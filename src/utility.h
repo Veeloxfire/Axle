@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 #include <utility>
 #include <new>
 
@@ -33,3 +34,14 @@ struct Array {
     data = new_data;
   }
 };
+
+enum class ErrorCode {
+  NO_ERROR = 0,
+  COULD_NOT_CREATE_FILE,
+  COULD_NOT_CLOSE_FILE,
+}
+
+template<typename T>
+inline void load_to_bytes(uint8_t* bytes, size_t offset, const T& t) {
+  memcpy(bytes + offset, &t, sizeof(T));
+}
