@@ -24,41 +24,9 @@ struct COFF_Characteristics {
     DLL = 0x2000,
     UP_SYSTEM_ONLY = 0x4000,
     BYTES_REVERSED_HI = 0x8000,
-  }
+  };
 
   uint16_t mask;
-
-  void relocs_stripped(bool enabled);
-  void executable_image(bool enabled);
-  void line_nums_stripped(bool enabled);
-  void local_syms_stripped(bool enabled);
-  void aggressive_ws_trim(bool enabled);
-  void large_address_aware(bool enabled);
-  void byte_reversed_lo(bool enabled);
-  void is_32_bit_machine(bool enabled);
-  void debug_stripped(bool enabled);
-  void removable_run_from_swap(bool enabled);
-  void net_run_from_swap(bool enabled);
-  void system(bool enabled);
-  void dll(bool enabled);
-  void up_system_only(bool enabled);
-  void bytes_reversed_hi(bool enabled);
-
-  bool relocs_stripped() const { return RELOCS_STRIPPED & mask != 0; }
-  bool executable_image() const { return EXECUTABLE_IMAGE & mask != 0; }
-  bool line_nums_stripped() const { return LINE_NUMS_STRIPPED & mask != 0; }
-  bool local_syms_stripped() const { return LOCAL_SYMS_STRIPPED & mask != 0; }
-  bool aggressive_ws_trim() const { return AGGRESSIVE_WS_TRIM & mask != 0; }
-  bool large_address_aware() const { return LARGE_ADDRESS_AWARE & mask != 0; }
-  bool byte_reversed_lo() const { return BYTE_REVERSE_LO & mask != 0; }
-  bool is_32_bit_machine() const { return IS_32_BIT_MACHINE & mask != 0; }
-  bool debug_stripped() const { return DEBUG_STRIPPED & mask != 0; }
-  bool removable_run_from_swap() const { return REMOVABLE_RUN_FROM_SWAP & mask != 0; }
-  bool net_run_from_swap() const { return NET_RUN_FROM_SWAP & mask != 0; }
-  bool system() const { return SYSTEM & mask != 0; }
-  bool dll() const { return DLL & mask != 0; }
-  bool up_system_only() const { return UP_SYSTEM_ONLY & mask != 0; }
-  bool bytes_reversed_hi() const { return BYTE_REVERSED_HI & mask != 0; }
 };
 
 enum struct MACHINE_TYPE : uint16_t {
@@ -97,6 +65,9 @@ struct PE32_optional_header {
   PE_Address base_of_code;
   PE_Address base_of_data;// not in the PE32+ format
 };
+
+//TODO: DLL Characteristics
+struct DLL_Characteristics {};
 
 struct PE32_windows_specific {
   PE_Address image_base;// 8 bytes in PE32+ format
@@ -204,6 +175,9 @@ struct PE_File_Header {
   Optional_header_directories directories;
 };
 
+//TODO: Section Header Characteristics
+struct Section_Header_Characteristics{};
+
 struct Section_Header {
   uint8_t name[8];// 8 byte null-padded ascii string OR '/' followed by ascii decimal offset into the string table
   uint32_t virtual_size;// size of section when loaded into memory, not the same as the size_of_raw_data
@@ -224,7 +198,7 @@ struct Section {
 };
 
 struct PE_File {
-  PE_File_Header pe_file_header;
+  PE_File_Header header;
 
   //Sections and Section Headers should be ordered by offset
   Array<Section_Header> section_headers;
@@ -232,7 +206,7 @@ struct PE_File {
 };
 
 PE_File        create_portable_executable();
-Section        create_pe_section();
-Section_Header create_pe_section_header();
+//Section        create_pe_section();
+//Section_Header create_pe_section_header();
 
 ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_name);

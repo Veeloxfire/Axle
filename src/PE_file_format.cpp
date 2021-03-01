@@ -1,26 +1,28 @@
 #include "PE_file_format.h"
+#include "files.h"
 #include <stdio.h>
 
 //// Sizes ////
 
-static_assert(sizeof(COFF_characteristics) == 2, "Must be 2 bytes");
-static_assert(sizeof(MS_DOS_Header) == 128, "Must be 128 bytes");
+static_assert(sizeof(COFF_Characteristics) == 2, "Must be 2 bytes");
+//static_assert(sizeof(MS_DOS_Header) == 128, "Must be 128 bytes");
 static_assert(sizeof(MS_DOS_Stub) == 128, "Must be 128 bytes");
 
 //// Forward Declarations ////
 
 static PE_File_Header create_pe_file_header();
-static MS_DOS create_default_ms_dos();
+//static MS_DOS create_default_ms_dos();
 static COFF_file_header create_default_coff_header();
 static PE32_optional_header create_default_pe32();
-static PE32_windows_specific create_default_pe32_windows_specific();
+//static PE32_windows_specific create_default_pe32_windows_specific();
 
 ///// Definitions /////
 
 ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_name) {
+
   FILE* out = FILES::open(file_name, FILES::OPEN_MODE::WRITE, FILES::DATA_MODE::BINARY);
 
-  if(out == NULL) return ErroCode::COULD_NOT_CREATE_FILE;
+  if(out == NULL) return ErrorCode::COULD_NOT_CREATE_FILE;
 
   {
     //MS-DOS header and stub
@@ -30,19 +32,19 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
   }
 
   {
-    const PE_File_Header& pe = pe_file->header;
+    const PE_File_Header& pe_head = pe_file->header;
 
     //COFF Header
     {
       constexpr size_t COFF_LENGTH = 24;
       uint8_t coff_header[COFF_LENGTH];
 
-      const COFF_file_header& coff = pe.coff;
+      const COFF_file_header& coff = pe_head.coff;
 
-      load_to_bytes<uint8_t[4]>(coff_header, 0, coff.signature);
+      load_to_bytes(coff_header, 0, coff.signature, 4);
       load_to_bytes(coff_header, 4, coff.machine);
       load_to_bytes(coff_header, 6, coff.number_of_sections);
-      load_to_bytes<uint8_t[4]>(coff_header, 8, coff.time_date_stamp);
+      load_to_bytes(coff_header, 8, coff.time_date_stamp, 4);
       load_to_bytes(coff_header, 12, coff.pointer_to_symbol_table);
       load_to_bytes(coff_header, 16, coff.number_of_symbols);
       load_to_bytes(coff_header, 20, coff.size_of_optional_header);
@@ -56,7 +58,7 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
       constexpr size_t OPT_LENGTH = 28;
       uint8_t opt_header[OPT_LENGTH];
 
-      const PE32_optional_header& pe32 = pe.pe32;
+      const PE32_optional_header& pe32 = pe_head.pe32;
 
       load_to_bytes(opt_header, 0, pe32.magic_number);
       load_to_bytes(opt_header, 2, pe32.major_linker_version);
@@ -76,7 +78,7 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
       constexpr size_t OPT_WIN_LENGTH = 68;
       uint8_t win_opt_header[OPT_WIN_LENGTH];
 
-      const PE32_optional_header& pe32_win = pe.pe32_windows;
+      const PE32_windows_specific& pe32_win = pe_head.pe32_windows;
 
       load_to_bytes(win_opt_header, 0, pe32_win.image_base);
       load_to_bytes(win_opt_header, 4, pe32_win.section_alignment);
@@ -108,7 +110,7 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
       constexpr size_t OPT_HEAD_DIR_LENGTH = 128;
       uint8_t opt_head_dir[OPT_HEAD_DIR_LENGTH];
 
-      const Optional_header_directories& dir = pe.directories;
+      const Optional_header_directories& dir = pe_head.directories;
 
       load_to_bytes(opt_head_dir, 0  , dir.export_table);
       load_to_bytes(opt_head_dir, 8  , dir.import_table);
@@ -132,13 +134,21 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
     }
   }
 
-  return FILES::close(file);
+  {
+    //TODO: Section Headers
+  }
+
+  {
+    //TODO: Sections
+  }
+
+  return FILES::close(out);
 }
 
 PE_File create_portable_executable() {
   PE_File pe;
 
-  pe.pe_file_header = create_pe_file_header();
+  pe.header = create_pe_file_header();
 
   return pe;
 }
@@ -149,7 +159,7 @@ PE_File_Header create_pe_file_header() {
   //header.ms_dos     = defualt;
   header.coff         = create_default_coff_header();
   header.pe32         = create_default_pe32();
-  header.pe32_windows = create_default_pe32_windows_specifics();
+  //header.pe32_windows = create_default_pe32_windows_specifics();
 
   return header;
 }
@@ -213,70 +223,6 @@ PE32_windows_specific create_default_pe32_windows_specifics() {
   header.size_of_heap_commit = 0;
 
   header.number_of_rva_and_sizes = 0x00000000;//TODO whatever this entails
+
+  return header;
 }
-
-//// Implementations ////
-
-#define COFF_MASK(enumeration) if(enabled) { mask |= constant; } else { mask &= ~enumeration }
-
-void COFF_Characteristics::relocs_stripped(const bool enabled) {
-  COFF_MASK(RELOCS_STRIPPED)
-}
-
-void COFF_Characteristics::executable_image(const bool enabled) {
-  COFF_MASK(EXECUTABLE_IMAGE)
-}
-
-void COFF_Characteristics::line_nums_stripped(const bool enabled) {
-  COFF_MASK(LINE_NUMS_STRIPPED)
-}
-
-void COFF_Characteristics::local_syms_stripped(const bool enabled) {
-  COFF_MASK(LOCAL_SYMS_STRIPPED)
-}
-
-void COFF_Characteristics::aggressive_ws_trim(const bool enabled) {
-  COFF_MASK(AGGRESSIVE_WS_TRIM)
-}
-
-void COFF_Characteristics::large_address_aware(const bool enabled) {
-  COFF_MASK(LARGE_ADDRESS_AWARE)
-}
-
-void COFF_Characteristics::byte_reversed_lo(const bool enabled) {
-  COFF_MASK(BYTES_REVERSED_LO)
-}
-
-void COFF_Characteristics::is_32_bit_machine(const bool enabled) {
-  COFF_MASK(IS_32_BIT_MACHINE)
-}
-
-void COFF_Characteristics::debug_stripped(const bool enabled) {
-  COFF_MASK(DEBUG_STRIPPED)
-}
-
-void COFF_Characteristics::removable_run_from_swap(const bool enabled) {
-  COFF_MASK(REMOVABLE_RUN_FROM_SWAP)
-}
-
-void COFF_Characteristics::net_run_from_swap(const bool enabled) {
-  COFF_MASK(NET_RUN_FROM_SWAP)
-}
-
-void COFF_Characteristics::system(const bool enabled) {
-  COFF_MASK(SYSTEM)
-}
-
-void COFF_Characteristics::dll(const bool enabled) {
-  COFF_MASK(DLL)
-}
-
-void COFF_Characteristics::up_system_only(const bool enabled) {
-  COFF_MASK(UP_SYSTEM_ONLY)
-}
-
-void COFF_Characteristics::bytes_reversed_hi(const bool enabled) {
-  COFF_MASK(BYTES_REVERSED_HI)
-}
-
-#undef COFF_MASK
