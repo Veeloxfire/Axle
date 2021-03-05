@@ -60,6 +60,7 @@ struct Local_State {
   int64_t max_stack = 0;
   int64_t max_call_stack = 0;
 
+
   uint8_t get_free_reg_from_set(const uint8_t* regs, size_t num_regs);
 
   uint8_t get_free_reg();

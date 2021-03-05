@@ -900,7 +900,6 @@ void compile_bytecode_of_statement(Compiler* const comp,
         for (; i < end; i++) {
           compile_bytecode_of_statement(comp, i, state, func);
         }
-
         return;
       }
     case STATEMENT_TYPE::EXPRESSION:
@@ -1391,15 +1390,27 @@ CompileCode compile_function_body_unit(Compiler* const comp,
       save_regs += (int64_t)(state->registers[reg].modified == MODIFICATION_TYPE::MODIFIED) * 8;
     }
 
+    //Makes sure the stack will align to 16 bytes
+    constexpr auto align_on_16 = [](const uint64_t val) {
+      const auto align = (val + 8) % 16;
+      if (align == 0) {
+        return val;
+      }
+      else {
+        return val + (16 - align);
+      }
+    };
+
     //Call operation stack stuff is included in max_stack
-    const int64_t STACK_SIZE = state->max_stack + state->max_call_stack + save_regs;
+    const int64_t unaligned_stack = state->max_stack + state->max_call_stack + save_regs;
+    const int64_t STACK_SIZE = align_on_16(unaligned_stack);
+    int64_t used_space = 0;
 
     // Need a stack?
-    if (STACK_SIZE > 0) {
+    if (unaligned_stack > 0) {
       ByteCode::emit_sub_64_to_r(temp, STACK_SIZE, RSP.REG);
 
       //Save non volatile registers
-      int64_t used_space = 0;
       for (size_t i = 0; i < num_non_volatile; i++) {
         const uint8_t reg = non_volatile[i];
 
@@ -1408,11 +1419,11 @@ CompileCode compile_function_body_unit(Compiler* const comp,
           ByteCode::emit_mov_r_to_m(temp, reg, RBP.REG, used_space);
         }
       }
-
-      //Fix locations into the stack given that we just saved a bunch of registers
-      //Also good point to fix jumps to the end
-      fix_put_off_things(used_space, temp.size, func->bytecode.data, func->bytecode.size);
     }
+
+    //Fix locations into the stack given that we just saved a bunch of registers
+      //Also good point to fix jumps to the end
+    fix_put_off_things(used_space, temp.size, func->bytecode.data, func->bytecode.size);
 
     //Copy the bytecode into the new buffer
     temp.reserve_extra(func->bytecode.size);
@@ -1421,7 +1432,7 @@ CompileCode compile_function_body_unit(Compiler* const comp,
 
 
     // Did we use the stack? - might have non volatiles on there
-    if (STACK_SIZE > 0) {
+    if (unaligned_stack > 0) {
       //Load non volatile registers from stack
       const size_t num_non_volatile = build_options->calling_convention->num_non_volatile_registers;
       const uint8_t* non_volatile = build_options->calling_convention->non_volatile_registers;

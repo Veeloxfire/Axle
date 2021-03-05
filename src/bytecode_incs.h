@@ -1,6 +1,6 @@
 #pragma once
 
-//X macro = X(NAME, STRUCTURE)
+//X macro = X(NAME)
 
 #define BYTECODES_X \
 X(LEAVE_THEN_RETURN)\

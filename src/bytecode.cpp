@@ -6,7 +6,7 @@ namespace ByteCode {
     switch (b) {
     #define X(NAME) case NAME: fprintf(stream, #NAME); break;
       BYTECODES_X
-     #undef X
+      #undef X
     }
   }
 
@@ -18,7 +18,7 @@ namespace ByteCode {
     print_bytecode(system, stderr, bytecode, size);
   }
 
-  void print_bytecode(const System* system, 
+  void print_bytecode(const System* system,
                       FILE* const stream,
                       const uint8_t* bytecode,
                       uint64_t size) {
@@ -55,7 +55,7 @@ namespace ByteCode {
         case PUSH_R:
         case POP_R:
         case CALL_R:
-        case SET_R_TO_ZF:{
+        case SET_R_TO_ZF: {
             print_bytecodeop(stream, bytecode[i]);
             const char* const reg_name = system->reg_name_from_num(bytecode[i + 1]);
             fprintf(stream, ": $%s\n", reg_name);
@@ -66,7 +66,7 @@ namespace ByteCode {
         case ADD_R_TO_R:
         case SUB_R_TO_R:
         case CMP_R_TO_R:
-        case MUL_R_TO_R: 
+        case MUL_R_TO_R:
         case DIV_R_TO_R:
         case OR_R_TO_R:
         case AND_R_TO_R: {
@@ -102,7 +102,7 @@ namespace ByteCode {
 
             const char* const to_name = system->reg_name_from_num(bytecode[i + 9]);
 
-            if(res2 == 0) {
+            if (res2 == 0) {
               fprintf(stream, ": 0x%llx to [$%s]\n", res1, to_name);
             }
             else {
@@ -143,7 +143,7 @@ namespace ByteCode {
             else {
               fprintf(stream, ": [$%s + %lld] to $%s\n", from_name, res1, to_name);
             }
-            
+
             i += OP_R_R_64::INSTRUCTION_SIZE;
             break;
           }
@@ -265,4 +265,5 @@ namespace ByteCode {
   void emit_set_r_to_zf(Array<uint8_t>& arr, uint8_t reg) {
     OP_R::emit(arr, SET_R_TO_ZF, reg);
   }
+
 }

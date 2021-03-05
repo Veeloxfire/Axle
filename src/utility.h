@@ -9,6 +9,20 @@
 
 #define BYTE(a) (static_cast<uint8_t>(a))
 
+struct DefaultAllocator {
+  DefaultAllocator() noexcept = default;
+
+  template<typename T>
+  T* reallocate(T* data, size_t capacity) {
+    return ::reallocate<T>(data, capacity);
+  }
+
+  template<typename T>
+  void free(T* data) {
+    ::free<T>(data);
+  }
+};
+
 template<typename T>
 struct Array {
   T*     data     = nullptr;// ptr to data in the array
@@ -17,9 +31,9 @@ struct Array {
 
   //No copy yet
   Array(const Array&) = delete;
+  Array(Array&&) noexcept = default;
 
   Array() noexcept = default;
-  Array(Array&&) noexcept = default;
   Array(size_t s) noexcept : data(allocate_zerod<T>(s)) {}
 
   Array& operator=(Array&& arr) noexcept {
@@ -356,6 +370,13 @@ inline constexpr void x64_to_bytes(const X64_UNION uint, uint8_t* const bytes) n
   bytes[2] = static_cast<uint8_t>(uint.val >> 16);
   bytes[1] = static_cast<uint8_t>(uint.val >> 8);
   bytes[0] = static_cast<uint8_t>(uint.val);
+}
+
+inline constexpr void x32_to_bytes(const uint32_t uint, uint8_t* const bytes) noexcept {
+  bytes[3] = static_cast<uint8_t>(uint >> 24);
+  bytes[2] = static_cast<uint8_t>(uint >> 16);
+  bytes[1] = static_cast<uint8_t>(uint >> 8);
+  bytes[0] = static_cast<uint8_t>(uint);
 }
 
 inline constexpr ErrorCode x64_to_bytes_s(const uint8_t* buffer,

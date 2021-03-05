@@ -9,6 +9,9 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 #include "compiler.h"
 #include "ast.h"
 
+#include "machine_code.h"
+#include "windows_specifics.h"
+
 #include <utility>
 #include <iostream>
 
@@ -39,10 +42,16 @@ auto cpp_fib(uint64_t a) -> uint64_t {
 }
 
 auto cpp_main() -> uint64_t {
-  return cpp_fib(0);
+  return cpp_fib(30);
 }
 
-int main() {
+constexpr char source2[] = R"(
+function main() -> u64 {
+  return 0;
+}
+)";
+
+int run_compiler(const char* text_source, FUNCTION_PTR<uint64_t> cpp) {
   //Setup
 
   StringInterner strings ={};
@@ -60,14 +69,14 @@ int main() {
   compiler.run_options.compile               = true;
   compiler.run_options.print_bytecode        = true;
   compiler.run_options.run_in_vm_after_build = true;
-  compiler.run_options.benchmark             = true;
+  compiler.run_options.benchmark             = false;
 
   load_language_builtin(&compiler);
 
   Parser parser ={};
   parser.lexer.strings   = &strings;
 
-  init_parser(&parser, "main.cpp", source);
+  init_parser(&parser, "main.cpp", text_source);
 
   //Parse
   ASTFile ast_base ={};
@@ -105,11 +114,10 @@ int main() {
       std::cout << "\n===============================\n\n";
     }
 
+    const Function* const main_f = find_entry_point(&compiler);
 
     if (compiler.run_options.run_in_vm_after_build) {
       std::cout << "\n=== Run In VM ===\n\n";
-
-      const Function* const main_f = find_entry_point(&compiler);
 
       if (main_f == nullptr) {
         std::cout << "Requested run in vm but could not find entry point";
@@ -117,7 +125,7 @@ int main() {
       }
 
       auto now = std::chrono::high_resolution_clock::now();
-      const uint64_t cpp_test = cpp_fib(30);
+      const uint64_t cpp_test = (cpp)();
       auto end = std::chrono::high_resolution_clock::now();
 
       if (compiler.run_options.benchmark) {
@@ -132,7 +140,14 @@ int main() {
 
       std::cout << "VM ran for: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - now).count() << "ms\n";
 
+    #define NO_ERROR_SAVE NO_ERROR
+    #undef NO_ERROR
+
       if (error != ErrorCode::NO_ERROR) {
+
+    #define NO_ERROR NO_ERROR_SAVE
+    #undef NO_ERROR_SAVE
+
         std::cout << error_code_string(error);
       }
       else {
@@ -150,6 +165,25 @@ int main() {
 
       std::cout << "\n=================\n\n";
     }
+
+    Array<uint8_t> machine_code ={};
+    convert_to_x64_machine_code(machine_code, main_f->bytecode.data, main_f->bytecode.size);
+
+    auto mem = Windows::get_exectuable_memory<uint8_t>(machine_code.size);
+
+    memcpy_s(mem.ptr, mem.size, machine_code.data, machine_code.size);
+
+    uint64_t res = mem.call<uint64_t>();
+
   }
+
+}
+
+int main() {
+
+  run_compiler(source2, &cpp_main);
+
+
+
   return 0;
 }
