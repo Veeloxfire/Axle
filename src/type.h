@@ -3,41 +3,11 @@
 #include "bytecode.h"
 #include "strings.h"
 
-struct ASTFunctionSignature;
 struct ASTFunctionDeclaration;
 struct ASTStructureDeclaration;
 
 struct Structure;
 
-enum struct LOCATION_TYPE : uint8_t {
-  UNKNOWN, REGISTER, STACK, ADDRESS
-};
-
-struct Location {
-  LOCATION_TYPE type = LOCATION_TYPE::UNKNOWN;
-
-  union {
-    uint8_t reg;
-    int64_t stack_disp = 0;
-  };
-
-  constexpr bool operator==(const Location& loc) const {
-    if (type != loc.type) {
-      return false;
-    }
- 
-    switch (type) {
-      case LOCATION_TYPE::ADDRESS:
-      case LOCATION_TYPE::REGISTER: return reg == loc.reg;
-      case LOCATION_TYPE::STACK: return stack_disp == loc.stack_disp;
-      case LOCATION_TYPE::UNKNOWN: return false;
-    }
-  }
-
-  constexpr bool operator!=(const Location& loc) const {
-    return !(operator==(loc));
-  }
-};
 
 enum struct STRUCTURE_TYPE : uint8_t {
   INTEGER, FLOATING, COMPOSITE, UNKNOWN, VOID, ENUM
@@ -80,17 +50,16 @@ struct Structure {
 
 struct PositionedElement {
   Structure* structure;
-  Location location;
-};
-
-struct FunctionSignature {
-  InternString name;
-  Array<PositionedElement> parameter_types;
-  PositionedElement return_type;
+  uint8_t val;
 };
 
 struct Function {
-  FunctionSignature signature = {};
+  InternString name;
+  Array<const Structure*> parameter_types;
+  const Structure* return_type;
 
-  Array<uint8_t> bytecode = {};
+  const ASTFunctionDeclaration* declaration;
+
+  uint64_t label = 0;
+  Array<uint8_t> code;
 };

@@ -1,4 +1,6 @@
+#pragma once
 #include "utility.h"
+#ifdef MACHINE_CODE
 
 enum struct REGISTER_8B : uint8_t {
   //Low bits
@@ -42,6 +44,7 @@ enum struct REGISTER_64B : uint8_t {
 };
 
 
+#endif
 
 namespace X64 {
 
@@ -53,6 +56,14 @@ namespace X64 {
     return (reg & 0b0000'1000) >> 3;
   }
 
+  inline constexpr uint8_t rex_rm(uint8_t reg) {
+    return rex_b(reg);
+  }
+
+  inline constexpr uint8_t rex_r_rm(uint8_t r, uint8_t rm) {
+    return rex_r(r) | rex_b(rm);
+  }
+
   inline constexpr uint8_t modrm_reg(uint8_t reg) {
     return (reg & 0b0000'0111) << 3;
   }
@@ -60,8 +71,13 @@ namespace X64 {
     return (reg & 0b0000'0111);
   }
 
+  inline constexpr uint8_t modrm_r_rm(uint8_t r, uint8_t rm) {
+    return modrm_reg(r) | modrm_rm(rm);
+  }
+
   enum MODRM_MOD_CODES : uint8_t {
-    MODRM_MOD_INDIRECT = 0b11000000,
+    MODRM_MOD_DIRECT = 0b11000000,
+    MODRM_MOD_INDIRECT = 0b00000000,
   };
 
   enum REX_CODES : uint8_t {
@@ -80,15 +96,29 @@ namespace X64 {
   };
 
   enum Opcode : uint8_t {
+    ADD_R_TO_RM = 0x01,
+    OR_R_TO_RM = 0x09,
+    AND_R_TO_RM = 0x21,
+    SUB_R_TO_RM = 0x29,
+    CMP_R_TO_RM = 0x39,
     PUSH_R = 0x50,//+ register
     POP_R = 0x58,//+ register
-    SUB_32_TO_RM = 0x81,
+    SUB_32_TO_RM = 0x81,// r = 5
+    CMP_32_TO_RM = 0x81,// r = 7
+    JZ_NEAR = 0x84,
+    JNE_NEAR = 0x85,
     MOV_R_TO_RM = 0x89,
+    SETE = 0x94,
     MOV_64_TO_R = 0xB8,//+ register
-    SHORT_RET = 0xC3,
-
+    IMUL_RM_TO_R = 0xAF,
+    RET_NEAR = 0xC3,
+    CALL_NEAR = 0xE8,
+    JMP_NEAR = 0xE9,
+    DIV_RM_TO_RAX = 0xF7,
   };
 }
 
-void convert_to_x64_machine_code(Array<uint8_t>& arr,
-                                 const uint8_t* bytecode, const size_t length);
+struct Compiler;
+
+size_t vm_backend(Array<uint8_t>& out_code, const Compiler*);
+size_t x86_64_backend(Array<uint8_t>& out_code, const Compiler* comp);

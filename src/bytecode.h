@@ -9,9 +9,9 @@ struct REGISTER_CONSTANT { uint8_t REG; const char* name; };
 #define REGISTER_LOAD(NAME, VAL) inline constexpr REGISTER_CONSTANT NAME = { VAL, #NAME }
 
 REGISTER_LOAD(RAX, 0);
-REGISTER_LOAD(RBX, 1);
-REGISTER_LOAD(RCX, 2);
-REGISTER_LOAD(RDX, 3);
+REGISTER_LOAD(RCX, 1);
+REGISTER_LOAD(RDX, 2);
+REGISTER_LOAD(RBX, 3);
 REGISTER_LOAD(RSP, 4);
 REGISTER_LOAD(RBP, 5);
 REGISTER_LOAD(RSI, 6);
@@ -27,139 +27,247 @@ REGISTER_LOAD(R14, 14);
 #undef REGISTER_LOAD
 
 struct System;
-struct Function;
 
 namespace ByteCode {
 
   enum ByteCodeOp : uint8_t {
-  #define X(NAME) NAME,
+  #define X(NAME, structure) NAME,
     BYTECODES_X
   #undef X
   };
 
-  void print_bytecode(const System* system,
+  using REG_NAME = FUNCTION_PTR<const char*, uint8_t>;
+
+  void print_bytecode(REG_NAME reg_name_from_num,
                       FILE* const stream,
                       const uint8_t* bytecode,
                       uint64_t size);
 
-  void log_bytecode(const System* system, const uint8_t* bytecode, uint64_t size);
-  void error_bytecode(const System* system, const uint8_t* bytecode, uint64_t size);
+  void log_bytecode(REG_NAME reg_name_from_num, const uint8_t* bytecode, uint64_t size);
+  void error_bytecode(REG_NAME reg_name_from_num, const uint8_t* bytecode, uint64_t size);
 
-  struct OP_R_R {
+  struct OP {
+    uint8_t op;
+
+    static constexpr OP parse(const uint8_t* bytecode) {
+      return {bytecode[0]};
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1;
+
+    inline static void write(uint8_t* ptr, uint8_t op) {
+      *ptr = op;
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t op) {
+      arr.insert(op);
+    }
+  };
+
+  struct OP_VAL_VAL {
+    uint8_t op;
+    uint8_t val1;
+    uint8_t val2;
+
+    static constexpr OP_VAL_VAL parse(const uint8_t* bytecode) {
+      OP_VAL_VAL ret ={};
+
+      ret.op = bytecode[0];
+      ret.val1 = bytecode[1];
+      ret.val2 = bytecode[2];
+
+      return ret;
+    }
+
     static constexpr size_t INSTRUCTION_SIZE = 1 + 1 + 1;
-    inline static void emit(Array<uint8_t>& arr, uint8_t op, uint8_t r1, uint8_t r2) {
+
+    inline static void write(uint8_t* ptr, uint8_t op, uint8_t val1, uint8_t val2) {
+      ptr[0] = op;
+      ptr[1] = val1;
+      ptr[2] = val2;
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t op, uint8_t val1, uint8_t val2) {
       arr.reserve_extra(INSTRUCTION_SIZE);
 
-      arr.data[arr.size]     = op;
-      arr.data[arr.size + 1] = r1;
-      arr.data[arr.size + 2] = r2;
+      write(arr.data + arr.size, op, val1, val2);
 
       arr.size += INSTRUCTION_SIZE;
     }
   };
 
-  struct OP_R {
+  struct OP_VAL {
+    uint8_t op;
+    uint8_t val;
+
+    static constexpr OP_VAL parse(const uint8_t* bytecode) {
+      OP_VAL ret ={};
+
+      ret.op = bytecode[0];
+      ret.val = bytecode[1];
+
+      return ret;
+    }
+
+    inline static void write(uint8_t* ptr, uint8_t op, uint8_t val) {
+      ptr[0] = op;
+      ptr[1] = val;
+    }
+
     static constexpr size_t INSTRUCTION_SIZE = 1 + 1;
-    inline static void emit(Array<uint8_t>& arr, uint8_t op, uint8_t r1) {
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint8_t val) {
       arr.reserve_extra(INSTRUCTION_SIZE);
 
-      arr.data[arr.size]     = op;
-      arr.data[arr.size + 1] = r1;
+      write(arr.data + arr.size, opcode, val);
 
       arr.size += INSTRUCTION_SIZE;
     }
   };
 
   struct OP_64 {
+    uint8_t op;
+    X64_UNION u64;
+
+    static constexpr OP_64 parse(const uint8_t* bytecode) {
+      OP_64 ret ={};
+
+      ret.op = bytecode[0];
+      ret.u64 = x64_from_bytes(bytecode + 1);
+
+      return ret;
+    }
+
     static constexpr size_t INSTRUCTION_SIZE = 1 + 8;
+
+    inline static void write(uint8_t* ptr, uint8_t op, X64_UNION x64) {
+      ptr[0] = op;
+      x64_to_bytes(x64, ptr + 1);
+    }
+
     inline static void emit(Array<uint8_t>& arr, uint8_t opcode, X64_UNION x64) {
-
       arr.reserve_extra(INSTRUCTION_SIZE);
 
-      arr.data[arr.size] = opcode;
-      x64_to_bytes(x64, arr.data + arr.size + 1);
+      write(arr.data + arr.size, opcode, std::move(x64));
 
       arr.size += INSTRUCTION_SIZE;
     }
   };
 
-  struct OP_64_R {
-    static constexpr size_t INSTRUCTION_SIZE = 1 + 8 + 1;
-    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, X64_UNION x64, uint8_t reg) {
+  struct OP_VAL_64 {
+    uint8_t op;
+    uint8_t val;
+    X64_UNION u64;
+
+    static constexpr OP_VAL_64 parse(const uint8_t* bytecode) {
+      OP_VAL_64 ret ={};
+
+      ret.op = bytecode[0];
+      ret.val = bytecode[1];
+      ret.u64 = x64_from_bytes(bytecode + 2);
+
+      return ret;
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 1 + 8;
+
+    inline static void write(uint8_t* ptr, uint8_t op, uint8_t val, X64_UNION x64) {
+      ptr[0] = op;
+      ptr[1] = val;
+      x64_to_bytes(x64, ptr + 2);
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint8_t val, X64_UNION x64) {
       arr.reserve_extra(INSTRUCTION_SIZE);
 
-      arr.data[arr.size] = opcode;
-      x64_to_bytes(x64, arr.data + arr.size + 1);
-
-      arr.data[arr.size + 9] = reg;
+      write(arr.data + arr.size, opcode, val, std::move(x64));
 
       arr.size += INSTRUCTION_SIZE;
     }
   };
 
-  struct OP_64_R_64 {
-    static constexpr size_t INSTRUCTION_SIZE = 1 + 8 + 1 + 8;
-    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, X64_UNION x64_1, uint8_t reg, X64_UNION x64_2) {
-      arr.reserve_extra(INSTRUCTION_SIZE);
-
-      arr.data[arr.size] = opcode;
-      x64_to_bytes(x64_1, arr.data + arr.size + 1);
-
-      arr.data[arr.size + 9] = reg;
-      x64_to_bytes(x64_2, arr.data + arr.size + 10);
-
-      arr.size += INSTRUCTION_SIZE;
+  namespace EMIT {
+  #define OP_VAL_64(name) inline void name (Array<uint8_t>& arr, uint8_t val, X64_UNION x64) {\
+    ByteCode::OP_VAL_64::emit(arr, ByteCode:: ## name, val, x64);\
     }
-  };
 
-  struct OP_R_R_64 {
-    static constexpr size_t INSTRUCTION_SIZE = 1 + 1 + 1 + 8;
-    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint8_t r1, uint8_t r2, X64_UNION x64) {
-      arr.reserve_extra(INSTRUCTION_SIZE);
-
-      arr.data[arr.size] = opcode;
-      arr.data[arr.size + 1] = r1;
-      arr.data[arr.size + 2] = r2;
-
-      x64_to_bytes(x64, arr.data + arr.size + 3);
-
-      arr.size += INSTRUCTION_SIZE;
+  #define OP_64(name) inline void name (Array<uint8_t>& arr, X64_UNION x64) {\
+    ByteCode::OP_64::emit(arr, ByteCode:: ## name, x64);\
     }
-  };
 
-  void emit_return(Array<uint8_t>& arr);
-  void emit_enter(Array<uint8_t>& arr);
+  #define OP(name) inline void name (Array<uint8_t>& arr) {\
+    ByteCode::OP::emit(arr, ByteCode:: ## name);\
+    }
 
-  void emit_call_ptr(Array<uint8_t>& arr, const Function* x64);
-  void emit_call_offset(Array<uint8_t>& arr, int64_t x64);
-  void emit_call_r(Array<uint8_t>& arr, uint8_t reg);
-  void emit_jump_by_offset(Array<uint8_t>& arr, int64_t x64);
-  void emit_jump_by_offset_if_zero(Array<uint8_t>& arr, int64_t x64);
-  void emit_jump_by_offset_if_not_zero(Array<uint8_t>& arr, int64_t x64);
+  #define OP_VAL(name) inline void name (Array<uint8_t>& arr, uint8_t val) {\
+    ByteCode::OP_VAL::emit(arr, ByteCode:: ## name, val);\
+    }
 
-  void emit_push_r(Array<uint8_t>& arr, uint8_t reg);
-  void emit_pop_r(Array<uint8_t>& arr, uint8_t reg);
+  #define OP_VAL_VAL(name) inline void name (Array<uint8_t>& arr, uint8_t val1, uint8_t val2) {\
+    ByteCode::OP_VAL_VAL::emit(arr, ByteCode:: ## name, val1, val2);\
+    }
 
-  void emit_set_r_to_zf(Array<uint8_t>& arr, uint8_t reg);
+  #define X(name, structure) structure(name)
+   BYTECODES_X
+  #undef X
 
-  void emit_add_r_to_r(Array<uint8_t>& arr, uint8_t from, uint8_t to);
-  void emit_add_64_to_r(Array<uint8_t>& arr, X64_UNION from, uint8_t to);
-  void emit_sub_r_to_r(Array<uint8_t>& arr, uint8_t from, uint8_t to);
-  void emit_sub_64_to_r(Array<uint8_t>& arr, X64_UNION from, uint8_t to);
-  void emit_cmp_r_to_r(Array<uint8_t>& arr, uint8_t from, uint8_t to);
-  void emit_cmp_64_to_r(Array<uint8_t>& arr, X64_UNION from, uint8_t to);
+   #undef OP_VAL_64
+   #undef OP_64
+   #undef OP
+   #undef OP_VAL
+   #undef OP_VAL_VAL
+  }
 
-  void emit_mul_r_to_r(Array<uint8_t>& arr, uint8_t from, uint8_t to);
-  void emit_mul_64_to_r(Array<uint8_t>& arr, X64_UNION from, uint8_t to);
-  void emit_div_r_to_r(Array<uint8_t>& arr, uint8_t from, uint8_t to);
-  void emit_div_64_to_r(Array<uint8_t>& arr, X64_UNION from, uint8_t to);
+  namespace PARSE {
+  #define X(name, structure) inline constexpr auto name = structure ## ::parse; 
+    BYTECODES_X
+   #undef X
+  }
 
-  void emit_or_r_to_r(Array<uint8_t>& arr, uint8_t from, uint8_t to);
-  void emit_and_r_to_r(Array<uint8_t>& arr, uint8_t from, uint8_t to);
+  namespace SIZE_OF {
+  #define X(name, structure) inline constexpr auto name = structure ## ::INSTRUCTION_SIZE; 
+    BYTECODES_X
+    #undef X
+  }
 
-  void emit_mov_r_to_r(Array<uint8_t>& arr, uint8_t from, uint8_t to);
-  void emit_mov_r_to_m(Array<uint8_t>& arr, uint8_t from, uint8_t to, int64_t disp);
-  void emit_mov_m_to_r(Array<uint8_t>& arr, uint8_t from, int64_t disp, uint8_t to);
-  void emit_mov_64_to_r(Array<uint8_t>& arr, X64_UNION x64, uint8_t to);
-  void emit_mov_64_to_m(Array<uint8_t>& arr, X64_UNION x64, uint8_t to, int64_t disp);
+  constexpr size_t instruction_size(uint8_t op) {
+  #define X(name, s) case name: return SIZE_OF:: ## name;
+    switch ((ByteCodeOp)op) {
+      BYTECODES_X
+    }
+  #undef X
+
+    return -1;
+  }
+
+  namespace WRITE {
+  #define OP_VAL_64(name) inline void name (uint8_t* ptr, uint8_t val, X64_UNION x64) {\
+    ByteCode::OP_VAL_64::write(ptr, ByteCode:: ## name, val, x64);\
+    }
+
+  #define OP_64(name) inline void name (uint8_t* ptr, X64_UNION x64) {\
+    ByteCode::OP_64::write(ptr, ByteCode:: ## name, x64);\
+    }
+
+  #define OP(name) inline void name (uint8_t* ptr) {\
+    ByteCode::OP::write(ptr, ByteCode:: ## name);\
+    }
+
+  #define OP_VAL(name) inline void name (uint8_t* ptr, uint8_t val) {\
+    ByteCode::OP_VAL::write(ptr, ByteCode:: ## name, val);\
+    }
+
+  #define OP_VAL_VAL(name) inline void name (uint8_t* ptr, uint8_t val1, uint8_t val2) {\
+    ByteCode::OP_VAL_VAL::write(ptr, ByteCode:: ## name, val1, val2);\
+    }
+
+  #define X(name, structure) structure(name)
+    BYTECODES_X
+    #undef X
+
+    #undef OP_VAL_64
+    #undef OP_64
+    #undef OP
+    #undef OP_VAL
+    #undef OP_VAL_VAL
+  }
 }

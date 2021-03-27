@@ -3,35 +3,6 @@
 #include "ast.h"
 #include "bytecode.h"
 
-void print_all_regs(const System* system, const Local_State* const state) {
-  printf("Raw Registers: |");
-
-  for (uint8_t i = 0; i < Local_State::NUM_REGS; i++) {
-    const Local_Register& reg = state->registers[i];
-    const char* name = system->reg_name_from_num(i);
-
-    printf(" %s: %hhu |", name, reg.occupied_size);
-  }
-
-  printf("\nValue Registers: |");
-
-  {
-    auto i = state->values.begin();
-    const auto end = state->values.end();
-
-    for (; i < end; i++) {
-      if (i->location.type == LOCATION_TYPE::REGISTER) {
-        const Local_Register& reg = state->registers[i->location.reg];
-        const char* name = system->reg_name_from_num(i->location.reg);
-
-        printf(" %s %hhu |", name, reg.occupied_size);
-      }
-    }
-  }
-
-  putc('\n', stdout);
-}
-
 Structure* Compiler::new_composite_structure() {
   Structure* s = structures.insert();
   s->type = STRUCTURE_TYPE::COMPOSITE;
@@ -43,95 +14,86 @@ Function* Compiler::new_function() {
   return functions.insert();
 }
 
+void State::use_value(const ValueIndex index, const ValueIndex creates) {
+  struct Lambda {
+    const ControlFlow* flow;
 
-int64_t Local_State::get_stack_location(const Structure* structure) {
-  //CONSIDER: This could probably be optimized a lot if its slow
-
-  const uint64_t alignment = structure->alignment();
-  const uint64_t size = structure->size();
-
-  const uint64_t mod_a = next_free_stack_offset % alignment;
-  if (mod_a == 0) {
-    next_free_stack_offset -= size;
-  }
-  else {
-    next_free_stack_offset -= (alignment - mod_a);
-    next_free_stack_offset -= size;
-  }
-
-  if (next_free_stack_offset < max_stack) {
-    max_stack = next_free_stack_offset;
-  }
-
-  return next_free_stack_offset;
-}
-
-uint8_t Local_State::get_free_reg() {
-  for (uint8_t i = 0; i < NUM_REGS; i++) {
-    if (registers[i].occupied_size == 0 && registers[i].modified != MODIFICATION_TYPE::MANAGED) {
-
-      registers[i].modified      = MODIFICATION_TYPE::MODIFIED;
-      registers[i].occupied_size = 8;
-      return i;
+    bool operator()(const ValueUse& p) const noexcept {
+      return flow->test_a_flows_to_b(p.time.flow, flow->current_flow)
+        || p.time.flow == flow->current_flow;
     }
-  }
+  };
 
-  return NUM_REGS;
-}
+  auto& val = value_tree.values.data[index.val];
 
-// "reg < Local_State::NUM_REGS" will always be true if this was successful
-uint8_t Local_State::get_free_reg_from_set(const uint8_t* regs, const size_t num_regs) {
-  const auto end = regs + num_regs;
-
-  for (; regs < end; regs++) {
-    Local_Register& reg = registers[*regs];
-
-    if (reg.occupied_size == 0 && reg.modified != MODIFICATION_TYPE::MANAGED) {
-
-      reg.modified      = MODIFICATION_TYPE::MODIFIED;
-      reg.occupied_size = 8;
-
-      return *regs;
+  val.last_uses.remove_if(Lambda{ &control_flow });
+  val.last_uses.insert(
+    ValueUse{
+      creates,
+      control_flow.now(),
     }
-  }
+  );
 
-  return NUM_REGS;
+  val.crosses_call = val.crosses_call //still crossed a call
+    || (control_flow.had_call //had a call
+        && val.creation.time.flow == control_flow.current_flow //same flow
+        && val.creation.time.time < control_flow.last_call) // created before last call
+    || (control_flow.had_call //had a call
+        && val.creation.time.flow != control_flow.current_flow);//not same flow must lead here
 }
 
-Location Local_State::get_free_space(const Structure* type) {
-  Location l ={};
+void ValueTree::combine_intersection(const ValueIndex from, const ValueIndex to) {
+  //Only need to insert if not already inserted
+  if (intersection_check.test_a_intersects_b(from.val, to.val)) {
 
-  if (type->size() <= 8) {
-    for (uint8_t i = 0; i < NUM_REGS; i++) {
-      if (registers[i].occupied_size == 0 && registers[i].modified != MODIFICATION_TYPE::MANAGED) {
+    struct SameVI {
+      ValueIndex test;
+      bool operator()(const ValueIndex v) const { return v == test; }
+    };
 
-        registers[i].modified      = MODIFICATION_TYPE::MODIFIED;
-        registers[i].occupied_size = 8;
+    //Remove interestion with from
+    intersection_check.remove_a_intersects_b(to.val, from.val);
+    adjacency_list.data[to.val].remove_if(SameVI{ from });
 
+    const auto& from_list = adjacency_list.data[from.val];
 
-        l.type = LOCATION_TYPE::REGISTER;
-        l.reg  = i;
-        return l;
+    //Replace all froms with tos
+    for (const auto& v : from_list) {
+      if (v == to) {
+        continue;
+      }
+
+      //Replace intersections
+      intersection_check.remove_a_intersects_b(v.val, from.val);
+      intersection_check.set_a_intersects_b(v.val, to.val);
+      intersection_check.set_a_intersects_b(to.val, v.val);
+
+      auto& list = adjacency_list.data[v.val];
+      bool has_to = false;
+      bool found_from = false;
+
+      for (size_t i = 0; i < list.size; i++) {
+        if (list.data[i] == to) {
+          has_to = true;
+        }
+        else if (list.data[i] == from) {
+          list.data[i] = to;
+          found_from = true;
+        }
+        else if (has_to && found_from) {
+          //Skip the second version of to by shinking the array
+          list.data[i - 1] = list.data[i];
+        }
+      }
+
+      //Skip the second version of to by shinking the array
+      if (has_to && found_from) {
+        list.size--;
       }
     }
-  }
 
-  l.type = LOCATION_TYPE::STACK;
-  l.stack_disp = get_stack_location(type);
-  return l;
-}
-
-void Local_State::free_reg(uint8_t reg) {
-  registers[reg].occupied_size = 0;
-}
-
-void Local_State::free_value(size_t i) {
-  const auto val = get_value_location(i);
-  if (val->location.type == LOCATION_TYPE::REGISTER) {
-    free_reg(val->location.reg);
-
-    val->modifiers = VALUE_MODIFIERS::NONE;
-    val->location.type = LOCATION_TYPE::UNKNOWN;
+    //Combine the adjacency list
+    combine_unique(from_list, adjacency_list.data[to.val]);
   }
 }
 
@@ -223,7 +185,7 @@ EnumValue* Compiler::enum_by_name(const InternString name) {
   return nullptr;
 }
 
-CompileCode get_compiled_structure(Compiler* const comp, ASTType* type, Structure** other, size_t other_n) {
+CompileCode get_compiled_structure(Compiler* const comp, ASTType* type, const Structure** other, size_t other_n) {
 
   Structure* s = comp->structure_by_name(type->name);
 
@@ -242,7 +204,7 @@ CompileCode get_compiled_structure(Compiler* const comp, ASTType* type, Structur
   }
 }
 
-void print_function_call(const FunctionCallExpr* const call) {
+static void print_function_call(const FunctionCallExpr* const call) {
   printf("%s(", call->function_name.string);
 
   auto i = call->arguments.begin();
@@ -268,15 +230,15 @@ static CompileCode find_function_for_call(Compiler* const comp,
     Function* const func = i.get();
 
     //Correct name and number of args
-    if (call->function_name == func->signature.name
-        && call->arguments.size == func->signature.parameter_types.size) {
+    if (call->function_name == func->name
+        && call->arguments.size == func->parameter_types.size) {
       auto p_call = call->arguments.begin();
       const auto end_call = call->arguments.end();
 
-      auto p_func = func->signature.parameter_types.begin();
+      auto p_func = func->parameter_types.begin();
 
       while (p_call < end_call) {
-        if (p_call->type != p_func->structure) {
+        if (p_call->type != *p_func) {
           //Escape out
           goto FAIL;
         }
@@ -304,7 +266,7 @@ static CompileCode find_function_for_call(Compiler* const comp,
 //Note: Recursive
 static CompileCode compile_type_of_expression(Compiler* const comp,
                                               ASTExpression* const expr,
-                                              const Local_State* const state) {
+                                              const State* const state) {
   //Already typed
   if (expr->type != nullptr) {
     return CompileCode::NO_ERRORS;
@@ -340,8 +302,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
 
             expr->expr_type = EXPRESSION_TYPE::LOCAL;
             expr->type = i->type;
-            //Local variable's location is known BUT different from expression location
-            expr->local = i->location;
+
             return CompileCode::NO_ERRORS;
           }
         }
@@ -415,7 +376,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           return ret_code;
         }
 
-        expr->type = call->function->signature.return_type.structure;
+        expr->type = call->function->return_type;
         expr->makes_call = true;
 
         return CompileCode::NO_ERRORS;
@@ -427,800 +388,271 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
   return CompileCode::UNFOUND_DEPENDENCY;
 }
 
-static void emit_mov_64_to_location(Array<uint8_t>& arr, X64_UNION x64, const Location& location) {
-  if (location.type == LOCATION_TYPE::REGISTER) {
-    ByteCode::emit_mov_64_to_r(arr, x64, location.reg);
-  }
-  else if (location.type == LOCATION_TYPE::STACK) {
-    ByteCode::emit_mov_64_to_m(arr, x64, RBP.REG, location.stack_disp);
-  }
-}
-
-static void emit_mov_location_to_r(Array<uint8_t>& arr, const Location& location, const uint8_t reg) {
-  if (location.type == LOCATION_TYPE::REGISTER) {
-    //No need to move if same reg
-    if (location.reg == reg) {
-      return;
-    }
-
-    ByteCode::emit_mov_r_to_r(arr, location.reg, reg);
-  }
-  else if (location.type == LOCATION_TYPE::STACK) {
-    ByteCode::emit_mov_m_to_r(arr, RBP.REG, location.stack_disp, reg);
-  }
-}
-
-static void emit_mov_stack_to_stack(Local_State* const state, Array<uint8_t>& arr, const int64_t from, const int64_t to) {
-  //Dont need to move if same
-  if (to != from) {
-    uint8_t temp = state->get_free_reg();
-
-    //TODO: Larger than 64 bits
-    ByteCode::emit_mov_m_to_r(arr, RBP.REG, from, temp);
-    ByteCode::emit_mov_r_to_m(arr, temp, RBP.REG, to);
-
-    state->free_reg(temp);
-  }
-}
-
-static void emit_mov_location_to_stack(Local_State* const state, Array<uint8_t>& arr, const Location& location, const int64_t offset) {
-  if (location.type == LOCATION_TYPE::REGISTER) {
-    ByteCode::emit_mov_r_to_m(arr, location.reg, RBP.REG, offset);
-  }
-  else if (location.type == LOCATION_TYPE::STACK) {
-    emit_mov_stack_to_stack(state, arr, location.stack_disp, offset);
-  }
-}
-
-static void emit_mov_location_to_location(Local_State* const state, Array<uint8_t>& arr, const Location& from, const Location& to) {
-  switch (to.type) {
-    case LOCATION_TYPE::REGISTER: {
-        emit_mov_location_to_r(arr, from, to.reg);
-        break;
-      }
-    case LOCATION_TYPE::STACK: {
-        emit_mov_location_to_stack(state, arr, from, to.stack_disp);
-        break;
-      }
-  }
-}
-
-static void emit_mov_r_to_location(Local_State* const state, Array<uint8_t>& arr, uint8_t from, const Location& to) {
-  switch (to.type) {
-    case LOCATION_TYPE::REGISTER: {
-        if (from != to.reg) {
-          ByteCode::emit_mov_r_to_r(arr, from, to.reg);
-        }
-        break;
-      }
-    case LOCATION_TYPE::STACK: {
-        ByteCode::emit_mov_r_to_m(arr, from, RBP.REG, to.stack_disp);
-        break;
-      }
-  }
-}
-
-static void emit_mov_location_to_parameter(Local_State* const state, Array<uint8_t>& arr, const Location& from, int64_t paramter_offset) {
-  constexpr auto SHADOW_OFFSET = 16;
-  paramter_offset -= SHADOW_OFFSET;
-
-  switch (from.type) {
-    case LOCATION_TYPE::REGISTER: {
-        ByteCode::emit_mov_r_to_m(arr, from.reg, RSP.REG, paramter_offset);
-        break;
-      }
-    case LOCATION_TYPE::STACK: {
-        const uint8_t temp = state->get_free_reg();
-
-        ByteCode::emit_mov_m_to_r(arr, RBP.REG, from.stack_disp, temp);
-        ByteCode::emit_mov_r_to_m(arr, temp, RSP.REG, paramter_offset);
-
-        state->free_reg(temp);
-        break;
-      }
-  }
-}
-
-constexpr bool VOLATILE_IS_SAFE(const ASTExpression* const expr) {
-  return !expr->call_leaf || !expr->makes_call;
-}
-
-static void find_new_reg_home_from_set(Local_State* const state,
-                                       Function* const func,
-                                       ValueLocation* const vl,
-                                       const ValueLocation* const end,
-                                       const uint8_t* set_one,
-                                       const size_t num_set_one,
-                                       const uint8_t* set_two,
-                                       const size_t num_set_two) {
-  //Try first set
-  uint8_t reg = state->get_free_reg_from_set(set_one, num_set_one);
-
-  if (reg < Local_State::NUM_REGS) {
-    ByteCode::emit_mov_r_to_r(func->bytecode, vl->location.reg, reg);
-
-    vl->location.reg = reg;
-    return;
-  }
-
-  //Try second set
-  reg = state->get_free_reg_from_set(set_two, num_set_two);
-
-  if (reg < Local_State::NUM_REGS) {
-    ByteCode::emit_mov_r_to_r(func->bytecode, vl->location.reg, reg);
-
-    vl->location.reg = reg;
-    return;
-  }
-
-  //Else move to stack
-  const auto stack_disp = state->get_stack_location(vl->type);
-  ByteCode::emit_mov_r_to_m(func->bytecode, vl->location.reg, RBP.REG, stack_disp);
-
-  vl->location.type       = LOCATION_TYPE::STACK;
-  vl->location.stack_disp = stack_disp;
-}
-
-//if valid_outs is nullptr then the rest of regs will be searched
-static uint8_t force_free_reg_from_set(Local_State* const state,
-                                       Function* const func,
-                                       const uint8_t* regs,
-                                       const size_t num_regs,
-                                       const uint8_t* valid_outs,
-                                       const size_t num_valid_outs) {
-  const auto maybe_reg = state->get_free_reg_from_set(regs, num_regs);
-
-  if (maybe_reg < Local_State::NUM_REGS) {
-    return maybe_reg;
-  }
-
-  auto i = state->values.mut_begin();
-  const auto end = state->values.end();
-
-  for (; i < end; i++) {
-    if (i->modifiers != VALUE_MODIFIERS::FIXED && i->location.type == LOCATION_TYPE::REGISTER) {
-      auto i_reg = regs;
-      const auto end_reg = regs + num_regs;
-
-      for (; i_reg < end_reg; i_reg++) {
-        if (i->location.reg == *i_reg) {
-          if (i->modifiers != VALUE_MODIFIERS::RESERVED) {
-            //use i_reg because we know the others are occupied
-            find_new_reg_home_from_set(state, func, i, end, i_reg, end_reg - i_reg, valid_outs, num_valid_outs);
-          }
-
-          return *i_reg;
-        }
-      }
-    }
-  }
-
-  //Lets hope we never get here lol that would be bad
-  printf("INTERNAL ERROR: The comment says \"Lets hope we never get here lol that would be bad\"\n"
-         "                Turns out we did get here ...\n");
-  //WE get here a lot for how we should never be here
-  return Local_State::NUM_REGS;//return this as a safe-ish error
-}
-
-static void set_expression_location_to_reg(const BuildOptions* const build_options,
-                                           ASTExpression* const expr,
-                                           Local_State* const state,
-                                           Function* const func) {
-
-  if (expr->value_index != 0) {
-    if (state->get_value_location(expr->value_index)->location.type == LOCATION_TYPE::REGISTER) {
-      //TODO: Volatile, Non-volatile
-      return;
-    }
-  }
-
-  uint8_t reg = Local_State::NUM_REGS;
-
-  //Get the correct registers
-  if (VOLATILE_IS_SAFE(expr)) {
-    reg = state->get_free_reg_from_set(build_options->calling_convention->volatile_registers,
-                                       build_options->calling_convention->num_volatile_registers);
-
-    if (reg >= Local_State::NUM_REGS) {
-      reg = state->get_free_reg_from_set(build_options->calling_convention->non_volatile_registers,
-                                         build_options->calling_convention->num_non_volatile_registers);
-    }
-  }
-  else {
-    reg = state->get_free_reg_from_set(build_options->calling_convention->non_volatile_registers,
-                                       build_options->calling_convention->num_non_volatile_registers);
-  }
-
-  //Did we find a register?
-  if (reg >= Local_State::NUM_REGS) {
-    if (VOLATILE_IS_SAFE(expr)) {
-      reg = force_free_reg_from_set(state, func,
-                                    build_options->calling_convention->volatile_registers,
-                                    build_options->calling_convention->num_volatile_registers,
-                                    nullptr, 0);
-    }
-    else {
-      reg = force_free_reg_from_set(state, func,
-                                    build_options->calling_convention->non_volatile_registers,
-                                    build_options->calling_convention->num_non_volatile_registers,
-                                    nullptr, 0);
-    }
-  }
-
-  //100% have a free register now
-
-  state->values.insert_uninit(1);
-  const size_t v_index = state->values.size;
-
-  ValueLocation& vl = state->values.data[v_index - 1];
-
-  vl.modifiers     = VALUE_MODIFIERS::LAZY;
-  vl.location.type = LOCATION_TYPE::REGISTER;
-  vl.location.reg  = reg;
-  vl.type          = expr->type;
-
-  if (expr->value_index != 0) {
-    ValueLocation* const vl_old = state->get_value_location(expr->value_index);
-
-    emit_mov_location_to_r(func->bytecode, vl_old->location, reg);
-  }
-
-  expr->value_index = v_index;
-}
-
-
 //Note: Recursive
-static void compile_bytecode_of_expression(const BuildOptions* const build_options,
-                                           ASTExpression* const expr,
-                                           Local_State* const state,
-                                           Function* const func) {
+static ValueIndex compile_bytecode_of_expression(const BuildOptions* const build_options,
+                                                 const ASTExpression* const expr,
+                                                 State* const state,
+                                                 Function* const func) {
 
-  //print_all_regs(build_options->system, state);
-  ValueLocation* vl = state->get_value_location(expr->value_index);
+  ValueIndex result ={};
 
   switch (expr->expr_type) {
     case EXPRESSION_TYPE::ENUM: {
-        emit_mov_64_to_location(func->bytecode, expr->enum_value.enum_value->value, vl->location);
+        result = state->new_value();
+
+        ByteCode::EMIT::SET_VAL_TO_64(func->code, (uint8_t)result.val, expr->enum_value.enum_value->value);
         break;
       }
     case EXPRESSION_TYPE::VALUE: {
-        emit_mov_64_to_location(func->bytecode, expr->value, vl->location);
+        result = state->new_value();
+
+        ByteCode::EMIT::SET_VAL_TO_64(func->code, (uint8_t)result.val, expr->value);
         break;
       }
     case EXPRESSION_TYPE::LOCAL: {
-        emit_mov_location_to_location(state, func->bytecode, expr->local, vl->location);
+        const ValueIndex local = state->find_local(expr->name)->val;
+        result = state->new_value();
+
+        state->use_value(local, result);
+        state->value_tree.values.data[result.val].creation.related_index = local;
+
+        ByteCode::EMIT::COPY_TO_VAL(func->code, (uint8_t)local.val, (uint8_t)result.val);
         break;
       }
     case EXPRESSION_TYPE::BINARY_OPERATOR: {
-        BinaryOperatorExpr* const bin_op = &expr->bin_op;
-        ASTExpression* const left = bin_op->left;
-        ASTExpression* const right = bin_op->right;
+        const BinaryOperatorExpr* const bin_op = &expr->bin_op;
+        const ASTExpression* const left = bin_op->left;
+        const ASTExpression* const right = bin_op->right;
 
-        const bool REVERSE_SAVE = vl->location.type == LOCATION_TYPE::REGISTER
-          && vl->location.reg == build_options->calling_convention->return_register
-          && left->makes_call
-          && right->makes_call;
+        const ValueIndex temp_left = compile_bytecode_of_expression(build_options, left, state, func);
+        const ValueIndex temp_right = compile_bytecode_of_expression(build_options, right, state, func);
 
-        constexpr auto set_as_acc =[](const BuildOptions* const build_options,
-                                      ASTExpression* const expr,
-                                      ValueLocation* const vl,
-                                      ASTExpression* const acc,
-                                      Local_State* const state,
-                                      Function* const func)
-        {
-          if (vl->location.type == LOCATION_TYPE::REGISTER && acc->value_index == 0) {
-            if (vl->modifiers == VALUE_MODIFIERS::NONE) {
-              vl->modifiers = VALUE_MODIFIERS::LAZY;
-            }
+        const ValueIndex left_val = state->new_value(temp_left);
+        const ValueIndex right_val = state->new_value(temp_right);
 
-            acc->value_index = expr->value_index;
-          }
-          else {
-            set_expression_location_to_reg(build_options, acc, state, func);
-          }
-        };
+        state->use_value(temp_left, left_val);
+        state->use_value(temp_right, right_val);
 
-        if (REVERSE_SAVE) {
-          set_expression_location_to_reg(build_options, left, state, func);
-        }
-        else {
-          set_as_acc(build_options, expr, vl, left, state, func);
-        }
+        ByteCode::EMIT::COPY_TO_VAL(func->code, (uint8_t)temp_left.val, (uint8_t)left_val.val);
+        ByteCode::EMIT::COPY_TO_VAL(func->code, (uint8_t)temp_right.val, (uint8_t)right_val.val);
 
-        //vl could now be invalid
+        state->control_flow.expression_num++;
+        state->use_value(left_val);
+        state->use_value(right_val);
 
-        compile_bytecode_of_expression(build_options, left, state, func);
-
-        if (REVERSE_SAVE) {
-          set_as_acc(build_options, expr, vl, right, state, func);
-        }
-        else {
-          set_expression_location_to_reg(build_options, right, state, func);
-        }
-
-        compile_bytecode_of_expression(build_options, right, state, func);
-
-        const size_t acc_index   = REVERSE_SAVE ? right->value_index : left->value_index;
-        const size_t other_index = REVERSE_SAVE ? left->value_index : right->value_index;
-
-        const uint8_t acc_reg   = state->get_value_location(acc_index)->location.reg;
-        const uint8_t other_reg = state->get_value_location(other_index)->location.reg;
+        state->value_tree.values.data[left_val.val].is_modified = true;
 
         //Select operation
         switch (bin_op->op) {
           case BINARY_OPERATOR::ADD: {
-              ByteCode::emit_add_r_to_r(func->bytecode, other_reg, acc_reg);
+              ByteCode::EMIT::ADD_VALS(func->code, (uint8_t)right_val.val, (uint8_t)left_val.val);
               break;
             }
           case BINARY_OPERATOR::SUB: {
-              ByteCode::emit_sub_r_to_r(func->bytecode, other_reg, acc_reg);
+              ByteCode::EMIT::SUB_VALS(func->code, (uint8_t)right_val.val, (uint8_t)left_val.val);
               break;
             }
           case BINARY_OPERATOR::MUL: {
-              ByteCode::emit_mul_r_to_r(func->bytecode, other_reg, acc_reg);
+              ByteCode::EMIT::MUL_VALS(func->code, (uint8_t)right_val.val, (uint8_t)left_val.val);
               break;
             }
           case BINARY_OPERATOR::DIV: {
-              ByteCode::emit_div_r_to_r(func->bytecode, other_reg, acc_reg);
+              ByteCode::EMIT::DIV_VALS(func->code, (uint8_t)right_val.val, (uint8_t)left_val.val);
               break;
             }
           case BINARY_OPERATOR::EQUIVALENT: {
-              //TODO: Think about flags, no need to do 2 cmps
-              ByteCode::emit_cmp_r_to_r(func->bytecode, other_reg, acc_reg);
-              ByteCode::emit_set_r_to_zf(func->bytecode, acc_reg);
+              ByteCode::EMIT::EQ_VALS(func->code, (uint8_t)right_val.val, (uint8_t)left_val.val);
               break;
             }
           case BINARY_OPERATOR::OR: {
-              ByteCode::emit_or_r_to_r(func->bytecode, other_reg, acc_reg);
+              ByteCode::EMIT::OR_VALS(func->code, (uint8_t)right_val.val, (uint8_t)left_val.val);
               break;
             }
           case BINARY_OPERATOR::AND: {
-              ByteCode::emit_and_r_to_r(func->bytecode, other_reg, acc_reg);
+              ByteCode::EMIT::AND_VALS(func->code, (uint8_t)right_val.val, (uint8_t)left_val.val);
               break;
             }
         }
 
-        //Manually right value
-        //Should be finished wit it now??? (currently no variables kept in registers)
-        state->free_value(other_index);
+        const ForcedColours colours = (build_options->system->bin_op_forced)(bin_op->op);
 
-        //Reset vl
-        vl = state->get_value_location(expr->value_index);
+        state->value_map.data[right_val.val] = colours.val1;
+        state->value_map.data[left_val.val] = colours.val2;
 
-        if (expr->value_index != acc_index) {
-          //Move result to output register and free temporary registers
-          emit_mov_r_to_location(state, func->bytecode, acc_reg, vl->location);
+        result = left_val;
 
-          state->free_value(acc_index);
-        }
         break;
       }
     case EXPRESSION_TYPE::FUNCTION_CALL: {
-        FunctionCallExpr* const call = &expr->call;
-        const CallingConvention* const conv = build_options->calling_convention;
+        const FunctionCallExpr* const call = &expr->call;
 
-        //Compile to argument locations
-        {
-          auto i = call->arguments.mut_begin();
-          const auto end = call->arguments.mut_end();
-          size_t index = 0;
-          const size_t total = end - i;
-
-          for (; i < end; (i++, index++)) {
-            Location loc = build_options->calling_convention->get_argument_location(index, total);
-
-            if (loc.type == LOCATION_TYPE::REGISTER) {
-              //Force the register to be free, move the previous value into a non_volatile register
-              force_free_reg_from_set(state, func, &loc.reg, 1,
-                                      conv->non_volatile_registers, conv->num_non_volatile_registers);
-            }
-
-            state->values.insert_uninit(1);
-            i->value_index = state->values.size;
-
-            ValueLocation* arg_vl = state->get_value_location(i->value_index);
-
-            arg_vl->type = i->type;
-            arg_vl->location = loc;
-            arg_vl->modifiers = VALUE_MODIFIERS::FIXED;
-
-            compile_bytecode_of_expression(build_options, i, state, func);
-          }
-        }
+        Array<ValueIndex> to_use_values;
+        to_use_values.reserve_total(call->arguments.size);
 
         {
-          uint64_t num_on_stack = 0;
-          if (call->function->signature.parameter_types.size > 4) {
-            num_on_stack = call->function->signature.parameter_types.size - 4;
-          }
-
-          const int64_t call_stack = conv->shadow_space_size + (num_on_stack * 8);
-          if (call_stack > state->max_call_stack) {
-            state->max_call_stack = call_stack;
-          }
-        }
-
-        vl = state->get_value_location(expr->value_index);
-        bool expr_is_rax = (vl->location.type == LOCATION_TYPE::REGISTER && vl->location.reg == conv->return_register);
-
-        if (!expr_is_rax) {
-          //Have to force rax to be free every time
-          force_free_reg_from_set(state, func, &conv->return_register, 1,
-                                  conv->non_volatile_registers, conv->num_non_volatile_registers);
-        }
-
-        //Call
-        if (call->function == func) {
-          //Calling itself
-          //Offset back to the start of the function
-          ByteCode::emit_call_offset(func->bytecode, -(int64_t)func->bytecode.size);
-        }
-        else {
-          //Just set pointer for now
-          //TODO: Is this persistent? Could this be done another way?
-          ByteCode::emit_call_ptr(func->bytecode, call->function);
-        }
-
-        //Free argument locations
-        {
-          auto i = call->arguments.mut_begin();
-          const auto end = call->arguments.mut_end();
+          auto i = call->arguments.begin();
+          const auto end = call->arguments.end();
 
           for (; i < end; i++) {
-            state->free_value(i->value_index);
+            const ValueIndex val = compile_bytecode_of_expression(build_options, i, state, func);
+            to_use_values.insert(val);
+          }
+        }
+
+        //Create parameter values
+        {
+          auto i = to_use_values.mut_begin();
+          const auto end = to_use_values.end();
+
+          for (; i < end; i++) {
+            auto p = state->new_value(*i);
+            state->use_value(*i, p);
+
+            ByteCode::EMIT::COPY_TO_VAL(func->code, (uint8_t)i->val, (uint8_t)p.val);
+
+            *i = p;
+          }
+        }
+
+        state->control_flow.expression_num++;
+
+        //Set parameter registers
+        {
+          size_t index = 0;
+          const size_t max = to_use_values.size;
+
+          for (; index < max; index++) {
+            auto i = to_use_values.begin();
+
+            state->use_value(*i);
+
+            state->value_map.data[i->val]
+              = build_options->calling_convention->parameter_registers[index] + 1;
           }
         }
 
 
-        if (!expr_is_rax) {
-          vl = state->get_value_location(expr->value_index);
+        ByteCode::EMIT::CALL(func->code, call->function->label);
+        state->control_flow.had_call = true;
+        state->control_flow.last_call = state->control_flow.expression_num;
 
-          emit_mov_r_to_location(state, func->bytecode, conv->return_register, vl->location);
-          state->free_reg(conv->return_register);
-        }
+        state->control_flow.expression_num++;
+
+        const ValueIndex rax = state->new_value();
+        *state->value_map.back() = build_options->calling_convention->return_register + 1;
+
+
+        //Fake copy so dont need to insert copy later if one is needed
+        state->control_flow.expression_num++;
+        result = state->new_value(rax);
+        state->use_value(rax, result);
+
+        ByteCode::EMIT::COPY_TO_VAL(func->code, (uint8_t)rax.val, (uint8_t)result.val);
 
         break;
       }
   }
-}
 
-static void patch_jump_to_current(Function* const func, size_t offset_to_jump) {
-  x64_to_bytes(func->bytecode.size - offset_to_jump, func->bytecode.data + offset_to_jump + 1);
+  state->control_flow.expression_num++;
+  return result;
 }
 
 void compile_bytecode_of_statement(Compiler* const comp,
                                    ASTStatement* const statement,
-                                   Local_State* const state,
+                                   State* const state,
                                    Function* const func) {
   switch (statement->type) {
     case STATEMENT_TYPE::BLOCK: {
+        size_t num_locals = state->locals.size;
+
         auto i = statement->block.block.mut_begin();
         const auto end = statement->block.block.mut_end();
 
         for (; i < end; i++) {
           compile_bytecode_of_statement(comp, i, state, func);
         }
+
+        state->locals.size = num_locals;
+        return;
+      }
+    case STATEMENT_TYPE::RETURN: {
+        const ValueIndex result = compile_bytecode_of_expression(&comp->build_options, &statement->expression, state, func);
+
+        const ValueIndex rax = state->new_value(result);
+        state->use_value(result, rax);
+        ByteCode::EMIT::COPY_TO_VAL(func->code, (uint8_t)result.val, (uint8_t)rax.val);
+
+        state->value_map.data[rax.val] = comp->build_options.calling_convention->return_register + 1;
+        state->use_value(result);
+
+        ByteCode::EMIT::JUMP_TO_FIXED(func->code, state->return_label);
         return;
       }
     case STATEMENT_TYPE::EXPRESSION:
-      //TODO: Identify which bits actually have side effects and run those in sequence
       compile_bytecode_of_expression(&comp->build_options, &statement->expression, state, func);
       return;
     case STATEMENT_TYPE::IF_ELSE: {
         ASTIfElse* const if_else = &statement->if_else;
 
-        set_expression_location_to_reg(&comp->build_options, &if_else->condition, state, func);
-        compile_bytecode_of_expression(&comp->build_options, &if_else->condition, state, func);
+        const ValueIndex cond = compile_bytecode_of_expression(&comp->build_options, &if_else->condition, state, func);
 
-        uint8_t comp_reg = state->get_value_location(if_else->condition.value_index)->location.reg;
-        ByteCode::emit_cmp_64_to_r(func->bytecode,
-                                   comp->lang->e_true->value,//probably always 1
-                                   comp_reg);
+        //Condition jump
+        const uint64_t else_label = comp->labels++;
 
-        state->free_value(if_else->condition.value_index);
+        state->use_value(cond);
+        ByteCode::EMIT::JUMP_TO_FIXED_IF_VAL_ZERO(func->code, (uint8_t)cond.val, else_label);
 
-        const size_t offset_to_jump = func->bytecode.size;
-        ByteCode::emit_jump_by_offset_if_not_zero(func->bytecode, 0);
-
+        const size_t start_flow = state->control_flow.current_flow;
 
         //If branch
+        state->control_flow.new_flow();
+        state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
         compile_bytecode_of_statement(comp, if_else->if_statement, state, func);
 
-        const size_t offset_to_exit_jump = func->bytecode.size;
-        ByteCode::emit_jump_by_offset(func->bytecode, 0);
+        const size_t end_if_flow = state->control_flow.current_flow;
 
-        //Patch the else jump
-        patch_jump_to_current(func, offset_to_jump);
+        //Jump from if branch to after the else branch
+        const uint64_t escape_label = comp->labels++;
+        ByteCode::EMIT::JUMP_TO_FIXED(func->code, escape_label);
+        ByteCode::EMIT::LABEL(func->code, else_label);
 
         //Else branch
+        state->control_flow.new_flow();
+        state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
         compile_bytecode_of_statement(comp, if_else->else_statement, state, func);
 
-        //Patch the if exit jump
-        patch_jump_to_current(func, offset_to_exit_jump);
+        const size_t end_else_flow = state->control_flow.current_flow;
 
-        //Should be done???
-        return;
-      }
-    case STATEMENT_TYPE::RETURN: {
-        ASTExpression* const expr = &statement->expression;
+        //Leave the if
+        state->control_flow.new_flow();
+        state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
+        state->control_flow.set_a_flows_to_b(end_else_flow, state->control_flow.current_flow);
 
-        //Determine the expected location of the output
-        const CallingConvention* conv = comp->build_options.calling_convention;
-
-        //free rax
-        force_free_reg_from_set(state, func, &conv->return_register, 1,
-                                conv->non_volatile_registers, conv->num_non_volatile_registers);
-
-        state->values.insert_uninit(1);
-        expr->value_index = state->values.size;
-
-        ValueLocation* const vl = state->get_value_location(expr->value_index);
-
-        vl->type          = expr->type;
-        vl->location.type = LOCATION_TYPE::REGISTER;
-        vl->location.reg  = conv->return_register;
-
-        if (expr->makes_call) {
-          vl->modifiers = VALUE_MODIFIERS::RESERVED;//Must be rax but that sorted later
-        }
-        else {
-          //In this case rax must be fixed
-          vl->modifiers = VALUE_MODIFIERS::FIXED;
-        }
-
-        compile_bytecode_of_expression(&comp->build_options, expr, state, func);
-        ByteCode::emit_jump_by_offset(func->bytecode, 0);
-
-        state->free_value(expr->value_index);//Stops program trying to save the value in rax
-
+        ByteCode::EMIT::LABEL(func->code, escape_label);
         return;
       }
     case STATEMENT_TYPE::DECLARATION: {
         ASTDeclaration* const decl = &statement->declaration;
 
-        //Set up the location of the local variable
-        Location loc ={};
-        loc.type       = LOCATION_TYPE::STACK;
-        loc.stack_disp = state->get_stack_location(decl->type.type);
+        const ValueIndex val = compile_bytecode_of_expression(&comp->build_options, &decl->expression, state, func);
 
-        //Reserve the stack location so nobody can use it
-        state->values.insert_uninit(1);
-        const size_t index = state->values.size;
-
-        ValueLocation* const vl = state->get_value_location(index);
-
-        vl->location  = loc;
-        vl->modifiers = VALUE_MODIFIERS::FIXED;//not allowed to move because its actually a local
-        vl->type      = decl->type.type;
-
-        //Compile the bytecode so the value will be loaded into where the local will end up being
-        decl->expression.value_index = index;
-
-        compile_bytecode_of_expression(&comp->build_options, &statement->declaration.expression, state, func);
-
-        //Insert it late so that it cant be used in the expression
         state->locals.insert_uninit(1);
-        Local_Variable& local_var = *state->locals.back();
 
-        local_var.name     = decl->name;
-        local_var.type     = decl->type.type;
-        local_var.location = loc;
+        Local* const local = state->locals.back();
+
+        local->name = decl->name;
+        local->val = val;
+        local->type = decl->type.type;
 
         return;
       }
   }
 }
 
-static void start_function_signature_stage(Compiler* const comp,
-                                           FunctionUnit* const unit) {
-
-  unit->stage           = FUNCTION_COMPILE_STAGE::SIGNATURE;
-  unit->status          = COMPILE_STATUS::OK;
-
-  ASTFunctionSignature* ast_sig = &unit->source->signature;
-  FunctionSignature* sig = &unit->destination->signature;
-
-  sig->parameter_types.insert_uninit(ast_sig->parameters.size);
-}
-
-static void start_function_body_stage(Compiler* const comp,
-                                      FunctionUnit* const unit) {
-
-  unit->stage           = FUNCTION_COMPILE_STAGE::BODY;
-  unit->status          = COMPILE_STATUS::OK;
-
-  ASTFunctionDeclaration* const ast_func = unit->source;
-  Function* const func = unit->destination;
-
-  Local_State* const state = &unit->state;
-
-  //Set fixed registers
-  {
-    const System* const syst = comp->build_options.system;
-
-    state->registers[syst->stack_pointer].modified = MODIFICATION_TYPE::MANAGED;
-    state->registers[syst->stack_pointer].occupied_size = 8;
-    state->registers[syst->base_pointer].modified = MODIFICATION_TYPE::MANAGED;
-    state->registers[syst->base_pointer].occupied_size = 8;
-  }
-
-  //Load parameters to a safe space if we have parameters
-  if (ast_func->signature.parameters.size > 0) {
-    const FunctionSignature* const sig = &func->signature;
-
-    auto i_ast = ast_func->signature.parameters.begin();
-    auto i = sig->parameter_types.begin();
-    const auto very_end = sig->parameter_types.end();
-    size_t num_to_save = 0;
-
-    const size_t num_params = sig->parameter_types.size;
-    const size_t num_reg_params = comp->build_options.calling_convention->num_parameter_registers;
-
-    if (num_params > num_reg_params) {
-      num_to_save = num_reg_params;
-    }
-    else {
-      num_to_save = num_params;
-    }
-
-    const auto end = i + num_to_save;
-    const size_t num_already_saved = num_reg_params - num_to_save;
-
-    //8 = Size of return address, 8 = size of base pointer
-    constexpr size_t OFFSET_TO_SHADOW = 8ull + 8ull;
-
-
-    //Use shadow space if exists
-    if (comp->build_options.calling_convention->shadow_space_size >= 8) {
-      uint64_t remaining_shadow_space = comp->build_options.calling_convention->shadow_space_size;
-
-
-      int64_t offset_in_shadow_space = OFFSET_TO_SHADOW;
-
-      //Will run max 'num_reg_params' times
-      while (i < end && remaining_shadow_space >= 8) {
-
-        ByteCode::emit_mov_r_to_m(func->bytecode, i->location.reg, RBP.REG, offset_in_shadow_space);
-
-        state->locals.insert_uninit(1);
-        auto last = state->locals.back();
-
-        last->name                = i_ast->name;
-        last->type                = i->structure;
-        last->location.type       = LOCATION_TYPE::STACK;
-        last->location.stack_disp = offset_in_shadow_space;
-
-        i_ast++;
-        i++;
-        offset_in_shadow_space += 8;
-        remaining_shadow_space -= 8;
-        num_to_save--;
-      }
-    }
-
-    while (i < end) {
-      auto offset = state->get_stack_location(i->structure);
-
-      ByteCode::emit_mov_r_to_m(func->bytecode, i->location.reg, RBP.REG, offset);
-
-      state->locals.insert_uninit(1);
-      auto last = state->locals.back();
-
-      last->name                = i_ast->name;
-      last->type                = i->structure;
-      last->location.type       = LOCATION_TYPE::STACK;
-      last->location.stack_disp = offset;
-
-      i_ast++;
-      i++;
-      num_to_save--;
-    }
-
-
-    while (i < very_end) {
-      state->locals.insert_uninit(1);
-      auto last = state->locals.back();
-
-      last->name     = i_ast->name;
-      last->type     = i->structure;
-      last->location = i->location;
-
-      i_ast++;
-      i++;
-    }
-  }
-}
-
-//Fix stack offsets and jumping to the return
-static void fix_put_off_things(const int64_t stack_size,
-                               const int64_t added_bytecode_size,
-                               uint8_t* const bytecode,
-                               const uint64_t size) {
-  for (uint64_t i = 0; i < size;) {
-    switch (bytecode[i]) {
-      case ByteCode::LEAVE_THEN_RETURN:
-      case ByteCode::ENTER_FUNCTION:
-        i++;
-        break;
-      case ByteCode::PUSH_R:
-      case ByteCode::POP_R:
-      case ByteCode::CALL_R:
-      case ByteCode::SET_R_TO_ZF:
-        i += ByteCode::OP_R::INSTRUCTION_SIZE;
-        break;
-      case ByteCode::CALL_PTR:
-      case ByteCode::JUMP_BY_I64_IF_ZERO:
-      case ByteCode::JUMP_BY_I64_IF_NOT_ZERO:
-        i += ByteCode::OP_64::INSTRUCTION_SIZE;
-        break;
-      case ByteCode::MOV_R_TO_R:
-      case ByteCode::ADD_R_TO_R:
-      case ByteCode::SUB_R_TO_R:
-      case ByteCode::CMP_R_TO_R:
-      case ByteCode::MUL_R_TO_R:
-      case ByteCode::DIV_R_TO_R:
-      case ByteCode::OR_R_TO_R:
-      case ByteCode::AND_R_TO_R:
-        i += ByteCode::OP_R_R::INSTRUCTION_SIZE;
-        break;
-      case ByteCode::MOV_64_TO_R:
-      case ByteCode::ADD_64_TO_R:
-      case ByteCode::SUB_64_TO_R:
-      case ByteCode::CMP_64_TO_R:
-      case ByteCode::MUL_64_TO_R:
-      case ByteCode::DIV_64_TO_R:
-        i += ByteCode::OP_64_R::INSTRUCTION_SIZE;
-        break;
-      case ByteCode::MOV_R_TO_M:
-      case ByteCode::MOV_M_TO_R: {
-          int64_t offset = x64_from_bytes(bytecode + i + 3);
-
-          if (offset < 0) {
-            offset += stack_size;
-            x64_to_bytes(offset, bytecode + i + 3);
-          }
-
-          i += ByteCode::OP_R_R_64::INSTRUCTION_SIZE;
-          break;
-        }
-      case ByteCode::MOV_64_TO_M: {
-          int64_t offset = x64_from_bytes(bytecode + i + 1 + 8 + 1);
-
-          if (offset < 0) {
-            offset += stack_size;
-            x64_to_bytes(offset, bytecode + i + 1 + 8 + 1);
-          }
-
-          i += ByteCode::OP_64_R_64::INSTRUCTION_SIZE;
-          break;
-        }
-
-      case ByteCode::JUMP_BY_I64: {
-          int64_t offset = x64_from_bytes(bytecode + i + 1);
-
-          //Actually a jump to the end
-          if (offset == 0) {
-            x64_to_bytes(size - i, bytecode + i + 1);
-          }
-
-          i += ByteCode::OP_R::INSTRUCTION_SIZE;
-          break;
-        }
-      case ByteCode::CALL_OFFSET: {
-          int64_t offset = x64_from_bytes(bytecode + i + 1);
-          offset -= added_bytecode_size;
-
-          x64_to_bytes(offset, bytecode + i + 1);
-
-          i += ByteCode::OP_64::INSTRUCTION_SIZE;
-        }
-    }
-  }
-}
 
 static CompileCode compile_type_of_statement(Compiler* const comp,
                                              Function* const func,
-                                             Local_State* const state,
+                                             State* const state,
                                              ASTStatement* const statement) {
 
   CompileCode ret = CompileCode::NO_ERRORS;
@@ -1235,6 +667,8 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
             return ret;
           }
         }
+
+        assert(if_else->condition.type != nullptr);
 
         //Must be bool
         if (if_else->condition.type != comp->lang->s_bool) {
@@ -1317,15 +751,16 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
           }
         }
 
-        const Structure* const expected = func->signature.return_type.structure;
+        assert(expr->type != nullptr);
 
-        if (expr->type == expected) {
+        if (expr->type == func->return_type) {
+
           return CompileCode::NO_ERRORS;
         }
         else {
           printf("ERROR: Cannot return incorrect type from function\n"
                  "       Return Type: '%s', Expression '%s'\n",
-                 expected->name.string, expr->type->name.string);
+                 func->return_type->name.string, expr->type->name.string);
 
           return CompileCode::TYPE_CHECK_ERROR;
         }
@@ -1338,10 +773,478 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
   return CompileCode::UNFOUND_DEPENDENCY;
 }
 
+static void load_prolog_and_epilog(const BuildOptions* const options,
+                                   Function* const func, const State* const state, uint64_t regs) {
+  //Only non volatiles
+  regs &= options->calling_convention->non_volatiles_bit_mask;
+  
+  //Prolog
+  {
+    Array<uint8_t> temp ={};
+
+    //Call label
+    ByteCode::EMIT::LABEL(temp, func->label);
+    ByteCode::EMIT::PUSH_FRAME(temp);
+
+    //Non-volatile registers need to be saved if the function is used
+    uint8_t non_v_regs = 0;
+    const uint8_t num_regs = options->system->num_registers;
+    for (; non_v_regs < num_regs; non_v_regs++) {
+      if (regs & ((uint64_t)1 << non_v_regs)) {
+        ByteCode::EMIT::PUSH_VAL(temp, options->system->all_registers[non_v_regs].REG);
+      }
+    }
+
+    temp.reserve_extra(func->code.size);
+    memcpy_ts(temp.data + temp.size, temp.capacity - temp.size,
+              func->code.data, func->code.size);
+    temp.size += func->code.size;
+
+    //Save new function
+    func->code = std::move(temp);
+  }
+
+  //Epilog
+
+  {
+    ByteCode::EMIT::LABEL(func->code, state->return_label);
+
+    uint8_t non_v_regs = options->system->num_registers + 1;
+    const uint8_t num_regs = 0;
+    for (; non_v_regs > num_regs; non_v_regs--) {
+      if (regs & ((uint64_t)1 << (non_v_regs - 1))) {
+        ByteCode::EMIT::POP_TO_VAL(func->code, options->system->all_registers[(non_v_regs - 1)].REG);
+      }
+    }
+
+    ByteCode::EMIT::POP_FRAME(func->code);
+    ByteCode::EMIT::RETURN(func->code);
+  }
+}
+
+
+constexpr static ValueIndex resolve_coalesced(ValueIndex i, const ValueTree& tree) noexcept {
+  while (tree.values.data[i.val].is_coalesced) {
+    i.val = tree.values.data[i.val].index.val;
+  }
+
+  return i;
+}
+
+
+static void compute_value_intersections(ValueTree& tree, const ControlFlow& flow) {
+  for (size_t i = 0; i < tree.values.size - 1; i++) {
+    auto i_val = tree.values.data + i;
+
+    for (size_t j = i + 1; j < tree.values.size; j++) {
+      auto j_val = tree.values.data + j;
+
+      if (i_val->creation.time.flow != j_val->creation.time.flow
+          && !flow.test_a_flows_to_b(i_val->creation.time.flow, j_val->creation.time.flow)
+          && !flow.test_a_flows_to_b(j_val->creation.time.flow, i_val->creation.time.flow)) {
+        //cant intersect as control flow not linked
+        continue;
+      }
+
+      auto j_last = j_val->last_uses.begin();
+      const auto j_end = j_val->last_uses.end();
+
+      for (; j_last < j_end; j_last++) {
+        if (flow.test_a_flows_to_b(j_last->time.flow, i_val->creation.time.flow)
+            || (j_last->time.flow == i_val->creation.time.flow && j_last->time.time < i_val->creation.time.time)) {
+          //i created after j last use
+          //if j_last flows to i_val then j_last must be before i_val
+          continue;
+        }
+        else {
+          //i created before j last use
+          auto i_last = i_val->last_uses.begin();
+          const auto i_end = i_val->last_uses.end();
+
+          for (; i_last < i_end; i_last++) {
+            if (flow.test_a_flows_to_b(i_last->time.flow, j_val->creation.time.flow)
+                || (i_last->time.flow == j_val->creation.time.flow && i_last->time.time < j_val->creation.time.time)) {
+              //i last used before j created
+              continue;
+            }
+            else {
+              //i and j dont not overlap
+              //therefore overlap
+              tree.set_intersection(ValueIndex{ i }, ValueIndex{ j });
+              goto OVERLAP_DONE;
+            }
+          }
+        }
+      }
+    OVERLAP_DONE:
+      continue;
+    }
+  }
+}
+
+static uint64_t select(const BuildOptions* const options, State* const state) noexcept {
+  Array<uint8_t>& value_map = state->value_map;
+  const ValueTree& tree = state->value_tree;
+
+  constexpr auto copy_array = [](const Array<Array<ValueIndex>>& from, Array<Array<ValueIndex>>& to) {
+    to.reserve_total(from.size);
+
+    auto i = from.begin();
+    auto end = from.end();
+    auto to_i = to.mut_begin();
+
+    for (; i < end; (i++, to_i++)) {
+      to_i->reserve_total(i->size);
+      to_i->size = i->size;
+      memcpy_ts(to_i->data, to_i->size, i->data, i->size);
+    }
+  };
+
+  Array<Array<ValueIndex>> a_l ={};
+  copy_array(tree.adjacency_list, a_l);
+
+  size_t num_values = 0;
+
+  //Coalesced values are converted to tombstones + count how many active values
+  for (uint64_t i = 0; i < tree.values.size; i++) {
+    if (!tree.values.data[i].is_coalesced) {
+      num_values++;
+    }
+    else if (value_map.data[i] > 0) {
+      //Fixed value 
+      continue;
+    }
+    else {
+      a_l.data[i].free();//make tombstones
+    }
+  }
+
+  size_t* const stack = allocate_zerod<size_t>(num_values);
+  size_t index = 0;
+  size_t num_intersects = 0;
+
+  //Load stack - runs while there are active values not in the stack
+  while (index < num_values) {
+    for (uint64_t i = 0; i < tree.values.size; i++) {
+
+      auto& intersects = a_l.data[i];
+      if (intersects.capacity == 0) {
+        continue; // tombstone can be skipped
+      }
+      else if (intersects.size >= num_intersects) {
+        //Valid to put in the stack
+        stack[index++] = i;
+
+        //Go down to previous level as this will remove intersects
+        num_intersects--;
+
+        //Remove this intersect from all others
+        auto i_arr = intersects.begin();
+        const auto end_arr = intersects.end();
+        for (; i_arr < end_arr; i_arr++) {
+          struct Lambda {
+            ValueIndex test;
+
+            bool operator()(const ValueIndex v) const {
+              return test == v;
+            }
+          };
+
+          //Remove i from these intersections
+          a_l.data[i_arr->val].remove_if(Lambda{ ValueIndex{i} });
+        }
+
+        intersects.free();
+      }
+    }
+
+    num_intersects++;
+  }
+
+  //Load colours
+  {
+    uint64_t regs ={};//not going to have more than 64 registers ... hopefully
+
+    auto i = stack + num_values - 1;
+    const auto end = stack;
+
+    for (; i >= end; i--) {
+      if (value_map.data[*i] > 0) {
+        continue;
+      }
+
+      regs = 0;
+
+      auto i_again = stack + num_values - 1;
+
+      //For each adjacent check for reserved colours
+      for (; i_again > end; i_again--) {
+        if (tree.intersection_check.test_a_intersects_b(*i_again, *i)) {
+          //If adjacent remove that colour
+          const uint8_t possible_colour = value_map.data[*i_again];
+          if (possible_colour > 0) {
+            regs |= ((uint64_t)1 << (possible_colour - 1));
+          }
+        }
+      }
+
+      uint8_t colour = 0;
+      if (tree.values.data[*i].crosses_call) {
+        //requires non volatile reg
+        colour = options->calling_convention->num_volatile_registers;
+      }
+
+      //Find first index that is 0 (i.e. a free colour/reg)
+      //Search in order of options->calling_convention->all_regs_unordered because this will do
+      //volatile registers first and then non volatile registers if required
+      while ((regs & ((uint64_t)1 << options->calling_convention->all_regs_unordered[colour])) != 0) {
+        colour++;
+      }
+
+      value_map.data[*i] = options->calling_convention->all_regs_unordered[colour] + 1;
+    }
+  }
+
+  //Load coalesced values
+  {
+    auto i = tree.values.begin();
+    const auto end = tree.values.end();
+
+    for (size_t i = 0; i < tree.values.size; i++) {
+      const auto* ptr = tree.values.data + i;
+      if (ptr->is_coalesced) {
+        const size_t index = resolve_coalesced(ptr->index, tree).val;
+
+        value_map.data[i] = value_map.data[index];
+      }
+    }
+  }
+
+  free(stack);
+
+
+  uint64_t used_regs = 0;
+
+  {
+    auto i = value_map.begin();
+    const auto end = value_map.end();
+
+    for (; i < end; i++) {
+      if (*i > 0) {
+        used_regs |= ((uint64_t)1 << (*i - 1));
+      }
+    }
+  }
+
+  return used_regs;
+}
+
+static void combine_last_uses(Array<ValueUse>& arr1, const Array<ValueUse>& arr2, const ControlFlow* const c_flow) {
+  Array<ValueUse> temp ={};
+
+  copy_array(arr2, temp);
+
+  struct ContainsLaterUse {
+    const ControlFlow* flow;
+    const Array<ValueUse>& arr_test;
+
+    bool operator()(const ValueUse& v) const {
+      auto i = arr_test.begin();
+      const auto end = arr_test.end();
+
+      for (; i < end; i++) {
+        if (v.time.flow == i->time.flow && v.time.time < i->time.time) {
+          return true;
+        }
+        else if (flow->test_a_flows_to_b(v.time.flow, i->time.flow)) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+  };
+
+  arr1.remove_if(ContainsLaterUse{ c_flow, temp });
+  temp.remove_if(ContainsLaterUse{ c_flow, arr1 });
+
+  arr1.concat(std::move(temp));
+}
+
+void coalesce(const Compiler* const comp, State* const state) {
+  ValueTree& tree = state->value_tree;
+  const ControlFlow& c_flow = state->control_flow;
+
+  const size_t size = state->value_tree.adjacency_list.size;
+  for (size_t l1 = 0; l1 < size; l1++) {
+    auto& l1_val = tree.values.data[l1];
+
+    //Store info needed to coalesce later
+    bool is_child = false;
+    bool is_child_by_modify = false;
+    size_t child_of = 0;
+
+    auto& list = tree.adjacency_list.data[l1];
+
+    //Find values to coalsce into
+    for (size_t i_el = 0; i_el < list.size; i_el++) {
+      auto* i_index = list.data + i_el;
+
+      //Reduce indirections
+      *i_index = resolve_coalesced(*i_index, tree);
+      const size_t l2 = i_index->val;
+
+      if (l2 == l1) {
+        continue;//just in case
+      }
+
+      auto& l2_val = tree.values.data[l2];
+
+      {
+        //cant merge value that crosses function with a volatile register
+        auto l1_colour = state->value_map.data[l1];
+        auto l2_colour = state->value_map.data[l2];
+
+        if (l1_colour != 0 && l2_colour != 0 && l1_colour != l2_colour) {
+          continue;
+        }
+
+
+        const size_t num_volatile = comp->build_options.calling_convention->num_volatile_registers;
+
+        if ((l1_val.crosses_call && l2_colour != 0
+            && (l2_colour + 1) < num_volatile)
+            || (l2_val.crosses_call && l1_colour != 0
+            && (l1_colour + 1) < num_volatile)) {
+          continue;
+        }
+      }
+
+      const size_t created_by = resolve_coalesced(l1_val.creation.related_index, tree).val;
+
+      //Test to see if l1 is a 'child' of l2
+      if (created_by == l2) {
+        if (!l1_val.is_modified && !l2_val.is_modified) {
+          //l1 created l2 and l1 or l2 are ever modified so can potentially merge
+
+          if (comp->print_options.coalesce_values) {
+            printf("%llu is potential child of %llu\n", l1, l2);
+          }
+
+          is_child_by_modify = true;
+          child_of = l2;
+        }
+
+
+        //l1 created by l2
+        //was it the last thing l2 did?
+        for (const ValueUse& use : l2_val.last_uses) {
+          const size_t use_created = resolve_coalesced(use.related_index, tree).val;
+
+          if (use_created == l1 //last thing l2 did was related to l1
+              && use.time.flow == l1_val.creation.time.flow //same block
+              && use.time.time == l1_val.creation.time.time /*same time*/) {
+            //Last thing l2 did is create l1
+
+            //Coalesce l1 into l2
+            if (comp->print_options.coalesce_values) {
+              printf("%llu is child of %llu\n", l1, l2);
+            }
+
+            is_child_by_modify = false;
+            is_child = true;
+            child_of = l2;
+          }
+        }
+
+        //dont need to check any others - can only be created by one value
+        break;
+      }
+    }
+
+    if (is_child || is_child_by_modify) {
+      auto& parent_val = tree.values.data[child_of];
+
+      //Test for modify
+      if (is_child || (!parent_val.is_modified && !l1_val.is_modified)) {
+
+        if (is_child_by_modify && comp->print_options.coalesce_values) {
+          printf("%llu is child of %llu\n", l1, child_of);
+        }
+
+        //Cant be child due to one being modified
+        l1_val.is_coalesced = true;
+        l1_val.index.val = child_of;
+
+        parent_val.crosses_call |= l1_val.crosses_call;
+        parent_val.is_modified |= l1_val.is_modified;
+
+        auto child_colour = state->value_map.data[l1];
+        if (child_colour > 0) {
+          state->value_map.data[child_of] = child_colour;
+        }
+
+        combine_last_uses(parent_val.last_uses, l1_val.last_uses, &c_flow);
+        tree.combine_intersection(ValueIndex{ l1 }, ValueIndex{ child_of });
+      }
+    }
+  }
+}
+
+void map_values(Array<uint8_t>& arr, const Array<uint8_t>& value_map) noexcept {
+  Array<uint8_t> temp ={};
+
+
+#define OP_VAL_64(name) ByteCode::EMIT:: ## name ## (temp, value_map.data[p.val] - 1, p.u64)
+#define OP_64(name) ByteCode::EMIT:: ## name ## (temp, p.u64)
+#define OP(name) ByteCode::EMIT:: ## name ## (temp)
+#define OP_VAL(name) ByteCode::EMIT:: ## name ## (temp, value_map.data[p.val] - 1)
+#define OP_VAL_VAL(name) ByteCode::EMIT:: ## name ## (temp, value_map.data[p.val1] - 1, value_map.data[p.val2] - 1) 
+
+#define X(name, structure) case ByteCode:: ## name: {\
+      const auto p = ByteCode::PARSE:: ## name ## (bytecode);\
+      structure(name);\
+      bytecode += ByteCode::SIZE_OF:: ## name;\
+      break;\
+    }
+
+  const uint8_t* bytecode = arr.data;
+  while (bytecode < arr.data + arr.size) {
+    switch (*bytecode) {
+      case ByteCode::COPY_TO_VAL: {
+          const auto p = ByteCode::PARSE::COPY_TO_VAL(bytecode);
+
+          const uint8_t v1 = value_map.data[p.val1] - 1;
+          const uint8_t v2 = value_map.data[p.val2] - 1;
+
+          if (v1 != v2) {
+            ByteCode::EMIT::COPY_TO_VAL(temp, v1, v2);
+          }
+
+          bytecode += ByteCode::SIZE_OF::COPY_TO_VAL;
+          break;
+        }
+      default:
+        switch (*bytecode) {
+          BYTECODES_X
+        }
+        break;
+    }
+  }
+
+#undef OP_VAL_64
+#undef OP_64
+#undef OP
+#undef OP_VAL
+#undef OP_VAL_VAL
+
+  arr = std::move(temp);
+}
+
 CompileCode compile_function_body_unit(Compiler* const comp,
                                        ASTFunctionDeclaration* const ast_func,
                                        Function* const func,
-                                       Local_State* const state) {
+                                       State* const state) {
   const BuildOptions* const build_options = &comp->build_options;
 
   CompileCode ret = CompileCode::NO_ERRORS;
@@ -1359,8 +1262,27 @@ CompileCode compile_function_body_unit(Compiler* const comp,
     }
   }
 
-  //Cant error now?
+  //Cant error now???
 
+  //Values for the parameters - allows them to be different from parameter registers
+  {
+    auto i = state->locals.mut_begin();
+    const auto end = state->locals.mut_end();
+
+    for (; i < end; i++) {
+      auto p = state->new_value(i->val);
+      state->use_value(p, i->val);
+
+      ByteCode::EMIT::COPY_TO_VAL(func->code, (uint8_t)i->val.val, (uint8_t)p.val);
+
+      i->val = p;
+    }
+  }
+
+  state->control_flow.expression_num++;
+
+  //Calculate all the values
+  //and compile the bytecode
   {
     Array<ASTStatement>& statements = ast_func->body.block;
 
@@ -1371,106 +1293,104 @@ CompileCode compile_function_body_unit(Compiler* const comp,
     }
   }
 
-  //Fix stack stuff
-  {
-    Array<uint8_t> temp(1 + ByteCode::OP_64_R::INSTRUCTION_SIZE);
-
-    //Should safely emit enter now so its only added once
-    ByteCode::emit_enter(temp);
-
-    //Calling convention non volatiles
-    const size_t num_non_volatile = build_options->calling_convention->num_non_volatile_registers;
-    const uint8_t* const non_volatile = build_options->calling_convention->non_volatile_registers;
-
-    //Get size of non volatile registers
-    int64_t save_regs = 0;
-    for (size_t i = 0; i < num_non_volatile; i++) {
-      const uint8_t reg = non_volatile[i];
-
-      save_regs += (int64_t)(state->registers[reg].modified == MODIFICATION_TYPE::MODIFIED) * 8;
-    }
-
-    //Makes sure the stack will align to 16 bytes
-    constexpr auto align_on_16 = [](const uint64_t val) {
-      const auto align = (val + 8) % 16;
-      if (align == 0) {
-        return val;
-      }
-      else {
-        return val + (16 - align);
-      }
-    };
-
-    //Call operation stack stuff is included in max_stack
-    const int64_t unaligned_stack = state->max_stack + state->max_call_stack + save_regs;
-    const int64_t STACK_SIZE = align_on_16(unaligned_stack);
-    int64_t used_space = 0;
-
-    // Need a stack?
-    if (unaligned_stack > 0) {
-      ByteCode::emit_sub_64_to_r(temp, STACK_SIZE, RSP.REG);
-
-      //Save non volatile registers
-      for (size_t i = 0; i < num_non_volatile; i++) {
-        const uint8_t reg = non_volatile[i];
-
-        if (state->registers[reg].modified == MODIFICATION_TYPE::MODIFIED) {
-          used_space -= 8;
-          ByteCode::emit_mov_r_to_m(temp, reg, RBP.REG, used_space);
-        }
-      }
-    }
-
-    //Fix locations into the stack given that we just saved a bunch of registers
-      //Also good point to fix jumps to the end
-    fix_put_off_things(used_space, temp.size, func->bytecode.data, func->bytecode.size);
-
-    //Copy the bytecode into the new buffer
-    temp.reserve_extra(func->bytecode.size);
-    memcpy(temp.data + temp.size, func->bytecode.data, func->bytecode.size);
-    temp.size += func->bytecode.size;
-
-
-    // Did we use the stack? - might have non volatiles on there
-    if (unaligned_stack > 0) {
-      //Load non volatile registers from stack
-      const size_t num_non_volatile = build_options->calling_convention->num_non_volatile_registers;
-      const uint8_t* non_volatile = build_options->calling_convention->non_volatile_registers;
-
-      int64_t used_space = 0;
-      for (size_t i = 0; i < num_non_volatile; i++) {
-        const uint8_t reg = non_volatile[i];
-
-        if (state->registers[reg].modified == MODIFICATION_TYPE::MODIFIED) {
-          used_space -= 8;
-          ByteCode::emit_mov_m_to_r(temp, RBP.REG, used_space, reg);
-        }
-      }
-    }
-
-    //For now just emit a return at the end just in case
-    ByteCode::emit_return(temp);
-
-    //Replace the bytecode
-    func->bytecode = std::move(temp);
+  if (comp->print_options.pre_reg_alloc) {
+    printf("\n=== %s Pre Register Allocation Bytecode ===\n\n", func->name.string);
+    ByteCode::print_bytecode(&reg_num_as_string, stdout, func->code.data, func->code.size);
+    printf("\n=============================\n\n");
   }
+
+  // Simplified Graph colouring Algorithm
+  //
+  // Build -> Coalesce -> Select
+  //
+
+  //Computers all the intersections in the value tree based on control flow
+  //Build section
+  compute_value_intersections(state->value_tree, state->control_flow);
+  coalesce(comp, state);
+  const uint64_t regs = select(build_options, state);
+  map_values(func->code, state->value_map);
+
+  //No longer needed
+  state->locals.free();
+  state->value_tree.free();
+  state->control_flow.free();
+
+  state->value_map.shrink();
+
+  ////Setup registers 
+  //{
+  //  const auto conv = build_options->calling_convention;
+
+  //  state->num_volatiles = conv->num_volatile_registers;
+  //  state->num_non_volatiles = conv->num_non_volatile_registers;
+  //  const size_t total_regs = state->num_volatiles + state->num_non_volatiles;
+
+  //  state->registers = allocate_zerod<StateRegister>(total_regs);
+
+  //  size_t i = 0;
+  //  for (; i < state->num_volatiles; i++) {
+  //    state->registers[i].reg = conv->volatile_registers[i];
+  //  }
+
+  //  for (; i < total_regs; i++) {
+  //    state->registers[i].reg = conv->non_volatile_registers[i - state->num_volatiles];
+  //  }
+
+
+  //  //Load parameter registers
+  //  const size_t num_param_regs = ast_func->parameters.size < conv->num_parameter_registers ? ast_func->parameters.size : conv->num_parameter_registers;
+  //  auto p = conv->parameter_registers;
+  //  auto p_ast = ast_func->parameters.begin();
+  //  const auto end = p + num_param_regs;
+
+  //  for (; p < end; (p++, p_ast++)) {
+  //    for (i = 0; i < state->num_non_volatiles; i++) {
+  //      if (state->registers[i].reg == *p) {
+  //        const auto val = state->get_local(p_ast->name);
+
+  //        state->values.data[val].current_reg = (uint8_t)i;
+  //        state->registers[i].val = val;
+  //        state->registers[i].ever_used = true;
+  //        state->registers[i].occupied = true;
+  //        break;
+  //      }
+  //    }
+  //  }
+  //}
+
+  //Save the non-volatile registers
+  load_prolog_and_epilog(&comp->build_options, func, state, regs);
+
+  ////No longer need the register array
+  //free(state->registers);
+
+  func->code.shrink();
+
+  if (comp->print_options.normal_bytecode) {
+    printf("\n=== %s Normal Bytecode ===\n\n", func->name.string);
+    ByteCode::print_bytecode(build_options->system->reg_name_from_num, stdout, func->code.data, func->code.size);
+    printf("\n=============================\n\n");
+  }
+
   return ret;
 }
 
-CompileCode compile_function_signature(Compiler* const comp,
-                                       ASTFunctionSignature* const ast_sig,
-                                       FunctionSignature* const sig) {
+static CompileCode compile_function_signature(Compiler* const comp,
+                                              ASTFunctionDeclaration* const ast_func,
+                                              Function* const func,
+                                              State* const state) {
   CompileCode ret = CompileCode::NO_ERRORS;
 
   //Parameters
   {
-    auto i_ast = ast_sig->parameters.mut_begin();
-    auto i = sig->parameter_types.mut_begin();
-    const auto end = sig->parameter_types.end();
+    auto i_ast = ast_func->parameters.mut_begin();
+    auto i = func->parameter_types.mut_begin();
+    const auto end = func->parameter_types.end();
 
     while (i < end) {
-      if (i->structure == nullptr) {
-        ret = get_compiled_structure(comp, &i_ast->type, &i->structure, 1);
+      if (*i == nullptr) {
+        ret = get_compiled_structure(comp, &i_ast->type, i, 1);
         if (ret != CompileCode::NO_ERRORS) {
           return ret;
         }
@@ -1481,78 +1401,35 @@ CompileCode compile_function_signature(Compiler* const comp,
     }
   }
 
-  //Return types - no need to check if compiled as will never be here if its
-  ret = get_compiled_structure(comp, &ast_sig->return_type, &sig->return_type.structure, 1);
-  if (ret != CompileCode::NO_ERRORS) {
-    return ret;
-  }
+  //Enter the body
+  state->control_flow.new_flow();
 
-
-  //Now can't error??
-  const CallingConvention* const conv = comp->build_options.calling_convention;
-
-  if (sig->return_type.structure->size() > 8) {
-    //Return wont fit
-    //Have to pass in an address
-
-    sig->return_type.location.type = LOCATION_TYPE::ADDRESS;
-    sig->return_type.location.reg  = conv->return_parameter;
-  }
-  else {
-    //Return will fit
-
-    sig->return_type.location.type = LOCATION_TYPE::REGISTER;
-    sig->return_type.location.reg  = conv->return_register;
-  }
-
+  //Load signature locals
   {
-    auto par = sig->parameter_types.mut_begin();
-    const auto end = sig->parameter_types.mut_end();
+    state->locals.insert_uninit(ast_func->parameters.size);
 
-    for (size_t i = 0; i < conv->num_parameter_registers && par < end; i++) {
-      const uint8_t reg =  conv->parameter_registers[i];
+    size_t index = 0;
+    const size_t max = ast_func->parameters.size;
 
-      if (reg == conv->return_parameter) {
-        continue;
-      }
+    for (; index < max; index++) {
+      auto i = ast_func->parameters.data + index;
+      auto l_i = state->locals.data + index;
 
-      if (par->structure->size() > 8) {
-        //Address can fit in register
-        par->location.type = LOCATION_TYPE::ADDRESS;
-      }
-      else {
-        //Can fit in register
-        par->location.type = LOCATION_TYPE::REGISTER;
-      }
+      l_i->name = i->name;
+      l_i->type = i->type.type;
+      l_i->val  = state->new_value();
 
-      par->location.reg = reg;
-      par++;
-    }
-
-    int8_t next_stack = 0;
-    int64_t stack_disp = 0;
-
-    if (comp->build_options.calling_convention->stack_direction == STACK_DIRECTION::RIGHT_TO_LEFT) {
-      stack_disp = CallingConvention::OFFSET_TO_SHADOW + comp->build_options.calling_convention->shadow_space_size;
-      next_stack = 8;
-    }
-    else {
-      stack_disp = CallingConvention::OFFSET_TO_SHADOW
-        + comp->build_options.calling_convention->shadow_space_size
-        + (8 * (end - par));
-      next_stack = -8;
-    }
-
-    while (par < end) {
-      par->location.type = LOCATION_TYPE::STACK;
-      par->location.stack_disp = stack_disp;
-
-      par++;
-      stack_disp += next_stack;
+      state->value_map.data[l_i->val.val]
+        = comp->build_options.calling_convention->parameter_registers[index] + 1;
     }
   }
 
-  return ret;
+  func->label = comp->labels++;
+
+  state->control_flow.expression_num++;
+
+  //Return types - no need to check if compiled as will never be here if its
+  return get_compiled_structure(comp, &ast_func->return_type, &func->return_type, 1);
 }
 
 void build_compilation_units(Compiler* const comp, ASTFile* const func) {
@@ -1568,16 +1445,21 @@ void build_compilation_units(Compiler* const comp, ASTFile* const func) {
 
     Function* const func = comp->new_function();
 
+    //Link up the ast and function
     unit->source = i;
     unit->destination = func;
+    func->name = i->name;
 
-    //Link up the ast and function
-    i->function = func;
-    i->signature.signature = &func->signature;
-    func->signature.name = i->name;
+    //Setup parameters
+    func->parameter_types.insert_uninit(i->parameters.size);
+    func->parameter_types.shrink();
 
-    start_function_signature_stage(comp, unit);
+    //Start signature stage
+    unit->stage  = FUNCTION_COMPILE_STAGE::SIGNATURE;
+    unit->status = COMPILE_STATUS::OK;
   }
+
+  comp->function_units.shrink();
 }
 
 CompileCode compile_all(Compiler* const comp) {
@@ -1594,12 +1476,15 @@ CompileCode compile_all(Compiler* const comp) {
         switch (unit->stage) {
           case FUNCTION_COMPILE_STAGE::SIGNATURE: {
               const CompileCode ret = compile_function_signature(comp,
-                                                                 &unit->source->signature,
-                                                                 &unit->destination->signature);
+                                                                 unit->source,
+                                                                 unit->destination,
+                                                                 &unit->state);
 
               switch (ret) {
                 case CompileCode::NO_ERRORS:
-                  start_function_body_stage(comp, unit);
+                  unit->stage  = FUNCTION_COMPILE_STAGE::BODY;
+                  unit->status = COMPILE_STATUS::OK;
+                  unit->state.return_label = comp->labels++;
                   i--;//Do it again straight away
                   break;
 
@@ -1654,48 +1539,15 @@ CompileCode compile_all(Compiler* const comp) {
   return CompileCode::NO_ERRORS;
 }
 
-void print_compiled_functions(Compiler* const comp) {
-  auto begin = comp->functions.begin_iter();
-  const auto end = comp->functions.end_iter();
+void print_compiled_functions(const Compiler* const comp) {
+  auto i = comp->functions.begin_const_iter();
+  const auto end = comp->functions.end_const_iter();
 
-  for (; begin != end; begin.next()) {
-    Function& func = *begin.get();
+  for (; i != end; i.next()) {
+    const Function* func = i.get();
 
-    printf("function %s(", func.signature.name.string);
-
-    auto begin = func.signature.parameter_types.begin();
-    const auto last = func.signature.parameter_types.back();
-
-    for (; begin < last; begin++) {
-      printf("%s, ", begin->structure->name.string);
-    }
-
-    if (func.signature.parameter_types.size > 0) {
-      printf("%s", last->structure->name.string);
-    }
-
-    printf(") -> %s\n", func.signature.return_type.structure->name.string);
-
-
-    ByteCode::log_bytecode(comp->build_options.system,
-                           func.bytecode.data, func.bytecode.size);
-
-    putc('\n', stdout);
+    printf("FUNCTION %s:\n", func->name.string);
+    ByteCode::print_bytecode(comp->build_options.system->reg_name_from_num, stdout, func->code.data, func->code.size);
+    printf("\n");
   }
-}
-
-const Function* find_entry_point(Compiler* const comp) {
-  auto begin = comp->functions.begin_iter();
-  const auto end = comp->functions.end_iter();
-
-  for (; begin != end; begin.next()) {
-    const Function* func = begin.get();
-
-    if (func->signature.name == comp->build_options.entry_point
-        && func->signature.parameter_types.size == 0) {
-      return func;
-    }
-  }
-
-  return nullptr;
 }

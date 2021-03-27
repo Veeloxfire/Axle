@@ -2,23 +2,17 @@
 #include "utility.h"
 #include "strings.h"
 
-#include "type.h"
-
 struct ASTExpression;
 struct ASTStatement;
+
+struct Structure;
+struct Function;
+struct EnumValue;
 
 struct ASTName {
   InternString name;
 
   const Structure* type = nullptr;
-  size_t value_index = 0;
-};
-
-struct ASTValue {
-  uint64_t val;
-
-  const Structure* type = nullptr;
-  size_t value_index = 0;
 };
 
 struct ASTType {
@@ -42,8 +36,13 @@ enum struct BINARY_OPERATOR : uint8_t {
 
 struct BinaryOperatorExpr {
   BINARY_OPERATOR op;
-  ASTExpression* left;
-  ASTExpression* right;
+  ASTExpression* left = nullptr;
+  ASTExpression* right = nullptr;
+
+  ~BinaryOperatorExpr() {
+    free(left);
+    free(right);
+  }
 };
 
 struct FunctionCallExpr {
@@ -53,8 +52,6 @@ struct FunctionCallExpr {
   Function* function = nullptr;
 };
 
-struct EnumValue;
-
 struct EnumValueExpr {
   const EnumValue* enum_value;
   InternString name;
@@ -62,7 +59,6 @@ struct EnumValueExpr {
 
 struct ASTExpression {
   const Structure* type = nullptr;
-  size_t value_index = 0;
   bool makes_call = false;
   bool call_leaf = false;
 
@@ -72,8 +68,7 @@ struct ASTExpression {
     BinaryOperatorExpr bin_op;
     FunctionCallExpr call;
     EnumValueExpr enum_value;
-    InternString name;//e.g. local or global variable - only in type stage
-    Location local;
+    InternString name;//e.g. local or global variable
     uint64_t value;
   };
 
@@ -93,9 +88,9 @@ struct ASTExpression {
 };
 
 struct ASTDeclaration {
+  ASTExpression expression;
   ASTType type;
   InternString name;
-  ASTExpression expression;
 };
 
 enum struct STATEMENT_TYPE : uint8_t {
@@ -106,6 +101,11 @@ struct ASTIfElse {
   ASTExpression condition;
   ASTStatement* if_statement;
   ASTStatement* else_statement;
+
+  ~ASTIfElse() {
+    free(if_statement);
+    free(else_statement);
+  }
 };
 
 struct ASTBlock {
@@ -114,6 +114,7 @@ struct ASTBlock {
 
 struct ASTStatement {
   STATEMENT_TYPE type;
+
   union {
     ASTExpression expression;
     ASTDeclaration declaration;
@@ -124,19 +125,12 @@ struct ASTStatement {
   ~ASTStatement();
 };
 
-struct ASTFunctionSignature {
+struct ASTFunctionDeclaration {
+  InternString name;
   ASTType return_type;
   Array<ASTDeclaration> parameters;
 
-  const FunctionSignature* signature;
-};
-
-struct ASTFunctionDeclaration {
-  InternString name;
-  ASTFunctionSignature signature;
   ASTBlock body;
-
-  Function* function;
 };
 
 struct ASTStructureDeclaration {

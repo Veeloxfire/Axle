@@ -2,6 +2,7 @@
 #include "parser.h"
 
 #include <stdarg.h>
+#include <stdio.h>
 
 
 void Parser::report_error(const char* error_message) {
@@ -404,6 +405,8 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
                 return;
               }
             }
+
+            call.arguments.shrink();//reduce over allocating space
           }
 
           advance(parser);
@@ -509,40 +512,6 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
 }
 
 
-
-static void parse_function_signature(Parser* const parser, ASTFunctionSignature* const sig) {
-  expect(parser, TokenType::Left_Bracket);
-
-  //Parameters
-  if (parser->current.type != TokenType::Right_Bracket) {
-    while (true) {
-      sig->parameters.insert_uninit(1);
-      parse_declaration(parser, sig->parameters.back());
-
-      if (parser->current.type == TokenType::Right_Bracket) {
-        break;
-      }
-      else if (parser->current.type == TokenType::Comma) {
-        advance(parser);
-        continue;
-      }
-      else {
-        //ERROR
-        parser->report_error("Expected a comma");
-        return;
-      }
-    }
-  }
-
-  advance(parser);
-
-  // ->
-  expect(parser, TokenType::Sub);// -
-  expect(parser, TokenType::Greater);// >
-
-  parse_type(parser, &sig->return_type);
-}
-
 static void parse_block(Parser* const parser, ASTBlock* const block) {
   expect(parser, TokenType::Left_Brace);
 
@@ -560,6 +529,7 @@ static void parse_block(Parser* const parser, ASTBlock* const block) {
     parse_statement(parser, block->block.back());
   }
 
+  block->block.shrink();//reduce over allocating space
   expect(parser, TokenType::Right_Brace);
 }
 
@@ -575,7 +545,40 @@ static void parse_function(Parser* const parser, ASTFunctionDeclaration* const f
   func->name = parser->current.string;
   advance(parser);
 
-  parse_function_signature(parser, &func->signature);
+  //Function signature
+
+  expect(parser, TokenType::Left_Bracket);
+
+  //Parameters
+  if (parser->current.type != TokenType::Right_Bracket) {
+    while (true) {
+      func->parameters.insert_uninit(1);
+      parse_declaration(parser, func->parameters.back());
+
+      if (parser->current.type == TokenType::Right_Bracket) {
+        break;
+      }
+      else if (parser->current.type == TokenType::Comma) {
+        advance(parser);
+        continue;
+      }
+      else {
+        //ERROR
+        parser->report_error("Expected a comma");
+        return;
+      }
+    }
+  }
+
+  func->parameters.shrink();//reduce over allocating space
+
+  advance(parser);
+
+  // ->
+  expect(parser, TokenType::Sub);// -
+  expect(parser, TokenType::Greater);// >
+
+  parse_type(parser, &func->return_type);
 
   parse_block(parser, &func->body);
 }
@@ -591,6 +594,8 @@ void parse_file(Parser* const parser, ASTFile* const file) {
     ASTFunctionDeclaration* const func = file->functions.data + file->functions.size - 1;
     parse_function(parser, func);
   }
+
+  file->functions.shrink();//reduce over allocating space
 }
 
 static void print(const char* string) {
@@ -736,8 +741,8 @@ void print_ast(const ASTFile* file) {
 
     //Parameters
     {
-      auto p_i = i->signature.parameters.begin();
-      const auto p_end = i->signature.parameters.end();
+      auto p_i = i->parameters.begin();
+      const auto p_end = i->parameters.end();
 
       if (p_end - p_i > 0) {
         for (; p_i < (p_end - 1); p_i++) {
@@ -748,7 +753,7 @@ void print_ast(const ASTFile* file) {
       }
     }
 
-    printf(") -> %s {", i->signature.return_type.name.string);
+    printf(") -> %s {", i->return_type.name.string);
     printer.tabs++;
 
     //Function body

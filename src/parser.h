@@ -1,6 +1,6 @@
 #pragma once
 #include "strings.h"
-#include "allocators.h"
+#include "safe_lib.h"
 #include "utility.h"
 
 struct ASTFile;

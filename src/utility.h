@@ -4,24 +4,70 @@
 #include <string.h>
 #include <utility>
 #include <new>
+#include <assert.h>
 
-#include "allocators.h"
+#include "safe_lib.h"
 
 #define BYTE(a) (static_cast<uint8_t>(a))
 
-struct DefaultAllocator {
-  DefaultAllocator() noexcept = default;
 
-  template<typename T>
-  T* reallocate(T* data, size_t capacity) {
-    return ::reallocate<T>(data, capacity);
+//Log 2 for uniform random 64 bit number
+constexpr inline uint64_t log_2(uint64_t v) {
+  if (v == 0) {
+    throw std::exception("MATH ERROR! Cannot log of 0");
+    return 0;
   }
 
-  template<typename T>
-  void free(T* data) {
-    ::free<T>(data);
+  uint64_t max = 63;
+  uint64_t min = 0;
+
+  while (max >= min + 1) {
+    uint64_t mid = (max + min) / 2;
+    if (v > ((uint64_t)1 << mid)) {
+      min = mid;
+    }
+    else {
+      max = mid;
+    }
   }
-};
+
+  return max;
+}
+
+//Log 2 optimised for small numbers
+//Floors the output
+constexpr inline uint64_t small_log_2_floor(uint64_t v) {
+  if (v == 0) {
+    throw std::exception("MATH ERROR! Cannot log of 0");
+    return 0;
+  }
+
+  uint64_t min = 0;
+
+  while (v > (uint64_t)1 << min) {
+    min++;
+  }
+
+  return min;
+}
+
+constexpr inline uint64_t small_log_2_ceil(uint64_t v) {
+  if (v == 0) {
+    throw std::exception("MATH ERROR! Cannot log of 0");
+    return 0;
+  }
+
+  uint8_t found1 = 0;//max value of 1
+  uint64_t min = 0;
+
+  while (v > (uint64_t)1 << min) {
+    found1 |= (v >> min) & 0b1;//tests if it is a 1 
+    min++;
+  }
+
+  return min + found1;
+}
+
 
 template<typename T>
 struct Array {
@@ -34,10 +80,10 @@ struct Array {
   Array(Array&&) noexcept = default;
 
   Array() noexcept = default;
-  Array(size_t s) noexcept : data(allocate_zerod<T>(s)) {}
+  Array(size_t s) noexcept : data(allocate_zerod<T>(s)), size(s), capacity(s) {}
 
   Array& operator=(Array&& arr) noexcept {
-    this->~Array();
+    free();
 
     data = std::exchange(arr.data, nullptr);
     size = std::exchange(arr.size, 0);
@@ -46,8 +92,15 @@ struct Array {
     return *this;
   }
 
+  void free() {
+    ::free<T>(data);
+    data = nullptr;
+    size = 0;
+    capacity = 0;
+  }
+
   ~Array() noexcept {
-    free<T>(data);
+    free();
   }
 
   const T* begin() const { return data; }
@@ -68,6 +121,30 @@ struct Array {
     return t;
   }
 
+  template<typename L>
+  void remove_if(L&& lambda) {
+    size_t num_removed = 0;
+
+    for (size_t i = 0; i < size; i++) {
+      if (lambda(data[i])) {
+        num_removed++;
+      }
+      else {
+        if (num_removed > 0) {
+          data[i - num_removed] = std::move(data[i]);
+        }
+      }
+    }
+    size -= num_removed;
+  }
+
+  void replace_a_with_b(const T& a, const T& b) {
+    for (size_t i = 0; i < size; i++) {
+      if (data[i] == a) {
+        data[i] = b;
+      }
+    }
+  }
 
   template<typename ... U>
   void insert(U&& ... u) noexcept {
@@ -116,7 +193,50 @@ struct Array {
     data = reallocate<T>(data, capacity);
 
     //Zero new memory
-    memset(data + prev, 0, (capacity - prev) * sizeof(T));
+    zero_init(data + prev, capacity - prev);
+  }
+
+  void shrink() noexcept {
+    if (size == 0) {
+      free();
+    }
+    else {
+      capacity = size;
+      data = reallocate<T>(data, capacity);
+    }
+  }
+
+  void clear() noexcept {
+    auto i = mut_begin();
+    auto end = mut_end();
+
+    for (; i < end; i++) {
+      i->~T();
+    }
+
+    size = 0;
+  }
+
+  bool contains(const T& t) const noexcept {
+    auto i = begin();
+    auto e = end();
+
+    for (; i < e; i++) {
+      if (*i == t) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  void concat(Array<T>&& arr) noexcept {
+    reserve_extra(arr.size);
+    memcpy_ts(data + size, (capacity - size), arr.data, arr.size);
+
+    size += arr.size;
+
+    arr.free();
   }
 };
 
@@ -125,8 +245,8 @@ struct LinkedList {
   struct BLOCK {
     constexpr static size_t BLOCK_SIZE = 32;
 
-    size_t filled;
-    BLOCK* next;
+    size_t filled = 0;
+    BLOCK* next = nullptr;
 
     T data[BLOCK_SIZE];
 
@@ -165,6 +285,36 @@ struct LinkedList {
     }
   };
 
+  struct ConstIter {
+    size_t index = 0;
+    const BLOCK* block = nullptr;
+
+    ConstIter() = default;
+
+    void next() {
+      index++;
+      if (index == BLOCK::BLOCK_SIZE) {
+        index = 0;
+        block = block->next;
+      }
+      else if (index == block->filled) {
+        index = 0;
+        block = nullptr;
+      }
+    }
+
+    const T* get() const {
+      return block->data + index;
+    }
+
+    bool operator!=(const ConstIter& i) const {
+      return (index != i.index) || (block != i.block);
+    }
+    bool operator==(const ConstIter& i) const {
+      return (index == i.index) && (block == i.block);
+    }
+  };
+
   Iter begin_iter() {
     return Iter{ 0, first };
   }
@@ -173,10 +323,18 @@ struct LinkedList {
     return Iter();
   }
 
+  ConstIter begin_const_iter() const {
+    return ConstIter{ 0, first };
+  }
+
+  ConstIter end_const_iter() const {
+    return ConstIter();
+  }
+
   BLOCK* first = nullptr;
   BLOCK* last = nullptr;
 
-  LinkedList() : first(allocate_default<BLOCK>()), last(first) {}
+  LinkedList() : first(allocate_zerod<BLOCK>()), last(first) {}
   ~LinkedList() {
     free<BLOCK>(first);
   }
@@ -184,7 +342,7 @@ struct LinkedList {
   template<typename ... U>
   T* insert(U&& ... u) {
     if (last->filled == BLOCK::BLOCK_SIZE) {
-      last->next = allocate_default<BLOCK>();
+      last->next = allocate_zerod<BLOCK>();
       last = last->next;
     }
 
@@ -197,20 +355,165 @@ struct LinkedList {
 
 template<typename T>
 struct Array_View {
-  const T* data = nullptr;
+  T* data = nullptr;
   size_t size = 0;
-
-  Array_View() noexcept = default;
-
-  template<size_t I>
-  Array_View(const T (&arr)[I]) noexcept : data(arr), size(I) {}
-
-  Array_View(const Array<T>& arr)
-    : data(arr.data), size(arr.size)
-  {}
-
-  bool has_value() const { return data != NULL && size > 0; }
 };
+
+template<typename T>
+struct FixedArray {
+  T* data = nullptr;
+  size_t size;
+
+  FixedArray(size_t s) : data(allocate_zerod<T>(s)), size(s) {}
+  FixedArray(Array<T>&& arr) : data(arr.data), size(arr.size) {
+    if (size != arr.capacity) {
+      data = reallocate(data, size);
+    }
+    arr.data = nullptr;
+    arr.size = 0;
+    arr.capacity = 0;
+  }
+
+  ~FixedArray() {
+    free<T>(data);
+    data = nullptr;
+    size = 0;
+  }
+};
+
+struct SquareBitMatrix {
+  //Per block: ceil(side_length / 8) bytes = (side_length / 8) + 1
+
+  //Block length = (side_length / 8) + 1
+  //Block pointer = data + (Block length * val)
+  //each bit corresponds to its equivalent value at that bit index
+
+  uint8_t* data = nullptr;
+  size_t side_length = 0;
+  size_t capacity = 0;
+
+  void free() {
+    ::free<uint8_t>(data);
+
+    data = nullptr;
+    side_length = 0;
+    capacity = 0;
+  }
+
+  ~SquareBitMatrix() {
+    free();
+  }
+
+  bool test_a_intersects_b(size_t a, size_t b) const {
+    const size_t bytes_per_val = (side_length / 8) + 1;
+    const uint8_t* a_data = data + bytes_per_val * a;
+
+    const size_t b_mod8 = b % 8;
+    const size_t b_div8 = b / 8;
+
+    return (a_data[b_div8] & (1 << b_mod8)) > 0;
+  }
+
+  void set_a_intersects_b(size_t a, size_t b) {
+    const size_t bytes_per_val = (side_length / 8) + 1;
+    uint8_t* a_data = data + bytes_per_val * a;
+
+    const size_t b_mod8 = b % 8;
+    const size_t b_div8 = b / 8;
+
+    a_data[b_div8] |= (uint8_t)(1 << b_mod8);
+  }
+
+  void remove_a_intersects_b(size_t a, size_t b) {
+    const size_t bytes_per_val = (side_length / 8) + 1;
+    uint8_t* a_data = data + bytes_per_val * a;
+
+    const size_t b_mod8 = b % 8;
+    const size_t b_div8 = b / 8;
+
+    a_data[b_div8] &= ~(uint8_t)(1 << b_mod8);
+  }
+
+  size_t new_value() {
+    const size_t bytes_per_val_now = side_length == 0 ? 0
+                                                      : ((side_length - 1) / 8) + 1;
+    const size_t bytes_per_val_next = ((side_length + 1 - 1) / 8) + 1;
+    const size_t required_capacity = bytes_per_val_next * (side_length + 1);
+
+    //check if we have enough space
+    if (required_capacity > capacity) {
+      const size_t old_capacity = capacity;
+
+      capacity = (size_t)1 << small_log_2_ceil(required_capacity);
+      data = reallocate(data, capacity);
+
+      //Initialize new data to 0
+      zero_init(data + old_capacity, capacity - old_capacity);
+    }
+
+    //Check if we need to fix data shape
+    if (bytes_per_val_now < bytes_per_val_next) {
+      auto block_i = side_length == 0 ? data 
+                                      : data + bytes_per_val_now * (side_length - 1);
+      auto new_i = data + bytes_per_val_next * side_length;
+
+      //Dont need to fix the first block as it will stay the same
+      const auto block_end = data + bytes_per_val_now;
+
+      const size_t diff = bytes_per_val_next - bytes_per_val_now;
+
+      while (block_i > block_end) {
+        size_t i = 0;
+        for (; i < diff; i++) {
+          new_i[bytes_per_val_next - (i + 1)] = 0;
+        }
+
+        i = 0;
+        for (size_t i = 0; i < bytes_per_val_now; i++) {
+          new_i[bytes_per_val_now - (i + 1)] = block_i[bytes_per_val_now - (i + 1)];
+        }
+
+        block_i -= bytes_per_val_now;
+        new_i -= bytes_per_val_now;
+      }
+    }
+
+    //Finally return new value
+    return side_length++;
+  }
+};
+
+template<typename T>
+void copy_array(const Array<T>& from, Array<T>& to) noexcept {
+  to.clear();
+  to.reserve_total(from.size);
+
+  for (size_t i = 0; i < from.size; i++) {
+    to.data[i] = from.data[i];
+  }
+
+  to.size += from.size;
+}
+
+template<typename T>
+void combine_unique(const Array<T>& from, Array<T>& to) noexcept {
+  auto i = from.begin();
+  const auto end = from.end();
+
+  const size_t initial_size = to.size;
+  for (; i < end; i++) {
+    for (size_t i_to = 0; i_to < initial_size; i_to++) {
+      if (*i == to.data[i_to]) {
+        goto NEXT_COMBINE;
+      }
+    }
+
+    to.insert(*i);
+
+  NEXT_COMBINE:
+    continue;
+  }
+}
 
 #define ERROR_CODES_X \
 modify(NO_ERROR)\
@@ -237,18 +540,20 @@ constexpr const char* error_code_string(const ErrorCode code) {
     ERROR_CODES_X
     #undef modify
   }
+
+  return nullptr;
 }
 
 
 template<typename T>
 inline void load_to_bytes(Array<uint8_t>& bytes, size_t offset, const T& t) {
   bytes.reserve_total(offset + sizeof(T));
-  memcpy(bytes.data + offset, &t, sizeof(T));
+  memcpy_ts((T*) bytes.data + offset, bytes.size - offset, &t, 1);
 }
 
 template<typename T>
-inline void load_to_bytes(uint8_t* bytes, size_t offset, const T& t) {
-  memcpy(bytes + offset, &t, sizeof(T));
+inline void load_to_bytes(uint8_t* bytes, size_t bytes_size, size_t offset, const T& t) {
+  memcpy_ts((T*) bytes + offset, bytes_size - offset, &t, 1);
 }
 
 inline void load_to_bytes(Array<uint8_t>& bytes,
@@ -256,14 +561,14 @@ inline void load_to_bytes(Array<uint8_t>& bytes,
                           const uint8_t* in_bytes,
                           const size_t len) {
   bytes.reserve_total(offset + len);
-  memcpy(bytes.data + offset, in_bytes, len);
+  memcpy_ts(bytes.data + offset, bytes.capacity - offset, in_bytes, len);
 }
 
-inline void load_to_bytes(uint8_t* bytes,
+inline void load_to_bytes(uint8_t* bytes, size_t bytes_size,
                           const size_t offset,
                           const uint8_t* in_bytes,
                           const size_t len) {
-  memcpy(bytes + offset, in_bytes, len);
+  memcpy_ts(bytes + offset, bytes_size - offset, in_bytes, len);
 }
 
 namespace BIT_MASKS {
@@ -360,6 +665,13 @@ inline constexpr ErrorCode x64_from_bytes_s(const uint8_t* buffer,
   }
 }
 
+inline constexpr uint32_t x32_from_bytes(const uint8_t* const bytes) noexcept {
+  return (static_cast<uint32_t>(bytes[3]) << 24)
+    | (static_cast<uint32_t>(bytes[2]) << 16)
+    | (static_cast<uint32_t>(bytes[1]) << 8)
+    |  static_cast<uint32_t>(bytes[0]);
+}
+
 //TODO: Big endian??
 inline constexpr void x64_to_bytes(const X64_UNION uint, uint8_t* const bytes) noexcept {
   bytes[7] = static_cast<uint8_t>(uint.val >> 56);
@@ -402,3 +714,22 @@ struct FUNCTION_PTR_IMPL {
 
 template<typename RET, typename ... PARAMS>
 using FUNCTION_PTR = typename FUNCTION_PTR_IMPL<RET, PARAMS...>::TYPE;
+
+inline constexpr size_t NUM_VM_REGS = 16;
+
+template<typename T>
+constexpr inline T square(T&& t) { return t * t; }
+
+struct ValueIndex {
+  uint64_t val;
+
+  bool operator==(const ValueIndex v) const {
+    return v.val == val;
+  }
+};
+
+template<typename T>
+constexpr inline T max(T t1, T t2) noexcept {
+  const bool left_is_max = t1 < t2;
+  return (t1 * left_is_max) | (t2 * !left_is_max);
+}

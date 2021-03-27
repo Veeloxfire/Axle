@@ -2,7 +2,10 @@
 
 void ASTExpression::move_from(ASTExpression&& a) noexcept {
   type = std::exchange(a.type, nullptr);
-  value_index = std::exchange(a.value_index, 0);
+
+  makes_call = std::exchange(a.makes_call, false);
+  call_leaf = std::exchange(a.call_leaf, false);
+
   expr_type = std::exchange(a.expr_type, EXPRESSION_TYPE::UNKNOWN);
 
   switch (expr_type)
@@ -13,10 +16,8 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
       bin_op = std::move(a.bin_op);
       break;
     case EXPRESSION_TYPE::NAME:
-      name = std::move(a.name);
-      break;
     case EXPRESSION_TYPE::LOCAL:
-      local = std::move(a.local);
+      name = std::move(a.name);
       break;
     case EXPRESSION_TYPE::VALUE:
       value = a.value;
@@ -33,12 +34,9 @@ ASTExpression::~ASTExpression() {
         bin_op.~BinaryOperatorExpr();
         break;
       }
+    case EXPRESSION_TYPE::LOCAL:
     case EXPRESSION_TYPE::NAME: {
         name.~InternString();
-        break;
-      }
-    case EXPRESSION_TYPE::LOCAL: {
-        local.~Location();
         break;
       }
     case EXPRESSION_TYPE::FUNCTION_CALL: {
@@ -59,6 +57,14 @@ ASTStatement::~ASTStatement() {
       }
     case STATEMENT_TYPE::DECLARATION: {
         declaration.~ASTDeclaration();
+        break;
+      }
+    case STATEMENT_TYPE::IF_ELSE: {
+        if_else.~ASTIfElse();
+        break;
+      }
+    case STATEMENT_TYPE::BLOCK: {
+        block.~ASTBlock();
         break;
       }
   }

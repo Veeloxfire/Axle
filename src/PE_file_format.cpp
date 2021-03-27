@@ -41,14 +41,14 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
 
       const COFF_file_header& coff = pe_head.coff;
 
-      load_to_bytes(coff_header, 0, coff.signature, 4);
-      load_to_bytes(coff_header, 4, coff.machine);
-      load_to_bytes(coff_header, 6, coff.number_of_sections);
-      load_to_bytes(coff_header, 8, coff.time_date_stamp, 4);
-      load_to_bytes(coff_header, 12, coff.pointer_to_symbol_table);
-      load_to_bytes(coff_header, 16, coff.number_of_symbols);
-      load_to_bytes(coff_header, 20, coff.size_of_optional_header);
-      load_to_bytes(coff_header, 22, coff.characteristics);
+      load_to_bytes(coff_header, COFF_LENGTH, 0, coff.signature, 4);
+      load_to_bytes(coff_header, COFF_LENGTH, 4, coff.machine);
+      load_to_bytes(coff_header, COFF_LENGTH, 6, coff.number_of_sections);
+      load_to_bytes(coff_header, COFF_LENGTH, 8, coff.time_date_stamp, 4);
+      load_to_bytes(coff_header, COFF_LENGTH, 12, coff.pointer_to_symbol_table);
+      load_to_bytes(coff_header, COFF_LENGTH, 16, coff.number_of_symbols);
+      load_to_bytes(coff_header, COFF_LENGTH, 20, coff.size_of_optional_header);
+      load_to_bytes(coff_header, COFF_LENGTH, 22, coff.characteristics);
 
       FILES::write(out, coff_header, COFF_LENGTH);
     }
@@ -60,15 +60,15 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
 
       const PE32_optional_header& pe32 = pe_head.pe32;
 
-      load_to_bytes(opt_header, 0, pe32.magic_number);
-      load_to_bytes(opt_header, 2, pe32.major_linker_version);
-      load_to_bytes(opt_header, 3, pe32.minor_linker_version);
-      load_to_bytes(opt_header, 4, pe32.size_of_code);
-      load_to_bytes(opt_header, 8, pe32.size_of_initialized_data);
-      load_to_bytes(opt_header, 12, pe32.size_of_uninitialized_data);
-      load_to_bytes(opt_header, 16, pe32.address_of_entry_point);
-      load_to_bytes(opt_header, 20, pe32.base_of_code);
-      load_to_bytes(opt_header, 24, pe32.base_of_data);
+      load_to_bytes(opt_header, OPT_LENGTH, 0, pe32.magic_number);
+      load_to_bytes(opt_header, OPT_LENGTH, 2, pe32.major_linker_version);
+      load_to_bytes(opt_header, OPT_LENGTH, 3, pe32.minor_linker_version);
+      load_to_bytes(opt_header, OPT_LENGTH, 4, pe32.size_of_code);
+      load_to_bytes(opt_header, OPT_LENGTH, 8, pe32.size_of_initialized_data);
+      load_to_bytes(opt_header, OPT_LENGTH, 12, pe32.size_of_uninitialized_data);
+      load_to_bytes(opt_header, OPT_LENGTH, 16, pe32.address_of_entry_point);
+      load_to_bytes(opt_header, OPT_LENGTH, 20, pe32.base_of_code);
+      load_to_bytes(opt_header, OPT_LENGTH, 24, pe32.base_of_data);
 
       FILES::write(out, opt_header, OPT_LENGTH);
     }
@@ -80,27 +80,27 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
 
       const PE32_windows_specific& pe32_win = pe_head.pe32_windows;
 
-      load_to_bytes(win_opt_header, 0, pe32_win.image_base);
-      load_to_bytes(win_opt_header, 4, pe32_win.section_alignment);
-      load_to_bytes(win_opt_header, 8, pe32_win.file_alignment);
-      load_to_bytes(win_opt_header, 12, pe32_win.major_os_version);
-      load_to_bytes(win_opt_header, 14, pe32_win.minor_os_version);
-      load_to_bytes(win_opt_header, 16, pe32_win.major_image_version);
-      load_to_bytes(win_opt_header, 18, pe32_win.minor_image_version);
-      load_to_bytes(win_opt_header, 20, pe32_win.major_sub_version);
-      load_to_bytes(win_opt_header, 22, pe32_win.minor_sub_version);
-      load_to_bytes(win_opt_header, 24, pe32_win.win32_version);
-      load_to_bytes(win_opt_header, 28, pe32_win.size_of_image);
-      load_to_bytes(win_opt_header, 32, pe32_win.size_of_header);
-      load_to_bytes(win_opt_header, 36, pe32_win.check_sum);
-      load_to_bytes(win_opt_header, 40, pe32_win.subsystem);
-      load_to_bytes(win_opt_header, 42, pe32_win.DLL_characteristics);
-      load_to_bytes(win_opt_header, 44, pe32_win.size_of_stack_reserve);
-      load_to_bytes(win_opt_header, 48, pe32_win.size_of_stack_commit);
-      load_to_bytes(win_opt_header, 52, pe32_win.size_of_heap_reserve);
-      load_to_bytes(win_opt_header, 56, pe32_win.size_of_heap_commit);
-      load_to_bytes(win_opt_header, 60, pe32_win.loader_flags);
-      load_to_bytes(win_opt_header, 64, pe32_win.number_of_rva_and_sizes);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 0, pe32_win.image_base);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 4, pe32_win.section_alignment);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 8, pe32_win.file_alignment);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 12, pe32_win.major_os_version);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 14, pe32_win.minor_os_version);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 16, pe32_win.major_image_version);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 18, pe32_win.minor_image_version);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 20, pe32_win.major_sub_version);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 22, pe32_win.minor_sub_version);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 24, pe32_win.win32_version);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 28, pe32_win.size_of_image);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 32, pe32_win.size_of_header);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 36, pe32_win.check_sum);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 40, pe32_win.subsystem);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 42, pe32_win.DLL_characteristics);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 44, pe32_win.size_of_stack_reserve);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 48, pe32_win.size_of_stack_commit);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 52, pe32_win.size_of_heap_reserve);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 56, pe32_win.size_of_heap_commit);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 60, pe32_win.loader_flags);
+      load_to_bytes(win_opt_header, OPT_WIN_LENGTH, 64, pe32_win.number_of_rva_and_sizes);
 
       FILES::write(out, win_opt_header, OPT_WIN_LENGTH);
     }
@@ -112,23 +112,23 @@ ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_nam
 
       const Optional_header_directories& dir = pe_head.directories;
 
-      load_to_bytes(opt_head_dir, 0  , dir.export_table);
-      load_to_bytes(opt_head_dir, 8  , dir.import_table);
-      load_to_bytes(opt_head_dir, 16 , dir.resource_table);
-      load_to_bytes(opt_head_dir, 24 , dir.exception_table);
-      load_to_bytes(opt_head_dir, 32 , dir.certificate_table);
-      load_to_bytes(opt_head_dir, 40 , dir.base_relocation_table);
-      load_to_bytes(opt_head_dir, 48 , dir.debug);
-      load_to_bytes(opt_head_dir, 56 , dir.architecture);
-      load_to_bytes(opt_head_dir, 64 , dir.global_ptr);
-      load_to_bytes(opt_head_dir, 68 , dir.reserved1);
-      load_to_bytes(opt_head_dir, 72 , dir.tls_table);
-      load_to_bytes(opt_head_dir, 80 , dir.load_config_table);
-      load_to_bytes(opt_head_dir, 88 , dir.bound_import);
-      load_to_bytes(opt_head_dir, 96 , dir.import_address_table);
-      load_to_bytes(opt_head_dir, 104, dir.delay_import_descriptor);
-      load_to_bytes(opt_head_dir, 112, dir.clr_runtime_header);
-      load_to_bytes(opt_head_dir, 120, dir.reserved2);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 0  , dir.export_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 8  , dir.import_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 16 , dir.resource_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 24 , dir.exception_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 32 , dir.certificate_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 40 , dir.base_relocation_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 48 , dir.debug);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 56 , dir.architecture);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 64 , dir.global_ptr);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 68 , dir.reserved1);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 72 , dir.tls_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 80 , dir.load_config_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 88 , dir.bound_import);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 96 , dir.import_address_table);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 104, dir.delay_import_descriptor);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 112, dir.clr_runtime_header);
+      load_to_bytes(opt_head_dir, OPT_HEAD_DIR_LENGTH, 120, dir.reserved2);
 
       FILES::write(out, opt_head_dir, OPT_HEAD_DIR_LENGTH);
     }
