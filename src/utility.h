@@ -726,6 +726,24 @@ void combine_unique(const Array<T>& from, Array<T>& to) noexcept {
   }
 }
 
+template<typename T>
+void reverse_array(Array<T>& arr) noexcept {
+  if (arr.size == 0) { return; }
+
+  auto* i_beg  = arr.data;
+  auto* i_back = arr.data + arr.size - 1;
+
+  //Swap first with back - then step inwards
+  while (i_beg < i_back) {
+    T temp  = std::move(*i_beg);
+    *i_beg  = std::move(*i_back);
+    *i_back = std::move(temp);
+
+    i_beg++;
+    i_back--;
+  }
+}
+
 #define ERROR_CODES_X \
 modify(OK)\
 modify(COULD_NOT_CREATE_FILE)\
