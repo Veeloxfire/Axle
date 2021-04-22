@@ -15,6 +15,10 @@ constexpr size_t array_size(T(&)[i]) {
   return i;
 }
 
+constexpr size_t ceil_div(size_t x, size_t y) noexcept {
+  return x / y + (x % y != 0);
+}
+
 //Log 2 for uniform random 64 bit number
 constexpr inline uint64_t log_2(uint64_t v) {
   if (v == 0) {
@@ -482,6 +486,38 @@ struct LinkedList {
 
     return last->data + last->filled - 1;
   }
+};
+
+struct ArenaAllocator {
+  static_assert(sizeof(void*) == sizeof(uint64_t), "Must be 8 bytes");
+
+  struct Block {
+    constexpr static size_t BLOCK_SIZE = 128;
+    uint64_t data[BLOCK_SIZE] ={};
+
+    Block* next = nullptr;
+
+    Block() = default;
+    ~Block();
+  };
+
+  struct FreeList {
+    uint64_t qwords_available = 0;
+    FreeList* next = nullptr;
+  };
+
+  Block* base = nullptr;
+  void* free_list = nullptr;
+
+  ArenaAllocator() = default;
+  ~ArenaAllocator();
+
+
+  void new_block();
+  void add_to_free_list(FreeList* fl);
+
+  void* alloc_no_construct(size_t bytes);
+  void free_no_destruct(void* val);
 };
 
 template<typename T>
