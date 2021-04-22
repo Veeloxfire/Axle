@@ -42,5 +42,14 @@ int main(int argc, const char** args) {
   return out.return_code;*/
 
   int ret = compile_file_and_write(options);
+  if (ret != 0) {
+    return ret;
+  }
+
+  std::cout << "running " << output_file << '\n';
+
+  uint32_t res = Windows::run_exe(output_file);
+
+  std::cout << "Res: " << res;
   return ret;
 }

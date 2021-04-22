@@ -25,7 +25,7 @@ namespace Windows {
 
   template<typename T>
   VirtualPtr<T> get_exectuable_memory(size_t num) {
-    VirtualPtr<T> ptr;
+    VirtualPtr<T> ptr ={};
     ptr.ptr = (T*) VirtualAlloc(nullptr, sizeof(T) * num, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     ptr.size = sizeof(T) * num;
 
@@ -36,5 +36,7 @@ namespace Windows {
   void free_executable_memory(VirtualPtr<T>& ptr) {
     VirtualFree(ptr.ptr, 0, MEM_RELEASE);
   }
+
+  uint32_t run_exe(const char* name);
 }
 
