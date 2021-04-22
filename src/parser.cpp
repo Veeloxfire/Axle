@@ -735,8 +735,16 @@ static void print_ast_expression(const ASTExpression* expr) {
         printf("%s", expr->value.suffix.string);
       }
       break;
+    case EXPRESSION_TYPE::CAST: {
+        printf("cast(%s, ", expr->cast.type.name.string);
+        print_ast_expression(expr->cast.expr);
+        print(')');
+        break;
+      }
     case EXPRESSION_TYPE::UNARY_OPERATOR:
-      print('-');
+      switch (expr->un_op.op) {
+        case UNARY_OPERATOR::NEG: print("-"); break;
+      }
       print_ast_expression(expr->un_op.primary);
       break;
     case EXPRESSION_TYPE::BINARY_OPERATOR:

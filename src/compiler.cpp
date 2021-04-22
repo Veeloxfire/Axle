@@ -317,7 +317,7 @@ static CompileCode cast_operator_type(const Types* const types,
   const auto end =  cast_from->casts.end();
 
   for (; i < end; i++) {
-    if (i->s == cast_to) {
+    if (i->test(cast_to)) {
       expr->cast.emit = i->cast;
       return CompileCode::NO_ERRORS;
     }

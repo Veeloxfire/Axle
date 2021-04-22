@@ -7,18 +7,19 @@ struct ASTFunctionDeclaration;
 struct ASTStructureDeclaration;
 
 struct Structure;
+struct State;
+struct Function;
 
 
 enum struct STRUCTURE_TYPE : uint8_t {
-  UNKNOWN, INTEGER, LITERAL, COMPOSITE, VOID, ENUM
+  UNKNOWN, INTEGER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY
 };
 
-struct State;
-struct Function;
+using CAST_TEST     = FUNCTION_PTR<bool, const Structure*>;
 using CAST_FUNCTION = FUNCTION_PTR<void, State*, Function*, ValueIndex>;
 
 struct Cast {
-  const Structure* s;
+  CAST_TEST test;
   CAST_FUNCTION cast;
 };
 
@@ -29,6 +30,11 @@ struct Structure {
 
   uint32_t size() const;
   uint32_t alignment() const;
+};
+
+struct ArrayStructure : public Structure {
+  const Structure* base;
+  size_t length;
 };
 
 struct IntegerStructure : public Structure {
@@ -199,4 +205,14 @@ namespace CASTS {
   void u8_to_r64(State*, Function*, ValueIndex);
   void i8_to_r64(State*, Function*, ValueIndex);
   void no_cast(State*, Function*, ValueIndex);
+}
+
+namespace TYPE_TESTS {
+  bool is_64_bit_int(const Structure*);
+  bool is_signed_64_bit_int(const Structure*);
+  bool is_unsigned_64_bit_int(const Structure*);
+
+  bool is_8_bit_int(const Structure*);
+  bool is_signed_8_bit_int(const Structure*);
+  bool is_unsigned_8_bit_int(const Structure*);
 }

@@ -135,23 +135,19 @@ void init_types(Types* types, StringInterner* strings) {
 
   /////// CASTS ///////
 
-  u8->casts.insert(Cast{ i8, &CASTS::no_cast });
-  u8->casts.insert(Cast{ u64, &CASTS::u8_to_r64 });
-  u8->casts.insert(Cast{ i64, &CASTS::u8_to_r64 });
+  u8->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
+  u8->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::u8_to_r64 });
 
-  i8->casts.insert(Cast{ u8, &CASTS::no_cast });
-  i8->casts.insert(Cast{ u64, &CASTS::i8_to_r64 });
-  i8->casts.insert(Cast{ i64, &CASTS::i8_to_r64 });
+  i8->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
+  i8->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::i8_to_r64 });
 
-  u64->casts.insert(Cast{ i64, &CASTS::no_cast });
-  u64->casts.insert(Cast{ u8, &CASTS::no_cast });
-  u64->casts.insert(Cast{ i8, &CASTS::no_cast });
+  u64->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::no_cast });
+  u64->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
 
-  i64->casts.insert(Cast{ u64, &CASTS::no_cast });
-  i64->casts.insert(Cast{ u8, &CASTS::no_cast });
-  i64->casts.insert(Cast{ i8, &CASTS::no_cast });
+  i64->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::no_cast });
+  i64->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
 
-  sint_lit->casts.insert(Cast{ u64, &CASTS::no_cast });
+  sint_lit->casts.insert(Cast{ &TYPE_TESTS::is_unsigned_64_bit_int, &CASTS::no_cast });
 }
 
 Types::~Types() {
@@ -213,4 +209,84 @@ void CASTS::i8_to_r64(State* state, Function* func, ValueIndex val) {
 
 void CASTS::no_cast(State*, Function*, ValueIndex) {
   return;
+}
+
+bool TYPE_TESTS::is_64_bit_int(const Structure* s) {
+  switch (s->type) {
+    case STRUCTURE_TYPE::INTEGER: return static_cast<const IntegerStructure*>(s)->bytes == 8;
+    case STRUCTURE_TYPE::LITERAL: {
+        auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
+
+        return l == LITERAL_TYPE::INTEGER || l == LITERAL_TYPE::SIGNED_INTEGER;
+      }
+    default: return false;
+  }
+}
+
+bool TYPE_TESTS::is_signed_64_bit_int(const Structure* s) {
+  switch (s->type) {
+    case STRUCTURE_TYPE::INTEGER: {
+        auto* i =  static_cast<const IntegerStructure*>(s);
+        return i->bytes == 8 && i->is_signed; 
+      }
+    case STRUCTURE_TYPE::LITERAL: {
+        auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
+        return l == LITERAL_TYPE::INTEGER || l == LITERAL_TYPE::SIGNED_INTEGER;
+      }
+    default: return false;
+  }
+}
+
+bool TYPE_TESTS::is_unsigned_64_bit_int(const Structure* s) {
+  switch (s->type) {
+    case STRUCTURE_TYPE::INTEGER: {
+        auto* i =  static_cast<const IntegerStructure*>(s);
+        return i->bytes == 8 && !i->is_signed; 
+      }
+    case STRUCTURE_TYPE::LITERAL: {
+        auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
+        return l == LITERAL_TYPE::INTEGER;
+      }
+    default: return false;
+  }
+}
+
+bool TYPE_TESTS::is_8_bit_int(const Structure* s) {
+  switch (s->type) {
+    case STRUCTURE_TYPE::INTEGER: return static_cast<const IntegerStructure*>(s)->bytes == 1;
+    case STRUCTURE_TYPE::LITERAL: {
+        auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
+
+        return l == LITERAL_TYPE::INTEGER || l == LITERAL_TYPE::SIGNED_INTEGER;
+      }
+    default: return false;
+  }
+}
+
+bool TYPE_TESTS::is_signed_8_bit_int(const Structure* s) {
+  switch (s->type) {
+    case STRUCTURE_TYPE::INTEGER: {
+        auto* i =  static_cast<const IntegerStructure*>(s);
+        return i->bytes == 1 && i->is_signed; 
+      }
+    case STRUCTURE_TYPE::LITERAL: {
+        auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
+        return l == LITERAL_TYPE::INTEGER || l == LITERAL_TYPE::SIGNED_INTEGER;
+      }
+    default: return false;
+  }
+}
+
+bool TYPE_TESTS::is_unsigned_8_bit_int(const Structure* s) {
+  switch (s->type) {
+    case STRUCTURE_TYPE::INTEGER: {
+        auto* i =  static_cast<const IntegerStructure*>(s);
+        return i->bytes == 1 && !i->is_signed; 
+      }
+    case STRUCTURE_TYPE::LITERAL: {
+        auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
+        return l == LITERAL_TYPE::INTEGER;
+      }
+    default: return false;
+  }
 }
