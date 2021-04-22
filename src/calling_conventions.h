@@ -1,22 +1,33 @@
 #pragma once
-#include <stdint.h>
+
 #include "utility.h"
-#include "type.h"
-#include "ast.h"
+
+//Forward decls
+struct REGISTER_CONSTANT;
+struct Compiler;
+
+//header
 
 enum struct STACK_DIRECTION : uint8_t {
   LEFT_TO_RIGHT, RIGHT_TO_LEFT
 };
-
-struct REGISTER_CONSTANT;
-struct Compiler;
 
 struct ForcedColours {
   uint8_t val1;
   uint8_t val2;
 };
 
+using REG_NAME_FROM_NUM_PTR = FUNCTION_PTR<const char*, uint8_t>;
+using BACKEND_PTR = FUNCTION_PTR<size_t, Array<uint8_t>&, const Compiler*>;
+
 struct System {
+#define CONST_NAME(n) static constexpr char n ## _name[] = #n
+  CONST_NAME(x86_64);
+  CONST_NAME(vm);
+#undef CONST_NAME
+
+  const char* name;
+
   const REGISTER_CONSTANT* all_registers;
   uint8_t num_registers;
 
@@ -24,10 +35,11 @@ struct System {
   uint8_t stack_pointer;
   uint8_t base_pointer;
 
-  FUNCTION_PTR<const char*, uint8_t> reg_name_from_num;
-  FUNCTION_PTR<size_t, Array<uint8_t>&, const Compiler*> backend;
-  FUNCTION_PTR<ForcedColours, BINARY_OPERATOR> bin_op_forced;
+  REG_NAME_FROM_NUM_PTR reg_name_from_num;
+  BACKEND_PTR backend;
 };
+
+const char* x86_64_reg_name_from_num(uint8_t) noexcept;
 
 extern const System system_x86_64;
 extern const System system_vm;
@@ -48,6 +60,9 @@ struct CallingConvention {
 
   const uint8_t* parameter_registers = nullptr;
   const uint8_t* all_regs_unordered = nullptr; //volatile then non_volatile
+
+  bool is_non_volatile(uint8_t) const;
+  bool is_volatile(uint8_t) const;
 };
 
 extern const CallingConvention convention_vm;

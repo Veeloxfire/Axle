@@ -3,6 +3,7 @@
 #include "strings.h"
 #include "calling_conventions.h"
 #include "options.h"
+#include "operators.h"
 
 #include "type.h"
 
@@ -14,29 +15,6 @@ struct ASTStatement;
 struct ASTExpression;
 struct ASTDeclaration;
 struct ASTFile;
-
-enum struct CompileCode {
-  NO_ERRORS = 0,
-  UNFOUND_DEPENDENCY,
-  TYPE_CHECK_ERROR,
-};
-
-enum struct COMPILATION_TYPE : uint8_t {
-  SIGNATURE, FUNCTION, STRUCTURE, NONE
-};
-
-enum struct FUNCTION_COMPILE_STAGE : uint8_t {
-  SIGNATURE, BODY, FINISHED,
-};
-
-enum struct COMPILE_STATUS : uint8_t {
-  OK, HAD_ERROR,
-};
-
-struct CompilationUnitCarrier {
-  COMPILATION_TYPE type;
-  size_t index;
-};
 
 struct TimePoint {
   size_t flow;
@@ -114,15 +92,31 @@ struct ValueUse {
   TimePoint time;
 };
 
-struct Value {
-  bool is_coalesced = false;
-  union {
-    uint8_t reg;
-    ValueIndex index;
-  };
+enum struct ValueType : uint8_t {
+  FREE = 0, FIXED, COALESCED, NORMAL_STACK, ARGUMENT_STACK
+};
 
+struct Value {
   bool is_modified = false;
   bool crosses_call = false;
+
+  ValueType value_type = ValueType::FREE;
+
+  constexpr bool fixed() const { return value_type == ValueType::FIXED; }
+  constexpr bool is_coalesced() const {
+    return value_type == ValueType::COALESCED;
+  }
+  constexpr bool on_stack() const {
+    return value_type == ValueType::NORMAL_STACK
+      || value_type == ValueType::ARGUMENT_STACK;
+  }
+
+  union {
+    uint8_t reg = 0;
+    ValueIndex index;
+    int64_t stack_offset;
+    uint64_t arg_num;
+  };
 
   ValueUse creation;
   Array<ValueUse> last_uses;
@@ -154,34 +148,45 @@ struct ValueTree {
   }
 };
 
+struct StackState {
+  uint64_t current = 0;
+  uint64_t max = 0;
+
+  uint64_t max_parameters = 0;
+
+  uint64_t next_stack_local(uint64_t size, uint64_t alignment);
+};
 
 struct State {
   Array<Local> locals;
-  Array<uint8_t> value_map;//0 is special value
 
   ValueTree value_tree;
   ControlFlow control_flow;
 
   uint64_t return_label;
 
+  bool made_call = false;
+
+  StackState stack ={};
+
   ValueIndex new_value() {
-    value_map.insert(0);
-
-    value_tree.adjacency_list.insert_uninit(1);
     value_tree.values.insert_uninit(1);
+    value_tree.adjacency_list.insert_uninit(1);
 
-    auto val = ValueIndex{ value_tree.intersection_check.new_value() };
+    auto val_index = ValueIndex{ value_tree.intersection_check.new_value() };
 
-    value_tree.values.back()->creation
-      = ValueUse{ val, control_flow.now() };
 
-    return val;
+    auto* val = value_tree.values.data + val_index.val;
+    val->creation = ValueUse{ val_index, control_flow.now() };
+
+    return val_index;
   }
 
   ValueIndex new_value(ValueIndex created_by) {
-    const ValueIndex val = new_value();
-    value_tree.values.back()->creation.related_index = created_by;
-    return val;
+    const ValueIndex val_index = new_value();
+    auto* val = value_tree.values.data + val_index.val;
+    val->creation.related_index = created_by;
+    return val_index;
   }
 
   void use_value(ValueIndex index, ValueIndex creates);
@@ -203,9 +208,29 @@ struct State {
   }
 };
 
+
+enum struct CompileCode : uint8_t {
+  NO_ERRORS = 0,
+  UNFOUND_DEPENDENCY,
+  TYPE_CHECK_ERROR,
+  INTERNAL_ERROR,
+};
+
+enum struct COMPILATION_TYPE : uint8_t {
+  SIGNATURE, FUNCTION, STRUCTURE, NONE
+};
+
+enum struct FUNCTION_COMPILE_STAGE : uint8_t {
+  SIGNATURE, BODY, FINISHED,
+};
+
+struct CompilationUnitCarrier {
+  COMPILATION_TYPE type;
+  size_t index;
+};
+
 struct FunctionUnit {
   FUNCTION_COMPILE_STAGE stage;
-  COMPILE_STATUS status;
 
   ASTFunctionDeclaration* source;
   Function* destination;
@@ -213,38 +238,25 @@ struct FunctionUnit {
   State state;
 };
 
-struct EnumValue {
-  const Structure* type;
-  InternString name;
-  uint64_t value;
-};
-
 struct Compiler {
+  PrintOptions        print_options        ={};
+  BuildOptions        build_options        ={};
+  OptimizationOptions optimization_options ={};
+
   Array<FunctionUnit> function_units;
 
   Array<CompilationUnitCarrier> compiling;
 
-  LinkedList<Structure> structures;
   LinkedList<Function> functions;
-  LinkedList<EnumValue> enums;
 
-  Lang* lang;
+  Types* types;
   StringInterner* strings;
 
+  InternString entry_point;
   uint64_t labels = 0;
 
-  RunOptions run_options;
-  PrintOptions print_options;
-  BuildOptions build_options;
-
-  Structure* structure_by_name(InternString);
-  EnumValue* enum_by_name(InternString);
-
-  Structure* new_composite_structure();
   Function* new_function();
 };
-
-void load_language_builtin(Compiler*);
 
 CompileCode compile_all(Compiler* const comp);
 void build_compilation_units(Compiler* const comp, ASTFile* const func);

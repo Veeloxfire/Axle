@@ -1,13 +1,21 @@
 #include "ast.h"
 #include "parser.h"
+#include "format.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 
+TokenTypeString token_type_string(TokenType t) {
+  switch (t) {
+  #define MODIFY(tt) case TokenType:: ## tt : return { #tt, sizeof(#tt) };
+    TOKEN_TYPE_MODIFY
+    #undef MODIFY
+  }
+}
 
 void Parser::report_error(const char* error_message) {
   if (current.type != TokenType::Error) {
-    current.type   = TokenType::Error;
+    current.type = TokenType::Error;
     current.string = lexer.strings->intern(error_message);
   }
 }
@@ -16,21 +24,17 @@ static uint64_t string_to_uint(const char* str) {
   return atoll(str);
 }
 
-struct KeywordPair {
-  const char* keyword;
-  TokenType type;
-};
-
-static constexpr KeywordPair keywords[] ={
+constexpr KeywordPair keywords[] ={
   {"return", TokenType::Return},
   {"function", TokenType::Function},
   {"if", TokenType::If},
   {"else", TokenType::Else},
   {"true", TokenType::True},
   {"false", TokenType::False},
+  {"cast", TokenType::Cast},
 };
 
-static constexpr KeywordPair operators[] ={
+constexpr KeywordPair operators[15] ={
   {"+", TokenType::Add},
   {"-", TokenType::Sub},
   {"*", TokenType::Mul},
@@ -55,6 +59,10 @@ constexpr static  bool is_letter(const char c) {
     || ('A' <= c && c <= 'Z');
 }
 
+constexpr static bool is_identifier_char(const char c) {
+  return is_letter(c) || c == '_';
+}
+
 constexpr static bool is_number(const char c) {
   return '0' <= c && c <= '9';
 }
@@ -66,7 +74,7 @@ constexpr static  bool is_letter_or_number(const char c) {
 
 constexpr static void copy_position(const Lexer* lex, Token* tok) {
   tok->file_name = lex->file_name;
-  tok->line      = lex->line;
+  tok->line = lex->line;
   tok->character = lex->character;
 }
 
@@ -130,12 +138,12 @@ static Token lex_identifier(Lexer* const lex) {
   do {
     lex->top++;
     lex->character++;
-  } while (is_letter_or_number(lex->top[0]));
+  } while (is_identifier_char(lex->top[0]) || is_number(lex->top[0]));
 
   const size_t ident_len = lex->top - name_base;
 
   Token ident ={};
-  ident.type   = TokenType::Identifier;
+  ident.type = TokenType::Identifier;
   ident.string = lex->strings->intern(name_base, ident_len);
   copy_position(lex, &ident);
 
@@ -143,11 +151,9 @@ static Token lex_identifier(Lexer* const lex) {
 
   for (size_t i = 0; i < num_keywords; i++) {
     const KeywordPair& pair = keywords[i];
-    //CONSIDER: Dont recompute every time
-    const size_t kw_len = strlen(pair.keyword);
 
-    if (kw_len == ident_len
-        && memcmp(pair.keyword, ident.string.string, ident_len) == 0) {
+    if (pair.size == ident_len
+        && memcmp_ts(pair.keyword, ident.string.string, ident_len) == 0) {
       //Is keyword
       ident.type = pair.type;
       //Exit early
@@ -170,7 +176,7 @@ static Token lex_number(Lexer* const lex) {
   const size_t ident_length = lex->top - number_base;
 
   Token num ={};
-  num.type   = TokenType::Number;
+  num.type = TokenType::Number;
   num.string = lex->strings->intern(number_base, ident_length);
 
   copy_position(lex, &num);
@@ -200,7 +206,8 @@ static Token make_single_char_token(Lexer* lex) {
     }
   }
 
-  return error_token(lex, "Unlexable token");
+  OwnedPtr<char> error = format("Unlexable character: '{}'", DisplayChar{ *lex->top });
+  return error_token(lex, error.ptr);
 }
 
 static Token lex_token(Lexer* const lex) {
@@ -208,7 +215,7 @@ static Token lex_token(Lexer* const lex) {
 
   const char c = lex->top[0];
 
-  if (is_letter(c)) {
+  if (is_identifier_char(lex->top[0])) {
     return lex_identifier(lex);
   }
   else if (is_number(c)) {
@@ -234,39 +241,55 @@ static void advance(Parser* parser) {
 }
 
 static bool expect(Parser* parser, const TokenType t) {
+  if (parser->current.type == TokenType::Error) {
+    return false;
+  }
   if (parser->current.type == t) {
     advance(parser);
     return true;
   }
   else {
-    parser->report_error("Unexpected Token");
+    OwnedPtr<char> error = format("Unexpected Token: {}, Expected: {}", parser->current.type, t);
+
+    parser->report_error(error.ptr);
     return false;
   }
+
 }
 
 void init_parser(Parser* const parser, const char* file_name, const char* source) {
 
-  parser->lexer.top       = source;
+  parser->lexer.top = source;
   parser->lexer.file_name = file_name;
 
   parser->current = lex_token(&parser->lexer);
 }
 
-
+//Should never be 0!
 static constexpr uint8_t precidence_table[] ={
-  2,// BINARY_OPERATOR::ADD
-  2,// BINARY_OPERATOR::SUB
-  3,// BINARY_OPERATOR::MUL
-  3,// BINARY_OPERATOR::DIV
-  1,// BINARY_OPERATOR::LESSER
-  1,// BINARY_OPERATOR::GREATER
-  1,// BINARY_OPERATOR::EQUIVALENT
-  0,// BINARY_OPERATOR::OR
-  0,// BINARY_OPERATOR::AND
+  3,// BINARY_OPERATOR::ADD
+  3,// BINARY_OPERATOR::SUB
+  4,// BINARY_OPERATOR::MUL
+  4,// BINARY_OPERATOR::DIV
+  2,// BINARY_OPERATOR::LESSER
+  2,// BINARY_OPERATOR::GREATER
+  2,// BINARY_OPERATOR::EQUIVALENT
+  1,// BINARY_OPERATOR::OR
+  1,// BINARY_OPERATOR::AND
 };
 
 static bool is_binary_operator(const TokenType t) {
   return TokenType::Add <= t && t < TokenType::Left_Bracket;
+}
+
+static void parse_type(Parser* const parser, ASTType* const type) {
+  if (parser->current.type != TokenType::Identifier) {
+    parser->report_error("Expected Identifier!");
+    return;
+  }
+
+  type->name = parser->current.string;
+  advance(parser);
 }
 
 static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
@@ -289,77 +312,123 @@ static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
     case TokenType::Or: advance(parser); return BINARY_OPERATOR::OR;
     case TokenType::And: advance(parser); return BINARY_OPERATOR::AND;
   }
+
+  OwnedPtr<char> error = format("Invalid binary operator: {}", parser->current.string);
+
+  parser->report_error(error.ptr);
+  return BINARY_OPERATOR::ADD;//just return whatever and hope everything errors out
 }
 
-static void parse_primary(Parser* const parser, ASTExpression* const expr);
+static void parse_unary_op(Parser* const parser, ASTExpression* const expr);
 
-static void parse_binary_operators(Parser* const parser, uint8_t precidence, BINARY_OPERATOR op, ASTExpression* const base) {
-
-  ASTExpression* outer_left  = allocate_zerod<ASTExpression>();
-  ASTExpression* outer_right       = allocate_zerod<ASTExpression>();
-
-  *outer_left = std::move(*base);
-
-  base->expr_type    = EXPRESSION_TYPE::BINARY_OPERATOR;
-  base->bin_op.op    = op;
-  base->bin_op.left  = outer_left;
-  base->bin_op.right = outer_right;
-
-  parse_primary(parser, outer_right);
+static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_t prev_prec, ASTExpression** base) {
+  //precidence for this level
+  uint8_t this_prec = precidence_table[(size_t)(*base)->bin_op.op];
 
   while (is_binary_operator(parser->current.type)) {
-
     const BINARY_OPERATOR new_op = parse_binary_operator(parser);
-    const uint8_t new_prec = precidence_table[(size_t)new_op];
+    uint8_t new_prec = precidence_table[(size_t)new_op];
 
-    if (new_prec > precidence) {
-      precidence = new_prec;
-      op = new_op;
+    if (this_prec < new_prec) {
+      //Make right the new base for the next level
+      {
+        ASTExpression* new_right = allocate_default<ASTExpression>();
 
-      ASTExpression* const inner_left  = allocate_zerod<ASTExpression>();
-      ASTExpression* const inner_right = allocate_zerod<ASTExpression>();
+        new_right->expr_type = EXPRESSION_TYPE::BINARY_OPERATOR;
+        new_right->bin_op.op = new_op;
+        new_right->bin_op.left = (*base)->bin_op.right;
+        new_right->bin_op.right = allocate_default<ASTExpression>();
 
-      *inner_left = std::move(*outer_right);
+        (*base)->bin_op.right = new_right;
+        parse_unary_op(parser, new_right->bin_op.right);
+      }
 
-      outer_right->expr_type    = EXPRESSION_TYPE::BINARY_OPERATOR;
-      outer_right->bin_op.op    = op;
-      outer_right->bin_op.left  = inner_left;
-      outer_right->bin_op.right = inner_right;
-      outer_right = inner_right;
+      ASTExpression* new_base = parse_binary_precidence(parser, this_prec, &(*base)->bin_op.right);
 
-      parse_primary(parser, outer_right);
+      //Finished
+      if (new_base == nullptr) {
+        return nullptr;
+      }
+
+      new_prec = precidence_table[(size_t)new_base->bin_op.op];
+      //Only return if new_base should be on the previous level
+      if (new_prec <= prev_prec) {
+        return new_base;
+      }
+
+      //new_base needs to replace this level
+      this_prec = new_prec;
+      new_base->bin_op.left = *base;
+      *base = new_base;
+
+      new_base->bin_op.right = allocate_default<ASTExpression>();
+      parse_unary_op(parser, new_base->bin_op.right);
+    }
+    else if(new_prec <= prev_prec)
+    {
+      //Needs to be on the previous level
+      ASTExpression* new_base = allocate_default<ASTExpression>();
+      new_base->expr_type = EXPRESSION_TYPE::BINARY_OPERATOR;
+      new_base->bin_op.op = new_op;
+
+      return new_base;
     }
     else {
-      precidence = new_prec;
-      op = new_op;
+      this_prec = new_prec;
 
-      ASTExpression* const inner_left  = allocate_zerod<ASTExpression>();
-      ASTExpression* const inner_right = allocate_zerod<ASTExpression>();
+      //new_base needs to replace this level
+      ASTExpression* new_base = allocate_default<ASTExpression>();
+      new_base->expr_type = EXPRESSION_TYPE::BINARY_OPERATOR;
+      new_base->bin_op.op = new_op;
+      new_base->bin_op.left = *base;
+      *base = new_base;
 
-      *inner_left = std::move(*base);
-
-      base->expr_type    = EXPRESSION_TYPE::BINARY_OPERATOR;
-      base->bin_op.op    = op;
-      base->bin_op.left  = inner_left;
-      base->bin_op.right = inner_right;
-
-      outer_left = inner_left;
-      outer_right = inner_right;
-
-      parse_primary(parser, outer_right);
+      new_base->bin_op.right = allocate_default<ASTExpression>();
+      parse_unary_op(parser, new_base->bin_op.right);
     }
   }
+  
+  return nullptr;
+}
+
+static void parse_binary_operators(Parser* const parser, BINARY_OPERATOR op, ASTExpression* const base) {
+
+  ASTExpression* temp_base = allocate_default<ASTExpression>();
+
+  temp_base->expr_type    = EXPRESSION_TYPE::BINARY_OPERATOR;
+  temp_base->bin_op.op    = op;
+  temp_base->bin_op.left  = allocate_default<ASTExpression>();
+  temp_base->bin_op.right = allocate_default<ASTExpression>();
+
+  *temp_base->bin_op.left = std::move(*base);
+
+  parse_unary_op(parser, temp_base->bin_op.right);
+
+  if (is_binary_operator(parser->current.type)) {
+    auto temp = parse_binary_precidence(parser, 0 /* <- will always be lowest precidence*/, &temp_base);
+
+    //Should always return nullptr
+    assert(temp == nullptr);
+  }
+
+  base->expr_type    = temp_base->expr_type;
+  base->bin_op.op    = temp_base->bin_op.op;
+  base->bin_op.left  = temp_base->bin_op.left;
+  base->bin_op.right = temp_base->bin_op.right;
+
+  temp_base->bin_op.left = nullptr;
+  temp_base->bin_op.right = nullptr;
+
+  free<ASTExpression>(temp_base);
 }
 
 static void parse_expression(Parser* const parser, ASTExpression* const expr) {
-  //Will always be a primary
-  parse_primary(parser, expr);
+  parse_unary_op(parser, expr);
 
   if (is_binary_operator(parser->current.type)) {
     const BINARY_OPERATOR op = parse_binary_operator(parser);
-    const uint8_t prec = precidence_table[(size_t)op];
 
-    parse_binary_operators(parser, prec, op, expr);
+    parse_binary_operators(parser, op, expr);
   }
 }
 
@@ -368,9 +437,22 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
   advance(parser);
 
   switch (current.type) {
+    case TokenType::Cast: {
+        expect(parser, TokenType::Left_Bracket);
+        expr->expr_type = EXPRESSION_TYPE::CAST;
+        parse_type(parser, &expr->cast.type);
+
+        expect(parser, TokenType::Comma);
+
+        expr->cast.expr = allocate_default<ASTExpression>();
+        parse_expression(parser, expr->cast.expr);
+
+        expect(parser, TokenType::Right_Bracket);
+        break;
+      }
     case TokenType::Number: {
         expr->expr_type = EXPRESSION_TYPE::VALUE;
-        expr->value = string_to_uint(current.string.string);
+        expr->value.value = string_to_uint(current.string.string);
         break;
       }
     case TokenType::Identifier: {
@@ -401,7 +483,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
               }
               else {
                 //ERROR
-                parser->report_error("Expected a comma");
+                parser->report_error("Expected a comma!");
                 return;
               }
             }
@@ -420,8 +502,8 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
       }
     case TokenType::True:
     case TokenType::False: {
-        expr->expr_type       = EXPRESSION_TYPE::ENUM;
-        expr->enum_value      = EnumValueExpr();
+        expr->expr_type = EXPRESSION_TYPE::ENUM;
+        expr->enum_value = EnumValueExpr();
         expr->enum_value.name = current.string;
         break;
       }
@@ -433,21 +515,27 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
   }
 }
 
-static void parse_type(Parser* const parser, ASTType* const type) {
-  if (parser->current.type != TokenType::Identifier) {
-    parser->report_error("Expected Identifier");
-    return;
+static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
+  if (parser->current.type == TokenType::Sub) {
+    expr->expr_type = EXPRESSION_TYPE::UNARY_OPERATOR;
+    expr->un_op.op = UNARY_OPERATOR::NEG;
+    advance(parser);
+
+    expr->un_op.primary = allocate_default<ASTExpression>(1);
+
+    parse_primary(parser, expr->un_op.primary);
+  }
+  else {
+    parse_primary(parser, expr);
   }
 
-  type->name = parser->current.string;
-  advance(parser);
 }
 
 static void parse_declaration(Parser* const parser, ASTDeclaration* const decl) {
   parse_type(parser, &decl->type);
 
   if (parser->current.type != TokenType::Identifier) {
-    parser->report_error("Expected Identifier");
+    parser->report_error("Expected Identifier!");
     return;
   }
 
@@ -460,7 +548,7 @@ static void parse_block(Parser* const parser, ASTBlock* const block);
 static void parse_statement(Parser* const parser, ASTStatement* const statement) {
   switch (parser->current.type) {
     case TokenType::Left_Brace: {
-        statement->type  = STATEMENT_TYPE::BLOCK;
+        statement->type = STATEMENT_TYPE::BLOCK;
         statement->block = ASTBlock();
         parse_block(parser, &statement->block);
         return;
@@ -484,12 +572,12 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
         expect(parser, TokenType::Right_Bracket);
 
 
-        statement->if_else.if_statement = allocate_zerod<ASTStatement>();
+        statement->if_else.if_statement = allocate_default<ASTStatement>();
         parse_statement(parser, statement->if_else.if_statement);
 
         if (parser->current.type == TokenType::Else) {
           advance(parser);
-          statement->if_else.else_statement = allocate_zerod<ASTStatement>();
+          statement->if_else.else_statement = allocate_default<ASTStatement>();
           parse_statement(parser, statement->if_else.else_statement);
         }
 
@@ -538,7 +626,7 @@ static void parse_function(Parser* const parser, ASTFunctionDeclaration* const f
 
   //Name
   if (parser->current.type != TokenType::Identifier) {
-    parser->report_error("Expected Identifier");
+    parser->report_error("Expected Identifier!");
     return;
   }
 
@@ -564,7 +652,7 @@ static void parse_function(Parser* const parser, ASTFunctionDeclaration* const f
       }
       else {
         //ERROR
-        parser->report_error("Expected a comma");
+        parser->report_error("Expected a comma!");
         return;
       }
     }
@@ -642,7 +730,14 @@ static void print_ast_expression(const ASTExpression* expr) {
       printf("%s", expr->name.string);
       break;
     case EXPRESSION_TYPE::VALUE:
-      printf("%llu", expr->value);
+      printf("%llu", expr->value.value);
+      if (expr->value.suffix.string != nullptr) {
+        printf("%s", expr->value.suffix.string);
+      }
+      break;
+    case EXPRESSION_TYPE::UNARY_OPERATOR:
+      print('-');
+      print_ast_expression(expr->un_op.primary);
       break;
     case EXPRESSION_TYPE::BINARY_OPERATOR:
       print("(");
@@ -662,6 +757,7 @@ static void print_ast_expression(const ASTExpression* expr) {
 
       print_ast_expression(expr->bin_op.right);
       print(")");
+      break;
   }
 }
 

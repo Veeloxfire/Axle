@@ -5,6 +5,7 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
 
   makes_call = std::exchange(a.makes_call, false);
   call_leaf = std::exchange(a.call_leaf, false);
+  compile_time_constant = std::exchange(a.compile_time_constant, false);
 
   expr_type = std::exchange(a.expr_type, EXPRESSION_TYPE::UNKNOWN);
 
@@ -14,6 +15,12 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
       break;
     case EXPRESSION_TYPE::BINARY_OPERATOR:
       bin_op = std::move(a.bin_op);
+      break;
+    case EXPRESSION_TYPE::UNARY_OPERATOR:
+      un_op = std::move(a.un_op);
+      break;
+    case EXPRESSION_TYPE::CAST:
+      cast = std::move(a.cast);
       break;
     case EXPRESSION_TYPE::NAME:
     case EXPRESSION_TYPE::LOCAL:
@@ -30,8 +37,17 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
 
 ASTExpression::~ASTExpression() {
   switch (expr_type) {
+    case EXPRESSION_TYPE::UNKNOWN: break;
     case EXPRESSION_TYPE::BINARY_OPERATOR: {
         bin_op.~BinaryOperatorExpr();
+        break;
+      }
+    case EXPRESSION_TYPE::UNARY_OPERATOR: {
+        un_op.~UnaryOperatorExpr();
+        break;
+      }
+    case EXPRESSION_TYPE::CAST: {
+        cast.~CastExpr();
         break;
       }
     case EXPRESSION_TYPE::LOCAL:
@@ -51,6 +67,7 @@ ASTExpression::~ASTExpression() {
 
 ASTStatement::~ASTStatement() {
   switch (type) {
+    case STATEMENT_TYPE::RETURN:
     case STATEMENT_TYPE::EXPRESSION: {
         expression.~ASTExpression();
         break;

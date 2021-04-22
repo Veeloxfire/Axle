@@ -5,23 +5,46 @@
 
 struct ASTFile;
 
+#define TOKEN_TYPE_MODIFY \
+MODIFY(Error)\
+MODIFY(Eof)\
+MODIFY(Identifier)\
+MODIFY(Number)\
+MODIFY(Return)\
+MODIFY(Function)\
+MODIFY(If)\
+MODIFY(Else)\
+MODIFY(True)\
+MODIFY(False)\
+MODIFY(Cast)\
+MODIFY(Add)\
+MODIFY(Sub)\
+MODIFY(Mul)\
+MODIFY(Div)\
+MODIFY(Lesser)\
+MODIFY(Greater)\
+MODIFY(Or)\
+MODIFY(And)\
+MODIFY(Equals)\
+MODIFY(Left_Bracket)\
+MODIFY(Right_Bracket)\
+MODIFY(Left_Brace)\
+MODIFY(Right_Brace)\
+MODIFY(Comma)\
+MODIFY(Semicolon)
+
 enum class TokenType : uint8_t {
-  //Info
-  Error, Eof,
-  
-  //Non-builtin
-  Identifier, Number,
-
-  //Keywords
-  Return, Function, If, Else, True, False,
-
-  //Operators
-  Add, Sub, Mul, Div, Lesser, Greater, Or, And, Equals,
-  
-  //Structure
-  Left_Bracket, Right_Bracket, Left_Brace, Right_Brace,
-  Comma, Semicolon
+#define MODIFY(n) n,
+  TOKEN_TYPE_MODIFY
+#undef MODIFY
 };
+
+struct TokenTypeString {
+  const char* string;
+  size_t length;
+};
+
+TokenTypeString token_type_string(TokenType);
 
 struct Token {
   TokenType type;
@@ -53,3 +76,13 @@ struct Parser {
 
 void init_parser(Parser* const parser, const char* file_name, const char* source);
 void parse_file(Parser* const parser, ASTFile* const file);
+
+struct KeywordPair {
+  const char* keyword;
+  TokenType type;
+  size_t size;
+
+  constexpr KeywordPair(const char* kw, TokenType t)
+    :keyword(kw), type(t), size(strlen_ts(kw))
+  {}
+};

@@ -1,12 +1,49 @@
 #pragma once
 #include <stddef.h>
 #include "utility.h"
+#include "strings.h"
 
 #define PE_SIGNATURE {'P', 'E', '\0', '\0'}
+#define DOS_STUB \
+{ 0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,\
+  0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68,\
+  0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,\
+  0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F,\
+  0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,\
+  0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20,\
+  0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,\
+  0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+
+constexpr inline uint32_t PAGE_SIZE = 4096;
+constexpr inline uint32_t MS_DO_HEADER_SIZE = 64;
+constexpr inline uint32_t MS_DOS_STUB_SIZE = 128;
+constexpr inline uint32_t COFF_HEADER_SIZE = 20;
+constexpr inline uint32_t SIGNATURE_SIZE = 4;
+constexpr inline uint32_t OPTIONAL_STANDARD_FIELDS_SIZE = 24;
+constexpr inline uint32_t OPTIONAL_WINDOWS_FIELDS_SIZE = 88;
+constexpr inline uint32_t ALL_DATA_DIRECTORIES_NUM = 16;
+constexpr inline uint32_t DATA_DIRECTORY_SIZE = 8;
+constexpr inline uint32_t ALL_DATA_DIRECTORIES_SIZE = ALL_DATA_DIRECTORIES_NUM * DATA_DIRECTORY_SIZE;
+
+constexpr inline uint32_t BASE_HEADERS_SIZE =
+MS_DO_HEADER_SIZE
++ MS_DOS_STUB_SIZE
++ SIGNATURE_SIZE
++ COFF_HEADER_SIZE
++ OPTIONAL_STANDARD_FIELDS_SIZE
++ OPTIONAL_WINDOWS_FIELDS_SIZE;
+
+constexpr inline uint32_t SINGLE_SECTION_HEADER_SIZE = 40;
+constexpr inline uint32_t NT_IMAGE_BASE = 0x00400000;
+constexpr inline uint32_t IMPORT_DIRECTORY_SIZE = 20;
+
 
 using PE_Address = uint32_t;
+using RVA = uint32_t;
+using VA = uint32_t;
+using FileOffset = uint32_t;
 
-struct COFF_Characteristics {
+namespace COFF_Characteristics {
   enum Characteristics : uint16_t {
     RELOCS_STRIPPED = 0x0001,
     EXECUTABLE_IMAGE = 0x0002,
@@ -25,23 +62,21 @@ struct COFF_Characteristics {
     UP_SYSTEM_ONLY = 0x4000,
     BYTES_REVERSED_HI = 0x8000,
   };
-
-  uint16_t mask;
 };
 
 enum struct MACHINE_TYPE : uint16_t {
   UNKNOWN = 0x0000,
+  AMD64   = 0x8664, 
 };
 
 struct COFF_file_header {
-  uint8_t signature[4] = PE_SIGNATURE;
   MACHINE_TYPE machine = MACHINE_TYPE::UNKNOWN;
   uint16_t number_of_sections;
-  uint8_t time_date_stamp[4];// crt time_t value - do this ourselves?
+  uint32_t time_date_stamp;
   PE_Address pointer_to_symbol_table;
   uint32_t number_of_symbols;
   uint16_t size_of_optional_header;
-  COFF_Characteristics characteristics;
+  uint16_t characteristics;
 };
 
 enum struct MAGIC_NUMBER : uint16_t {
@@ -51,7 +86,7 @@ enum struct MAGIC_NUMBER : uint16_t {
 };
 
 //Not really optional. Just called that because other file formats dont include it
-struct PE32_optional_header {
+struct PE32Plus_optional_header {
   MAGIC_NUMBER magic_number;
 
   uint8_t major_linker_version;// heh but this is a linker
@@ -63,14 +98,13 @@ struct PE32_optional_header {
   PE_Address address_of_entry_point;
 
   PE_Address base_of_code;
-  PE_Address base_of_data;// not in the PE32+ format
 };
 
 //TODO: DLL Characteristics
 struct DLL_Characteristics {};
 
-struct PE32_windows_specific {
-  PE_Address image_base;// 8 bytes in PE32+ format
+struct PE32Plus_windows_specific {
+  uint64_t image_base;// 8 bytes in PE32+ format
 
   uint32_t section_alignment;
   uint32_t file_alignment;
@@ -87,15 +121,15 @@ struct PE32_windows_specific {
   uint32_t win32_version = 0x00000000;// reserved to be 0
   uint32_t size_of_image;
   uint32_t size_of_header;
-  uint32_t check_sum;
+  uint32_t check_sum = 0;
 
-  uint16_t subsystem;
-  DLL_Characteristics DLL_characteristics;
+  uint16_t subsystem;//TODO: More subsystems
+  uint16_t DLL_characteristics;
 
-  uint32_t size_of_stack_reserve;// 8 bytes in PE32+ format
-  uint32_t size_of_stack_commit;// 8 bytes in PE32+ format
-  uint32_t size_of_heap_reserve;// 8 bytes in PE32+ format
-  uint32_t size_of_heap_commit;// 8 bytes in PE32+ format
+  uint64_t size_of_stack_reserve;// 8 bytes in PE32+ format
+  uint64_t size_of_stack_commit;// 8 bytes in PE32+ format
+  uint64_t size_of_heap_reserve;// 8 bytes in PE32+ format
+  uint64_t size_of_heap_commit;// 8 bytes in PE32+ format
 
   uint32_t loader_flags = 0x00000000;// reserved to be 0
   uint32_t number_of_rva_and_sizes;
@@ -116,23 +150,16 @@ struct MS_DOS_Header {
   uint16_t initial_cs = 0x0000;
   uint16_t address_of_relocation_table = 0x0000;
   uint16_t overlay_number = 0x0000;
-  uint16_t reserved_words[4] = {0,0,0,0};
+  uint16_t reserved_words[4] ={ 0,0,0,0 };
   uint16_t oem_identifier = 0x0000;
   uint16_t oem_info = 0x0000;
-  uint16_t reserved_2_electric_boogaloo[10] = {0,0,0,0,0,0,0,0,0,0};
-  PE_Address actual_start_of_header;// actually needs to be calculated
+  uint16_t reserved_2_electric_boogaloo[10] ={ 0,0,0,0,0,0,0,0,0,0 };
+  PE_Address actual_start_of_header ;
 };
 
 struct MS_DOS_Stub {
-  // Default is the windows stub which just says it cannot be run in MS-DOS
-  uint8_t bytes[128] = { 0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,
-                         0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68,
-                         0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,
-                         0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F,
-                         0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,
-                         0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20,
-                         0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,
-                         0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+  // Default is the stub which just says it cannot be run in MS-DOS
+  uint8_t bytes[MS_DOS_STUB_SIZE] = DOS_STUB;
 };
 
 struct MS_DOS {
@@ -145,68 +172,152 @@ struct Data_directory {
   uint32_t size = 0x00000000;
 };
 
-struct Optional_header_directories {
-  Data_directory export_table;
-  Data_directory import_table;
-  Data_directory resource_table;
-  Data_directory exception_table;
-  Data_directory certificate_table;
-  Data_directory base_relocation_table;
-  Data_directory debug;
-  Data_directory architecture;// reserved, apparently must be all be 0
-  PE_Address global_ptr;
-  uint32_t reserved1 = 0x00000000;
-  Data_directory tls_table;
-  Data_directory load_config_table;
-  Data_directory bound_import;
-  Data_directory import_address_table;
-  Data_directory delay_import_descriptor;
-  Data_directory clr_runtime_header;
-
-  // not entirely sure why but it has to be reserved
-  Data_directory reserved2;
+//Not all emited
+struct Image_header_directories {
+  Data_directory export_table ={};
+  Data_directory import_table ={};
+  Data_directory resource_table ={};
+  Data_directory exception_table ={};
+  Data_directory certificate_table ={};
+  Data_directory base_relocation_table ={};
+  Data_directory debug ={};
+  uint64_t architecture = 0x0;// reserved, apparently must be all be 0
+  PE_Address global_ptr = 0x0;
+  uint32_t reserved1 = 0x0;
+  Data_directory tls_table ={};
+  Data_directory load_config_table ={};
+  Data_directory bound_import ={};
+  Data_directory import_address_table ={};
+  Data_directory delay_import_descriptor ={};
+  Data_directory clr_runtime_header ={};
+  uint64_t reserved2 = 0x0;// not entirely sure why but it has to be reserved
 };
 
 struct PE_File_Header {
   MS_DOS ms_dos;// required by windows. Some programs even require it to be a specific length
+  uint8_t signature[SIGNATURE_SIZE] = PE_SIGNATURE;
   COFF_file_header coff;
-  PE32_optional_header pe32;
-  PE32_windows_specific pe32_windows;
-  Optional_header_directories directories;
+  PE32Plus_optional_header pe32;
+  PE32Plus_windows_specific pe32_windows;
+  Image_header_directories directories;
 };
 
-//TODO: Section Header Characteristics
-struct Section_Header_Characteristics{};
+namespace Section_Flags {
+  enum FLAGS : uint32_t {
+    CONTAINS_CODE = 0x00000020,
+    CONTAINS_INITIALIZED = 0x00000040,
+    EXECTUTABLE = 0x20000000,
+    READABLE = 0x40000000,
+    WRITABLE = 0x80000000,
+  };
+}
 
 struct Section_Header {
-  uint8_t name[8];// 8 byte null-padded ascii string OR '/' followed by ascii decimal offset into the string table
+  uint8_t name[8];// 8 byte null-padded utf8 string (if there is exactly 8 bytes then the null is ignored)
   uint32_t virtual_size;// size of section when loaded into memory, not the same as the size_of_raw_data
-  PE_Address virtual_address;
+  RVA virtual_address;
   uint32_t size_of_raw_data;
-  PE_Address pointer_to_raw_data;
-  PE_Address pointer_to_relocations;
-  PE_Address pointer_to_line_numbers;
-  uint16_t number_of_relocations;
-  uint16_t number_of_line_numbers;
-  Section_Header_Characteristics characteristics;
+  uint32_t pointer_to_raw_data;
+  uint32_t pointer_to_relocations;
+  uint32_t pointer_to_line_numbers;
+  uint16_t number_of_relocations = 0x0;
+  uint16_t number_of_line_numbers = 0x0;
+  uint32_t characteristics;
 };
 
-struct Section {
-  // The end of this will be padded to reach whatever the virtual size is (in section header)
-  // i.e. length of array is not size of raw data!
-  Array<uint8_t> bytes;
+struct ImportDataDirectory {
+  RVA import_lookup_table;
+  uint32_t date_time_stamp;
+  uint32_t forwarder_chain;
+  RVA name_rva;
+  RVA import_address_table;
 };
+
+struct CodeSection {
+  const uint8_t* bytes = nullptr;
+  size_t size = 0;
+  size_t entry_point = 0;
+};
+
+enum struct ConstantType : uint8_t {
+  UTF8_STRING,
+  STRING,
+  INTEGER,
+};
+
+struct ConstantEntry {
+  ConstantType type;
+  union {
+    InternString string;
+    uint64_t integer;
+  };
+
+  uint32_t loaded_offset = 0;
+};
+
+struct ConstantOffset {
+  size_t offset;
+};
+
+struct ConstantTable {
+  Array<ConstantEntry> constants;
+  RVA table_rva;
+  VA table_va;
+
+  ConstantOffset string_constant(InternString);
+  RVA get_constant_rva(ConstantOffset offset) const;
+  VA get_constant_va(ConstantOffset offset) const;
+};
+
+struct ImportNameEntry {
+  InternString name;
+  VA va;
+};
+
+struct Import {
+  ConstantOffset DLL_name;
+  VA lookup_table1;
+  VA lookup_table2;
+
+  Array<size_t> imported_names;
+};
+
+struct ImportTable {
+  Array<ImportNameEntry> import_names;
+
+  Array<Import> imports;
+};
+
+Import* new_import(InternString dll_name, ImportTable* imports, ConstantTable* constants);
+void add_name_to_import(Import* import_ptr, InternString name_to_import, ImportTable* table);
+
 
 struct PE_File {
-  PE_File_Header header;
-
-  //Sections and Section Headers should be ordered by offset
-  Array<Section_Header> section_headers;
-  Array<Section> sections;
+  CodeSection* code = nullptr;
+  ConstantTable* constants = nullptr;
+  ImportTable* imports = nullptr;
 };
 
-PE_File        create_portable_executable();
-//Section        create_pe_section();
-//Section_Header create_pe_section_header();
+struct ImportantValues {
+  uint32_t num_sections;
 
-ErrorCode write_portable_executable(const PE_File* pe_file, const char* file_name);
+  uint32_t size_of_optional_header;
+  uint32_t header_padding;
+  uint32_t size_of_header;
+
+  uint32_t size_of_image;
+
+  RVA code_rva;
+  VA code_va;
+  uint32_t code_raw_size;
+
+  RVA constants_rva;
+  VA constants_va;
+  uint32_t constants_raw_size;
+
+  RVA imports_rva;
+  VA imports_va;
+  uint32_t imports_raw_size;
+};
+
+ErrorCode write_portable_executable_to_file(const PE_File* pe_file, const char* file_name);

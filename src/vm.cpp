@@ -35,99 +35,163 @@ void Reg64_32B::zero_padding() noexcept {
 }
 
 ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_point) noexcept {
-  
+
   //Pre entry function - if we ever return to nullptr then we finish execution
   vm->push((uint8_t*)nullptr);
   vm->IP = code + entry_point;
 
   while (true) {
     switch (vm->IP[0]) {
-      case ByteCode::ADD_VALS: {
-          const auto i = ByteCode::PARSE::ADD_VALS(vm->IP);
+      case ByteCode::ADD_R64S: {
+          const auto i = ByteCode::PARSE::ADD_R64S(vm->IP);
 
-          vm->registers[i.val2].full.reg += vm->registers[i.val1].full.reg;
+          vm->registers[i.val2].b64.reg += vm->registers[i.val1].b64.reg;
 
-          vm->IP += ByteCode::SIZE_OF::ADD_VALS;
+          vm->IP += ByteCode::SIZE_OF::ADD_R64S;
           break;
         }
-      case ByteCode::SUB_VALS: {
-          const auto i = ByteCode::PARSE::SUB_VALS(vm->IP);
+      case ByteCode::SUB_R64S: {
+          const auto i = ByteCode::PARSE::SUB_R64S(vm->IP);
 
-          vm->registers[i.val2].full.reg -= vm->registers[i.val1].full.reg;
+          vm->registers[i.val2].b64.reg -= vm->registers[i.val1].b64.reg;
 
-          vm->IP += ByteCode::SIZE_OF::SUB_VALS;
+          vm->IP += ByteCode::SIZE_OF::SUB_R64S;
           break;
         }
-      case ByteCode::MUL_VALS: {
-          const auto i = ByteCode::PARSE::MUL_VALS(vm->IP);
+      case ByteCode::MUL_R64S: {
+          const auto i = ByteCode::PARSE::MUL_R64S(vm->IP);
 
-          vm->registers[i.val2].full.reg *= vm->registers[i.val1].full.reg;
+          vm->registers[i.val2].b64.reg *= vm->registers[i.val1].b64.reg;
 
-          vm->IP += ByteCode::SIZE_OF::MUL_VALS;
+          vm->IP += ByteCode::SIZE_OF::MUL_R64S;
           break;
         }
-      case ByteCode::DIV_VALS: {
-          const auto i = ByteCode::PARSE::DIV_VALS(vm->IP);
+      case ByteCode::DIV_RU64S: {
+          const auto i = ByteCode::PARSE::DIV_RU64S(vm->IP);
 
-          vm->registers[i.val2].full.reg /= vm->registers[i.val1].full.reg;
+          vm->registers[i.val2].b64.reg /= vm->registers[i.val1].b64.reg;
 
-          vm->IP += ByteCode::SIZE_OF::DIV_VALS;
+          vm->IP += ByteCode::SIZE_OF::DIV_RU64S;
           break;
         }
-      case ByteCode::EQ_VALS: {
-          const auto i = ByteCode::PARSE::EQ_VALS(vm->IP);
+      case ByteCode::DIV_RI64S: {
+          const auto i = ByteCode::PARSE::DIV_RI64S(vm->IP);
 
-          vm->registers[i.val2].full.reg = (vm->registers[i.val2].full.reg == vm->registers[i.val1].full.reg);
+          vm->registers[i.val2].b64.reg_s /= vm->registers[i.val1].b64.reg_s;
 
-          vm->IP += ByteCode::SIZE_OF::EQ_VALS;
+          vm->IP += ByteCode::SIZE_OF::DIV_RI64S;
           break;
         }
-      case ByteCode::OR_VALS: {
-          const auto i = ByteCode::PARSE::OR_VALS(vm->IP);
+      case ByteCode::EQ_R64S: {
+          const auto i = ByteCode::PARSE::EQ_R64S(vm->IP);
 
-          vm->registers[i.val2].full.reg |= vm->registers[i.val1].full.reg;
+          vm->registers[i.val2].b64.reg = (vm->registers[i.val2].b64.reg == vm->registers[i.val1].b64.reg);
 
-          vm->IP += ByteCode::SIZE_OF::OR_VALS;
+          vm->IP += ByteCode::SIZE_OF::EQ_R64S;
           break;
         }
-      case ByteCode::AND_VALS: {
-          const auto i = ByteCode::PARSE::AND_VALS(vm->IP);
+      case ByteCode::OR_R64S: {
+          const auto i = ByteCode::PARSE::OR_R64S(vm->IP);
 
-          vm->registers[i.val2].full.reg &= vm->registers[i.val1].full.reg;
+          vm->registers[i.val2].b64.reg |= vm->registers[i.val1].b64.reg;
 
-          vm->IP += ByteCode::SIZE_OF::AND_VALS;
+          vm->IP += ByteCode::SIZE_OF::OR_R64S;
           break;
         }
-      case ByteCode::SET_VAL_TO_64: {
-          const auto i = ByteCode::PARSE::SET_VAL_TO_64(vm->IP);
+      case ByteCode::AND_R64S: {
+          const auto i = ByteCode::PARSE::AND_R64S(vm->IP);
 
-          vm->registers[i.val].full.reg = i.u64;
+          vm->registers[i.val2].b64.reg &= vm->registers[i.val1].b64.reg;
 
-          vm->IP += ByteCode::SIZE_OF::SET_VAL_TO_64;
+          vm->IP += ByteCode::SIZE_OF::AND_R64S;
           break;
         }
-      case ByteCode::COPY_TO_VAL: {
-          const auto i = ByteCode::PARSE::COPY_TO_VAL(vm->IP);
+      case ByteCode::NEG_R64: {
+          const auto i = ByteCode::PARSE::NEG_R64(vm->IP);
 
-          vm->registers[i.val2].full.reg = vm->registers[i.val1].full.reg;
+          vm->registers[i.val].b64.reg_s = -vm->registers[i.val].b64.reg_s;
 
-          vm->IP += ByteCode::SIZE_OF::COPY_TO_VAL;
+          vm->IP += ByteCode::SIZE_OF::NEG_R64;
           break;
         }
-      case ByteCode::PUSH_VAL: {
-          const auto i = ByteCode::PARSE::PUSH_VAL(vm->IP);
+      case ByteCode::SET_R64_TO_64: {
+          const auto i = ByteCode::PARSE::SET_R64_TO_64(vm->IP);
 
-          vm->push(vm->registers[i.val].full.reg);
+          vm->registers[i.val].b64.reg = i.u64;
 
-          vm->IP += ByteCode::SIZE_OF::PUSH_VAL;
+          vm->IP += ByteCode::SIZE_OF::SET_R64_TO_64;
           break;
         }
-      case ByteCode::POP_TO_VAL: {
-          const auto i = ByteCode::PARSE::POP_TO_VAL(vm->IP);
+      case ByteCode::COPY_R64_TO_R64: {
+          const auto i = ByteCode::PARSE::COPY_R64_TO_R64(vm->IP);
 
-          vm->registers[i.val].full.reg = vm->pop();
+          vm->registers[i.val2].b64.reg = vm->registers[i.val1].b64.reg;
 
-          vm->IP += ByteCode::SIZE_OF::POP_TO_VAL;
+          vm->IP += ByteCode::SIZE_OF::COPY_R64_TO_R64;
+          break;
+        }
+      case ByteCode::PUSH_R64: {
+          const auto i = ByteCode::PARSE::PUSH_R64(vm->IP);
+
+          vm->push(vm->registers[i.val].b64.reg);
+
+          vm->IP += ByteCode::SIZE_OF::PUSH_R64;
+          break;
+        }
+      case ByteCode::POP_TO_R64: {
+          const auto i = ByteCode::PARSE::POP_TO_R64(vm->IP);
+
+          vm->registers[i.val].b64.reg = vm->pop();
+
+          vm->IP += ByteCode::SIZE_OF::POP_TO_R64;
+          break;
+        }
+      case ByteCode::ALLOCATE_STACK: {
+          const auto i = ByteCode::PARSE::ALLOCATE_STACK(vm->IP);
+
+          vm->allocate_stack(i.u64.val);
+
+          vm->IP += ByteCode::SIZE_OF::ALLOCATE_STACK;
+          break;
+        }
+      case ByteCode::COPY_R64_TO_STACK_TOP: {
+          const auto i = ByteCode::PARSE::COPY_R64_TO_STACK_TOP(vm->IP);
+
+          x64_to_bytes(vm->registers[i.val].b64.reg, vm->SP + i.u64.sig_val);
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R64_TO_STACK_TOP;
+          break;
+        }
+      case ByteCode::COPY_R64_TO_STACK: {
+          const auto i = ByteCode::PARSE::COPY_R64_TO_STACK(vm->IP);
+
+          x64_to_bytes(vm->registers[i.val].b64.reg, vm->BP + i.u64.sig_val);
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R64_TO_STACK;
+          break;
+        }
+      case ByteCode::COPY_R64_FROM_STACK: {
+          const auto i = ByteCode::PARSE::COPY_R64_FROM_STACK(vm->IP);
+
+          vm->registers[i.val].b64.reg = x64_from_bytes(vm->BP + i.u64.sig_val);
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R64_FROM_STACK;
+          break;
+        }
+      case ByteCode::CONV_RU8_TO_R64: {
+          const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(vm->IP);
+
+          vm->registers[i.val].b64.reg = (uint64_t)vm->registers[i.val].b8s.low_reg;
+
+          vm->IP += ByteCode::SIZE_OF::CONV_RU8_TO_R64;
+          break;
+        }
+      case ByteCode::CONV_RI8_TO_R64: {
+          const auto i = ByteCode::PARSE::CONV_RI8_TO_R64(vm->IP);
+
+          vm->registers[i.val].b64.reg = (uint64_t)vm->registers[i.val].b8s.low_reg_s;
+
+          vm->IP += ByteCode::SIZE_OF::CONV_RI8_TO_R64;
           break;
         }
       case ByteCode::JUMP_TO_FIXED: {
@@ -137,9 +201,9 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
         }
       case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
           const auto i = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_ZERO(vm->IP);
-          
-          //Ugly - dont want an if in the vm to do an if
-          if (vm->registers[i.val].full.reg == 0) {
+
+          //Ugly - dont want an 'if' in the vm to do an if
+          if (vm->registers[i.val].b64.reg == 0) {
             vm->IP = code + i.u64.val;
           }
           else {
@@ -150,8 +214,8 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
       case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
           const auto i = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(vm->IP);
 
-          //Ugly - dont want an if in the vm to do an if
-          if (vm->registers[i.val].full.reg != 0) {
+          //Ugly - dont want an 'if' in the vm to do an if
+          if (vm->registers[i.val].b64.reg != 0) {
             vm->IP = code + i.u64.val;
           }
           else {
@@ -184,7 +248,7 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->IP = vm->pop();
           if (vm->IP == nullptr) {
             //End execution
-            return ErrorCode::NO_ERROR;
+            return ErrorCode::OK;
           }
           break;
         }

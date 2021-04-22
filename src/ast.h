@@ -1,6 +1,8 @@
 #pragma once
 #include "utility.h"
 #include "strings.h"
+#include "operators.h"
+#include "type.h"
 
 struct ASTExpression;
 struct ASTStatement;
@@ -22,6 +24,8 @@ struct ASTType {
 
 enum struct EXPRESSION_TYPE : uint8_t {
   UNKNOWN = 0,
+  CAST,
+  UNARY_OPERATOR,
   BINARY_OPERATOR,
   NAME /* = only in type check phase (converted to local or maybe others)*/,
   LOCAL /* = not in type check phase (converted from name) */,
@@ -30,14 +34,16 @@ enum struct EXPRESSION_TYPE : uint8_t {
   FUNCTION_CALL
 };
 
-enum struct BINARY_OPERATOR : uint8_t {
-  ADD, SUB, MUL, DIV, LESSER, GREATER, EQUIVALENT, OR, AND
-};
+struct BuildOptions;
+struct State;
 
 struct BinaryOperatorExpr {
   BINARY_OPERATOR op;
+
   ASTExpression* left = nullptr;
   ASTExpression* right = nullptr;
+
+  BINARY_OPERATOR_FUNCTION emit;
 
   ~BinaryOperatorExpr() {
     free(left);
@@ -49,7 +55,7 @@ struct FunctionCallExpr {
   Array<ASTExpression> arguments;
   InternString function_name;
 
-  Function* function = nullptr;
+  const Function* function = nullptr;
 };
 
 struct EnumValueExpr {
@@ -57,19 +63,48 @@ struct EnumValueExpr {
   InternString name;
 };
 
+struct UnaryOperatorExpr {
+  UNARY_OPERATOR op;
+  ASTExpression* primary;
+
+  UNARY_OPERATOR_FUNCTION emit;
+
+  ~UnaryOperatorExpr() {
+    free(primary);
+  }
+};
+
+struct CastExpr {
+  ASTType type;
+  ASTExpression* expr;
+  CAST_FUNCTION emit;
+
+  ~CastExpr() {
+    free(expr);
+  }
+};
+
+struct ValueExpr {
+  uint64_t value;
+  InternString suffix;
+};
+
 struct ASTExpression {
   const Structure* type = nullptr;
   bool makes_call = false;
   bool call_leaf = false;
+  bool compile_time_constant = false;
 
   EXPRESSION_TYPE expr_type = EXPRESSION_TYPE::UNKNOWN;
   union {
     char _dummy = '\0';
+    CastExpr cast;
+    UnaryOperatorExpr un_op;
     BinaryOperatorExpr bin_op;
     FunctionCallExpr call;
     EnumValueExpr enum_value;
     InternString name;//e.g. local or global variable
-    uint64_t value;
+    ValueExpr value;
   };
 
   ASTExpression() : _dummy() {}
@@ -113,15 +148,17 @@ struct ASTBlock {
 };
 
 struct ASTStatement {
-  STATEMENT_TYPE type;
+  STATEMENT_TYPE type ={};
 
   union {
+    char _dummy;
     ASTExpression expression;
     ASTDeclaration declaration;
     ASTIfElse if_else;
     ASTBlock block;
   };
 
+  ASTStatement() : _dummy() {}
   ~ASTStatement();
 };
 

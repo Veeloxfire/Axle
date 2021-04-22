@@ -1,53 +1,7 @@
 #pragma once
 #include "utility.h"
-#ifdef MACHINE_CODE
-
-enum struct REGISTER_8B : uint8_t {
-  //Low bits
-  AL = 0, CL = 1, DL = 2, BL = 3,
-
-  //High bits
-  AH = 4, CH = 5, DH = 6, BH = 7,
-};
-enum struct REGISTER_8B_REX : uint8_t {
-  AL = 0, CL = 1, DL = 2, BL = 3,
-  SPL = 4, BPL = 5, SIL = 6, DIL = 7,
-  R8L = 8, R9L = 9, R10L = 10, R11L = 11,
-  R12L = 12, R13L = 13, R14L = 14, R15L = 15,
-};
-
-enum struct REGISTER_16B : uint8_t {
-  AX = 0, CX = 1, DX = 2, BX = 3,
-  SP = 4, BP = 5, SI = 6, DI = 7,
-};
-enum struct REGISTER_16B_REX : uint8_t {
-  R8W = 0, R9W = 1, R10W = 2, R11W = 3,
-  R12W = 4, R13W = 5, R14W = 6, R15W = 7,
-};
-
-enum struct REGISTER_32B : uint8_t {
-  EAX = 0, ECX = 1, EDX = 2, EBX = 3,
-  ESP = 4, EBP = 5, ESI = 6, EDI = 7,
-};
-enum struct REGISTER_32B_REX : uint8_t {
-  EAX = 0, ECX = 1, EDX = 2, EBX = 3,
-  ESP = 4, EBP = 5, ESI = 6, EDI = 7,
-  R8D = 8, R9D = 9, R10D = 10, R11D = 11,
-  R12D = 12, R13D = 13, R14D = 14, R15D = 15,
-};
-
-enum struct REGISTER_64B : uint8_t {
-  RAX = 0, RCX = 1, RDX = 2, RBX = 3,
-  RSP = 4, RBP = 5, RSI = 6, RDI = 7,
-  R8 = 8, R9 = 9, R10 = 10, R11 = 11,
-  R12 = 12, R13 = 13, R14 = 14, R15 = 15,
-};
-
-
-#endif
 
 namespace X64 {
-
   inline constexpr uint8_t rex_r(uint8_t reg) {
     return (reg & 0b0000'1000) >> 1;
   }
@@ -75,24 +29,39 @@ namespace X64 {
     return modrm_reg(r) | modrm_rm(rm);
   }
 
+  inline constexpr uint8_t sib_i_b(uint8_t i, uint8_t b) {
+    return ((i & 0b111) << 3) | (b & 0b111);
+  }
+
+  enum SIB_SCALE : uint8_t {
+    SIB_SCALE_1 = 0b00'000'000,
+    SIB_SCALE_2 = 0b01'000'000,
+    SIB_SCALE_4 = 0b10'000'000,
+    SIB_SCALE_8 = 0b11'000'000,
+
+    SIB_INDEX_MASK = 0b00'111'000,
+    SIB_BASE_MASK  = 0b00'000'111,
+  };
+
   enum MODRM_MOD_CODES : uint8_t {
-    MODRM_MOD_DIRECT = 0b11000000,
-    MODRM_MOD_INDIRECT = 0b00000000,
+    MODRM_MOD_DIRECT   = 0b11'000'000,
+    MODRM_MOD_INDIRECT = 0b00'000'000,
+
+    MODRM_REG_MASK = 0b00'111'000,
+    MODRM_RM_MASK  = 0b00'000'111,
+
+    MODRM_REG_SHIFT = 3,
   };
 
   enum REX_CODES : uint8_t {
     REX   = 0b01000000,
     REX_W = 0b01001000,
-    REX_R = 0b01000100,
-    REX_X = 0b01000010,
-    REX_B = 0b01000001,
-  };
+    REX_R = 0b00000100,
+    REX_X = 0b00000010,
+    REX_B = 0b00000001,
 
-  enum REGISTER_64B : uint8_t {
-    RAX = 0, RCX = 1, RDX = 2, RBX = 3,
-    RSP = 4, RBP = 5, RSI = 6, RDI = 7,
-    R8 = 8, R9 = 9, R10 = 10, R11 = 11,
-    R12 = 12, R13 = 13, R14 = 14, R15 = 15,
+    REX_R_SHIFT = 1,
+    REX_B_SHIFT = 3,
   };
 
   enum Opcode : uint8_t {
@@ -108,17 +77,26 @@ namespace X64 {
     JZ_NEAR = 0x84,
     JNE_NEAR = 0x85,
     MOV_R_TO_RM = 0x89,
-    SETE = 0x94,
-    MOV_64_TO_R = 0xB8,//+ register
+    MOV_RM_TO_R = 0x8B,
+    SETE_RM8 = 0x94,
+    CQO = 0x99,
     IMUL_RM_TO_R = 0xAF,
+    MOV_ZX_RM8_TO_R = 0xB6,
+    MOV_SX_RM8_TO_R = 0xBE,
+    MOV_64_TO_R = 0xB8,//+ register
     RET_NEAR = 0xC3,
     CALL_NEAR = 0xE8,
     JMP_NEAR = 0xE9,
-    DIV_RM_TO_RAX = 0xF7,
+    NEG_RM = 0xF7,//        r = 3
+    MUL_RM_TO_RAX = 0xF7,// r = 4
+    DIV_RM_TO_RAX = 0xF7,// r = 6
+    IDIV_RM_TO_RAX = 0xF7,// r = 7
   };
 }
 
 struct Compiler;
 
 size_t vm_backend(Array<uint8_t>& out_code, const Compiler*);
-size_t x86_64_backend(Array<uint8_t>& out_code, const Compiler* comp);
+size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* comp);
+
+void print_x86_64(const uint8_t* bytes, size_t size);

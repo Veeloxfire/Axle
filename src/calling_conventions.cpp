@@ -2,6 +2,8 @@
 #include "bytecode.h"
 #include "backends.h"
 
+#include "ast.h"
+
 constexpr REGISTER_CONSTANT all_x64_regs[] ={
   RAX,
   RCX,
@@ -56,27 +58,16 @@ const char* vm_regs_name_from_num(uint8_t reg) noexcept {
   return reg_num_as_string(reg);
 }
 
-ForcedColours vm_bin_op_forced(BINARY_OPERATOR op) {
-  return { 0, 0 };
-}
-
-ForcedColours x86_64_bin_op_forced(BINARY_OPERATOR op) {
-  switch (op) {
-    case BINARY_OPERATOR::DIV:
-      return { 0, RAX.REG + 1 };
-    default:
-      return { 0, 0 };
-  }
-}
-
 template<size_t num_registers>
-static constexpr System make_system(const REGISTER_CONSTANT(&all_regs)[num_registers],
+static constexpr System make_system(const char* name,
+                                    const REGISTER_CONSTANT(&all_regs)[num_registers],
                                     const REGISTER_CONSTANT& stack_pointer,
                                     const REGISTER_CONSTANT& base_pointer,
-                                    FUNCTION_PTR<const char*, uint8_t> reg_name_from_num,
-                                    FUNCTION_PTR<size_t, Array<uint8_t>&, const Compiler*> backend,
-                                    FUNCTION_PTR<ForcedColours, BINARY_OPERATOR> bin_op_forced) {
+                                    REG_NAME_FROM_NUM_PTR reg_name_from_num,
+                                    BACKEND_PTR backend) {
   System system ={};
+
+  system.name = name;
 
   system.all_registers = all_regs;
   system.num_registers = num_registers;
@@ -87,17 +78,18 @@ static constexpr System make_system(const REGISTER_CONSTANT(&all_regs)[num_regis
 
   system.reg_name_from_num = reg_name_from_num;
   system.backend = backend;
-  system.bin_op_forced = bin_op_forced;
 
   return system;
 }
 
 template<size_t num_registers>
-static constexpr System make_system(const REGISTER_CONSTANT(&all_regs)[num_registers],
-                                    FUNCTION_PTR<const char*, uint8_t> reg_name_from_num,
-                                    FUNCTION_PTR<size_t, Array<uint8_t>&, const Compiler*> backend,
-                                    FUNCTION_PTR<ForcedColours, BINARY_OPERATOR> bin_op_forced) {
+static constexpr System make_system(const char* name,
+                                    const REGISTER_CONSTANT(&all_regs)[num_registers],
+                                    REG_NAME_FROM_NUM_PTR reg_name_from_num,
+                                    BACKEND_PTR backend) {
   System system ={};
+
+  system.name = name;
 
   system.all_registers = all_regs;
   system.num_registers = num_registers;
@@ -106,20 +98,19 @@ static constexpr System make_system(const REGISTER_CONSTANT(&all_regs)[num_regis
 
   system.reg_name_from_num = reg_name_from_num;
   system.backend = backend;
-  system.bin_op_forced = bin_op_forced;
 
   return system;
 }
 
-const System system_x86_64 = make_system(all_x64_regs, RSP, RBP, 
+const System system_x86_64 = make_system(System::x86_64_name,
+                                         all_x64_regs, RSP, RBP,
                                          &x86_64_reg_name_from_num,
-                                         &x86_64_backend,
-                                         &x86_64_bin_op_forced);
+                                         &x86_64_machine_code_backend);
 
-const System system_vm = make_system(all_vm_regs, 
-                                     &vm_regs_name_from_num, 
-                                     &vm_backend, 
-                                     &vm_bin_op_forced);
+const System system_vm = make_system(System::vm_name,
+                                     all_vm_regs,
+                                     &vm_regs_name_from_num,
+                                     &vm_backend);
 
 template<typename T, size_t size>
 struct ConstArray {
@@ -128,8 +119,8 @@ struct ConstArray {
 
 template<size_t num_volatile, size_t num_non_volatile>
 constexpr static ConstArray<uint8_t, num_volatile + num_non_volatile>
-combine_regs(const uint8_t (&volatiles)[num_volatile],
-             const uint8_t (&non_volatiles)[num_non_volatile]) {
+combine_regs(const uint8_t(&volatiles)[num_volatile],
+             const uint8_t(&non_volatiles)[num_non_volatile]) {
   ConstArray<uint8_t, num_volatile + num_non_volatile> arr ={};
 
   size_t i = 0;
@@ -149,16 +140,16 @@ namespace MICROSOFT_X64 {
   constexpr uint8_t parameters[] ={ RCX.REG, RDX.REG, R8.REG, R9.REG };
   constexpr uint8_t volatiles[] ={ RAX.REG, RCX.REG, RDX.REG, R8.REG, R9.REG, R10.REG, R11.REG };
   constexpr uint8_t non_volatiles[] ={ RBX.REG, RSI.REG, RDI.REG, R12.REG, R13.REG, R14.REG };
-  
+
   constexpr auto all_regs_unordered = combine_regs(volatiles, non_volatiles);
 }
 
 template<size_t all, size_t num_params, size_t num_volatile, size_t num_non_volatile>
 static constexpr CallingConvention
-make_calling_convention(const uint8_t (&all_regs)[all],
-                        const uint8_t (&params)[num_params],
-                        const uint8_t (&volatiles)[num_volatile],
-                        const uint8_t (&non_volatiles)[num_non_volatile],
+make_calling_convention(const uint8_t(&all_regs)[all],
+                        const uint8_t(&params)[num_params],
+                        const uint8_t(&volatiles)[num_volatile],
+                        const uint8_t(&non_volatiles)[num_non_volatile],
                         const REGISTER_CONSTANT& ret_reg,
                         uint8_t shadow_space_size,
                         STACK_DIRECTION direction) {
@@ -219,3 +210,13 @@ const CallingConvention convention_vm
                           all_vm_regs[0],
                           0,
                           STACK_DIRECTION::RIGHT_TO_LEFT);
+
+
+
+bool CallingConvention::is_non_volatile(uint8_t reg) const {
+  return (non_volatiles_bit_mask & ((uint64_t)1 << reg)) != 0;
+}
+
+bool CallingConvention::is_volatile(uint8_t reg) const {
+  return (non_volatiles_bit_mask & ((uint64_t)1 << reg)) == 0;
+}

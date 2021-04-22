@@ -1,34 +1,30 @@
 #pragma once
 #include "calling_conventions.h"
 
-struct Structure;
-struct EnumValue;
-
-struct Lang {
-  const Structure* s_bool = nullptr;
-  const Structure* s_u8   = nullptr;
-  const Structure* s_u64  = nullptr;
-  const Structure* s_void = nullptr;
-
-  const EnumValue* e_false = nullptr;
-  const EnumValue* e_true  = nullptr;
+struct OptimizationOptions {
+  bool non_stack_locals = false;
 };
 
 struct BuildOptions {
-  InternString entry_point;
+  const char* file_name;
+  const char* entry_point;
+  const char* output_file = nullptr;
+
   const System* system;
   const CallingConvention* calling_convention;
 };
 
-struct RunOptions {
-  bool compile;
-  bool run_after_build;
+struct PrintOptions {
+  bool ast             = false;
+  bool pre_reg_alloc   = false;
+  bool normal_bytecode = false;
+  bool fully_compiled  = false;
+  bool coalesce_values = false;
+  bool run_headers     = false;;
 };
 
-struct PrintOptions {
-  bool ast;
-  bool pre_reg_alloc;
-  bool normal_bytecode;
-  bool combined_bytecode;
-  bool coalesce_values;
+struct Options {
+  OptimizationOptions optimize;
+  BuildOptions build;
+  PrintOptions print;
 };

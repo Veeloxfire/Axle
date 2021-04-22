@@ -1,0 +1,12 @@
+function fib(u64 a) -> u64 {
+  if(a == 1 | a == 0) {
+    return 1;
+  }
+  else {
+    return fib(a - 1) + fib(a - 2);
+  }
+}
+
+function main() -> u64 {
+  return fib(15);
+}
