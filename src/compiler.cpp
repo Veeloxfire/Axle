@@ -8,6 +8,10 @@ Function* Compiler::new_function() {
   return functions.insert();
 }
 
+void State::use_value(ValueIndex index) {
+  use_value(index, index);
+}
+
 void State::use_value(const ValueIndex index, const ValueIndex creates) {
   struct Lambda {
     const ControlFlow* flow;
@@ -34,6 +38,49 @@ void State::use_value(const ValueIndex index, const ValueIndex creates) {
         && val.creation.time.time < control_flow.last_call) // created before last call
     || (control_flow.had_call //had a call
         && val.creation.time.flow != control_flow.current_flow);//not same flow must lead here
+}
+
+ValueIndex State::new_value() {
+  value_tree.values.insert_uninit(1);
+  value_tree.adjacency_list.insert_uninit(1);
+
+  auto val_index = ValueIndex{ value_tree.intersection_check.new_value() };
+
+
+  auto* val = value_tree.values.data + val_index.val;
+  val->creation = ValueUse{ val_index, control_flow.now() };
+
+  return val_index;
+}
+
+ValueIndex State::new_value(ValueIndex created_by) {
+  const ValueIndex val_index = new_value();
+  auto* val = value_tree.values.data + val_index.val;
+  val->creation.related_index = created_by;
+  return val_index;
+}
+
+const Local* State::find_local(InternString i_s) const {
+  auto i = locals.begin();
+  const auto end = locals.end();
+
+  for (; i < end; i++) {
+    if (i->name == i_s) {
+      return i;
+    }
+  }
+  return nullptr;
+}
+
+void State::free_constants(Compiler* comp) {
+  auto i = constants.begin();
+  const auto end = constants.end();
+
+  for (; i < end; i++) {
+    if (i->val != nullptr) {
+      comp->constants.free(i->val);
+    }
+  }
 }
 
 uint64_t StackState::next_stack_local(uint64_t size, uint64_t alignment) {

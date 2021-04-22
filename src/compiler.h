@@ -157,6 +157,11 @@ struct StackState {
   uint64_t next_stack_local(uint64_t size, uint64_t alignment);
 };
 
+struct ComptimeConstant {
+  ASTExpression* expr = nullptr;
+  void* val = nullptr;
+};
+
 struct State {
   Array<Local> locals;
 
@@ -166,46 +171,17 @@ struct State {
   uint64_t return_label;
 
   bool made_call = false;
-
   StackState stack ={};
 
-  ValueIndex new_value() {
-    value_tree.values.insert_uninit(1);
-    value_tree.adjacency_list.insert_uninit(1);
+  Array<ComptimeConstant> constants ={};
 
-    auto val_index = ValueIndex{ value_tree.intersection_check.new_value() };
+  void free_constants(Compiler* comp);
 
-
-    auto* val = value_tree.values.data + val_index.val;
-    val->creation = ValueUse{ val_index, control_flow.now() };
-
-    return val_index;
-  }
-
-  ValueIndex new_value(ValueIndex created_by) {
-    const ValueIndex val_index = new_value();
-    auto* val = value_tree.values.data + val_index.val;
-    val->creation.related_index = created_by;
-    return val_index;
-  }
-
+  ValueIndex new_value();
+  ValueIndex new_value(ValueIndex created_by);
   void use_value(ValueIndex index, ValueIndex creates);
-  void use_value(ValueIndex index) {
-    use_value(index, index);
-  }
-
-
-  const Local* find_local(InternString i_s) const {
-    auto i = locals.begin();
-    const auto end = locals.end();
-
-    for (; i < end; i++) {
-      if (i->name == i_s) {
-        return i;
-      }
-    }
-    return nullptr;
-  }
+  void use_value(ValueIndex index);
+  const Local* find_local(InternString i_s) const;
 };
 
 
@@ -248,6 +224,8 @@ struct Compiler {
   Array<CompilationUnitCarrier> compiling;
 
   LinkedList<Function> functions;
+
+  ArenaAllocator constants;
 
   Types* types;
   StringInterner* strings;
