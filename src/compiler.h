@@ -17,8 +17,8 @@ struct ASTDeclaration;
 struct ASTFile;
 
 struct TimePoint {
-  size_t flow;
-  uint32_t time;
+  size_t flow = 0;
+  uint32_t time = 0;
 };
 
 struct ControlFlow {
@@ -222,25 +222,25 @@ struct FunctionUnit {
 struct VM;
 
 struct Compiler {
-  VM* vm;
-  State* working_state;
+  VM* vm = nullptr;
+  State* working_state = nullptr;
 
   PrintOptions        print_options        ={};
   BuildOptions        build_options        ={};
   OptimizationOptions optimization_options ={};
 
-  Array<FunctionUnit> function_units;
+  Array<FunctionUnit> function_units ={};
 
-  Array<CompilationUnitCarrier> compiling;
+  Array<CompilationUnitCarrier> compiling ={};
 
-  LinkedList<Function> functions;
+  LinkedList<Function> functions ={};
 
-  ArenaAllocator constants;
+  ArenaAllocator constants ={};
 
-  Types* types;
-  StringInterner* strings;
+  Types* types = nullptr;
+  StringInterner* strings = nullptr;
 
-  InternString entry_point;
+  InternString entry_point ={};
   uint64_t labels = 0;
 
   Function* new_function();
