@@ -11,6 +11,8 @@ TokenTypeString token_type_string(TokenType t) {
     TOKEN_TYPE_MODIFY
     #undef MODIFY
   }
+
+  return {"UNKNOWN TOKEN TYPE", sizeof("UNKNOWN TOKEN TYPE")};
 }
 
 void Parser::report_error(const char* error_message) {

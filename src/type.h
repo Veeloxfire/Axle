@@ -12,7 +12,7 @@ struct Function;
 
 
 enum struct STRUCTURE_TYPE : uint8_t {
-  UNKNOWN, INTEGER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY
+  INTEGER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY
 };
 
 using CAST_TEST     = FUNCTION_PTR<bool, const Structure*>;
@@ -24,7 +24,7 @@ struct Cast {
 };
 
 struct Structure {
-  STRUCTURE_TYPE type = STRUCTURE_TYPE::UNKNOWN;
+  STRUCTURE_TYPE type = STRUCTURE_TYPE::VOID;
   InternString name = { nullptr };
   Array<Cast> casts ={};
 
@@ -60,7 +60,7 @@ enum struct LITERAL_TYPE {
 };
 
 struct LiteralStructure : public Structure {
-  LITERAL_TYPE literal_type;
+  LITERAL_TYPE literal_type = LITERAL_TYPE::INTEGER;
 };
 
 struct StructElement {

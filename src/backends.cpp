@@ -5,6 +5,130 @@
 
 #include <stdio.h>
 
+size_t vm_backend_single_func(Array<uint8_t>& out_code, const Function* func, uint64_t labels) {
+  size_t* const label_indexes = allocate_default<size_t>(labels);
+  Array<size_t> instruction_offsets ={};
+
+  size_t entry_point_label = func->label;
+
+  {
+    auto code_i = func->code.begin();
+    const auto code_end = func->code.end();
+
+    //First is guaranteed to be label
+    {
+      const auto p = ByteCode::PARSE::LABEL(code_i);
+
+      label_indexes[p.u64.val] = out_code.size;
+
+      code_i += ByteCode::SIZE_OF::LABEL;
+    }
+
+    while (code_i < code_end) {
+      switch (*code_i) {
+        case ByteCode::RESERVE: {
+            code_i += ByteCode::SIZE_OF::RESERVE;
+            break;
+          }
+        case ByteCode::LABEL: {
+            const auto p = ByteCode::PARSE::LABEL(code_i);
+
+            label_indexes[p.u64.val] = out_code.size;
+
+            code_i += ByteCode::SIZE_OF::LABEL;
+            break;
+          }
+        case ByteCode::JUMP_TO_FIXED: {
+            const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED(code_i);
+            code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED;
+
+            //Can ignore anything between a fixed jump and a label - it wont every be reached
+            while (code_i < code_end && code_i[0] != ByteCode::LABEL) {
+              code_i += ByteCode::instruction_size(code_i[0]);
+            }
+
+            size_t next = 0;
+
+            //Could be series of labels so needs to while loop
+            while (code_i + next < code_end && code_i[next] == ByteCode::LABEL) {
+              const auto p_l = ByteCode::PARSE::LABEL(code_i + next);
+
+              if (p_l.u64.val == p_j.u64.val) {
+                //About to jump to next instruction - can ignore jump
+                goto SKIP_JUMP;
+              }
+
+              //Next might also be a label
+              next += ByteCode::SIZE_OF::LABEL;
+            }
+
+            instruction_offsets.insert(out_code.size);
+            ByteCode::EMIT::JUMP_TO_FIXED(out_code, p_j.u64);
+          SKIP_JUMP:
+            break;
+          }
+        case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO:
+        case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO:
+          //Could try removing these jumps maybe
+          //but they shouldnt ever jump to the next instruction anyway
+          //Would be checking for something that never happens
+        case ByteCode::CALL:
+          instruction_offsets.insert(out_code.size);
+          goto NEXT_INSTRUCTION;//Remove warning about fallthrough
+        default: {
+          NEXT_INSTRUCTION:
+            const size_t i_size = ByteCode::instruction_size(*code_i);
+            out_code.insert_uninit(i_size);
+            memcpy_ts(out_code.data + out_code.size - i_size, i_size, code_i, i_size);
+
+            code_i += i_size;
+            break;
+          }
+      }
+    }
+  }
+
+  {
+    auto jumps_i = instruction_offsets.begin();
+    const auto jumps_end = instruction_offsets.end();
+
+    for (; jumps_i < jumps_end; jumps_i++) {
+      const size_t index = *jumps_i;
+
+      switch (out_code.data[index]) {
+        case ByteCode::CALL: {
+            const auto p = ByteCode::PARSE::CALL(out_code.data + index);
+            ByteCode::WRITE::CALL(out_code.data + index, label_indexes[p.u64.val]);
+            break;
+          }
+        case ByteCode::JUMP_TO_FIXED: {
+            const auto p = ByteCode::PARSE::JUMP_TO_FIXED(out_code.data + index);
+            ByteCode::WRITE::JUMP_TO_FIXED(out_code.data + index, label_indexes[p.u64.val]);
+            break;
+          }
+        case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
+            const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_ZERO(out_code.data + index);
+            ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_ZERO(out_code.data + index, p.val, label_indexes[p.u64.val]);
+            break;
+          }
+        case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
+            const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(out_code.data + index);
+            ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(out_code.data + index, p.val, label_indexes[p.u64.val]);
+            break;
+          }
+      }
+    }
+  }
+
+  size_t entry_point_index = -1;
+  if (entry_point_label <= labels) {
+    entry_point_index = label_indexes[entry_point_label];
+  }
+
+  free<size_t>(label_indexes);
+  return entry_point_index;
+}
+
 size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
   Array<size_t> instruction_offsets ={};
@@ -190,6 +314,7 @@ inline static void emit_mod_rm(Array<uint8_t>& arr, R r, RM rm) {
                     (const uint8_t*)&rm.disp, 4);
           arr.size += 4;
         }
+        break;
       }
 
     case RBP.REG:
@@ -894,9 +1019,9 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
               }
               else {
                 return format("[{} + ({} * {})]",
-                         rm_name(base),
-                         rm_name(index),
-                         scale);
+                              rm_name(base),
+                              rm_name(index),
+                              scale);
               }
             }
           case 0b01: {
@@ -906,14 +1031,14 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
 
               if (INDEX_RSP) {
                 return format("[{} {} {}]",
-                         rm_name(base),
-                         sign, absolute(disp));
+                              rm_name(base),
+                              sign, absolute(disp));
               }
               else {
                 return format("[{} + ({} * {}) {} {}]",
-                         rm_name(base),
-                         rm_name(index), scale,
-                         sign, absolute(disp));
+                              rm_name(base),
+                              rm_name(index), scale,
+                              sign, absolute(disp));
               }
             }
           case 0b10: {
@@ -924,14 +1049,14 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
 
               if (INDEX_RSP) {
                 return format("[{} {} {}]",
-                         rm_name(base),
-                         sign, absolute(disp));
+                              rm_name(base),
+                              sign, absolute(disp));
               }
               else {
                 return format("[{} + ({} * {}) {} {}]",
-                         rm_name(base),
-                         rm_name(index), scale,
-                         sign, absolute(disp));
+                              rm_name(base),
+                              rm_name(index), scale,
+                              sign, absolute(disp));
               }
             }
         }

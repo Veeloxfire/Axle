@@ -12,13 +12,13 @@ struct Function;
 struct EnumValue;
 
 struct ASTName {
-  InternString name;
+  InternString name ={};
 
   const Structure* type = nullptr;
 };
 
 struct ASTType {
-  InternString name;
+  InternString name ={};
   const Structure* type = nullptr;
 };
 
@@ -107,7 +107,7 @@ struct ASTExpression {
     ValueExpr value;
   };
 
-  ASTExpression() : _dummy() {}
+  ASTExpression() = default;
 
   ASTExpression(ASTExpression&& a) noexcept {
     move_from(std::move(a));
@@ -151,14 +151,14 @@ struct ASTStatement {
   STATEMENT_TYPE type ={};
 
   union {
-    char _dummy;
+    char _dummy ={};
     ASTExpression expression;
     ASTDeclaration declaration;
     ASTIfElse if_else;
     ASTBlock block;
   };
 
-  ASTStatement() : _dummy() {}
+  ASTStatement() = default;
   ~ASTStatement();
 };
 

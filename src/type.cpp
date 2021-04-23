@@ -13,6 +13,21 @@ uint32_t Structure::size() const {
     case STRUCTURE_TYPE::COMPOSITE: return static_cast<const CompositeStructure*>(this)->total_size;
     case STRUCTURE_TYPE::INTEGER: return static_cast<const IntegerStructure*>(this)->bytes;
     case STRUCTURE_TYPE::ENUM: return static_cast<const EnumStructure*>(this)->base->bytes;
+    case STRUCTURE_TYPE::FIXED_ARRAY: {
+        const ArrayStructure* const fa = static_cast<const ArrayStructure*>(this);
+        return fa->base->size() * (uint32_t)fa->length;
+      }
+    case STRUCTURE_TYPE::LITERAL: {
+        const LiteralStructure* const ls = static_cast<const LiteralStructure*>(this);
+
+        switch (ls->literal_type) {
+          case LITERAL_TYPE::INTEGER:
+          case LITERAL_TYPE::SIGNED_INTEGER: return 8;
+        }
+
+        break;
+      }
+    case STRUCTURE_TYPE::VOID: return 0;
   }
 
   return (uint32_t)-1;
@@ -23,6 +38,18 @@ uint32_t Structure::alignment() const {
     case STRUCTURE_TYPE::COMPOSITE: return static_cast<const CompositeStructure*>(this)->total_alignment;
     case STRUCTURE_TYPE::INTEGER: return static_cast<const IntegerStructure*>(this)->bytes;
     case STRUCTURE_TYPE::ENUM: return static_cast<const EnumStructure*>(this)->base->bytes;
+    case STRUCTURE_TYPE::FIXED_ARRAY: return static_cast<const ArrayStructure*>(this)->base->alignment();
+    case STRUCTURE_TYPE::LITERAL: {
+        const LiteralStructure* ls = static_cast<const LiteralStructure*>(this);
+
+        switch (ls->literal_type) {
+          case LITERAL_TYPE::INTEGER:
+          case LITERAL_TYPE::SIGNED_INTEGER: return 8;
+        }
+
+        break;
+      }
+    case STRUCTURE_TYPE::VOID: return 0;
   }
 
   return (uint32_t)-1;

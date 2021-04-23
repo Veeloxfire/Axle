@@ -25,6 +25,10 @@ constexpr auto fib_recurse_main() -> uint64_t {
   return constexpr_fibonacci(15);
 }
 
+constexpr auto operations_optim() -> uint64_t {
+  return 1 + -2 * 3 / 4;
+}
+
 constexpr auto operations_unsigned_cpp() -> uint64_t {
   uint64_t one = 1;
   uint64_t minus_two = -2;
@@ -61,6 +65,7 @@ static constexpr Test tests[] ={
   Test{"Fibonnaci Recursive", TEST_DIR("fib_recurse.axl"), fib_recurse_main()},
   Test{"Operators Unsigned", TEST_DIR("operators_unsigned.axl"), operations_unsigned_cpp()},
   Test{"Operators Signed", TEST_DIR("operators_signed.axl"), operations_signed_cpp()},
+  Test{"Operators Comptime", TEST_DIR("operators_comptime.axl"), operations_optim()},
 };
 
 static constexpr size_t num_tests = sizeof(tests)/sizeof(Test);
@@ -139,7 +144,8 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
     options.build.entry_point        = "main";
     options.build.file_name          = test.file_name;
 
-    //options.print.fully_compiled = true;
+    options.print.fully_compiled = true;
+    options.print.comptime_exec = true;
 
     std::cout << "\nStarting Test: " << test.test_name << "\n";
 

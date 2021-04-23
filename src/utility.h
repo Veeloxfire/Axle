@@ -9,6 +9,14 @@
 #include "safe_lib.h"
 
 #define BYTE(a) (static_cast<uint8_t>(a))
+#define JOIN2(a, b) a ## b
+#define JOIN(a, b) JOIN2(a, b)
+
+template<typename T>
+void reset_type(T* t) noexcept {
+  t->~T();
+  new(t) T();
+}
 
 template<typename T, size_t i>
 constexpr size_t array_size(T(&)[i]) {
@@ -137,7 +145,7 @@ constexpr inline uint64_t small_log_2_ceil(uint64_t v) {
 
 constexpr inline uint8_t absolute(int8_t i) {
   if (i == INT32_MIN) {
-    return static_cast<uint16_t>(INT8_MAX)+ 1u;
+    return static_cast<uint16_t>(INT8_MAX) + 1u;
   }
   else if (i < 0) {
     return static_cast<uint8_t>(-i);
@@ -149,7 +157,7 @@ constexpr inline uint8_t absolute(int8_t i) {
 
 constexpr inline uint16_t absolute(int16_t i) {
   if (i == INT32_MIN) {
-    return static_cast<uint16_t>(INT16_MAX)+ 1u;
+    return static_cast<uint16_t>(INT16_MAX) + 1u;
   }
   else if (i < 0) {
     return static_cast<uint16_t>(-i);
@@ -161,7 +169,7 @@ constexpr inline uint16_t absolute(int16_t i) {
 
 constexpr inline uint32_t absolute(int32_t i) {
   if (i == INT32_MIN) {
-    return static_cast<uint32_t>(INT32_MAX)+ 1u;
+    return static_cast<uint32_t>(INT32_MAX) + 1u;
   }
   else if (i < 0) {
     return static_cast<uint32_t>(-i);
@@ -173,7 +181,7 @@ constexpr inline uint32_t absolute(int32_t i) {
 
 constexpr inline uint64_t absolute(int64_t i) {
   if (i == INT64_MIN) {
-    return static_cast<uint64_t>(INT64_MAX) + 1ull;
+    return 0x8000000000000000ull;
   }
   else if (i < 0) {
     return static_cast<uint64_t>(-i);
@@ -350,6 +358,23 @@ struct Array {
   void pop() noexcept {
     size--;
     (data + size)->~T();
+  }
+
+  void pop(size_t num) noexcept {
+    const auto* old_end = data + size;
+
+    if (num > size) {
+      size = 0;
+    }
+    else {
+      size -= num;
+    }
+
+    auto* i = data + size;
+
+    for (; i < old_end; i++) {
+      i->~T();
+    }
   }
 
   bool contains(const T& t) const noexcept {
@@ -999,3 +1024,19 @@ template<typename T>
 constexpr inline T smaller(T t1, T t2) noexcept {
   return t1 < t2 ? t1 : t2;
 }
+
+template<typename T>
+struct EXECUTE_AT_END {
+  T t;
+
+  constexpr EXECUTE_AT_END(T&& t_) : t(std::move(t_)) {}
+
+  ~EXECUTE_AT_END() {
+    t();
+  }
+};
+
+template<typename T>
+EXECUTE_AT_END(T&& t) -> EXECUTE_AT_END<T>;
+
+#define DEFER(...) EXECUTE_AT_END JOIN(defer, __LINE__) = [__VA_ARGS__]() mutable ->void 

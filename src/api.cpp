@@ -54,6 +54,9 @@ int compile_file(const Options& options,
 
   init_types(&types, &strings);
 
+  State working_state ={};
+  VM vm = {};
+
   Compiler compiler ={};
   compiler.build_options = options.build;
   compiler.print_options = options.print;
@@ -62,6 +65,8 @@ int compile_file(const Options& options,
   compiler.strings = &strings;
   compiler.types = &types;
   compiler.entry_point = strings.intern(options.build.entry_point);
+  compiler.working_state = &working_state;
+  compiler.vm = &vm;
 
   Parser parser ={};
   parser.lexer.strings = &strings;
@@ -142,7 +147,7 @@ int compile_file(const Options& options,
 RunOutput compile_file_and_run(const Options& options) {
   Program program ={};
 
-  int res = compile_file(options, &program);
+  const int res = compile_file(options, &program);
 
   if (res != 0) {
     return { res,  0 };
@@ -152,23 +157,23 @@ RunOutput compile_file_and_run(const Options& options) {
     if (options.print.run_headers) {
       std::cout << "\n=== Running in VM ===\n\n";
     }
-    RunOutput res = run_in_vm(program);
+    RunOutput ret = run_in_vm(program);
     if (options.print.run_headers) {
       std::cout << "\n=====================\n\n";
     }
 
-    return res;
+    return ret;
   }
   else if (options.build.system == &system_x86_64 && options.build.calling_convention == &convention_microsoft_x64) {
     if (options.print.run_headers) {
       std::cout << "\n=== Running machine code (JIT) ===\n\n";
     }
-    RunOutput res = run_as_machine_code(program);
+    RunOutput ret = run_as_machine_code(program);
     if (options.print.run_headers) {
       std::cout << "\n==================================\n\n";
     }
 
-    return res;
+    return ret;
   }
   else {
     std::cerr << "Could not run! Invalid convention and system conbination\n";

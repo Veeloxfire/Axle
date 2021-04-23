@@ -95,8 +95,11 @@ namespace X64 {
 }
 
 struct Compiler;
+struct Function;
 
 size_t vm_backend(Array<uint8_t>& out_code, const Compiler*);
+size_t vm_backend_single_func(Array<uint8_t>& out_code, const Function* func, uint64_t labels);
+
 size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* comp);
 
 void print_x86_64(const uint8_t* bytes, size_t size);

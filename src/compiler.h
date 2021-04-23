@@ -22,11 +22,11 @@ struct TimePoint {
 };
 
 struct ControlFlow {
-  SquareBitMatrix ever_flows_to;
-  Array<Array<size_t>> direct_flows_from;
+  SquareBitMatrix ever_flows_to ={};
+  Array<Array<size_t>> direct_flows_from ={};
 
-  size_t current_flow;
-  uint32_t expression_num;
+  size_t current_flow = 0;
+  uint32_t expression_num = 0;
 
   bool had_call = false;
   uint32_t last_call = 0;
@@ -82,14 +82,14 @@ struct ControlFlow {
 };
 
 struct Local {
-  InternString name;
-  ValueIndex val;
-  const Structure* type;
+  InternString name ={};
+  ValueIndex val ={};
+  const Structure* type = nullptr;
 };
 
 struct ValueUse {
   ValueIndex related_index ={};
-  TimePoint time;
+  TimePoint time ={};
 };
 
 enum struct ValueType : uint8_t {
@@ -102,6 +102,16 @@ struct Value {
 
   ValueType value_type = ValueType::FREE;
 
+  union {
+    uint8_t reg = 0;
+    ValueIndex index;
+    int64_t stack_offset;
+    uint64_t arg_num;
+  };
+
+  ValueUse creation ={};
+  Array<ValueUse> last_uses ={};
+
   constexpr bool fixed() const { return value_type == ValueType::FIXED; }
   constexpr bool is_coalesced() const {
     return value_type == ValueType::COALESCED;
@@ -110,23 +120,13 @@ struct Value {
     return value_type == ValueType::NORMAL_STACK
       || value_type == ValueType::ARGUMENT_STACK;
   }
-
-  union {
-    uint8_t reg = 0;
-    ValueIndex index;
-    int64_t stack_offset;
-    uint64_t arg_num;
-  };
-
-  ValueUse creation;
-  Array<ValueUse> last_uses;
 };
 
 struct ValueTree {
-  Array<Value> values;
+  Array<Value> values ={};
 
-  SquareBitMatrix intersection_check;
-  Array<Array<ValueIndex>> adjacency_list;
+  SquareBitMatrix intersection_check ={};
+  Array<Array<ValueIndex>> adjacency_list ={};
 
   void set_intersection(const ValueIndex a, const ValueIndex b) {
     //Only need to insert if not already inserted
@@ -151,7 +151,6 @@ struct ValueTree {
 struct StackState {
   uint64_t current = 0;
   uint64_t max = 0;
-
   uint64_t max_parameters = 0;
 
   uint64_t next_stack_local(uint64_t size, uint64_t alignment);
@@ -163,19 +162,25 @@ struct ComptimeConstant {
 };
 
 struct State {
-  Array<Local> locals;
+  Array<Local> locals ={};
 
-  ValueTree value_tree;
-  ControlFlow control_flow;
+  ValueTree value_tree ={};
+  ControlFlow control_flow ={};
 
-  uint64_t return_label;
+  uint64_t return_label = 0;
 
   bool made_call = false;
+
+  bool used_stack = false;
   StackState stack ={};
 
+  bool comptime_compilation = false;
   Array<ComptimeConstant> constants ={};
 
+  constexpr bool needs_new_frame() const { return made_call || used_stack; }
+
   void free_constants(Compiler* comp);
+  const void* find_constant(const ASTExpression*) const;
 
   ValueIndex new_value();
   ValueIndex new_value(ValueIndex created_by);
@@ -201,20 +206,25 @@ enum struct FUNCTION_COMPILE_STAGE : uint8_t {
 };
 
 struct CompilationUnitCarrier {
-  COMPILATION_TYPE type;
-  size_t index;
+  COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
+  size_t index = 0;
 };
 
 struct FunctionUnit {
-  FUNCTION_COMPILE_STAGE stage;
+  FUNCTION_COMPILE_STAGE stage = FUNCTION_COMPILE_STAGE::FINISHED;
 
-  ASTFunctionDeclaration* source;
-  Function* destination;
+  ASTFunctionDeclaration* source = nullptr;
+  Function* destination = nullptr;
 
-  State state;
+  State state ={};
 };
 
+struct VM;
+
 struct Compiler {
+  VM* vm;
+  State* working_state;
+
   PrintOptions        print_options        ={};
   BuildOptions        build_options        ={};
   OptimizationOptions optimization_options ={};

@@ -17,6 +17,7 @@ struct BuildOptions {
 struct PrintOptions {
   bool ast             = false;
   bool pre_reg_alloc   = false;
+  bool comptime_exec   = false;
   bool normal_bytecode = false;
   bool fully_compiled  = false;
   bool coalesce_values = false;

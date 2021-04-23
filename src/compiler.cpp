@@ -3,6 +3,8 @@
 #include "ast.h"
 #include "bytecode.h"
 #include "parser.h"
+#include "vm.h"
+#include "backends.h"
 
 Function* Compiler::new_function() {
   return functions.insert();
@@ -78,9 +80,22 @@ void State::free_constants(Compiler* comp) {
 
   for (; i < end; i++) {
     if (i->val != nullptr) {
-      comp->constants.free(i->val);
+      comp->constants.free_no_destruct(i->val);
     }
   }
+}
+
+const void* State::find_constant(const ASTExpression* expr) const {
+  auto i = constants.begin();
+  const auto end = constants.end();
+
+  for (; i < end; i++) {
+    if (i->expr == expr) {
+      return i->val;
+    }
+  }
+
+  return nullptr;
 }
 
 uint64_t StackState::next_stack_local(uint64_t size, uint64_t alignment) {
@@ -387,10 +402,14 @@ static CompileCode check_cast(const Structure* from, const Structure* to) {
   }
 }
 
+constexpr static bool already_const_value(const ASTExpression* expr) {
+  return expr->expr_type == EXPRESSION_TYPE::ENUM || expr->expr_type == EXPRESSION_TYPE::VALUE;
+}
+
 //Note: Recursive
 static CompileCode compile_type_of_expression(Compiler* const comp,
                                               ASTExpression* const expr,
-                                              const State* const state) {
+                                              State* const state) {
   //Already typed
   if (expr->type != nullptr) {
     return CompileCode::NO_ERRORS;
@@ -445,7 +464,6 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
 
             expr->expr_type = EXPRESSION_TYPE::LOCAL;
             expr->type = i->type;
-
             break;
           }
         }
@@ -518,8 +536,31 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           return ret_code;
         }
 
+        if (bin_op->left->compile_time_constant && bin_op->right->compile_time_constant) {
+          expr->compile_time_constant = true;
+        }
+        else if (bin_op->left->compile_time_constant && !already_const_value(bin_op->left)) {
+          expr->compile_time_constant = false;
 
-        expr->compile_time_constant = bin_op->left->compile_time_constant && bin_op->right->compile_time_constant;
+          ComptimeConstant compconst ={};
+          compconst.expr = bin_op->left;
+          compconst.val = comp->constants.alloc_no_construct(bin_op->left->type->size());
+
+          state->constants.insert(std::move(compconst));
+        }
+        else if (bin_op->right->compile_time_constant && !already_const_value(bin_op->right)) {
+          expr->compile_time_constant = false;
+
+          ComptimeConstant compconst ={};
+          compconst.expr = bin_op->right;
+          compconst.val = comp->constants.alloc_no_construct(bin_op->right->type->size());
+
+          state->constants.insert(std::move(compconst));
+        }
+        else {
+          expr->compile_time_constant = false;
+        }
+
         expr->makes_call = bin_op->left->makes_call || bin_op->right->makes_call;
 
         ret_code = binary_operator_type(comp->types, expr);
@@ -553,6 +594,24 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         ret_code = find_function_for_call(comp, call);
         if (ret_code != CompileCode::NO_ERRORS) {
           return ret_code;
+        }
+
+        //Cant currently call functions at compile time
+        expr->compile_time_constant = false;
+
+        if (!expr->compile_time_constant) {
+          auto i = call->arguments.mut_begin();
+          const auto end = call->arguments.mut_end();
+
+          for (; i < end; i++) {
+            if (i->compile_time_constant && !already_const_value(i)) {
+              ComptimeConstant compconst ={};
+              compconst.expr = i;
+              compconst.val = comp->constants.alloc_no_construct(i->type->size());
+
+              state->constants.insert(std::move(compconst));
+            }
+          }
         }
 
         expr->type = call->function->return_type;
@@ -642,9 +701,19 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
             return ret;
           }
 
+          assert(decl->expression.type != nullptr);
+
           ret = check_cast(decl->expression.type, decl->type.type);
           if (ret != CompileCode::NO_ERRORS) {
             return ret;
+          }
+
+          if (decl->expression.compile_time_constant && !already_const_value(&decl->expression)) {
+            ComptimeConstant compconst ={};
+            compconst.expr = &decl->expression;
+            compconst.val = comp->constants.alloc_no_construct(decl->expression.type->size());
+
+            state->constants.insert(std::move(compconst));
           }
         }
         assert(decl->expression.type != nullptr);
@@ -662,6 +731,16 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
           if (ret != CompileCode::NO_ERRORS) {
             return ret;
           }
+
+          assert(expr->type != nullptr);
+
+          if (expr->compile_time_constant && !already_const_value(expr)) {
+            ComptimeConstant compconst ={};
+            compconst.expr = expr;
+            compconst.val = comp->constants.alloc_no_construct(expr->type->size());
+
+            state->constants.insert(std::move(compconst));
+          }
         }
 
         return CompileCode::NO_ERRORS;
@@ -675,9 +754,19 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
             return ret;
           }
 
+          assert(expr->type != nullptr);
+
           ret = check_cast(expr->type, func->return_type);
           if (ret != CompileCode::NO_ERRORS) {
             return ret;
+          }
+
+          if (expr->compile_time_constant && !already_const_value(expr)) {
+            ComptimeConstant compconst ={};
+            compconst.expr = expr;
+            compconst.val = comp->constants.alloc_no_construct(expr->type->size());
+
+            state->constants.insert(std::move(compconst));
           }
         }
 
@@ -697,8 +786,22 @@ static ValueIndex compile_bytecode_of_expression(const BuildOptions* const build
                                                  const ASTExpression* const expr,
                                                  State* const state,
                                                  Function* const func) {
+  DEFER(state) { state->control_flow.expression_num++; };
 
   ValueIndex result ={};
+
+  if (expr->compile_time_constant && !state->comptime_compilation && !already_const_value(expr)) {
+    result = state->new_value();
+
+    const void* ptr = state->find_constant(expr);
+    if (ptr == nullptr) {
+      throw std::exception("Could not find constant!");
+    }
+
+    ByteCode::EMIT::SET_R64_TO_64(func->code, (uint8_t)result.val, *(const uint64_t*)ptr);
+    return result;
+  }
+
 
   switch (expr->expr_type) {
     case EXPRESSION_TYPE::ENUM: {
@@ -848,6 +951,8 @@ static ValueIndex compile_bytecode_of_expression(const BuildOptions* const build
 
             i_val->value_type = ValueType::ARGUMENT_STACK;
             i_val->arg_num    = index - max_reg_params;
+
+            state->used_stack = true;
           }
         }
 
@@ -875,8 +980,6 @@ static ValueIndex compile_bytecode_of_expression(const BuildOptions* const build
         break;
       }
   }
-
-  state->control_flow.expression_num++;
   return result;
 }
 
@@ -899,8 +1002,9 @@ void compile_bytecode_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::RETURN: {
+        const ASTExpression* expr = &statement->expression;
         const ValueIndex result = compile_bytecode_of_expression(&comp->build_options,
-                                                                 &statement->expression,
+                                                                 expr,
                                                                  state,
                                                                  func);
 
@@ -997,6 +1101,8 @@ void compile_bytecode_of_statement(Compiler* const comp,
 
           local_val->value_type   = ValueType::NORMAL_STACK;
           local_val->stack_offset = state->stack.next_stack_local(local->type->size(), local->type->alignment());
+
+          state->used_stack = true;
         }
         else {
           state->use_value(val);
@@ -1009,6 +1115,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
   }
 }
 
+
 static void map_values(const BuildOptions* const options,
                        Function* const func, const State* const state, uint64_t regs) {
   //Only non volatiles
@@ -1020,13 +1127,14 @@ static void map_values(const BuildOptions* const options,
 
   //Call label
   ByteCode::EMIT::LABEL(temp, func->label);
-  ByteCode::EMIT::PUSH_FRAME(temp);
 
   //Non-volatile registers need to be saved in the function if used
   uint8_t non_v_regs = 0;
   int64_t base_pointer_offset = 0;
 
-  {
+  if (state->needs_new_frame()) {
+    ByteCode::EMIT::PUSH_FRAME(temp);
+
     const uint8_t num_regs = options->system->num_registers;
     for (; non_v_regs < num_regs; non_v_regs++) {
       if (regs & ((uint64_t)1 << non_v_regs)) {
@@ -1035,7 +1143,6 @@ static void map_values(const BuildOptions* const options,
       }
     }
   }
-
 
   //Finally allocate the stack
   const uint64_t stack_needed = state->stack.max
@@ -1161,7 +1268,10 @@ static void map_values(const BuildOptions* const options,
       }
     }
 
-    ByteCode::EMIT::POP_FRAME(temp);
+    if (state->needs_new_frame()) {
+      ByteCode::EMIT::POP_FRAME(temp);
+    }
+
     ByteCode::EMIT::RETURN(temp);
   }
 
@@ -1559,6 +1669,22 @@ void coalesce(const Compiler* const comp, State* const state) {
   }
 }
 
+// Simplified Graph colouring Algorithm
+//
+// Build -> Coalesce -> Select -> Map
+//
+// Also emits a function prolog and function epilog
+void graph_colour_algo(Compiler* const comp, Function* const func, State* const state) {
+  //Computers all the intersections in the value tree based on control flow
+  //Build section
+  compute_value_intersections(state->value_tree, state->control_flow);
+  coalesce(comp, state);
+  const uint64_t regs = select(&comp->build_options, state);
+
+  //map values and function prolog and epilog
+  map_values(&comp->build_options, func, state, regs);
+}
+
 CompileCode compile_function_body_unit(Compiler* const comp,
                                        ASTFunctionDeclaration* const ast_func,
                                        Function* const func,
@@ -1582,7 +1708,6 @@ CompileCode compile_function_body_unit(Compiler* const comp,
 
     state->locals.size = locals;
   }
-
 
   //Cant error now???
 
@@ -1611,6 +1736,8 @@ CompileCode compile_function_body_unit(Compiler* const comp,
           int64_t offset = state->stack.next_stack_local(8, 8);
           p_val->stack_offset = offset;
         }
+
+        state->used_stack = true;
       }
 
 
@@ -1619,6 +1746,78 @@ CompileCode compile_function_body_unit(Compiler* const comp,
   }
 
   state->control_flow.expression_num++;
+
+  //Comptime constants
+  {
+    auto i = state->constants.mut_begin();
+    const auto end = state->constants.end();
+
+    for (; i < end; i++) {
+      //Reset the working state - so it doesnt include parameters/locals
+      reset_type(comp->working_state);
+      const uint64_t save_comp_labels = comp->labels;
+      const uint64_t save_func_label  = func->label;
+
+      comp->labels = 0;
+      func->label = comp->labels++;
+      comp->working_state->return_label = comp->labels++;
+
+      //Set up new flow
+      size_t new_flow = comp->working_state->control_flow.new_flow();
+      comp->working_state->control_flow.current_flow = new_flow;
+
+      //Compile bytecode
+      comp->working_state->comptime_compilation = true;
+      const ValueIndex result = compile_bytecode_of_expression(build_options, i->expr, comp->working_state, func);
+
+      //Effectively do a return
+      const ValueIndex rax = comp->working_state->new_value(result);
+      comp->working_state->use_value(result, rax);
+      ByteCode::EMIT::COPY_R64_TO_R64(func->code, (uint8_t)result.val, (uint8_t)rax.val);
+      comp->working_state->control_flow.expression_num++;
+
+      auto& rax_val = comp->working_state->value_tree.values.data[rax.val];
+
+      rax_val.value_type = ValueType::FIXED;
+      rax_val.reg        = comp->build_options.calling_convention->return_register;
+      comp->working_state->use_value(result);
+
+      ByteCode::EMIT::JUMP_TO_FIXED(func->code, comp->working_state->return_label);
+
+      //Graph colour
+      graph_colour_algo(comp, func, comp->working_state);
+
+      //Backend
+      Array<uint8_t> code ={};
+      const size_t entry = vm_backend_single_func(code, func, comp->labels);
+
+      if (comp->print_options.comptime_exec) {
+        printf("Some Compile Time Executed Code:\n");
+        ByteCode::print_bytecode(&vm_regs_name_from_num, stdout, code.data, code.size);
+      }
+
+      //Run the VM
+      vm_rum(comp->vm, code.data, entry);
+
+      if (i->expr->type->size() > 8) {
+        printf("INTERNAL ERROR: Size of type too large for return %u", i->expr->type->size());
+        return CompileCode::INTERNAL_ERROR;
+      }
+      else {
+        uint64_t val = comp->vm->registers[convention_vm.return_register].b64.reg;
+        *((uint64_t*)i->val) = val;
+
+        if (comp->print_options.comptime_exec) {
+          printf("\nComptime Res: %llu\n", val);
+        }
+      }
+
+      //Reset the function code and labels
+      func->code.free();
+      comp->labels = save_comp_labels;
+      func->label  = save_func_label;
+    }
+  }
 
   //Calculate all the values
   //and compile the bytecode
@@ -1638,21 +1837,9 @@ CompileCode compile_function_body_unit(Compiler* const comp,
     printf("\n=============================\n\n");
   }
 
-  // Simplified Graph colouring Algorithm
-  //
-  // Build -> Coalesce -> Select
-  //
+  graph_colour_algo(comp, func, state);
 
-  //Computers all the intersections in the value tree based on control flow
-  //Build section
-  compute_value_intersections(state->value_tree, state->control_flow);
-  coalesce(comp, state);
-  const uint64_t regs = select(build_options, state);
-
-  //map values and function prolog and epilog
-  map_values(&comp->build_options, func, state, regs);
-
-  //No longer needed
+   //No longer needed
   state->locals.free();
   state->value_tree.free();
   state->control_flow.free();
@@ -1724,6 +1911,8 @@ static CompileCode compile_function_signature(Compiler* const comp,
           - (int64_t)8
           - comp->build_options.calling_convention->shadow_space_size
           - ((int64_t)8 * param_num);
+
+        state->used_stack = true;
       }
       else {
         l_val->value_type = ValueType::FIXED;

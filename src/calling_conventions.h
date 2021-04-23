@@ -40,6 +40,7 @@ struct System {
 };
 
 const char* x86_64_reg_name_from_num(uint8_t) noexcept;
+const char* vm_regs_name_from_num(uint8_t reg) noexcept;
 
 extern const System system_x86_64;
 extern const System system_vm;

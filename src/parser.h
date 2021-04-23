@@ -47,8 +47,8 @@ struct TokenTypeString {
 TokenTypeString token_type_string(TokenType);
 
 struct Token {
-  TokenType type;
-  InternString string;
+  TokenType type = TokenType::Error;
+  InternString string ={};
 
   //Position
   const char* file_name = nullptr;

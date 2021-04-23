@@ -87,8 +87,8 @@ void* ArenaAllocator::alloc_no_construct(size_t bytes) {
   if (fl == nullptr) {
     //Allocate more data
     new_block();
+    fl = (FreeList*)free_list;
   }
-
 
   const uint64_t available_space = fl->qwords_available;
   uint64_t used_space = req_size;
@@ -142,7 +142,7 @@ void ArenaAllocator::free_no_destruct(void* val) {
 void ArenaAllocator::new_block() {
   Block* block = allocate_default<Block>(1);
 
-  FreeList* fl = (FreeList*)base->data;
+  FreeList* fl = (FreeList*)block->data;
 
   fl->qwords_available = Block::BLOCK_SIZE - 1;
 
