@@ -6,6 +6,8 @@
 
 #include <memory>
 
+//#define COUNT_ALLOC
+
 template<typename T>
 constexpr inline void memcpy_ts(T* dest, size_t dest_size, const T* source, size_t src_size) {
   const errno_t res = memcpy_s((void*)dest, dest_size * sizeof(T), (const void*)source, src_size * sizeof(T));
@@ -31,11 +33,120 @@ constexpr inline void default_init(T* const dest, const size_t dest_size) {
   }
 }
 
+#ifdef COUNT_ALLOC
+struct ALLOC_COUNTER {
+  struct Allocation {
+    const void* mem;
+    size_t size;
+  };
+
+  Allocation* allocs = nullptr;
+  size_t num_allocs = 0;
+  size_t capacity = 0;
+
+  size_t current_allocated_size = 0;
+
+  size_t max_allocated_blocks = 0;
+  size_t max_allocated_size   = 0;
+
+  template<typename T>
+  void insert(T* t, size_t num) {
+    if (capacity == num_allocs) {
+      if (capacity == 0) {
+        capacity = 8;
+      }
+      else {
+        capacity <<= 1;
+      }
+
+      allocs = (Allocation*) std::realloc(allocs, capacity * sizeof(Allocation));
+      assert(allocs != nullptr);
+    }
+
+    allocs[num_allocs].mem  = (const void*)t;
+    allocs[num_allocs].size = num * sizeof(T);
+
+    num_allocs++;
+    if (num_allocs > max_allocated_blocks) {
+      max_allocated_blocks = num_allocs;
+    }
+
+    current_allocated_size += num * sizeof(T);
+    if (current_allocated_size > max_allocated_size) {
+      max_allocated_size = current_allocated_size;
+    }
+  }
+
+  template<typename T>
+  void update(T* from, T* to, size_t num) {
+    const void* f_v = (void*)from;
+
+    auto i = allocs;
+    const auto end = allocs + num_allocs;
+
+    for (; i < end; i++) {
+      if (i->mem = f_v) {
+        i->mem = (const void*)to;
+
+        current_allocated_size -= i->size;
+        i->size = num * sizeof(T);
+        current_allocated_size += i->size;
+
+        if (current_allocated_size > max_allocated_size) {
+          max_allocated_size = current_allocated_size;
+        }
+        break;
+      }
+    }
+  }
+
+  template<typename T>
+  void remove(T* t) {
+    if (t == nullptr) {
+      return;
+    }
+
+    const void* t_v = (void*)t;
+
+    auto i = allocs;
+    const auto end = allocs + num_allocs;
+
+    for (; i < end; i++) {
+      if (i->mem = t_v) {
+        current_allocated_size -= i->size;
+        num_allocs--;
+        goto REMOVE;
+      }
+    }
+
+    return;
+
+  REMOVE:
+    auto mov_i = i++;
+
+    for (; i < end; (i++, mov_i++)) {
+      *mov_i = std::move(*i);
+    }
+  }
+
+
+  static ALLOC_COUNTER& allocated() {
+    static ALLOC_COUNTER allocated_s ={};
+
+    return allocated_s;
+  }
+};
+#endif
+
 template<typename T>
 T* allocate_default(const size_t num = 1) {
   T* t = (T*)std::malloc(sizeof(T) * num);
 
   assert(t != nullptr);
+
+#ifdef COUNT_ALLOC
+  ALLOC_COUNTER::allocated().insert(t, num);
+#endif
 
   default_init(t, num);
   return t;
@@ -47,6 +158,10 @@ T* allocate_single_constructed(U&& ... u) {
 
   assert(t != nullptr);
 
+#ifdef COUNT_ALLOC
+  ALLOC_COUNTER::allocated().insert(t, 1);
+#endif
+
   new(t) T(std::forward<U>(u...));
   return t;
 }
@@ -55,6 +170,11 @@ template<typename T>
 T* allocate_uninit(size_t num = 1) {
   T* val = (T*)std::malloc(sizeof(T) * num);
   assert(val != nullptr);
+
+#ifdef COUNT_ALLOC
+  ALLOC_COUNTER::allocated().insert(val, num);
+#endif
+
   return val;
 }
 
@@ -62,6 +182,11 @@ template<typename T>
 T* reallocate_uninit(T* ptr, const size_t num = 1) {
   T* val = (T*)std::realloc((void*)ptr, sizeof(T) * num);
   assert(val != nullptr);
+
+#ifdef COUNT_ALLOC
+  ALLOC_COUNTER::allocated().update(ptr, val, num);
+#endif
+
   return val;
 }
 
@@ -74,17 +199,25 @@ T* reallocate_default(T* ptr, const size_t old_size, const size_t new_size) {
     default_init(val + old_size, new_size - old_size);
   }
 
+#ifdef COUNT_ALLOC
+  ALLOC_COUNTER::allocated().update(ptr, val, new_size);
+#endif
+
   return val;
 }
 
 template<typename T>
 void free(T* ptr) {
   std::free((void*)ptr);
+
+#ifdef COUNT_ALLOC
+  ALLOC_COUNTER::allocated().remove(ptr);
+#endif
 }
 
 constexpr size_t strlen_ts(const char* c) {
   const char* const base = c;
-  while(*c != '\0') {c++;}
+  while (*c != '\0') { c++; }
 
   return c - base;
 }

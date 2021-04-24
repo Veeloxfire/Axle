@@ -223,5 +223,25 @@ int main() {
     std::cout << "All tests passed!!!" << std::endl;
   }
 
+#ifdef COUNT_ALLOC
+  {
+    ALLOC_COUNTER& a = ALLOC_COUNTER::allocated();
+
+    std::cout << "Max Allocated Blocks: " << a.max_allocated_blocks << '\n';
+    std::cout << "Max Allocated Size: " << a.max_allocated_size << '\n';
+
+    auto i = a.allocs;
+    const auto end = a.allocs + a.num_allocs;
+
+    if (i < end) {
+      std::cout << "Still some allocated - Possible memory leaks:\n";
+
+      for (; i < end; i++) {
+        std::cout << "Ptr: " << i->mem << ", Bytes: " << i->size << '\n';
+      }
+    }
+  }
+#endif
+
   return 0;
 }
