@@ -17,8 +17,25 @@ struct ASTName {
   const Structure* type = nullptr;
 };
 
+enum struct TYPE_TYPE {
+  NORMAL, ARRAY
+};
+
+struct ASTType;
+
+struct ASTArrayType {
+  ASTType* base ={};
+  ASTExpression* expr ={};
+};
+
 struct ASTType {
-  InternString name ={};
+  TYPE_TYPE type_type;
+
+  union {
+    InternString name ={};
+    ASTArrayType arr;
+  };
+
   const Structure* type = nullptr;
 };
 
@@ -52,22 +69,22 @@ struct BinaryOperatorExpr {
 };
 
 struct FunctionCallExpr {
-  Array<ASTExpression> arguments;
-  InternString function_name;
+  Array<ASTExpression> arguments ={};
+  InternString function_name ={};
 
   const Function* function = nullptr;
 };
 
 struct EnumValueExpr {
-  const EnumValue* enum_value;
-  InternString name;
+  const EnumValue* enum_value = nullptr;
+  InternString name ={};
 };
 
 struct UnaryOperatorExpr {
   UNARY_OPERATOR op;
-  ASTExpression* primary;
+  ASTExpression* primary = nullptr;
 
-  UNARY_OPERATOR_FUNCTION emit;
+  UNARY_OPERATOR_FUNCTION emit = nullptr;
 
   ~UnaryOperatorExpr() {
     free(primary);
@@ -76,8 +93,8 @@ struct UnaryOperatorExpr {
 
 struct CastExpr {
   ASTType type;
-  ASTExpression* expr;
-  CAST_FUNCTION emit;
+  ASTExpression* expr = nullptr;
+  CAST_FUNCTION emit = nullptr;
 
   ~CastExpr() {
     free(expr);
@@ -85,8 +102,8 @@ struct CastExpr {
 };
 
 struct ValueExpr {
-  uint64_t value;
-  InternString suffix;
+  uint64_t value = 0;
+  InternString suffix ={};
 };
 
 struct ASTExpression {
