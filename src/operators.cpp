@@ -3,25 +3,25 @@
 #include "ast.h"
 
 void emit_add_64s(const BuildOptions* const,
-                  State*, Function* func,
+                  State*, CodeBlock* code,
                   ValueIndex left, ValueIndex right) {
-  ByteCode::EMIT::ADD_R64S(func->code, (uint8_t)right.val, (uint8_t)left.val);
+  ByteCode::EMIT::ADD_R64S(code->code, (uint8_t)right.val, (uint8_t)left.val);
 }
 
 void emit_sub_64s(const BuildOptions* const,
-                  State*, Function* func,
+                  State*, CodeBlock* code,
                   ValueIndex left, ValueIndex right) {
-  ByteCode::EMIT::SUB_R64S(func->code, (uint8_t)right.val, (uint8_t)left.val);
+  ByteCode::EMIT::SUB_R64S(code->code, (uint8_t)right.val, (uint8_t)left.val);
 }
 
 void emit_mul_64s(const BuildOptions* const,
-                  State*, Function* func,
+                  State*, CodeBlock* code,
                   ValueIndex left, ValueIndex right) {
-  ByteCode::EMIT::MUL_R64S(func->code, (uint8_t)right.val, (uint8_t)left.val);
+  ByteCode::EMIT::MUL_R64S(code->code, (uint8_t)right.val, (uint8_t)left.val);
 }
 
 void emit_div_u64s(const BuildOptions* const build_options,
-                   State* state, Function* func,
+                   State* state, CodeBlock* code,
                    ValueIndex left, ValueIndex right) {
   if (build_options->system == &system_x86_64) {
     ValueIndex save_rdx = state->new_value();
@@ -35,17 +35,17 @@ void emit_div_u64s(const BuildOptions* const build_options,
     left_val->reg   = RAX.REG;
 
     //Stop it from being removed
-    ByteCode::EMIT::RESERVE(func->code, (uint8_t)save_rdx.val);
+    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);
     state->use_value(save_rdx);
 
     state->control_flow.expression_num++;
   }
 
-  ByteCode::EMIT::DIV_RU64S(func->code, (uint8_t)right.val, (uint8_t)left.val);
+  ByteCode::EMIT::DIV_RU64S(code->code, (uint8_t)right.val, (uint8_t)left.val);
 }
 
 void emit_div_i64s(const BuildOptions* const build_options,
-                   State* state, Function* func,
+                   State* state, CodeBlock* code,
                    ValueIndex left, ValueIndex right) {
 
   if (build_options->system == &system_x86_64) {
@@ -60,35 +60,35 @@ void emit_div_i64s(const BuildOptions* const build_options,
     left_val->reg   = RAX.REG;
 
     //Stop it from being removed
-    ByteCode::EMIT::RESERVE(func->code, (uint8_t)save_rdx.val);
+    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);
     state->use_value(save_rdx);
   }
 
-  ByteCode::EMIT::DIV_RI64S(func->code, (uint8_t)right.val, (uint8_t)left.val);
+  ByteCode::EMIT::DIV_RI64S(code->code, (uint8_t)right.val, (uint8_t)left.val);
 }
 
 void emit_eq_64s(const BuildOptions* const build_options,
-                 State* state, Function* func,
+                 State* state, CodeBlock* code,
                  ValueIndex left, ValueIndex right) {
-  ByteCode::EMIT::EQ_R64S(func->code, (uint8_t)right.val, (uint8_t)left.val);
+  ByteCode::EMIT::EQ_R64S(code->code, (uint8_t)right.val, (uint8_t)left.val);
 }
 
 void emit_or_64s(const BuildOptions* const build_options,
-                 State* state, Function* func,
+                 State* state, CodeBlock* code,
                  ValueIndex left, ValueIndex right) {
-  ByteCode::EMIT::OR_R64S(func->code, (uint8_t)right.val, (uint8_t)left.val);
+  ByteCode::EMIT::OR_R64S(code->code, (uint8_t)right.val, (uint8_t)left.val);
 }
 
 void emit_and_64s(const BuildOptions* const build_options,
-                  State* state, Function* func,
+                  State* state, CodeBlock* code,
                   ValueIndex left, ValueIndex right) {
-  ByteCode::EMIT::AND_R64S(func->code, (uint8_t)right.val, (uint8_t)left.val);
+  ByteCode::EMIT::AND_R64S(code->code, (uint8_t)right.val, (uint8_t)left.val);
 }
 
 void emit_neg_i64(const BuildOptions*,
-                  State*, Function* func,
+                  State*, CodeBlock* code,
                   ValueIndex prim) {
-  ByteCode::EMIT::NEG_R64(func->code, (uint8_t)prim.val);
+  ByteCode::EMIT::NEG_R64(code->code, (uint8_t)prim.val);
 }
 
 const Structure* BIN_OP_TESTS::num_int_64_bit(const Types* types, const Structure* left, const Structure* right) {

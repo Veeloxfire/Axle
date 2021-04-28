@@ -23,17 +23,21 @@ namespace ByteCode {
                       const uint8_t* bytecode,
                       uint64_t size) {
 
-  #define OP_R64_64 const char* const reg_name = reg_name_from_num(p.val);\
+  #define OP_64_64 printf(": 0x%llx 0x%llx\n", p.u64_1.val, p.u64_2.val)
+
+  #define OP_8_64 printf(": 0x%hhx 0x%llx\n", p.u8, p.u64.val)
+
+  #define OP_R_64 const char* const reg_name = reg_name_from_num(p.val);\
                        printf(": $%s 0x%llx\n", reg_name, p.u64.val)
 
   #define OP_64 printf(": 0x%llx\n", p.u64.val)
 
   #define OP printf("\n")
 
-  #define OP_R64 const char* const reg_name = reg_name_from_num(p.val);\
+  #define OP_R const char* const reg_name = reg_name_from_num(p.val);\
                     printf(": $%s\n", reg_name)
 
-  #define OP_R64_R64 const char* const reg_name1 = reg_name_from_num(p.val1);\
+  #define OP_R_R const char* const reg_name1 = reg_name_from_num(p.val1);\
                         printf(": $%s", reg_name1);\
                         const char* const reg_name2 = reg_name_from_num(p.val2);\
                         printf(" $%s\n", reg_name2)
@@ -57,11 +61,13 @@ namespace ByteCode {
       }
     }
 
-    #undef OP_R64_64
+    #undef OP_R_64
+    #undef OP_8_64
+    #undef OP_64_64
     #undef OP_64
     #undef OP
-    #undef OP_R64
-    #undef OP_R64_R64
+    #undef OP_R
+    #undef OP_R_R
 
     fflush(stream);
   }

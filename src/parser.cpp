@@ -12,7 +12,7 @@ TokenTypeString token_type_string(TokenType t) {
     #undef MODIFY
   }
 
-  return {"UNKNOWN TOKEN TYPE", sizeof("UNKNOWN TOKEN TYPE")};
+  return { "UNKNOWN TOKEN TYPE", sizeof("UNKNOWN TOKEN TYPE") };
 }
 
 void Parser::report_error(const char* error_message) {
@@ -36,7 +36,7 @@ constexpr KeywordPair keywords[] ={
   {"cast", TokenType::Cast},
 };
 
-constexpr KeywordPair operators[15] ={
+constexpr KeywordPair operators[] ={
   {"+", TokenType::Add},
   {"-", TokenType::Sub},
   {"*", TokenType::Mul},
@@ -47,6 +47,8 @@ constexpr KeywordPair operators[15] ={
   {")", TokenType::Right_Bracket},
   {"{", TokenType::Left_Brace},
   {"}", TokenType::Right_Brace},
+  {"[", TokenType::Left_Square},
+  {"]", TokenType::Right_Square},
   {",", TokenType::Comma},
   {";", TokenType::Semicolon},
   {"|", TokenType::Or},
@@ -97,6 +99,10 @@ static Token error_token(Lexer* const lex, const char* string) {
   copy_position(lex, &error);
 
   return error;
+}
+
+constexpr static bool is_new_line(Lexer* const lex) {
+  return lex->top[0] == '\n' || lex->top[0] == '\r';
 }
 
 constexpr static void skip_whitespace(Lexer* const lex) {
@@ -200,9 +206,8 @@ static Token make_single_char_token(Lexer* lex) {
 
       copy_position(lex, &tok);
 
-      //Operators are all 1 character at this point
-      lex->top++;
-      lex->character++;
+      lex->top += pair.size;
+      lex->character += pair.size;
 
       return tok;
     }
@@ -210,6 +215,36 @@ static Token make_single_char_token(Lexer* lex) {
 
   OwnedPtr<char> error = format("Unlexable character: '{}'", DisplayChar{ *lex->top });
   return error_token(lex, error.ptr);
+}
+
+static Token lex_string(Lexer* const lex) {
+  lex->top++;
+  lex->character++;
+
+  const char* const start = lex->top;
+
+  while (!is_new_line(lex) && lex->top[0] != '\0' && lex->top[0] != '"') {
+    lex->top++;
+    lex->character++;
+  }
+
+  const char* end = lex->top;
+
+  if (lex->top[0] == '"') {
+    lex->top++;
+    lex->character++;
+
+    Token tok;
+    tok.type = TokenType::String;
+    tok.string = lex->strings->intern(start, end - start);
+
+    copy_position(lex, &tok);
+
+    return tok;
+  }
+  else {
+    return error_token(lex, "String was not closed!");
+  }
 }
 
 static Token lex_token(Lexer* const lex) {
@@ -222,6 +257,9 @@ static Token lex_token(Lexer* const lex) {
   }
   else if (is_number(c)) {
     return lex_number(lex);
+  }
+  else if (c == '"') {
+    return lex_string(lex);
   }
   else if (c == '\0') {
     // \0 is the end of file
@@ -267,6 +305,9 @@ void init_parser(Parser* const parser, const char* file_name, const char* source
   parser->current = lex_token(&parser->lexer);
 }
 
+static void parse_type(Parser* const parser, ASTType* const type);
+static void parse_unary_op(Parser* const parser, ASTExpression* const expr);
+
 //Should never be 0!
 static constexpr uint8_t precidence_table[] ={
   3,// BINARY_OPERATOR::ADD
@@ -282,16 +323,6 @@ static constexpr uint8_t precidence_table[] ={
 
 static bool is_binary_operator(const TokenType t) {
   return TokenType::Add <= t && t < TokenType::Left_Bracket;
-}
-
-static void parse_type(Parser* const parser, ASTType* const type) {
-  if (parser->current.type != TokenType::Identifier) {
-    parser->report_error("Expected Identifier!");
-    return;
-  }
-
-  type->name = parser->current.string;
-  advance(parser);
 }
 
 static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
@@ -320,8 +351,6 @@ static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
   parser->report_error(error.ptr);
   return BINARY_OPERATOR::ADD;//just return whatever and hope everything errors out
 }
-
-static void parse_unary_op(Parser* const parser, ASTExpression* const expr);
 
 static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_t prev_prec, ASTExpression** base) {
   //precidence for this level
@@ -366,7 +395,7 @@ static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_
       new_base->bin_op.right = allocate_default<ASTExpression>();
       parse_unary_op(parser, new_base->bin_op.right);
     }
-    else if(new_prec <= prev_prec)
+    else if (new_prec <= prev_prec)
     {
       //Needs to be on the previous level
       ASTExpression* new_base = allocate_default<ASTExpression>();
@@ -389,13 +418,14 @@ static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_
       parse_unary_op(parser, new_base->bin_op.right);
     }
   }
-  
+
   return nullptr;
 }
 
 static void parse_binary_operators(Parser* const parser, BINARY_OPERATOR op, ASTExpression* const base) {
-
+  //Has to be heap allocated
   ASTExpression* temp_base = allocate_default<ASTExpression>();
+  DEFER(&) { free_destruct_single<ASTExpression>(temp_base); };
 
   temp_base->expr_type    = EXPRESSION_TYPE::BINARY_OPERATOR;
   temp_base->bin_op.op    = op;
@@ -420,8 +450,6 @@ static void parse_binary_operators(Parser* const parser, BINARY_OPERATOR op, AST
 
   temp_base->bin_op.left = nullptr;
   temp_base->bin_op.right = nullptr;
-
-  free<ASTExpression>(temp_base);
 }
 
 static void parse_expression(Parser* const parser, ASTExpression* const expr) {
@@ -439,6 +467,13 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
   advance(parser);
 
   switch (current.type) {
+    case TokenType::String: {
+        expr->expr_type = EXPRESSION_TYPE::ASCII_STRING;
+        expr->ascii_string = current.string;
+        
+        advance(parser);
+        break;
+      }
     case TokenType::Cast: {
         expect(parser, TokenType::Left_Bracket);
         expr->expr_type = EXPRESSION_TYPE::CAST;
@@ -533,6 +568,37 @@ static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
 
 }
 
+static void parse_type(Parser* const parser, ASTType* const type) {
+  if (parser->current.type == TokenType::Identifier) {
+    type->type_type = TYPE_TYPE::NORMAL;
+    type->name = parser->current.string;
+    advance(parser);
+  }
+  else if (parser->current.type == TokenType::Left_Square) {
+    // [ BASE ; EXPR ]
+    type->type_type = TYPE_TYPE::ARRAY;
+
+    advance(parser);//[
+
+                    //Base Type
+    type->arr.base = allocate_default<ASTType>();
+    parse_type(parser, type->arr.base);
+
+    expect(parser, TokenType::Semicolon);
+
+    //Expression
+    type->arr.expr = allocate_default<ASTExpression>();
+    parse_expression(parser, type->arr.expr);
+
+    expect(parser, TokenType::Right_Square);
+  }
+  else {
+    parser->report_error("Expected Type!");
+    return;
+  }
+
+}
+
 static void parse_declaration(Parser* const parser, ASTDeclaration* const decl) {
   parse_type(parser, &decl->type);
 
@@ -588,6 +654,7 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
         }
         return;
       }
+    case TokenType::Left_Square:
     case TokenType::Identifier: {
         //Probs type at the moment
         statement->type = STATEMENT_TYPE::DECLARATION;
@@ -708,9 +775,29 @@ struct Printer {
   }
 };
 
+static void print_ast_expression(const ASTExpression* expr);
+
+static void print_type(const ASTType* type) {
+  switch (type->type_type) {
+    case TYPE_TYPE::NORMAL:
+      print(type->name.string);
+      break;
+    case TYPE_TYPE::ARRAY:
+      print('[');
+      print_type(type->arr.base);
+      print("; ");
+      print_ast_expression(type->arr.expr);
+      print(']');
+      break;
+  }
+}
 
 static void print_ast_expression(const ASTExpression* expr) {
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::ASCII_STRING: {
+        printf("\"%s\"", expr->ascii_string.string);
+        break;
+      }
     case EXPRESSION_TYPE::FUNCTION_CALL: {
         printf("%s(", expr->call.function_name.string);
         auto i = expr->call.arguments.begin();
@@ -738,7 +825,9 @@ static void print_ast_expression(const ASTExpression* expr) {
       }
       break;
     case EXPRESSION_TYPE::CAST: {
-        printf("cast(%s, ", expr->cast.type.name.string);
+        print("cast(");
+        print_type(&expr->cast.type);
+        print(", ");
         print_ast_expression(expr->cast.expr);
         print(')');
         break;
@@ -776,8 +865,8 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
 
   switch (statement->type) {
     case STATEMENT_TYPE::DECLARATION:
-      printf("%s %s = ",
-             statement->declaration.type.name.string, statement->declaration.name.string);
+      print_type(&statement->declaration.type);
+      printf(" %s = ", statement->declaration.name.string);
       print_ast_expression(&statement->declaration.expression);
       print(';');
       break;
@@ -852,14 +941,18 @@ void print_ast(const ASTFile* file) {
 
       if (p_end - p_i > 0) {
         for (; p_i < (p_end - 1); p_i++) {
-          printf("%s %s,", p_i->type.name.string, p_i->name.string);
+          print_type(&p_i->type);
+          printf(" %s,", p_i->name.string);
         }
 
-        printf("%s %s", p_i->type.name.string, p_i->name.string);
+        print_type(&p_i->type);
+        printf(" %s", p_i->name.string);
       }
     }
 
-    printf(") -> %s {", i->return_type.name.string);
+    print(") -> ");
+    print_type(&i->return_type);
+    print(" {\n");
     printer.tabs++;
 
     //Function body

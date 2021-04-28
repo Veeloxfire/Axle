@@ -12,11 +12,11 @@ struct Function;
 
 
 enum struct STRUCTURE_TYPE : uint8_t {
-  INTEGER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY
+  INTEGER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY, ASCII_CHAR
 };
 
 using CAST_TEST     = FUNCTION_PTR<bool, const Structure*>;
-using CAST_FUNCTION = FUNCTION_PTR<void, State*, Function*, ValueIndex>;
+using CAST_FUNCTION = FUNCTION_PTR<void, State*, CodeBlock*, ValueIndex>;
 
 struct Cast {
   CAST_TEST test;
@@ -33,8 +33,8 @@ struct Structure {
 };
 
 struct ArrayStructure : public Structure {
-  const Structure* base;
-  size_t length;
+  const Structure* base = nullptr;
+  size_t length = 0;
 };
 
 struct IntegerStructure : public Structure {
@@ -56,11 +56,12 @@ struct EnumStructure : public Structure {
 };
 
 enum struct LITERAL_TYPE {
-  INTEGER, SIGNED_INTEGER,
+  INTEGER, SIGNED_INTEGER, STRING
 };
 
 struct LiteralStructure : public Structure {
   LITERAL_TYPE literal_type = LITERAL_TYPE::INTEGER;
+  size_t str_length;
 };
 
 struct StructElement {
@@ -76,11 +77,6 @@ struct CompositeStructure : public Structure {
   Array<StructElement> elements = {};
 };
 
-struct PositionedElement {
-  const Structure* structure = nullptr;
-  uint8_t val = 0;
-};
-
 struct Function {
   InternString name ={};
   Array<const Structure*> parameter_types ={};
@@ -88,65 +84,7 @@ struct Function {
 
   const ASTFunctionDeclaration* declaration = nullptr;
 
-  uint64_t label = 0;
-  Array<uint8_t> code ={};
-};
-
-struct StructAllocator {
-  static FreelistBlockAllocator<LiteralStructure> literal_structures;
-  static FreelistBlockAllocator<IntegerStructure> int_structures;
-  static FreelistBlockAllocator<CompositeStructure> composite_structures;
-  static FreelistBlockAllocator<EnumStructure> enum_structures;
-  static FreelistBlockAllocator<Structure> base_structures;
-  static FreelistBlockAllocator<EnumValue> enum_values;
-
-  static LiteralStructure* new_literal() {
-    LiteralStructure* const type = literal_structures.allocate();
-    type->type = STRUCTURE_TYPE::LITERAL;
-
-    return type;
-  }
-
-  static IntegerStructure* new_int() {
-    IntegerStructure* const type = int_structures.allocate();
-    type->type = STRUCTURE_TYPE::INTEGER;
-
-    return type;
-  }
-
-  static CompositeStructure* new_composite() {
-    CompositeStructure* const type = composite_structures.allocate();
-    type->type = STRUCTURE_TYPE::COMPOSITE;
-
-    return type;
-  }
-
-  static EnumStructure* new_enum() {
-    EnumStructure* const type = enum_structures.allocate();
-    type->type = STRUCTURE_TYPE::ENUM;
-
-    return type;
-  }
-
-  static void free_structure(const Structure* s) {
-    switch (s->type) {
-      case STRUCTURE_TYPE::LITERAL:
-        literal_structures.free((const LiteralStructure*)s);
-        break;
-      case STRUCTURE_TYPE::INTEGER:
-        int_structures.free((const IntegerStructure*)s);
-        break;
-      case STRUCTURE_TYPE::COMPOSITE:
-        composite_structures.free((const CompositeStructure*)s);
-        break;
-      case STRUCTURE_TYPE::ENUM:
-        enum_structures.free((const EnumStructure*)s);
-        break;
-      case STRUCTURE_TYPE::VOID:
-        base_structures.free(s);
-        break;
-    }
-  }
+  CodeBlock code_block ={};
 };
 
 constexpr bool is_negatable(const Structure* s) {
@@ -167,6 +105,21 @@ constexpr bool is_numeric_type(const Structure* s) {
 }
 
 struct Types {
+  static FreelistBlockAllocator<LiteralStructure> literal_structures;
+  static FreelistBlockAllocator<IntegerStructure> int_structures;
+  static FreelistBlockAllocator<CompositeStructure> composite_structures;
+  static FreelistBlockAllocator<EnumStructure> enum_structures;
+  static FreelistBlockAllocator<Structure> base_structures;
+  static FreelistBlockAllocator<ArrayStructure> array_structures;
+  static FreelistBlockAllocator<EnumValue> enum_values;
+
+  LiteralStructure* new_literal();
+  IntegerStructure* new_int();
+  CompositeStructure* new_composite();
+  EnumStructure* new_enum();
+  ArrayStructure* new_array();
+
+
   const Structure* s_bool = nullptr;
 
   const Structure* s_u8   = nullptr;
@@ -178,6 +131,7 @@ struct Types {
   const Structure* s_sint_lit = nullptr;
 
   const Structure* s_void = nullptr;
+  const Structure* s_ascii = nullptr;
 
   const EnumValue* e_false = nullptr;
   const EnumValue* e_true  = nullptr;
@@ -186,6 +140,8 @@ struct Types {
   Array<const Structure*> structures;
 
   ~Types();
+
+
 
   constexpr bool is_logical_type(const Structure* s) const {
     return s == s_bool || is_numeric_type(s);
@@ -202,12 +158,15 @@ void init_types(Types* types, StringInterner* strings);
 bool can_literal_cast(const Structure* from, const Structure* to);
 
 namespace CASTS {
-  void u8_to_r64(State*, Function*, ValueIndex);
-  void i8_to_r64(State*, Function*, ValueIndex);
-  void no_cast(State*, Function*, ValueIndex);
+  void u8_to_r64(State*,  CodeBlock*, ValueIndex);
+  void i8_to_r64(State*,  CodeBlock*, ValueIndex);
+  void no_cast(State*,  CodeBlock*, ValueIndex);
 }
 
 namespace TYPE_TESTS {
+  bool is_int(const Structure*);
+  bool is_signed_int(const Structure*);
+
   bool is_64_bit_int(const Structure*);
   bool is_signed_64_bit_int(const Structure*);
   bool is_unsigned_64_bit_int(const Structure*);

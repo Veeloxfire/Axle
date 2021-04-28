@@ -13,6 +13,17 @@
 #define JOIN(a, b) JOIN2(a, b)
 
 template<typename T>
+constexpr T slow_bit_fill_lower(uint8_t bits) {
+  T t = 0;
+
+  for (uint8_t i = 0; i < bits; i++) {
+    t |= ((T)1 << i);
+  }
+
+  return t;
+}
+
+template<typename T>
 void reset_type(T* t) noexcept {
   t->~T();
   new(t) T();
@@ -221,7 +232,7 @@ struct Array {
   }
 
   void free() {
-    ::free<T>(data);
+    ::free_destruct_n<T>(data, capacity);
     data = nullptr;
     size = 0;
     capacity = 0;
@@ -401,7 +412,7 @@ struct Array {
 };
 
 template<typename T>
-struct LinkedList {
+struct BucketArray {
   struct BLOCK {
     constexpr static size_t BLOCK_SIZE = 32;
 
@@ -411,7 +422,7 @@ struct LinkedList {
     T data[BLOCK_SIZE];
 
     ~BLOCK() {
-      free<BLOCK>(next);
+      free_destruct_single<BLOCK>(next);
     }
   };
 
@@ -494,9 +505,9 @@ struct LinkedList {
   BLOCK* first = nullptr;
   BLOCK* last = nullptr;
 
-  LinkedList() : first(allocate_default<BLOCK>()), last(first) {}
-  ~LinkedList() {
-    free<BLOCK>(first);
+  BucketArray() : first(allocate_default<BLOCK>()), last(first) {}
+  ~BucketArray() {
+    free_destruct_single<BLOCK>(first);
   }
 
   template<typename ... U>
@@ -589,7 +600,7 @@ struct FreelistBlockAllocator {
   ~FreelistBlockAllocator() {
     while (top != nullptr) {
       BLOCK* next = top->prev;
-      ::free<BLOCK>(top);
+      free_destruct_single<BLOCK>(top);
       top = next;
     }
 
@@ -645,92 +656,15 @@ struct SquareBitMatrix {
   size_t side_length = 0;
   size_t capacity = 0;
 
-  void free() {
-    ::free<uint8_t>(data);
+  void free();
 
-    data = nullptr;
-    side_length = 0;
-    capacity = 0;
-  }
+  ~SquareBitMatrix();
 
-  ~SquareBitMatrix() {
-    free();
-  }
+  bool test_a_intersects_b(size_t a, size_t b) const;
+  void set_a_intersects_b(size_t a, size_t b);
+  void remove_a_intersects_b(size_t a, size_t b);
 
-  bool test_a_intersects_b(size_t a, size_t b) const {
-    const size_t bytes_per_val = (side_length / 8) + 1;
-    const uint8_t* a_data = data + bytes_per_val * a;
-
-    const size_t b_mod8 = b % 8;
-    const size_t b_div8 = b / 8;
-
-    return (a_data[b_div8] & (1 << b_mod8)) > 0;
-  }
-
-  void set_a_intersects_b(size_t a, size_t b) {
-    const size_t bytes_per_val = (side_length / 8) + 1;
-    uint8_t* a_data = data + bytes_per_val * a;
-
-    const size_t b_mod8 = b % 8;
-    const size_t b_div8 = b / 8;
-
-    a_data[b_div8] |= (uint8_t)(1 << b_mod8);
-  }
-
-  void remove_a_intersects_b(size_t a, size_t b) {
-    const size_t bytes_per_val = (side_length / 8) + 1;
-    uint8_t* a_data = data + bytes_per_val * a;
-
-    const size_t b_mod8 = b % 8;
-    const size_t b_div8 = b / 8;
-
-    a_data[b_div8] &= ~(uint8_t)(1 << b_mod8);
-  }
-
-  size_t new_value() {
-    const size_t bytes_per_val_now = side_length == 0 ? 0
-      : ((side_length - 1) / 8) + 1;
-    const size_t bytes_per_val_next = ((side_length + 1 - 1) / 8) + 1;
-    const size_t required_capacity = bytes_per_val_next * (side_length + 1);
-
-    //check if we have enough space
-    if (required_capacity > capacity) {
-      const size_t old_capacity = capacity;
-
-      capacity = (size_t)1 << small_log_2_ceil(required_capacity);
-      data = reallocate_default(data, old_capacity, capacity);
-    }
-
-    //Check if we need to fix data shape
-    if (bytes_per_val_now < bytes_per_val_next) {
-      auto block_i = side_length == 0 ? data
-        : data + bytes_per_val_now * (side_length - 1);
-      auto new_i = data + bytes_per_val_next * side_length;
-
-      //Dont need to fix the first block as it will stay the same
-      const auto block_end = data + bytes_per_val_now;
-
-      const size_t diff = bytes_per_val_next - bytes_per_val_now;
-
-      while (block_i > block_end) {
-        size_t i = 0;
-        for (; i < diff; i++) {
-          new_i[bytes_per_val_next - (i + 1)] = 0;
-        }
-
-        i = 0;
-        for (size_t i = 0; i < bytes_per_val_now; i++) {
-          new_i[bytes_per_val_now - (i + 1)] = block_i[bytes_per_val_now - (i + 1)];
-        }
-
-        block_i -= bytes_per_val_now;
-        new_i -= bytes_per_val_now;
-      }
-    }
-
-    //Finally return new value
-    return side_length++;
-  }
+  size_t new_value();
 };
 
 template<typename T>
@@ -751,7 +685,7 @@ struct OwnedPtr {
   }
 
   ~OwnedPtr() {
-    free<T>(ptr);
+    free_destruct_single<T>(ptr);
   }
 };
 

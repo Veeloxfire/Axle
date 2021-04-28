@@ -50,18 +50,18 @@ ASTExpression::~ASTExpression() {
         cast.~CastExpr();
         break;
       }
-    case EXPRESSION_TYPE::LOCAL:
-    case EXPRESSION_TYPE::NAME: {
-        name.~InternString();
-        break;
-      }
     case EXPRESSION_TYPE::FUNCTION_CALL: {
         call.~FunctionCallExpr();
         break;
       }
-    case EXPRESSION_TYPE::VALUE: {
+    case EXPRESSION_TYPE::ENUM: {
+        enum_value.~EnumValueExpr();
         break;
       }
+    case EXPRESSION_TYPE::LOCAL:
+    case EXPRESSION_TYPE::NAME:
+    case EXPRESSION_TYPE::VALUE:
+        break;
   }
 }
 
@@ -84,5 +84,15 @@ ASTStatement::~ASTStatement() {
         block.~ASTBlock();
         break;
       }
+  }
+}
+
+ASTType::~ASTType() {
+  switch (type_type) {
+    case TYPE_TYPE::ARRAY: {
+      arr.~ASTArrayType();
+      break;
+    }
+    case TYPE_TYPE::NORMAL: break;
   }
 }

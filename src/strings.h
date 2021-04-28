@@ -20,6 +20,8 @@ struct StringInterner {
 
   InternString intern(const char* string);
   InternString intern(const char* string, size_t len);
+
+  ~StringInterner();
 };
 
 struct TempUTF8String {
@@ -34,7 +36,7 @@ struct TempUTF8String {
   }
 
   ~TempUTF8String() {
-    free(bytes);
+    free_no_destruct(bytes);
   }
 };
 

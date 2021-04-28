@@ -85,7 +85,7 @@ int compile_file(const Options& options,
   parse_file(&parser, &ast_base);
 
   //Should have all been copied now :)
-  free(text_source);
+  free_no_destruct(text_source);
 
 
   if (parser.current.type == TokenType::Error) {
@@ -104,8 +104,11 @@ int compile_file(const Options& options,
 
   //Compilation
   build_compilation_units(&compiler, &ast_base);
-  if (compile_all(&compiler) != CompileCode::NO_ERRORS) {
-    std::cerr << "Compilation was not completed due to an error!\n";
+  const CompileCode ret = compile_all(&compiler);
+  if (ret != CompileCode::NO_ERRORS) {
+    std::cerr << "Compilation was not completed due to an error!\nError Code '" 
+      << compile_code_string(ret)
+      << "'\n";
     return 1;
   }
 

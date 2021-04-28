@@ -5,15 +5,15 @@
 
 #include <stdio.h>
 
-size_t vm_backend_single_func(Array<uint8_t>& out_code, const Function* func, uint64_t labels) {
+size_t vm_backend_single_func(Array<uint8_t>& out_code, const CodeBlock* code, uint64_t labels) {
   size_t* const label_indexes = allocate_default<size_t>(labels);
   Array<size_t> instruction_offsets ={};
 
-  size_t entry_point_label = func->label;
+  size_t entry_point_label = code->label;
 
   {
-    auto code_i = func->code.begin();
-    const auto code_end = func->code.end();
+    auto code_i = code->code.begin();
+    const auto code_end = code->code.end();
 
     //First is guaranteed to be label
     {
@@ -125,7 +125,7 @@ size_t vm_backend_single_func(Array<uint8_t>& out_code, const Function* func, ui
     entry_point_index = label_indexes[entry_point_label];
   }
 
-  free<size_t>(label_indexes);
+  free_no_destruct(label_indexes);
   return entry_point_index;
 }
 
@@ -141,9 +141,10 @@ size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
+      const CodeBlock* const code = &func->code_block;
 
-      auto code_i = func->code.begin();
-      const auto code_end = func->code.end();
+      auto code_i = code->code.begin();
+      const auto code_end = code->code.end();
 
       //First is guaranteed to be label
       {
@@ -262,30 +263,19 @@ size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
     entry_point_index = label_indexes[entry_point_label];
   }
 
-  free<size_t>(label_indexes);
+  free_no_destruct(label_indexes);
   return entry_point_index;
 }
 
-struct R {
-  uint8_t r;
-};
-
-struct RM {
-  uint8_t r;
-
-  bool indirect = false;
-  int32_t disp = 0;
-};
-
-inline static void mov(Array<uint8_t>& arr,
-                       uint8_t from,
-                       uint8_t to) {
+void X64::mov(Array<uint8_t>& arr,
+              uint8_t from,
+              uint8_t to) {
   arr.insert(X64::REX_W | X64::rex_r_rm(from, to));
   arr.insert(X64::MOV_R_TO_RM);
   arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(from, to));
 }
 
-inline static void emit_mod_rm(Array<uint8_t>& arr, R r, RM rm) {
+inline static void emit_mod_rm(Array<uint8_t>& arr, X64::R r, X64::RM rm) {
   if (!rm.indirect) {
     arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(r.r, rm.r));
     return;
@@ -348,9 +338,9 @@ inline static void emit_mod_rm(Array<uint8_t>& arr, R r, RM rm) {
   }
 }
 
-inline static void mov(Array<uint8_t>& arr,
-                       R r,
-                       RM rm) {
+void X64::mov(Array<uint8_t>& arr,
+              R r,
+              RM rm) {
 
   arr.insert(X64::REX_W | X64::rex_r_rm(r.r, rm.r));
   arr.insert(X64::MOV_R_TO_RM);
@@ -358,27 +348,43 @@ inline static void mov(Array<uint8_t>& arr,
   emit_mod_rm(arr, r, rm);
 }
 
-inline static void mov(Array<uint8_t>& arr,
-                       RM rm,
-                       R r) {
+void X64::mov(Array<uint8_t>& arr,
+              RM rm,
+              R r) {
   arr.insert(X64::REX_W | X64::rex_r_rm(r.r, rm.r));
   arr.insert(X64::MOV_RM_TO_R);
 
   emit_mod_rm(arr, r, rm);
 }
 
-inline static void mov(Array<uint8_t>& arr,
-                       uint8_t r,
-                       uint64_t u64) {
-  arr.insert(X64::REX_W | X64::rex_b(r));
-  arr.insert(X64::MOV_64_TO_R + (r & 0b111));
+void X64::mov(Array<uint8_t>& arr,
+              R r,
+              uint64_t u64) {
+  arr.insert(X64::REX_W | X64::rex_b(r.r));
+  arr.insert(X64::MOV_64_TO_R + (r.r & 0b111));
 
   arr.reserve_extra(sizeof(uint64_t));
   x64_to_bytes(u64, arr.data + arr.size);
   arr.size += sizeof(uint64_t);
 }
 
-inline static void sub(Array<uint8_t>& arr,
+void X64::mov(Array<uint8_t>& arr,
+              RM rm,
+              uint32_t u32) {
+  if ((rm.r & 0b1000) > 0) {
+    arr.insert(X64::REX | X64::rex_b(rm.r));
+  }
+
+  arr.insert(X64::MOV_IMM32_RM);
+
+  emit_mod_rm(arr, R{ '\0' }, rm);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(u32, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+void X64::sub(Array<uint8_t>& arr,
                        uint8_t r,
                        uint8_t rm) {
   arr.insert(X64::REX_W | X64::rex_r_rm(r, rm));
@@ -387,7 +393,7 @@ inline static void sub(Array<uint8_t>& arr,
              | X64::modrm_r_rm(r, rm));
 }
 
-inline static void sub(Array<uint8_t>& arr,
+void X64::sub(Array<uint8_t>& arr,
                        uint8_t rm,
                        int32_t i32) {
   arr.insert(X64::REX_W | X64::rex_rm(rm));
@@ -399,7 +405,7 @@ inline static void sub(Array<uint8_t>& arr,
   arr.size += sizeof(uint32_t);
 }
 
-inline static void push(Array<uint8_t>& arr, uint8_t reg) {
+void X64::push(Array<uint8_t>& arr, uint8_t reg) {
   if ((reg & 0b0000'1000) > 0) {
     arr.insert(X64::REX_W | X64::REX_B);
   }
@@ -407,12 +413,16 @@ inline static void push(Array<uint8_t>& arr, uint8_t reg) {
   arr.insert(X64::PUSH_R + (reg & 0b0000'0111));
 }
 
-inline static void pop(Array<uint8_t>& arr, uint8_t reg) {
+void X64::pop(Array<uint8_t>& arr, uint8_t reg) {
   if ((reg & 0b0000'1000) > 0) {
     arr.insert(X64::REX_W | X64::REX_B);
   }
 
   arr.insert(X64::POP_R + (reg & 0b0000'0111));
+}
+
+void X64::ret(Array<uint8_t>& arr) {
+  arr.insert(X64::RET_NEAR);
 }
 
 inline static void jump_near(Array<uint8_t>& arr, int32_t relative) {
@@ -575,9 +585,10 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
+      const CodeBlock* const code = &func->code_block;
 
-      auto code_i = func->code.begin();
-      const auto code_end = func->code.end();
+      auto code_i = code->code.begin();
+      const auto code_end = code->code.end();
 
       //First is guaranteed to be label
       {
@@ -602,13 +613,13 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
             }
           case ByteCode::COPY_R64_TO_R64: {
               const auto p = ByteCode::PARSE::COPY_R64_TO_R64(code_i);
-              mov(out_code, p.val1, p.val2);
+              X64::mov(out_code, p.val1, p.val2);
               code_i += ByteCode::SIZE_OF::COPY_R64_TO_R64;
               break;
             }
           case ByteCode::SET_R64_TO_64: {
               const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
-              mov(out_code, p.val, p.u64);
+              X64::mov(out_code, X64::R{ p.val }, p.u64);
               code_i += ByteCode::SIZE_OF::SET_R64_TO_64;
               break;
             }
@@ -628,7 +639,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::SUB_R64S: {
               const auto p = ByteCode::PARSE::SUB_R64S(code_i);
 
-              sub(out_code, p.val1, p.val2);
+              X64::sub(out_code, p.val1, p.val2);
 
               code_i += ByteCode::SIZE_OF::SUB_R64S;
 
@@ -656,7 +667,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               assert(p.val2 == 0);
 
               //Set RDX to 0
-              mov(out_code, RDX.REG, 0ull);
+              X64::mov(out_code, X64::R{ RDX.REG }, 0ull);
 
               out_code.insert(X64::REX_W | X64::rex_rm(p.val1));
               out_code.insert(X64::DIV_RM_TO_RAX);
@@ -735,22 +746,22 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::PUSH_R64: {
               const auto p = ByteCode::PARSE::PUSH_R64(code_i);
 
-              push(out_code, p.val);
+              X64::push(out_code, p.val);
               code_i += ByteCode::SIZE_OF::PUSH_R64;
               break;
             }
           case ByteCode::POP_TO_R64: {
               const auto p = ByteCode::PARSE::POP_TO_R64(code_i);
 
-              pop(out_code, p.val);
+              X64::pop(out_code, p.val);
               code_i += ByteCode::SIZE_OF::POP_TO_R64;
               break;
             }
           case ByteCode::PUSH_FRAME: {
               const auto p = ByteCode::PARSE::PUSH_FRAME(code_i);
 
-              push(out_code, RBP.REG);
-              mov(out_code, RSP.REG, RBP.REG);
+              X64::push(out_code, RBP.REG);
+              X64::mov(out_code, RSP.REG, RBP.REG);
 
               code_i += ByteCode::SIZE_OF::PUSH_FRAME;
               break;
@@ -758,8 +769,8 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::POP_FRAME: {
               const auto p = ByteCode::PARSE::POP_FRAME(code_i);
 
-              mov(out_code, RBP.REG, RSP.REG);
-              pop(out_code, RBP.REG);
+              X64::mov(out_code, RBP.REG, RSP.REG);
+              X64::pop(out_code, RBP.REG);
 
               code_i += ByteCode::SIZE_OF::POP_FRAME;
               break;
@@ -767,7 +778,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::ALLOCATE_STACK: {
               const auto p = ByteCode::PARSE::ALLOCATE_STACK(code_i);
 
-              sub(out_code, RSP.REG, (int32_t)p.u64.sig_val);
+              X64::sub(out_code, RSP.REG, (int32_t)p.u64.sig_val);
 
               code_i += ByteCode::SIZE_OF::ALLOCATE_STACK;
               break;
@@ -775,23 +786,48 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_TO_STACK_TOP: {
               const auto i = ByteCode::PARSE::COPY_R64_TO_STACK_TOP(code_i);
 
-              mov(out_code, R{ i.val }, RM{ RSP.REG, true, (int32_t)i.u64.sig_val });
+              X64::mov(out_code, X64::R{ i.val }, X64::RM{ RSP.REG, true, (int32_t)i.u64.sig_val });
 
               code_i += ByteCode::SIZE_OF::COPY_R64_TO_STACK_TOP;
+              break;
+            }
+          case ByteCode::COPY_64_TO_STACK_TOP: {
+              const auto i = ByteCode::PARSE::COPY_64_TO_STACK_TOP(code_i);
+
+              const uint32_t low = i.u64_1.val & 0xFFFFFFFF;
+              const uint32_t high = (i.u64_1.val >> (8 * 4)) & 0xFFFFFFFF;
+
+              X64::mov(out_code, X64::RM{ RSP.REG, true, (int32_t)i.u64_2.sig_val + 4 }, high);
+              X64::mov(out_code, X64::RM{ RSP.REG, true, (int32_t)i.u64_2.sig_val }, low);
+
+              code_i += ByteCode::SIZE_OF::COPY_64_TO_STACK_TOP;
               break;
             }
           case ByteCode::COPY_R64_TO_STACK: {
               const auto i = ByteCode::PARSE::COPY_R64_TO_STACK(code_i);
 
-              mov(out_code, R{ i.val }, RM{ RBP.REG, true, (int32_t)i.u64.sig_val });
+              X64::mov(out_code, X64::R{ i.val }, X64::RM{ RBP.REG, true, (int32_t)i.u64.sig_val });
 
               code_i += ByteCode::SIZE_OF::COPY_R64_TO_STACK;
+              break;
+            }
+          case ByteCode::COPY_64_TO_STACK: {
+              const auto i = ByteCode::PARSE::COPY_64_TO_STACK(code_i);
+
+              const uint32_t low = i.u64_1.val & 0xFFFFFFFF;
+              const uint32_t high = (i.u64_1.val >> (8 * 4)) & 0xFFFFFFFF;
+
+              X64::mov(out_code, X64::RM{ RBP.REG, true, (int32_t)i.u64_2.sig_val + 4 }, high);
+              X64::mov(out_code, X64::RM{ RBP.REG, true, (int32_t)i.u64_2.sig_val }, low);
+
+
+              code_i += ByteCode::SIZE_OF::COPY_64_TO_STACK;
               break;
             }
           case ByteCode::COPY_R64_FROM_STACK: {
               const auto i = ByteCode::PARSE::COPY_R64_FROM_STACK(code_i);
 
-              mov(out_code, RM{ RBP.REG, true, (int32_t)i.u64.sig_val }, R{ i.val });
+              X64::mov(out_code, X64::RM{ RBP.REG, true, (int32_t)i.u64.sig_val }, X64::R{ i.val });
 
               code_i += ByteCode::SIZE_OF::COPY_R64_FROM_STACK;
               break;
@@ -827,7 +863,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               break;
             }
           case ByteCode::RETURN: {
-              out_code.insert(X64::RET_NEAR);
+              X64::ret(out_code);
               code_i += ByteCode::SIZE_OF::RETURN;
               break;
             }
@@ -928,7 +964,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
     entry_point_index = label_indexes[entry_point_label];
   }
 
-  free<size_t>(label_indexes);
+  free_no_destruct(label_indexes);
   return entry_point_index;
 }
 
@@ -975,7 +1011,38 @@ const char* b8_rex_reg_name(uint8_t reg) {
   return "INVALID REGISTER";
 }
 
-static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_name,
+const char* b32_reg_name(uint8_t reg) {
+  switch (reg) {
+    case 0: return "EAX";
+    case 1: return "ECX";
+    case 2: return "EDX";
+    case 3: return "EBX";
+    case 4: return "ESP";
+    case 5: return "EBP";
+    case 6: return "ESI";
+    case 7: return "EDI";
+    case 8: return "R8D";
+    case 9: return "R9D";
+    case 10: return "R10D";
+    case 11: return "R11D";
+    case 12: return "R12D";
+    case 13: return "R13D";
+    case 14: return "R14D";
+    case 15: return "R15D";
+  }
+
+  return "INVALID REGISTER";
+}
+
+struct x86PrintOptions {
+  bool short_operand = false;
+  FUNCTION_PTR<const char*, uint8_t> r_name;
+  FUNCTION_PTR<const char*, uint8_t> rm_name;
+};
+
+
+
+static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
                                     uint8_t rex, uint8_t modrm, const uint8_t** rest) {
   uint8_t address_mode = (modrm & 0b11'000000) >> 6;
   uint8_t rm = modrm & X64::MODRM_RM_MASK;
@@ -983,8 +1050,19 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
   if ((modrm & 0b11'000000) == 0b11'000000) {
     rm |= ((rex & X64::REX_B) << X64::REX_B_SHIFT);
 
-    return format("{}", rm_name(rm));
+    return format("{}", p_opts->rm_name(rm));
   }
+
+  constexpr auto SIZE = [](bool short_operand)->const char* {
+    if (short_operand) {
+      return "WORD PTR";
+    }
+    else {
+      return "DWORD PTR";
+    }
+  };
+
+  const char* const size_operand = SIZE(p_opts->short_operand);
 
   switch (rm) {
     case RSP.REG: {
@@ -1004,10 +1082,10 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
                 int32_t disp = x32_from_bytes(*rest);
                 *rest += 4;
 
-                return format("[{}]", disp);
+                return format("{} [{}]", size_operand, disp);
               }
               else if (INDEX_RSP) {
-                return format("[{}]", rm_name(base));
+                return format("{} [{}]", size_operand, p_opts->rm_name(base));
               }
               else if (BASE_RBP) {
                 int32_t disp = x32_from_bytes(*rest);
@@ -1015,12 +1093,13 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
 
                 char sign = disp >= 0 ? '+' : '-';
 
-                return format("[({} * {}) {} {}]", rm_name(index), scale, sign, absolute(disp));
+                return format("{} [({} * {}) {} {}]", size_operand, p_opts->rm_name(index), scale, sign, absolute(disp));
               }
               else {
-                return format("[{} + ({} * {})]",
-                              rm_name(base),
-                              rm_name(index),
+                return format("{} [{} + ({} * {})]",
+                              size_operand,
+                              p_opts->rm_name(base),
+                              p_opts->rm_name(index),
                               scale);
               }
             }
@@ -1030,14 +1109,16 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
               char sign = disp >= 0 ? '+' : '-';
 
               if (INDEX_RSP) {
-                return format("[{} {} {}]",
-                              rm_name(base),
+                return format("{} [{} {} {}]",
+                              size_operand,
+                              p_opts->rm_name(base),
                               sign, absolute(disp));
               }
               else {
-                return format("[{} + ({} * {}) {} {}]",
-                              rm_name(base),
-                              rm_name(index), scale,
+                return format("{} [{} + ({} * {}) {} {}]",
+                              size_operand,
+                              p_opts->rm_name(base),
+                              p_opts->rm_name(index), scale,
                               sign, absolute(disp));
               }
             }
@@ -1048,14 +1129,16 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
               char sign = disp >= 0 ? '+' : '-';
 
               if (INDEX_RSP) {
-                return format("[{} {} {}]",
-                              rm_name(base),
+                return format("{} [{} {} {}]",
+                              size_operand,
+                              p_opts->rm_name(base),
                               sign, absolute(disp));
               }
               else {
-                return format("[{} + ({} * {}) {} {}]",
-                              rm_name(base),
-                              rm_name(index), scale,
+                return format("{} [{} + ({} * {}) {} {}]",
+                              size_operand,
+                              p_opts->rm_name(base),
+                              p_opts->rm_name(index), scale,
                               sign, absolute(disp));
               }
             }
@@ -1070,7 +1153,7 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
 
           char sign = disp >= 0 ? '+' : '-';
 
-          return format("[RIP {} {}]", sign, absolute(disp));
+          return format("{} [RIP {} {}]", size_operand, sign, absolute(disp));
         }
 
         goto NORMAL_MODRM;
@@ -1081,14 +1164,14 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
 
         switch (address_mode) {
           case 0b00: {
-              return format("[{}]", rm_name(rm));
+              return format("{} [{}]", size_operand, p_opts->rm_name(rm));
             }
           case 0b01: {
               int8_t disp = *(*rest)++;
 
               char sign = disp >= 0 ? '+' : '-';
 
-              return format("[{} {} {}]", rm_name(rm), sign, absolute(disp));
+              return format("{} [{} {} {}]", size_operand, p_opts->rm_name(rm), sign, absolute(disp));
             }
           case 0b10: {
               int32_t disp = x32_from_bytes(*rest);
@@ -1096,7 +1179,7 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
 
               char sign = disp >= 0 ? '+' : '-';
 
-              return format("[{} {} {}]", rm_name(rm), sign, absolute(disp));
+              return format("{} [{} {} {}]", size_operand, p_opts->rm_name(rm), sign, absolute(disp));
             }
         }
 
@@ -1107,54 +1190,33 @@ static OwnedPtr<char> rm_reg_string(const FUNCTION_PTR<const char*, uint8_t> rm_
   throw std::exception("Internal error, should not be here");
 }
 
-static OwnedPtr<char> r_reg_string(const FUNCTION_PTR<const char*, uint8_t> r_name,
+static OwnedPtr<char> r_reg_string(x86PrintOptions* p_opts,
                                    uint8_t rex, uint8_t modrm) {
   uint8_t r = ((rex & X64::REX_R) << X64::REX_R_SHIFT)
     | ((modrm & X64::MODRM_REG_MASK) >> X64::MODRM_REG_SHIFT);
 
-  return  format("{}", r_name(r));
+  return  format("{}", p_opts->r_name(r));
 }
 
 
-static RegisterNames register_names(const FUNCTION_PTR<const char*, uint8_t> r_name,
-                                    const FUNCTION_PTR<const char*, uint8_t> rm_name,
+static RegisterNames register_names(x86PrintOptions* p_opts,
                                     uint8_t rex, uint8_t modrm, const uint8_t** rest) {
-
-  return { r_reg_string(r_name, rex, modrm), rm_reg_string(rm_name, rex, modrm, rest) };
-}
-
-static RegisterNames b64_register_names(uint8_t rex, uint8_t modrm, const uint8_t** rest) {
-  return register_names(x86_64_reg_name_from_num, x86_64_reg_name_from_num,
-                        rex, modrm, rest);
-}
-
-static RegisterNames register_names_R64_M8(uint8_t rex, uint8_t modrm, const uint8_t** rest) {
-  return register_names(x86_64_reg_name_from_num, b8_rex_reg_name,
-                        rex, modrm, rest);
-}
-
-static OwnedPtr<char> b64_register_name_M(uint8_t rex, uint8_t modrm, const uint8_t** rest) {
-  return rm_reg_string(x86_64_reg_name_from_num, rex, modrm, rest);
-}
-
-static OwnedPtr<char> b64_register_name_R(uint8_t rex, const uint8_t modrm) {
-  return r_reg_string(x86_64_reg_name_from_num, rex, modrm);
-}
-
-static OwnedPtr<char> b8_register_name_M(uint8_t modrm, const uint8_t** rest) {
-  return rm_reg_string(b8_no_rex_reg_name, 0, modrm, rest);
-}
-
-static OwnedPtr<char> b8_register_name_M(uint8_t rex, uint8_t modrm, const uint8_t** rest) {
-  return rm_reg_string(b8_no_rex_reg_name, rex, modrm, rest);
+  return { r_reg_string(p_opts, rex, modrm), rm_reg_string(p_opts, rex, modrm, rest) };
 }
 
 void print_x86_64(const uint8_t* machine_code, size_t size) {
   const uint8_t* bytes = machine_code;
   const uint8_t* const end = machine_code + size;
 
+  x86PrintOptions p_opts ={};
+
   while (bytes < end) {
     printf("0x%-4llx: ", bytes - machine_code);
+
+    p_opts.short_operand = bytes[0] == 0x66;
+    if (p_opts.short_operand) {
+      bytes++;
+    }
 
     const uint8_t maybe_rex = *bytes++;
     if ((maybe_rex & 0b1111'1000) == X64::REX_W) {
@@ -1164,7 +1226,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::ADD_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            RegisterNames names = b64_register_names(maybe_rex, modrm, &bytes);
+            p_opts.r_name = x86_64_reg_name_from_num;
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("add %s, %s\n", names.rm.ptr, names.r.ptr);
             break;
@@ -1172,7 +1237,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::OR_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            RegisterNames names = b64_register_names(maybe_rex, modrm, &bytes);
+            p_opts.r_name = x86_64_reg_name_from_num;
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("or  %s, %s\n", names.rm.ptr, names.r.ptr);
             break;
@@ -1180,7 +1248,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::AND_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            RegisterNames names = b64_register_names(maybe_rex, modrm, &bytes);
+            p_opts.r_name = x86_64_reg_name_from_num;
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("and %s, %s\n", names.rm.ptr, names.r.ptr);
             break;
@@ -1188,7 +1259,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::SUB_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            RegisterNames names = b64_register_names(maybe_rex, modrm, &bytes);
+            p_opts.r_name = x86_64_reg_name_from_num;
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("sub %s, %s\n", names.rm.ptr, names.r.ptr);
             break;
@@ -1196,7 +1270,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::CMP_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            RegisterNames names = b64_register_names(maybe_rex, modrm, &bytes);
+            p_opts.r_name = x86_64_reg_name_from_num;
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("cmp %s, %s\n", names.rm.ptr, names.r.ptr);
             break;
@@ -1232,7 +1309,9 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case 0x81: {
             uint8_t modrm = *bytes++;
 
-            OwnedPtr<char> rm_string = b64_register_name_M(maybe_rex, modrm, &bytes);
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
 
             int32_t imm32 = x32_from_bytes(bytes);
             bytes += 4;
@@ -1256,7 +1335,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::MOV_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            RegisterNames names = b64_register_names(maybe_rex, modrm, &bytes);
+            p_opts.r_name = x86_64_reg_name_from_num;
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("mov %s, %s\n", names.rm.ptr, names.r.ptr);
             break;
@@ -1264,7 +1346,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::MOV_RM_TO_R: {
             uint8_t modrm = *bytes++;
 
-            RegisterNames names = b64_register_names(maybe_rex, modrm, &bytes);
+            p_opts.r_name = x86_64_reg_name_from_num;
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("mov %s, %s\n", names.r.ptr, names.rm.ptr);
             break;
@@ -1279,7 +1364,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
               case X64::IMUL_RM_TO_R: {
                   uint8_t modrm = *bytes++;
 
-                  RegisterNames names = b64_register_names(maybe_rex, modrm, &bytes);
+                  p_opts.r_name = x86_64_reg_name_from_num;
+                  p_opts.rm_name = x86_64_reg_name_from_num;
+
+                  RegisterNames names =  register_names(&p_opts, maybe_rex, modrm, &bytes);
 
                   printf("imul %s, %s\n", names.r.ptr, names.rm.ptr);
                   break;
@@ -1287,7 +1375,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
               case X64::MOV_ZX_RM8_TO_R: {
                   uint8_t modrm = *bytes++;
 
-                  RegisterNames names = register_names_R64_M8(maybe_rex, modrm, &bytes);
+                  p_opts.r_name = x86_64_reg_name_from_num;
+                  p_opts.rm_name = b8_rex_reg_name;
+
+                  RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
                   printf("movzx %s, %s\n", names.r.ptr, names.rm.ptr);
                   break;
@@ -1295,7 +1386,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
               case X64::MOV_SX_RM8_TO_R: {
                   uint8_t modrm = *bytes++;
 
-                  RegisterNames names = register_names_R64_M8(maybe_rex, modrm, &bytes);
+                  p_opts.r_name = x86_64_reg_name_from_num;
+                  p_opts.rm_name = x86_64_reg_name_from_num;
+
+                  RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
                   printf("movsx %s, %s\n", names.r.ptr, names.rm.ptr);
                   break;
@@ -1329,8 +1423,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case 0xF7: {
             uint8_t modrm = *bytes++;
 
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
             const uint8_t r = (modrm & 0b0011'1000) >> 3;
-            OwnedPtr<char> rm_string = b64_register_name_M(maybe_rex, modrm, &bytes);
+            OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
 
             if (r == 3) {
               printf("neg %s\n", rm_string.ptr);
@@ -1363,12 +1459,28 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
     else if ((maybe_rex & 0b1111'1000) == X64::REX) {
       uint8_t op = *bytes++;
       switch (op) {
+        case X64::MOV_IMM32_RM: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            OwnedPtr<char> rm = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+
+            uint32_t val = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("mov %s, %u\n", rm.ptr, val);
+            break;
+          }
         case 0x0F: {
             uint8_t op2 = *bytes++;
             switch (op2) {
               case X64::SETE_RM8: {
                   uint8_t modrm = *bytes++;
-                  OwnedPtr<char> r_string = b8_register_name_M(maybe_rex, modrm, &bytes);
+
+                  p_opts.rm_name = x86_64_reg_name_from_num;
+
+                  OwnedPtr<char> r_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
                   printf("sete %s\n", r_string.ptr);
                   break;
                 }
@@ -1410,7 +1522,9 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::SETE_RM8: {
             uint8_t modrm = *bytes++;
 
-            OwnedPtr<char> r_string = b8_register_name_M(modrm, &bytes);
+            p_opts.rm_name = b8_rex_reg_name;
+
+            OwnedPtr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &bytes);
             printf("sete %s\n", r_string.ptr);
             break;
           }
@@ -1469,6 +1583,19 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             bytes += 4;
 
             printf("call 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::MOV_IMM32_RM: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            OwnedPtr<char> rm = rm_reg_string(&p_opts, 0, modrm, &bytes);
+
+            uint32_t val = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("mov %s, %u\n", rm.ptr, val);
             break;
           }
         default: {

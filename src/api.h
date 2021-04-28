@@ -36,7 +36,7 @@ struct Program {
     return *this;
   }
 
-  ~Program() { free(code); }
+  ~Program() { free_no_destruct(code); }
 };
 
 struct RunOutput {

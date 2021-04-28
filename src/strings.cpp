@@ -45,5 +45,15 @@ InternString StringInterner::intern(const char* string, const size_t str_len_new
 }
 
 TempUTF8String ascii_to_utf8(const char* string) {
+  assert(false);//Not implemented yet
   return {};
+}
+
+StringInterner::~StringInterner() {
+  auto i = strings.begin();
+  const auto end = strings.end();
+
+  for (; i < end; i++) {
+    free_no_destruct(*i);
+  }
 }

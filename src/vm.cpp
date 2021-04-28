@@ -162,6 +162,22 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->IP += ByteCode::SIZE_OF::COPY_R64_TO_STACK_TOP;
           break;
         }
+      case ByteCode::COPY_64_TO_STACK_TOP: {
+          const auto i = ByteCode::PARSE::COPY_64_TO_STACK_TOP(vm->IP);
+
+          x64_to_bytes(i.u64_1, vm->SP + i.u64_2.sig_val);
+
+          vm->IP += ByteCode::SIZE_OF::COPY_64_TO_STACK_TOP;
+          break;
+        }
+      case ByteCode::COPY_64_TO_STACK: {
+          const auto i = ByteCode::PARSE::COPY_64_TO_STACK(vm->IP);
+
+          x64_to_bytes(i.u64_1, vm->BP + i.u64_2.sig_val);
+
+          vm->IP += ByteCode::SIZE_OF::COPY_64_TO_STACK;
+          break;
+        }
       case ByteCode::COPY_R64_TO_STACK: {
           const auto i = ByteCode::PARSE::COPY_R64_TO_STACK(vm->IP);
 

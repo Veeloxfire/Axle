@@ -2,6 +2,17 @@
 #include "utility.h"
 
 namespace X64 {
+  struct R {
+    uint8_t r;
+  };
+
+  struct RM {
+    uint8_t r;
+
+    bool indirect = false;
+    int32_t disp = 0;
+  };
+
   inline constexpr uint8_t rex_r(uint8_t reg) {
     return (reg & 0b0000'1000) >> 1;
   }
@@ -85,6 +96,7 @@ namespace X64 {
     MOV_SX_RM8_TO_R = 0xBE,
     MOV_64_TO_R = 0xB8,//+ register
     RET_NEAR = 0xC3,
+    MOV_IMM32_RM = 0xC7,
     CALL_NEAR = 0xE8,
     JMP_NEAR = 0xE9,
     NEG_RM = 0xF7,//        r = 3
@@ -92,13 +104,46 @@ namespace X64 {
     DIV_RM_TO_RAX = 0xF7,// r = 6
     IDIV_RM_TO_RAX = 0xF7,// r = 7
   };
+
+  void mov(Array<uint8_t>& arr,
+           uint8_t from,
+           uint8_t to);
+
+  void mov(Array<uint8_t>& arr,
+           R r,
+           RM rm);
+
+  void mov(Array<uint8_t>& arr,
+           RM rm,
+           R r);
+
+  void mov(Array<uint8_t>& arr,
+           R r,
+           uint64_t u64);
+
+  void mov(Array<uint8_t>& arr,
+           RM rm,
+           uint32_t u32);
+
+  void sub(Array<uint8_t>& arr,
+           uint8_t r,
+           uint8_t rm);
+
+  void sub(Array<uint8_t>& arr,
+           uint8_t rm,
+           int32_t i32);
+
+  void ret(Array<uint8_t>& arr);
+
+  void push(Array<uint8_t>& arr, uint8_t reg);
+  void pop(Array<uint8_t>& arr, uint8_t reg);
 }
 
 struct Compiler;
-struct Function;
+struct CodeBlock;
 
 size_t vm_backend(Array<uint8_t>& out_code, const Compiler*);
-size_t vm_backend_single_func(Array<uint8_t>& out_code, const Function* func, uint64_t labels);
+size_t vm_backend_single_func(Array<uint8_t>& out_code, const CodeBlock* code, uint64_t labels);
 
 size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* comp);
 

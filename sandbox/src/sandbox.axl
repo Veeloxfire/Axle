@@ -1,3 +1,6 @@
 function main() -> u64 {
+  [ascii; 8] a = "abcdefg";
+
+
   return cast(u64, -1);
 }

@@ -30,8 +30,11 @@ MODIFY(Left_Bracket)\
 MODIFY(Right_Bracket)\
 MODIFY(Left_Brace)\
 MODIFY(Right_Brace)\
+MODIFY(Left_Square)\
+MODIFY(Right_Square)\
 MODIFY(Comma)\
-MODIFY(Semicolon)
+MODIFY(Semicolon)\
+MODIFY(String)\
 
 enum class TokenType : uint8_t {
 #define MODIFY(n) n,
@@ -40,8 +43,8 @@ enum class TokenType : uint8_t {
 };
 
 struct TokenTypeString {
-  const char* string;
-  size_t length;
+  const char* string = nullptr;
+  size_t length = 0;
 };
 
 TokenTypeString token_type_string(TokenType);
@@ -67,9 +70,9 @@ struct Lexer {
 };
 
 struct Parser {
-  Lexer lexer;
+  Lexer lexer ={};
 
-  Token current;
+  Token current ={};
 
   void report_error(const char* error_message);
 };
@@ -78,9 +81,9 @@ void init_parser(Parser* const parser, const char* file_name, const char* source
 void parse_file(Parser* const parser, ASTFile* const file);
 
 struct KeywordPair {
-  const char* keyword;
-  TokenType type;
-  size_t size;
+  const char* keyword = nullptr;
+  TokenType type = TokenType::Error;
+  size_t size = 0;
 
   constexpr KeywordPair(const char* kw, TokenType t)
     :keyword(kw), type(t), size(strlen_ts(kw))

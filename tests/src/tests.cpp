@@ -6,6 +6,33 @@
 #include "api.h"
 #include "utility.h"
 
+#ifdef COUNT_ALLOC
+void print_still_allocated() {
+  ALLOC_COUNTER& a = ALLOC_COUNTER::allocated();
+
+  std::cout << "Max Allocated Blocks: " << a.max_allocated_blocks << '\n';
+  std::cout << "Max Allocated Size: " << a.max_allocated_size << '\n';
+  std::cout << '\n';
+  std::cout << "Insert Calls: " << a.insert_calls << '\n';
+  std::cout << "Update Calls: " << a.update_calls << '\n';
+  std::cout << "Remove Calls: " << a.valid_remove_calls + a.null_remove_calls << '\n';
+  std::cout << "- Valid Remove Calls: " << a.valid_remove_calls << '\n';
+  std::cout << "- Nullptr Remove Calls: " << a.null_remove_calls << '\n';
+
+
+  if (a.num_allocs > 0) {
+    auto i = a.allocs;
+    const auto end = a.allocs +  a.num_allocs;
+
+    std::cout << "Still " << a.num_allocs << " blocks allocated - Possible memory leaks:\n";
+
+    for (; i < end; i++) {
+      std::cout << "Type: " << i->type_name << ", Ptr: " << i->mem << ", Bytes: " << i->size << '\n';
+    }
+  }
+}
+#endif
+
 //Loop fibonacci algorithm - slow version wont run in constexpr
 constexpr auto constexpr_fibonacci(uint64_t a) -> uint64_t {
   uint64_t n0 = 0;
@@ -81,8 +108,8 @@ bool run_test(const Options& opts, const uint64_t res) {
     const auto end = std::chrono::high_resolution_clock::now();
 
     std::cout << "Test ran for: "
-      << std::chrono::duration_cast<std::chrono::milliseconds>(end - now).count()
-      << "ms\n";
+      << std::chrono::duration_cast<std::chrono::microseconds>(end - now).count()
+      << "us\n";
 
     if (out.return_code != 0) {
       std::cerr << "Return code: " << out.return_code << '\n';
@@ -144,8 +171,11 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
     options.build.entry_point        = "main";
     options.build.file_name          = test.file_name;
 
-    options.print.fully_compiled = true;
-    options.print.comptime_exec = true;
+    //options.print.ast = true;
+    //options.print.fully_compiled = true;
+    //options.print.comptime_exec = true;
+    //options.print.pre_reg_alloc = true;
+    //options.print.coalesce_values = true;
 
     std::cout << "\nStarting Test: " << test.test_name << "\n";
 
@@ -158,6 +188,9 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
       std::cerr << "Test failed!\n";
       failed_tests.insert(test.test_name);
     }
+
+    //Test for memory leaks
+    //print_still_allocated();
   }
 
   if (failed_tests.size == 0) {
@@ -224,23 +257,7 @@ int main() {
   }
 
 #ifdef COUNT_ALLOC
-  {
-    ALLOC_COUNTER& a = ALLOC_COUNTER::allocated();
-
-    std::cout << "Max Allocated Blocks: " << a.max_allocated_blocks << '\n';
-    std::cout << "Max Allocated Size: " << a.max_allocated_size << '\n';
-
-    auto i = a.allocs;
-    const auto end = a.allocs + a.num_allocs;
-
-    if (i < end) {
-      std::cout << "Still some allocated - Possible memory leaks:\n";
-
-      for (; i < end; i++) {
-        std::cout << "Ptr: " << i->mem << ", Bytes: " << i->size << '\n';
-      }
-    }
-  }
+  print_still_allocated();
 #endif
 
   return 0;

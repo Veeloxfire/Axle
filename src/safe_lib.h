@@ -36,6 +36,7 @@ constexpr inline void default_init(T* const dest, const size_t dest_size) {
 #ifdef COUNT_ALLOC
 struct ALLOC_COUNTER {
   struct Allocation {
+    const char* type_name;
     const void* mem;
     size_t size;
   };
@@ -49,8 +50,15 @@ struct ALLOC_COUNTER {
   size_t max_allocated_blocks = 0;
   size_t max_allocated_size   = 0;
 
+  size_t update_calls = 0;
+  size_t null_remove_calls = 0;
+  size_t valid_remove_calls = 0;
+  size_t insert_calls = 0;
+
   template<typename T>
   void insert(T* t, size_t num) {
+    insert_calls++;
+
     if (capacity == num_allocs) {
       if (capacity == 0) {
         capacity = 8;
@@ -59,10 +67,14 @@ struct ALLOC_COUNTER {
         capacity <<= 1;
       }
 
-      allocs = (Allocation*) std::realloc(allocs, capacity * sizeof(Allocation));
-      assert(allocs != nullptr);
+      
+      auto* new_allocs = (Allocation*) std::realloc(allocs, capacity * sizeof(Allocation));
+      assert(new_allocs != nullptr);
+
+      allocs = new_allocs;
     }
 
+    allocs[num_allocs].type_name = typeid(T*).name();
     allocs[num_allocs].mem  = (const void*)t;
     allocs[num_allocs].size = num * sizeof(T);
 
@@ -79,13 +91,20 @@ struct ALLOC_COUNTER {
 
   template<typename T>
   void update(T* from, T* to, size_t num) {
-    const void* f_v = (void*)from;
+    if (from == nullptr) {
+      insert<T>(to, num);
+      return;
+    }
+
+    update_calls++;
+
+    const void* f_v = (const void*)from;
 
     auto i = allocs;
     const auto end = allocs + num_allocs;
 
     for (; i < end; i++) {
-      if (i->mem = f_v) {
+      if (i->mem == f_v) {
         i->mem = (const void*)to;
 
         current_allocated_size -= i->size;
@@ -95,7 +114,8 @@ struct ALLOC_COUNTER {
         if (current_allocated_size > max_allocated_size) {
           max_allocated_size = current_allocated_size;
         }
-        break;
+
+        return;
       }
     }
   }
@@ -103,8 +123,11 @@ struct ALLOC_COUNTER {
   template<typename T>
   void remove(T* t) {
     if (t == nullptr) {
+      null_remove_calls++;
       return;
     }
+
+    valid_remove_calls++;
 
     const void* t_v = (void*)t;
 
@@ -112,7 +135,7 @@ struct ALLOC_COUNTER {
     const auto end = allocs + num_allocs;
 
     for (; i < end; i++) {
-      if (i->mem = t_v) {
+      if (i->mem == t_v) {
         current_allocated_size -= i->size;
         num_allocs--;
         goto REMOVE;
@@ -207,12 +230,41 @@ T* reallocate_default(T* ptr, const size_t old_size, const size_t new_size) {
 }
 
 template<typename T>
-void free(T* ptr) {
-  std::free((void*)ptr);
-
+void free_destruct_single(T* ptr) {
 #ifdef COUNT_ALLOC
   ALLOC_COUNTER::allocated().remove(ptr);
 #endif
+
+  if(ptr == nullptr) return;
+
+  ptr->~T();
+  std::free((void*)ptr);
+}
+
+template<typename T>
+void free_destruct_n(T* ptr, size_t num) {
+#ifdef COUNT_ALLOC
+  ALLOC_COUNTER::allocated().remove(ptr);
+#endif
+
+  if(ptr == nullptr) return;
+
+  for (size_t i = 0; i < num; i++) {
+    ptr[i].~T();
+  }
+
+  std::free((void*)ptr);
+}
+
+template<typename T>
+void free_no_destruct(T* ptr) {
+#ifdef COUNT_ALLOC
+  ALLOC_COUNTER::allocated().remove(ptr);
+#endif
+
+  if(ptr == nullptr) return;
+
+  std::free((void*)ptr);
 }
 
 constexpr size_t strlen_ts(const char* c) {

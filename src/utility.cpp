@@ -91,18 +91,22 @@ void* ArenaAllocator::alloc_no_construct(size_t bytes) {
   }
 
   const uint64_t available_space = fl->qwords_available;
-  uint64_t used_space = req_size;
+ 
+  uint64_t* const used_space = (uint64_t*)fl;
+  uint64_t* current_alloc = (uint64_t*)used_space + 1;
 
-  uint64_t* current_alloc = (uint64_t*)fl;
 
   //Fix the free list - do we need a new node?
   if (available_space - req_size >= 2) {
     //Yay there is more space
 
-    FreeList* new_fl = (FreeList*)(current_alloc + used_space);
+    FreeList* new_fl = (FreeList*)(current_alloc + req_size);
 
     if (prev != nullptr) {
       prev->next = new_fl;
+    }
+    else {
+      free_list = new_fl;
     }
 
     //-1 for the bytes available
@@ -117,11 +121,13 @@ void* ArenaAllocator::alloc_no_construct(size_t bytes) {
     if (prev != nullptr) {
       prev->next = fl->next;
     }
+    else {
+      free_list = nullptr;
+    }
   }
 
   //How much data to free
-  *current_alloc = used_space;
-  current_alloc += 1;
+  *used_space = req_size;
 
   return current_alloc;
 }
@@ -132,7 +138,7 @@ void ArenaAllocator::free_no_destruct(void* val) {
 
   const uint64_t free_size = ptr[-1];
 
-  FreeList* new_fl = (FreeList*)ptr;
+  FreeList* new_fl = (FreeList*)(ptr - 1);
   new_fl->qwords_available = free_size;
   new_fl->next = nullptr;
 
@@ -154,7 +160,99 @@ void ArenaAllocator::new_block() {
 }
 
 ArenaAllocator::~ArenaAllocator() {
-  ::free(base);
+  ::free_destruct_single(base);
 }
 
-ArenaAllocator::Block::~Block() { ::free(next); }
+ArenaAllocator::Block::~Block() { ::free_destruct_single(next); }
+
+SquareBitMatrix::~SquareBitMatrix() {
+  free();
+}
+
+void SquareBitMatrix::free() {
+  ::free_no_destruct<uint8_t>(data);
+
+  data = nullptr;
+  side_length = 0;
+  capacity = 0;
+}
+
+bool SquareBitMatrix::test_a_intersects_b(size_t a, size_t b) const {
+  const size_t bytes_per_val = (side_length / 8) + 1;
+  const uint8_t* a_data = data + bytes_per_val * a;
+
+  const size_t b_mod8 = b % 8;
+  const size_t b_div8 = b / 8;
+
+  return (a_data[b_div8] & (1 << b_mod8)) > 0;
+}
+
+void SquareBitMatrix::set_a_intersects_b(size_t a, size_t b) {
+  const size_t bytes_per_val = (side_length / 8) + 1;
+  uint8_t* a_data = data + bytes_per_val * a;
+
+  const size_t b_mod8 = b % 8;
+  const size_t b_div8 = b / 8;
+
+  a_data[b_div8] |= (uint8_t)(1 << b_mod8);
+}
+
+void SquareBitMatrix::remove_a_intersects_b(size_t a, size_t b) {
+  const size_t bytes_per_val = (side_length / 8) + 1;
+  uint8_t* a_data = data + bytes_per_val * a;
+
+  const size_t b_mod8 = b % 8;
+  const size_t b_div8 = b / 8;
+
+  a_data[b_div8] &= ~(uint8_t)(1 << b_mod8);
+}
+
+size_t SquareBitMatrix::new_value() {
+  const size_t bytes_per_val_now = side_length == 0 ? 0
+    : ((side_length - 1) / 8) + 1;
+  const size_t bytes_per_val_next = ((side_length + 1 - 1) / 8) + 1;
+  const size_t required_capacity = bytes_per_val_next * (side_length + 1);
+
+  //check if we have enough space
+  if (required_capacity > capacity) {
+    const size_t old_capacity = capacity;
+
+    if (capacity == 0) {
+      capacity = 8;
+    }
+    else {
+      capacity = (size_t)1 << small_log_2_ceil(required_capacity);
+    }
+    data = reallocate_default(data, old_capacity, capacity);
+  }
+
+  //Check if we need to fix data shape
+  if (bytes_per_val_now < bytes_per_val_next) {
+    auto block_i = side_length == 0 ? data
+      : data + bytes_per_val_now * (side_length - 1);
+    auto new_i = data + bytes_per_val_next * side_length;
+
+    //Dont need to fix the first block as it will stay the same
+    const auto block_end = data + bytes_per_val_now;
+
+    const size_t diff = bytes_per_val_next - bytes_per_val_now;
+
+    while (block_i > block_end) {
+      size_t i = 0;
+      for (; i < diff; i++) {
+        new_i[bytes_per_val_next - (i + 1)] = 0;
+      }
+
+      i = 0;
+      for (size_t i = 0; i < bytes_per_val_now; i++) {
+        new_i[bytes_per_val_now - (i + 1)] = block_i[bytes_per_val_now - (i + 1)];
+      }
+
+      block_i -= bytes_per_val_now;
+      new_i -= bytes_per_val_now;
+    }
+  }
+
+  //Finally return new value
+  return side_length++;
+}

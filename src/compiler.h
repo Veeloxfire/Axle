@@ -93,7 +93,7 @@ struct ValueUse {
 };
 
 enum struct ValueType : uint8_t {
-  FREE = 0, FIXED, COALESCED, NORMAL_STACK, ARGUMENT_STACK
+  FREE = 0, FIXED, COALESCED, NORMAL_STACK, ARGUMENT_STACK, CONSTANT
 };
 
 struct Value {
@@ -107,6 +107,7 @@ struct Value {
     ValueIndex index;
     int64_t stack_offset;
     uint64_t arg_num;
+    void* constant;
   };
 
   ValueUse creation ={};
@@ -156,11 +157,6 @@ struct StackState {
   uint64_t next_stack_local(uint64_t size, uint64_t alignment);
 };
 
-struct ComptimeConstant {
-  ASTExpression* expr = nullptr;
-  void* val = nullptr;
-};
-
 struct State {
   Array<Local> locals ={};
 
@@ -175,12 +171,8 @@ struct State {
   StackState stack ={};
 
   bool comptime_compilation = false;
-  Array<ComptimeConstant> constants ={};
 
   constexpr bool needs_new_frame() const { return made_call || used_stack; }
-
-  void free_constants(Compiler* comp);
-  const void* find_constant(const ASTExpression*) const;
 
   ValueIndex new_value();
   ValueIndex new_value(ValueIndex created_by);
@@ -189,16 +181,50 @@ struct State {
   const Local* find_local(InternString i_s) const;
 };
 
+struct IteratorForASTBlock {
+  struct StatementLayer {
+    ASTStatement* itr;
+    const ASTStatement* end;
+  };
 
-enum struct CompileCode : uint8_t {
-  NO_ERRORS = 0,
-  UNFOUND_DEPENDENCY,
-  TYPE_CHECK_ERROR,
-  INTERNAL_ERROR,
+  ASTExpression* current_expression;
+  StatementLayer current_statement_layer;
+
+  Array<ASTExpression*> to_do_expressions;
+  Array<StatementLayer> to_do_statements;
 };
 
+
+#define COMPCODEINC \
+MOD(NO_ERRORS)\
+MOD(UNFOUND_DEPENDENCY)\
+MOD(FOUND_DEPENDENCY)\
+MOD(CIRCULAR_DEPENDENCY)\
+MOD(TYPE_CHECK_ERROR)\
+MOD(INTERNAL_ERROR)
+
+enum struct CompileCode : uint8_t {
+#define MOD(E) E,
+  COMPCODEINC
+#undef MOD
+};
+
+constexpr const char* compile_code_string(CompileCode c) {
+  switch (c) {
+  #define MOD(E) case CompileCode:: ## E: return #E;
+    COMPCODEINC
+  #undef MOD
+  }
+
+  return "Invalid code";
+}
+
 enum struct COMPILATION_TYPE : uint8_t {
-  SIGNATURE, FUNCTION, STRUCTURE, NONE
+  SIGNATURE, FUNCTION, STRUCTURE, CONSTANT, NONE
+};
+
+enum struct EXPRESSION_COMPILE_STAGE : uint8_t {
+  UNTYPED, TYPED, FINISHED,
 };
 
 enum struct FUNCTION_COMPILE_STAGE : uint8_t {
@@ -208,10 +234,16 @@ enum struct FUNCTION_COMPILE_STAGE : uint8_t {
 struct CompilationUnitCarrier {
   COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
   size_t index = 0;
+
+  constexpr bool operator == (const CompilationUnitCarrier& c) const {
+    return type == c.type && index == c.index;
+  }
 };
 
 struct FunctionUnit {
   FUNCTION_COMPILE_STAGE stage = FUNCTION_COMPILE_STAGE::FINISHED;
+  Array<CompilationUnitCarrier> dependecies;
+  bool unfound_dependency = false;
 
   ASTFunctionDeclaration* source = nullptr;
   Function* destination = nullptr;
@@ -219,22 +251,41 @@ struct FunctionUnit {
   State state ={};
 };
 
+struct ConstantUnit {
+  EXPRESSION_COMPILE_STAGE stage = EXPRESSION_COMPILE_STAGE::FINISHED;
+  Array<CompilationUnitCarrier> dependecies ={};
+  bool unfound_dependency = false;
+
+  ASTExpression* expr;
+};
+
 struct VM;
+
+struct UnfoundDependenciesInfo {
+  bool panic = false;
+
+  size_t num_function_units = 0;
+  size_t num_constant_units = 0;
+};
 
 struct Compiler {
   VM* vm = nullptr;
   State* working_state = nullptr;
+
+  UnfoundDependenciesInfo unfound_dep_info;
+
+  CompilationUnitCarrier current_unit ={};
 
   PrintOptions        print_options        ={};
   BuildOptions        build_options        ={};
   OptimizationOptions optimization_options ={};
 
   Array<FunctionUnit> function_units ={};
+  Array<ConstantUnit> constant_units ={};
 
   Array<CompilationUnitCarrier> compiling ={};
 
-  LinkedList<Function> functions ={};
-
+  BucketArray<Function> functions ={};
   ArenaAllocator constants ={};
 
   Types* types = nullptr;

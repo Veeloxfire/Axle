@@ -24,8 +24,13 @@ enum struct TYPE_TYPE {
 struct ASTType;
 
 struct ASTArrayType {
-  ASTType* base ={};
-  ASTExpression* expr ={};
+  ASTType* base = nullptr;
+  ASTExpression* expr = nullptr;
+
+  ~ASTArrayType() {
+    free_destruct_single(base);
+    free_destruct_single(expr);
+  }
 };
 
 struct ASTType {
@@ -37,6 +42,8 @@ struct ASTType {
   };
 
   const Structure* type = nullptr;
+
+  ~ASTType();
 };
 
 enum struct EXPRESSION_TYPE : uint8_t {
@@ -48,7 +55,8 @@ enum struct EXPRESSION_TYPE : uint8_t {
   LOCAL /* = not in type check phase (converted from name) */,
   ENUM,
   VALUE,
-  FUNCTION_CALL
+  FUNCTION_CALL,
+  ASCII_STRING,
 };
 
 struct BuildOptions;
@@ -63,8 +71,8 @@ struct BinaryOperatorExpr {
   BINARY_OPERATOR_FUNCTION emit;
 
   ~BinaryOperatorExpr() {
-    free(left);
-    free(right);
+    free_destruct_single(left);
+    free_destruct_single(right);
   }
 };
 
@@ -87,7 +95,7 @@ struct UnaryOperatorExpr {
   UNARY_OPERATOR_FUNCTION emit = nullptr;
 
   ~UnaryOperatorExpr() {
-    free(primary);
+    free_destruct_single(primary);
   }
 };
 
@@ -97,7 +105,7 @@ struct CastExpr {
   CAST_FUNCTION emit = nullptr;
 
   ~CastExpr() {
-    free(expr);
+    free_destruct_single(expr);
   }
 };
 
@@ -112,6 +120,8 @@ struct ASTExpression {
   bool call_leaf = false;
   bool compile_time_constant = false;
 
+  void* const_val = nullptr;
+
   EXPRESSION_TYPE expr_type = EXPRESSION_TYPE::UNKNOWN;
   union {
     char _dummy = '\0';
@@ -122,6 +132,7 @@ struct ASTExpression {
     EnumValueExpr enum_value;
     InternString name;//e.g. local or global variable
     ValueExpr value;
+    InternString ascii_string;
   };
 
   ASTExpression() = default;
@@ -155,8 +166,8 @@ struct ASTIfElse {
   ASTStatement* else_statement;
 
   ~ASTIfElse() {
-    free(if_statement);
-    free(else_statement);
+    free_destruct_single(if_statement);
+    free_destruct_single(else_statement);
   }
 };
 

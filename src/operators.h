@@ -66,57 +66,57 @@ enum struct CompileCode : uint8_t;
 struct Structure;
 struct BuildOptions;
 struct State;
-struct Function;
+struct CodeBlock;
 struct ASTExpression;
 
 using BINARY_OPERATOR_FUNCTION = FUNCTION_PTR<
   void,
   const BuildOptions*,
-  State*, Function*,
+  State*, CodeBlock*,
   ValueIndex, ValueIndex
 >;
 
 using UNARY_OPERATOR_FUNCTION = FUNCTION_PTR<
   void,
   const BuildOptions*,
-  State*, Function*,
+  State*, CodeBlock*,
   ValueIndex
 >;
 
 void emit_add_64s(const BuildOptions*,
-                  State*, Function*,
+                  State*, CodeBlock*,
                   ValueIndex, ValueIndex);
 
 void emit_sub_64s(const BuildOptions*,
-                  State*, Function*,
+                  State*, CodeBlock*,
                   ValueIndex, ValueIndex);
 
 void emit_mul_64s(const BuildOptions*,
-                  State*, Function*,
+                  State*, CodeBlock*,
                   ValueIndex, ValueIndex);
 
 void emit_div_u64s(const BuildOptions*,
-                   State*, Function*,
+                   State*, CodeBlock*,
                    ValueIndex, ValueIndex);
 
 void emit_div_i64s(const BuildOptions*,
-                   State*, Function*,
+                   State*, CodeBlock*,
                    ValueIndex, ValueIndex);
 
 void emit_eq_64s(const BuildOptions*,
-                 State*, Function*,
+                 State*, CodeBlock*,
                  ValueIndex, ValueIndex);
 
 void emit_or_64s(const BuildOptions*,
-                 State*, Function*,
+                 State*, CodeBlock*,
                  ValueIndex, ValueIndex);
 
 void emit_and_64s(const BuildOptions*,
-                  State*, Function*,
+                  State*, CodeBlock*,
                   ValueIndex, ValueIndex);
 
 void emit_neg_i64(const BuildOptions*,
-                  State*, Function*,
+                  State*, CodeBlock*,
                   ValueIndex);
 
 struct BinaryOperation {
