@@ -106,6 +106,14 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->IP += ByteCode::SIZE_OF::AND_R64S;
           break;
         }
+      case ByteCode::LOAD_ADDRESS: {
+          const auto i = ByteCode::PARSE::LOAD_ADDRESS(vm->IP);
+
+          vm->registers[i.val1].b64.reg = vm->registers[i.val2].b64.reg + vm->registers[i.val3].b64.reg;
+
+          vm->IP += ByteCode::SIZE_OF::LOAD_ADDRESS;
+          break;
+        }
       case ByteCode::NEG_R64: {
           const auto i = ByteCode::PARSE::NEG_R64(vm->IP);
 
@@ -192,6 +200,26 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->registers[i.val].b64.reg = x64_from_bytes(vm->BP + i.u64.sig_val);
 
           vm->IP += ByteCode::SIZE_OF::COPY_R64_FROM_STACK;
+          break;
+        }
+      case ByteCode::COPY_R64_FROM_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(vm->IP);
+
+          vm->registers[i.val1].b64.reg = *(uint64_t*)vm->registers[i.val2].b64.ptr;
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
+          break;
+        }
+      case ByteCode::COPY_R64_FROM_MEM_COMPLEX: {
+          const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM_COMPLEX(vm->IP);
+
+          uint8_t* const ptr = (vm->registers[i.mem.base].b64.b_ptr
+            + i.mem.disp
+            + (vm->registers[i.mem.index].b64.reg * i.mem.scale));
+
+          vm->registers[i.val].b64.reg = x64_from_bytes(ptr);
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R64_FROM_MEM_COMPLEX;
           break;
         }
       case ByteCode::CONV_RU8_TO_R64: {

@@ -56,7 +56,9 @@ enum struct EXPRESSION_TYPE : uint8_t {
   ENUM,
   VALUE,
   FUNCTION_CALL,
+  ARRAY_EXPR,
   ASCII_STRING,
+  INDEX,
 };
 
 struct BuildOptions;
@@ -109,9 +111,23 @@ struct CastExpr {
   }
 };
 
+struct IndexExpr {
+  ASTExpression* expr = nullptr;
+  ASTExpression* index = nullptr;
+
+  ~IndexExpr() {
+    free_destruct_single(expr);
+    free_destruct_single(index);
+  }
+};
+
 struct ValueExpr {
   uint64_t value = 0;
   InternString suffix ={};
+};
+
+struct ArrayExpr {
+  Array<ASTExpression> elements;
 };
 
 struct ASTExpression {
@@ -132,7 +148,9 @@ struct ASTExpression {
     EnumValueExpr enum_value;
     InternString name;//e.g. local or global variable
     ValueExpr value;
+    ArrayExpr array_expr;
     InternString ascii_string;
+    IndexExpr index;
   };
 
   ASTExpression() = default;

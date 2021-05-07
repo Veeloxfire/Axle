@@ -2,6 +2,10 @@
 
 #include "utility.h"
 
+inline constexpr size_t NUM_VM_REGS = 18;
+inline constexpr size_t VM_BP_R = 16;
+inline constexpr size_t VM_SP_R = 17;
+
 //Forward decls
 struct REGISTER_CONSTANT;
 struct Compiler;

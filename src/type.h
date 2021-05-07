@@ -56,7 +56,7 @@ struct EnumStructure : public Structure {
 };
 
 enum struct LITERAL_TYPE {
-  INTEGER, SIGNED_INTEGER, STRING
+  INTEGER, SIGNED_INTEGER, EMPTY_ARR
 };
 
 struct LiteralStructure : public Structure {
@@ -129,6 +129,7 @@ struct Types {
 
   const Structure* s_int_lit = nullptr;
   const Structure* s_sint_lit = nullptr;
+  const Structure* s_empty_arr = nullptr;
 
   const Structure* s_void = nullptr;
   const Structure* s_ascii = nullptr;
@@ -164,6 +165,8 @@ namespace CASTS {
 }
 
 namespace TYPE_TESTS {
+  bool is_array(const Structure*);
+
   bool is_int(const Structure*);
   bool is_signed_int(const Structure*);
 

@@ -528,6 +528,80 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
   CompileCode ret_code = CompileCode::NO_ERRORS;
 
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::INDEX: {
+        expr->index.expr->call_leaf = expr->call_leaf;
+        expr->index.index->call_leaf = expr->call_leaf;
+
+        ret_code = compile_type_of_expression(comp, expr->index.expr, state);
+        if (ret_code != CompileCode::NO_ERRORS) {
+          return ret_code;
+        }
+
+        assert(expr->index.expr->type != nullptr);
+        if (!TYPE_TESTS::is_array(expr->index.expr->type)) {
+          printf("TYPE_ERROR: Cannot take index of non-array type: %s\n", expr->index.expr->type->name.string);
+          return CompileCode::TYPE_CHECK_ERROR;
+        }
+
+        ret_code = compile_type_of_expression(comp, expr->index.index, state);
+        if (ret_code != CompileCode::NO_ERRORS) {
+          return ret_code;
+        }
+
+        assert(expr->index.index->type != nullptr);
+
+        if (!TYPE_TESTS::is_int(expr->index.index->type)) {
+          printf("TYPE_ERROR: An index must be in integer\n"
+                 "            Found non-integer type: %s\n", expr->index.index->type->name.string);
+          return CompileCode::TYPE_CHECK_ERROR;
+        }
+
+        expr->type = static_cast<const ArrayStructure*>(expr->index.expr->type)->base;
+        expr->compile_time_constant = expr->index.index->compile_time_constant && expr->index.expr->compile_time_constant;
+        expr->makes_call = expr->index.index->makes_call || expr->index.expr->makes_call;
+        break;
+      }
+    case EXPRESSION_TYPE::ARRAY_EXPR: {
+        auto i = expr->array_expr.elements.mut_begin();
+        const auto end = expr->array_expr.elements.mut_end();
+
+        const Structure* base_type = nullptr;
+
+        for (; i < end; i++) {
+          i->call_leaf = expr->call_leaf;
+
+          ret_code = compile_type_of_expression(comp, i, state);
+          if (ret_code != CompileCode::NO_ERRORS) {
+            return ret_code;
+          }
+
+          if (base_type == nullptr) {
+            //TEMP: First element decides type for now - will have issues with literals
+            base_type = i->type;
+          }
+          else {
+            //Check rest of the elements match
+            ret_code = check_cast(i->type, base_type);
+            if (ret_code != CompileCode::NO_ERRORS) {
+              return ret_code;
+            }
+
+            base_type = i->type;//Will always be either same or more specific
+          }
+
+          expr->makes_call |= i->makes_call;
+          expr->compile_time_constant &= i->compile_time_constant;
+        }
+
+        if (base_type == nullptr) {
+          expr->type = comp->types->s_empty_arr;
+        }
+        else {
+          expr->type = find_or_make_array(comp, base_type, expr->array_expr.elements.size);
+        }
+
+        break;
+      }
     case EXPRESSION_TYPE::ASCII_STRING: {
         const size_t len = strlen_ts(expr->ascii_string.string) + 1;
 
@@ -688,12 +762,12 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           const auto end = call->arguments.mut_end();
 
           for (; i < end; i++) {
+            i->call_leaf = true;
+
             ret_code = compile_type_of_expression(comp, i, state);
             if (ret_code != CompileCode::NO_ERRORS) {
               return ret_code;
             }
-
-            i->call_leaf = true;
 
             expr->compile_time_constant &= i->compile_time_constant;
           }
@@ -881,65 +955,185 @@ struct ValueOrConst {
   };
 };
 
-static void copy_val_to_val(Compiler* const comp,
-                            State* const state,
-                            CodeBlock* const code,
-                            const Structure* type,
-                            const ValueOrConst& from,
-                            ValueIndex& to) {
-  DEFER(&) { state->control_flow.expression_num++; };
+static void load_const_to_stack(Compiler* const comp,
+                                State* const state,
+                                CodeBlock* const code,
+                                const Structure* type,
+                                uint64_t* from,
+                                ValueIndex& to,
+                                uint64_t additional_offset) {
 
   const uint32_t size = type->size();
   const uint32_t align = type->alignment();
 
+  const size_t s_div_8 = size / 8;
+  const size_t s_mod_8 = size % 8;
+
+
+  //Needs to go on stack
+  auto* const to_val = state->value_tree.values.data + to.val;
+  assert(to_val->on_stack());
+
+  uint64_t offset = to_val->stack_offset + additional_offset;
+
+  if (comp->build_options.system == &system_x86_64) {
+    auto mov_val = state->new_value();
+
+    for (size_t itr = 0; itr < s_div_8; itr++) {
+      ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)mov_val.val, *from);
+      state->use_value(mov_val);
+      state->control_flow.expression_num++;
+
+      ByteCode::EMIT::COPY_R64_TO_STACK(code->code, (uint8_t)mov_val.val, offset);
+      state->use_value(mov_val);
+      state->use_value(to);
+      state->control_flow.expression_num++;
+
+      from++;
+      offset += 8;
+    }
+  }
+  else {
+    for (size_t itr = 0; itr < s_div_8; itr++) {
+      ByteCode::EMIT::COPY_64_TO_STACK(code->code, *from, offset);
+      state->use_value(to);
+      state->control_flow.expression_num++;
+
+      from++;
+      offset += 8;
+    }
+  }
+
+
+
+  uint64_t last = *from;
+  uint8_t last_8 = last & 255;
+
+  for (size_t itr = 0; itr < s_mod_8; itr++) {
+    ByteCode::EMIT::COPY_8_TO_STACK(code->code, (uint8_t)(last & 255), offset);
+    state->use_value(to);
+    state->control_flow.expression_num++;
+    last >>= 8;//Shift over to the next byte
+    offset++;
+  }
+}
+
+static void load_stack_to_stack(Compiler* const comp,
+                                State* const state,
+                                CodeBlock* const code,
+                                const Structure* type,
+                                const ValueIndex& from,
+                                ValueIndex& to,
+                                int64_t additional_offset) {
+
+  const uint32_t size = type->size();
+  const uint32_t align = type->alignment();
+
+  const size_t s_div_8 = size / 8;
+  const size_t s_mod_8 = size % 8;
+
+
+  //Needs to go on stack
+  auto* const to_val = state->value_tree.values.data + to.val;
+  assert(to_val->on_stack());
+  uint64_t to_offset = to_val->stack_offset + additional_offset;
+
+  auto* const from_val = state->value_tree.values.data + from.val;
+  assert(from_val->on_stack());
+  uint64_t from_offset = from_val->stack_offset;
+
+
+
+  auto mov_val = state->new_value();
+
+  for (size_t itr = 0; itr < s_div_8; itr++) {
+    ByteCode::EMIT::COPY_R64_FROM_STACK(code->code, (uint8_t)mov_val.val, from_offset);
+    state->use_value(mov_val);
+    state->use_value(from);
+    state->control_flow.expression_num++;
+
+    ByteCode::EMIT::COPY_R64_TO_STACK(code->code, (uint8_t)mov_val.val, to_offset);
+    state->use_value(mov_val);
+    state->use_value(to);
+    state->control_flow.expression_num++;
+
+    from_offset += 8;
+    to_offset += 8;
+  }
+
+  for (size_t itr = 0; itr < s_mod_8; itr++) {
+    ByteCode::EMIT::COPY_R8_FROM_STACK(code->code, (uint8_t)mov_val.val, from_offset);
+    state->use_value(mov_val);
+    state->use_value(from);
+    state->control_flow.expression_num++;
+
+    ByteCode::EMIT::COPY_R8_TO_STACK(code->code, (uint8_t)mov_val.val, to_offset);
+    state->use_value(mov_val);
+    state->use_value(to);
+    state->control_flow.expression_num++;
+
+    from_offset++;
+    to_offset++;
+  }
+}
+
+static void copy_val_to_stack(Compiler* const comp,
+                              State* const state,
+                              CodeBlock* const code,
+                              const Structure* type,
+                              const ValueOrConst& from,
+                              ValueIndex& to,
+                              int64_t additional_offset) {
+  DEFER(&) { state->control_flow.expression_num++; };
+
+  auto* const to_val = state->value_tree.values.data + to.val;
+  assert(to_val->on_stack());
+
   if (from.is_constant) {
-    to = state->new_value();
+    load_const_to_stack(comp, state, code, type, (uint64_t*)from.constant, to, additional_offset);
+    comp->constants.free_no_destruct(from.constant);
+  }
+  else {
+    auto* const from_val = state->value_tree.values.data + from.index.val;
+
+    if (from_val->on_stack()) {
+      load_stack_to_stack(comp, state, code, type, from.index, to, additional_offset);
+    }
+    else {
+      state->use_value(from.index);
+      state->use_value(to);
+      ByteCode::EMIT::COPY_R64_TO_STACK(code->code, (uint8_t)from.index.val, to_val->stack_offset + additional_offset);
+    }
+  }
+}
+
+static ValueIndex copy_val_to_val(Compiler* const comp,
+                                  State* const state,
+                                  CodeBlock* const code,
+                                  const Structure* type,
+                                  const ValueOrConst& from) {
+  DEFER(&) { state->control_flow.expression_num++; };
+
+  ValueIndex to;
+
+  if (from.is_constant) {
 
     auto* constant = (uint64_t*)from.constant;
 
+    const uint32_t size = type->size();
+    const uint32_t align = type->alignment();
     const size_t s_div_8 = size / 8;
     const size_t s_mod_8 = size % 8;
 
     if (size > 8) {
       //Needs to go on stack
-      auto* const to_val = state->value_tree.values.data + to.val;
+      to = state->new_value();
 
-      uint64_t stack = state->stack.next_stack_local(size, align);
-      state->used_stack = true;
+      auto* to_val = state->value_tree.values.data + to.val;
+      to_val->value_type = ValueType::NORMAL_STACK;
+      to_val->stack_offset = state->stack.next_stack_local(size, align);
 
-      to_val->value_type   = ValueType::NORMAL_STACK;
-      to_val->stack_offset = (int64_t)stack;
-
-      if (comp->build_options.system == &system_x86_64) {
-        auto mov_val = state->new_value();
-
-        for (size_t itr = 0; itr < s_div_8; itr++) {
-          ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)mov_val.val, *constant);
-          ByteCode::EMIT::COPY_R64_TO_STACK(code->code, (uint8_t)mov_val.val, stack);
-
-          constant++;
-          stack += 8;
-        }
-      }
-      else {
-        for (size_t itr = 0; itr < s_div_8; itr++) {
-          ByteCode::EMIT::COPY_64_TO_STACK(code->code, *constant, stack);
-
-          constant++;
-          stack += 8;
-        }
-      }
-
-
-
-      uint64_t last = *constant;
-      uint8_t last_8 = last & 255;
-
-      for (size_t itr = 0; itr < s_mod_8; itr++) {
-        ByteCode::EMIT::COPY_8_TO_STACK(code->code, (uint8_t)(last & 255), stack);
-        last >>= 8;//Shift over to the next byte
-        stack++;
-      }
+      load_const_to_stack(comp, state, code, type, (uint64_t*)from.constant, to, 0);
     }
     else {
       //need to fill in the upper bytes with zeros if less than 8
@@ -952,7 +1146,10 @@ static void copy_val_to_val(Compiler* const comp,
         zerod_c = *constant & slow_bit_fill_lower<uint64_t>((uint8_t)s_mod_8);
       }
 
+      to = state->new_value();
+
       ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)to.val, zerod_c);
+      state->use_value(to);
     }
 
     comp->constants.free_no_destruct(from.constant);
@@ -963,6 +1160,8 @@ static void copy_val_to_val(Compiler* const comp,
 
     ByteCode::EMIT::COPY_R64_TO_R64(code->code, (uint8_t)from.index.val, (uint8_t)to.val);
   }
+
+  return to;
 }
 
 //Note: Recursive
@@ -995,6 +1194,98 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
   result.is_constant = false;
 
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::INDEX: {
+
+        const size_t base_size = static_cast<const ArrayStructure*>(expr->index.expr->type)->base->size();
+
+        ValueIndex expr_val_stack;
+        {
+          ValueOrConst expr_val = compile_bytecode_of_expression(comp, expr->index.expr, state, code);
+          if (expr_val.is_constant) {
+            expr_val_stack = state->new_value();
+
+            auto* expr_stack_v = state->value_tree.values.data + expr_val_stack.val;
+
+            expr_stack_v->value_type = ValueType::NORMAL_STACK;
+            expr_stack_v->stack_offset = state->stack.next_stack_local(expr->type->size(), expr->type->alignment());
+
+            load_const_to_stack(comp, state, code, expr->index.expr->type, (uint64_t*)expr_val.constant, expr_val_stack, 0);
+            comp->constants.free_no_destruct(expr_val.constant);
+          }
+          else {
+            expr_val_stack = expr_val.index;
+          }
+        }
+
+        auto* const expr_v = state->value_tree.values.data + expr_val_stack.val;
+
+
+        const ValueOrConst index_val = compile_bytecode_of_expression(comp, expr->index.index, state, code);
+        if (index_val.is_constant) {
+          result.index = state->new_value();
+
+          const uint64_t stack_offset = expr_v->stack_offset - (*(uint64_t*)index_val.constant * base_size);
+
+          ByteCode::EMIT::COPY_R64_FROM_STACK(code->code, (uint8_t)result.index.val, stack_offset);
+          state->use_value(result.index);
+        }
+        else {
+          const ValueIndex rbp = state->new_value();
+          auto& rbp_val = state->value_tree.values.data[rbp.val];
+
+          rbp_val.value_type = ValueType::FIXED;
+          rbp_val.reg = comp->build_options.system->base_pointer;
+
+          MemComplex complex ={};
+          complex.base   = (uint8_t)rbp.val;
+          complex.index  = (uint8_t)index_val.index.val;
+          complex.scale  = (uint8_t)base_size;
+          complex.disp = (int32_t)expr_v->stack_offset;
+
+          ByteCode::EMIT::COPY_R64_FROM_MEM_COMPLEX(code->code, (uint8_t)result.index.val, complex);
+          state->use_value(index_val.index);
+          state->use_value(rbp);
+        }
+
+
+        break;
+      }
+    case EXPRESSION_TYPE::ARRAY_EXPR: {
+        const ArrayStructure* const arr_type = (const ArrayStructure*)expr->type;
+
+        const size_t base_size = arr_type->base->size();
+
+        const size_t full_align = arr_type->alignment();
+        const size_t full_size = arr_type->size();
+
+        result.is_constant = false;
+        result.index = state->new_value();
+
+        auto* res_val = state->value_tree.values.data + result.index.val;
+
+        res_val->value_type = ValueType::NORMAL_STACK;
+        res_val->stack_offset = state->stack.next_stack_local(full_size, full_align);
+
+        int64_t offset = 0;
+
+        auto i = expr->array_expr.elements.begin();
+        const auto end = expr->array_expr.elements.end();
+
+        //save stack as expression stack cant be used by anything - its copied anyway
+        auto save_stack = state->stack.current;
+
+        for (; i < end; i++) {
+          auto leaf = compile_bytecode_of_expression(comp, i, state, code);
+
+          copy_val_to_stack(comp, state, code, arr_type->base, leaf, result.index, offset);
+
+          state->stack.current = save_stack;//reset stack
+          offset -= base_size;//for next round
+        }
+
+        state->stack.current = save_stack;
+        break;
+      }
     case EXPRESSION_TYPE::ASCII_STRING: {
         const ArrayStructure* const arr_type = (const ArrayStructure*)expr->type;
 
@@ -1032,17 +1323,26 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
     case EXPRESSION_TYPE::LOCAL: {
         const ValueIndex local = state->find_local(expr->name)->val;
 
-        result.index = state->new_value(local);
-        state->use_value(local, result.index);
+        auto* local_val = state->value_tree.values.data + local.val;
 
-        ByteCode::EMIT::COPY_R64_TO_R64(code->code, (uint8_t)local.val, (uint8_t)result.index.val);
+        if (local_val->on_stack() && expr->type->size() > 8) {
+          result.is_constant = false;
+          result.index = local;
+        }
+        else {
+          result.index = state->new_value(local);
+          state->use_value(local, result.index);
+
+          ByteCode::EMIT::COPY_R64_TO_R64(code->code, (uint8_t)local.val, (uint8_t)result.index.val);
+        }
+
         break;
       }
     case EXPRESSION_TYPE::CAST: {
         const CastExpr* const cast = &expr->cast;
         const ValueOrConst temp = compile_bytecode_of_expression(comp, cast->expr, state, code);
 
-        copy_val_to_val(comp, state, code, expr->type, temp, result.index);
+        result.index = copy_val_to_val(comp, state, code, expr->type, temp);
 
         cast->emit(state, code, result.index);
         break;
@@ -1051,7 +1351,7 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
         const UnaryOperatorExpr* const un_op = &expr->un_op;
         const ValueOrConst temp = compile_bytecode_of_expression(comp, un_op->primary, state, code);
 
-        copy_val_to_val(comp, state, code, expr->type, temp, result.index);
+        result.index = copy_val_to_val(comp, state, code, expr->type, temp);
 
         un_op->emit(&comp->build_options, state, code, result.index);
 
@@ -1068,11 +1368,8 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
         const ValueOrConst temp_left = compile_bytecode_of_expression(comp, left, state, code);
         const ValueOrConst temp_right = compile_bytecode_of_expression(comp, right, state, code);
 
-        ValueIndex left_index;
-        ValueIndex right_index;
-
-        copy_val_to_val(comp, state, code, left->type, temp_left, left_index);
-        copy_val_to_val(comp, state, code, left->type, temp_right, right_index);
+        const ValueIndex left_index = copy_val_to_val(comp, state, code, left->type, temp_left);
+        const ValueIndex right_index = copy_val_to_val(comp, state, code, left->type, temp_right);
 
         bin_op->emit(&comp->build_options, state, code, left_index, right_index);
 
@@ -1087,6 +1384,9 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
       }
     case EXPRESSION_TYPE::FUNCTION_CALL: {
         const FunctionCallExpr* const call = &expr->call;
+
+        auto save_stack_params = state->stack.current_parameters;
+        DEFER(&) { state->stack.current_parameters = save_stack_params; };
 
         state->made_call = true;
 
@@ -1118,8 +1418,7 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
             auto* i = to_use_values.data + itr;
             auto* i_s = call->arguments.data[itr].type;
 
-            ValueIndex p;
-            copy_val_to_val(comp, state, code, i_s, *i, p);
+            const ValueIndex p = copy_val_to_val(comp, state, code, i_s, *i);
 
             i->is_constant = false;
             i->index = p;
@@ -1147,6 +1446,8 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
             i_val->reg        = comp->build_options.calling_convention->parameter_registers[index];
           }
 
+          state->stack.push_stack_params(to_use_values.size - index);
+
           for (; index < to_use_values.size; index++) {
             auto i = to_use_values.data + index;
 
@@ -1155,9 +1456,7 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
             auto* i_val = state->value_tree.values.data + i->index.val;
 
             i_val->value_type = ValueType::ARGUMENT_STACK;
-            i_val->arg_num    = index - max_reg_params;
-
-            state->used_stack = true;
+            i_val->arg_num    = index - max_reg_params + state->stack.current_parameters;
           }
         }
 
@@ -1216,8 +1515,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                                    state,
                                                                    code);
 
-        ValueIndex rax;
-        copy_val_to_val(comp, state, code, expr->type, result, rax);
+        const ValueIndex rax = copy_val_to_val(comp, state, code, expr->type, result);
 
         auto& rax_val = state->value_tree.values.data[rax.val];
 
@@ -1311,19 +1609,25 @@ void compile_bytecode_of_statement(Compiler* const comp,
         local->name = decl->name;
         local->type = decl->type.type;
 
-        ValueIndex temp_val;
-        copy_val_to_val(comp, state, code, decl->expression.type, val, temp_val);
+        const bool is_stack = !val.is_constant && (state->value_tree.values.data + val.index.val)->on_stack();
 
-        local->val  = temp_val;
-        auto* const local_val = state->value_tree.values.data + local->val.val;
+        if (is_stack) {
+          local->val  = val.index;
+        }
+        else {
+          //Have to copy the value
 
-        if (!comp->optimization_options.non_stack_locals && local_val->value_type != ValueType::NORMAL_STACK) {
-          assert(local_val->value_type == ValueType::FREE);
+          const ValueIndex temp_val = copy_val_to_val(comp, state, code, decl->expression.type, val);
 
-          local_val->value_type   = ValueType::NORMAL_STACK;
-          local_val->stack_offset = state->stack.next_stack_local(local->type->size(), local->type->alignment());
+          local->val  = temp_val;
+          auto* const local_val = state->value_tree.values.data + local->val.val;
 
-          state->used_stack = true;
+          if (!comp->optimization_options.non_stack_locals && local_val->value_type != ValueType::NORMAL_STACK) {
+            assert(local_val->value_type == ValueType::FREE);
+
+            local_val->value_type   = ValueType::NORMAL_STACK;
+            local_val->stack_offset = state->stack.next_stack_local(local->type->size(), local->type->alignment());
+          }
         }
 
         return;
@@ -1386,6 +1690,16 @@ static void map_values(const BuildOptions* const options,
         assert(!v->on_stack());\
         ByteCode::EMIT:: ## name ## (temp, v->reg, p.u64)
 
+#define OP_R_MEM(name) auto* v = UNROLL_COALESCE(p.val);\
+        auto* base = UNROLL_COALESCE(p.mem.base);\
+        auto* index = UNROLL_COALESCE(p.mem.index);\
+        assert(!v->on_stack());\
+        assert(!base->on_stack());\
+        assert(!index->on_stack());\
+        auto s = p.mem.scale;\
+        assert(s == 1 || s == 2 || s == 4 || s == 8);\
+        ByteCode::EMIT:: ## name ## (temp, v->reg, MemComplex{base->reg, index->reg, p.mem.scale, p.mem.disp});
+
 #define OP_8_64(name) ByteCode::EMIT:: ## name ## (temp, p.u8, p.u64)
 
 #define OP_64_64(name) ByteCode::EMIT:: ## name ## (temp, p.u64_1, p.u64_2)
@@ -1404,6 +1718,14 @@ static void map_values(const BuildOptions* const options,
         assert(!v2->on_stack());\
         ByteCode::EMIT:: ## name ## (temp, v1->reg, v2->reg) 
 
+#define OP_R_R_R(name) auto* v1 = UNROLL_COALESCE(p.val1);\
+        auto* v2 = UNROLL_COALESCE(p.val2);\
+        auto* v3 = UNROLL_COALESCE(p.val3);\
+        assert(!v1->on_stack());\
+        assert(!v2->on_stack());\
+        assert(!v3->on_stack());\
+        ByteCode::EMIT:: ## name ## (temp, v1->reg, v2->reg, v3->reg) 
+
 #define X(name, structure) case ByteCode:: ## name: {\
       const auto p = ByteCode::PARSE:: ## name ## (bytecode);\
       structure(name);\
@@ -1416,6 +1738,37 @@ static void map_values(const BuildOptions* const options,
 
   while (bytecode < end) {
     switch (*bytecode) {
+      case ByteCode::COPY_R64_FROM_MEM_COMPLEX: {
+          const auto p = ByteCode::PARSE::COPY_R64_FROM_MEM_COMPLEX(bytecode);
+
+          const Value* const v = UNROLL_COALESCE(p.val);
+          const Value* const b = UNROLL_COALESCE(p.mem.base);
+          const Value* const i = UNROLL_COALESCE(p.mem.index);
+
+          assert(!v->on_stack());
+          assert(!b->on_stack());
+          assert(!i->on_stack());
+          {
+            auto s = p.mem.scale;
+            assert(s == 1 || s == 2 || s == 4 || s == 8);
+          }
+
+          MemComplex mem ={};
+          mem.base = b->reg;
+          mem.index = i->reg;
+          mem.scale = p.mem.scale;
+          mem.disp = -p.mem.disp;//negate for stack
+
+          if (b->reg == options->system->base_pointer) {
+            mem.disp += (int32_t)base_pointer_offset;
+          }
+
+          ByteCode::EMIT::COPY_R64_FROM_MEM_COMPLEX(temp, v->reg, mem);
+
+          bytecode += ByteCode::SIZE_OF::COPY_R64_FROM_MEM_COMPLEX;
+          break;
+        }
+
       case ByteCode::SET_R64_TO_64: {
           const auto p = ByteCode::PARSE::SET_R64_TO_64(bytecode);
 
@@ -1441,6 +1794,62 @@ static void map_values(const BuildOptions* const options,
           }
 
           bytecode += ByteCode::SIZE_OF::SET_R64_TO_64;
+          break;
+        }
+      case ByteCode::COPY_R8_TO_STACK: {
+          const auto p = ByteCode::PARSE::COPY_R8_TO_STACK(bytecode);
+
+          auto* v = UNROLL_COALESCE(p.val);
+          assert(!v->on_stack());
+          ByteCode::EMIT::COPY_R8_TO_STACK(temp, v->reg, base_pointer_offset - p.u64.sig_val);
+
+          bytecode += ByteCode::SIZE_OF::COPY_R8_TO_STACK;
+          break;
+        }
+      case ByteCode::COPY_R8_FROM_STACK: {
+          const auto p = ByteCode::PARSE::COPY_R8_FROM_STACK(bytecode);
+
+          auto* v = UNROLL_COALESCE(p.val);
+          assert(!v->on_stack());
+          ByteCode::EMIT::COPY_R8_FROM_STACK(temp, v->reg, base_pointer_offset - p.u64.sig_val);
+
+          bytecode += ByteCode::SIZE_OF::COPY_R8_FROM_STACK;
+          break;
+        }
+      case ByteCode::COPY_R64_FROM_STACK: {
+          const auto p = ByteCode::PARSE::COPY_R64_FROM_STACK(bytecode);
+
+          auto* v = UNROLL_COALESCE(p.val);
+          assert(!v->on_stack());
+          ByteCode::EMIT::COPY_R64_FROM_STACK(temp, v->reg, base_pointer_offset - p.u64.sig_val);
+
+          bytecode += ByteCode::SIZE_OF::COPY_R64_FROM_STACK;
+          break;
+        }
+      case ByteCode::COPY_R64_TO_STACK: {
+          const auto p = ByteCode::PARSE::COPY_R64_TO_STACK(bytecode);
+
+          auto* v = UNROLL_COALESCE(p.val);
+          assert(!v->on_stack());
+          ByteCode::EMIT::COPY_R64_TO_STACK(temp, v->reg, base_pointer_offset - p.u64.sig_val);
+
+          bytecode += ByteCode::SIZE_OF::COPY_R64_TO_STACK;
+          break;
+        }
+      case ByteCode::COPY_8_TO_STACK: {
+          const auto p = ByteCode::PARSE::COPY_8_TO_STACK(bytecode);
+
+          ByteCode::EMIT::COPY_8_TO_STACK(temp, p.u8, base_pointer_offset - p.u64.sig_val);
+
+          bytecode += ByteCode::SIZE_OF::COPY_8_TO_STACK;
+          break;
+        }
+      case ByteCode::COPY_64_TO_STACK: {
+          const auto p = ByteCode::PARSE::COPY_64_TO_STACK(bytecode);
+
+          ByteCode::EMIT::COPY_64_TO_STACK(temp, p.u64_1, base_pointer_offset - p.u64_2.sig_val);
+
+          bytecode += ByteCode::SIZE_OF::COPY_64_TO_STACK;
           break;
         }
       case ByteCode::COPY_R64_TO_R64: {
@@ -1496,12 +1905,14 @@ static void map_values(const BuildOptions* const options,
   }
 
 #undef OP_R_64
+#undef OP_R_MEM
 #undef OP_8_64
 #undef OP_64_64
 #undef OP_64
 #undef OP
 #undef OP_R
 #undef OP_R_R
+#undef OP_R_R_R
 
   //Epilog
   {
@@ -1761,7 +2172,7 @@ static uint64_t select(const BuildOptions* const options, State* const state) no
     for (; i < end; i++) {
       assert(i->value_type != ValueType::FREE);
 
-      if (i->fixed()) {
+      if (i->fixed() && i->is_modified) {//is_modified stops saving rbp and rsp as they are managed separately
         used_regs |= ((uint64_t)1 << (i->reg));
       }
     }
@@ -2006,8 +2417,6 @@ CompileCode compile_function_body_unit(Compiler* const comp,
           int64_t offset = state->stack.next_stack_local(8, 8);
           p_val->stack_offset = offset;
         }
-
-        state->used_stack = true;
       }
 
 
@@ -2097,7 +2506,7 @@ static CompileCode compile_function_signature(Compiler* const comp,
           - comp->build_options.calling_convention->shadow_space_size
           - ((int64_t)8 * param_num);
 
-        state->used_stack = true;
+        state->stack.push_stack_params(param_num);
       }
       else {
         l_val->value_type = ValueType::FIXED;
@@ -2359,8 +2768,7 @@ CompileCode compile_all(Compiler* const comp) {
                     const ValueOrConst result = compile_bytecode_of_expression(comp, unit->expr, comp->working_state, &block);
 
                     //Effectively do a return
-                    ValueIndex rax;
-                    copy_val_to_val(comp, comp->working_state, &block, unit->expr->type, result, rax);
+                    const ValueIndex rax = copy_val_to_val(comp, comp->working_state, &block, unit->expr->type, result);
 
                     auto& rax_val = comp->working_state->value_tree.values.data[rax.val];
 

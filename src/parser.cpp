@@ -467,6 +467,30 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
   advance(parser);
 
   switch (current.type) {
+    case TokenType::Left_Square: {
+        expr->expr_type = EXPRESSION_TYPE::ARRAY_EXPR;
+
+        expr->array_expr = ArrayExpr();
+
+        while (true) {
+          expr->array_expr.elements.insert_uninit(1);
+          auto* new_expr = expr->array_expr.elements.back();
+
+          parse_expression(parser, new_expr);
+
+          if (parser->current.type == TokenType::Comma) {
+            advance(parser);
+          }
+          else {
+            break;
+          }
+        }
+
+        expr->array_expr.elements.shrink();
+
+        expect(parser, TokenType::Right_Square);
+        break;
+      }
     case TokenType::String: {
         expr->expr_type = EXPRESSION_TYPE::ASCII_STRING;
         expr->ascii_string = current.string;
@@ -552,6 +576,33 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
   }
 }
 
+static void parse_primary_and_suffix(Parser* const parser, ASTExpression* const expr) {
+  parse_primary(parser, expr);
+
+  switch (parser->current.type) {
+    case TokenType::Left_Square: {
+        advance(parser);
+        ASTExpression* const new_expr = allocate_default<ASTExpression>();
+        ASTExpression* const index    = allocate_default<ASTExpression>();
+        
+        //Move the expr into the suffix thing
+        *new_expr = std::move(*expr);
+
+        expr->expr_type = EXPRESSION_TYPE::INDEX;
+        expr->index.expr = new_expr;
+        expr->index.index = index;
+
+        parse_expression(parser, index);
+
+        expect(parser, TokenType::Right_Square);
+        break;
+      }
+    default:
+      //No suffix
+      break;
+  }
+}
+
 static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
   if (parser->current.type == TokenType::Sub) {
     expr->expr_type = EXPRESSION_TYPE::UNARY_OPERATOR;
@@ -560,10 +611,10 @@ static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
 
     expr->un_op.primary = allocate_default<ASTExpression>(1);
 
-    parse_primary(parser, expr->un_op.primary);
+    parse_primary_and_suffix(parser, expr->un_op.primary);
   }
   else {
-    parse_primary(parser, expr);
+    parse_primary_and_suffix(parser, expr);
   }
 
 }
@@ -794,6 +845,33 @@ static void print_type(const ASTType* type) {
 
 static void print_ast_expression(const ASTExpression* expr) {
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::INDEX: {
+        print_ast_expression(expr->index.expr);
+        print('[');
+        print_ast_expression(expr->index.index);
+        print(']');
+        break;
+      }
+    case EXPRESSION_TYPE::ARRAY_EXPR: {
+        print('[');
+        auto i = expr->array_expr.elements.begin();
+        const auto end = expr->array_expr.elements.end();
+
+        if (i < end) {
+          for (; i < (end - 1); i++) {
+            print_ast_expression(i);
+            print(", ");
+          }
+
+          print_ast_expression(i);
+          print(']');
+        }
+        else {
+          print(']');
+        }
+
+        break;
+      }
     case EXPRESSION_TYPE::ASCII_STRING: {
         printf("\"%s\"", expr->ascii_string.string);
         break;
@@ -952,7 +1030,7 @@ void print_ast(const ASTFile* file) {
 
     print(") -> ");
     print_type(&i->return_type);
-    print(" {\n");
+    print(" {");
     printer.tabs++;
 
     //Function body

@@ -47,8 +47,10 @@ struct RunOutput {
 RunOutput run_as_machine_code(const Program& prog);
 RunOutput run_in_vm(const Program& prog);
 
-int compile_file(const Options& options,
-                 Program* out_program);
 
 RunOutput compile_file_and_run(const Options& options);
 int compile_file_and_write(const Options& options);
+
+int compile_file(const Options& options, Program* out_program);
+RunOutput run_program(const Options& options, const Program& prog);
+void print_program(const Options& opts, const Program& prog);

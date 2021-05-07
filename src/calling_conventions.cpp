@@ -25,6 +25,8 @@ constexpr REGISTER_CONSTANT all_x64_regs[] ={
 constexpr REGISTER_CONSTANT all_vm_regs[NUM_VM_REGS] ={
   {0, "v_0"}, {1, "v_1"}, {2, "v_2"}, {3, "v_3"}, {4, "v_4"}, {5, "v_5"}, {6, "v_6"}, {7, "v_7"},
   {8, "nv_0"}, {9, "nv_1"}, {10, "nv_2"}, {11, "nv_3"}, {12, "nv_4"}, {13, "nv_5"}, {14, "nv_6"}, {15, "nv_7"},
+
+  {VM_BP_R, "r_BP"}, {VM_SP_R, "r_SP"},
 };
 
 static char invalid_reg_string[sizeof("REG(000)")];
@@ -82,33 +84,13 @@ static constexpr System make_system(const char* name,
   return system;
 }
 
-template<size_t num_registers>
-static constexpr System make_system(const char* name,
-                                    const REGISTER_CONSTANT(&all_regs)[num_registers],
-                                    REG_NAME_FROM_NUM_PTR reg_name_from_num,
-                                    BACKEND_PTR backend) {
-  System system ={};
-
-  system.name = name;
-
-  system.all_registers = all_regs;
-  system.num_registers = num_registers;
-
-  system.stack_pointers_are_regs = false;
-
-  system.reg_name_from_num = reg_name_from_num;
-  system.backend = backend;
-
-  return system;
-}
-
 const System system_x86_64 = make_system(System::x86_64_name,
                                          all_x64_regs, RSP, RBP,
                                          &x86_64_reg_name_from_num,
                                          &x86_64_machine_code_backend);
 
 const System system_vm = make_system(System::vm_name,
-                                     all_vm_regs,
+                                     all_vm_regs, all_vm_regs[VM_SP_R], all_vm_regs[VM_BP_R],
                                      &vm_regs_name_from_num,
                                      &vm_backend);
 

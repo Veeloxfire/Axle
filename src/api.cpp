@@ -21,6 +21,22 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 
 #include <chrono>
 
+void print_program(const Options& opts, const Program& prog) {
+  if (opts.build.system == &system_vm) {
+    std::cout << "\n=== Print Linked Bytecode ===\n\n";
+    ByteCode::print_bytecode(opts.build.system->reg_name_from_num, stdout, prog.code, prog.size);
+    std::cout << "\n=============================\n\n";
+  }
+  else if (opts.build.system == &system_x86_64) {
+    std::cout << "\n=== Print x86_64 Machine code ===\n\n";
+    print_x86_64(prog.code, prog.size);
+    std::cout << "\n=================================\n\n";
+  }
+  else {
+    std::cerr << "Incorrect system for printing combined bytecode!\n";
+  }
+}
+
 RunOutput run_in_vm(const Program& prog) {
   VM vm ={};
   ErrorCode error = vm_rum(&vm, prog.code, prog.entry);
@@ -147,20 +163,12 @@ int compile_file(const Options& options,
   return 0;
 }
 
-RunOutput compile_file_and_run(const Options& options) {
-  Program program ={};
-
-  const int res = compile_file(options, &program);
-
-  if (res != 0) {
-    return { res,  0 };
-  }
-
+RunOutput run_program(const Options& options, const Program& prog) {
   if (options.build.system == &system_vm && options.build.calling_convention == &convention_vm) {
     if (options.print.run_headers) {
       std::cout << "\n=== Running in VM ===\n\n";
     }
-    RunOutput ret = run_in_vm(program);
+    RunOutput ret = run_in_vm(prog);
     if (options.print.run_headers) {
       std::cout << "\n=====================\n\n";
     }
@@ -171,7 +179,7 @@ RunOutput compile_file_and_run(const Options& options) {
     if (options.print.run_headers) {
       std::cout << "\n=== Running machine code (JIT) ===\n\n";
     }
-    RunOutput ret = run_as_machine_code(program);
+    RunOutput ret = run_as_machine_code(prog);
     if (options.print.run_headers) {
       std::cout << "\n==================================\n\n";
     }
@@ -182,6 +190,18 @@ RunOutput compile_file_and_run(const Options& options) {
     std::cerr << "Could not run! Invalid convention and system conbination\n";
     return { 1, 0 };
   }
+}
+
+RunOutput compile_file_and_run(const Options& options) {
+  Program program ={};
+
+  const int res = compile_file(options, &program);
+
+  if (res != 0) {
+    return { res,  0 };
+  }
+
+  return run_program(options, program);
 }
 
 int compile_file_and_write(const Options& options) {

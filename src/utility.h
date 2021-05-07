@@ -936,8 +936,6 @@ struct FUNCTION_PTR_IMPL {
 template<typename RET, typename ... PARAMS>
 using FUNCTION_PTR = typename FUNCTION_PTR_IMPL<RET, PARAMS...>::TYPE;
 
-inline constexpr size_t NUM_VM_REGS = 16;
-
 template<typename T>
 constexpr inline T square(T t) { return t * t; }
 

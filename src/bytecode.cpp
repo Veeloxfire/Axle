@@ -18,6 +18,14 @@ namespace ByteCode {
     print_bytecode(reg_name_from_num, stderr, bytecode, size);
   }
 
+  static void print_mem_complex(REG_NAME reg_name_from_num, const MemComplex& mem) {
+    const char* reg_name = reg_name_from_num(mem.base);
+    char c = mem.disp > 0 ? '+' : '-';
+    printf("[$%s %c 0x%lx ", reg_name, c, absolute(mem.disp));
+    reg_name = reg_name_from_num(mem.index);
+    printf("+ ($%s * 0x%hhx]", reg_name, mem.scale);
+  }
+
   void print_bytecode(REG_NAME reg_name_from_num,
                       FILE* const stream,
                       const uint8_t* bytecode,
@@ -30,6 +38,11 @@ namespace ByteCode {
   #define OP_R_64 const char* const reg_name = reg_name_from_num(p.val);\
                        printf(": $%s 0x%llx\n", reg_name, p.u64.val)
 
+  #define OP_R_MEM const char* const reg_name = reg_name_from_num(p.val);\
+                        printf(": $%s ", reg_name);\
+                        print_mem_complex(reg_name_from_num, p.mem);\
+                        printf("\n")
+
   #define OP_64 printf(": 0x%llx\n", p.u64.val)
 
   #define OP printf("\n")
@@ -37,10 +50,17 @@ namespace ByteCode {
   #define OP_R const char* const reg_name = reg_name_from_num(p.val);\
                     printf(": $%s\n", reg_name)
 
-  #define OP_R_R const char* const reg_name1 = reg_name_from_num(p.val1);\
-                        printf(": $%s", reg_name1);\
-                        const char* const reg_name2 = reg_name_from_num(p.val2);\
-                        printf(" $%s\n", reg_name2)
+  #define OP_R_R const char* reg_name = reg_name_from_num(p.val1);\
+                        printf(": $%s", reg_name);\
+                        reg_name = reg_name_from_num(p.val2);\
+                        printf(" $%s\n", reg_name)
+
+  #define OP_R_R_R const char* reg_name = reg_name_from_num(p.val1);\
+                        printf(": $%s", reg_name);\
+                        reg_name = reg_name_from_num(p.val2);\
+                        printf(" $%s", reg_name);\
+                        reg_name = reg_name_from_num(p.val3);\
+                        printf(" $%s\n", reg_name)
 
 #define X(name, structure) case name: {\
       auto p = ByteCode::PARSE:: ## name ## (bytecode + i);\
@@ -62,12 +82,14 @@ namespace ByteCode {
     }
 
     #undef OP_R_64
+    #undef OP_R_MEM
     #undef OP_8_64
     #undef OP_64_64
     #undef OP_64
     #undef OP
     #undef OP_R
     #undef OP_R_R
+    #undef OP_R_R_R
 
     fflush(stream);
   }

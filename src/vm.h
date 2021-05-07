@@ -1,6 +1,7 @@
 #pragma once
 #include "utility.h"
 #include "bytecode.h"
+#include "calling_conventions.h"
 
 struct Reg64_8B {
   uint8_t padding[6];
@@ -43,6 +44,7 @@ struct Reg64_64B {
     uint64_t reg;
     int64_t  reg_s;
     void* ptr;
+    uint8_t* b_ptr;
   };
 };
 
@@ -58,17 +60,21 @@ struct Register {
 struct Function;
 
 struct VM {
+
   constexpr static size_t STACK_SIZE = 256 * 8;
   uint8_t stack[STACK_SIZE] ={};
 
-  uint8_t* BP = stack + STACK_SIZE - 1;
-  uint8_t* SP = stack + STACK_SIZE - 1;
   const uint8_t* IP = nullptr;
 
-  Register registers[NUM_VM_REGS] ={};
+  Register registers[NUM_VM_REGS + 2] ={};
 
+#define SP registers[VM_SP_R].b64.b_ptr
+#define BP registers[VM_BP_R].b64.b_ptr
 
-  VM() = default;
+  VM() {
+    SP = stack + STACK_SIZE - 1;
+    BP = stack + STACK_SIZE - 1;
+  }
 
   void allocate_stack(uint64_t bytes) {
     SP -= bytes;

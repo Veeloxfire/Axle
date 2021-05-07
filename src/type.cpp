@@ -25,6 +25,7 @@ uint32_t Structure::size() const {
         switch (ls->literal_type) {
           case LITERAL_TYPE::INTEGER:
           case LITERAL_TYPE::SIGNED_INTEGER: return 8;
+          case LITERAL_TYPE::EMPTY_ARR: return 0;
         }
 
         break;
@@ -32,6 +33,7 @@ uint32_t Structure::size() const {
     case STRUCTURE_TYPE::VOID: return 0;
   }
 
+  assert(false);
   return (uint32_t)-1;
 }
 
@@ -48,6 +50,7 @@ uint32_t Structure::alignment() const {
         switch (ls->literal_type) {
           case LITERAL_TYPE::INTEGER:
           case LITERAL_TYPE::SIGNED_INTEGER: return 8;
+          case LITERAL_TYPE::EMPTY_ARR: return 0;
         }
 
         break;
@@ -55,28 +58,43 @@ uint32_t Structure::alignment() const {
     case STRUCTURE_TYPE::VOID: return 0;
   }
 
+  assert(false);
   return (uint32_t)-1;
 }
 
 bool can_literal_cast(const Structure* from, const Structure* to) {
-  if (from->type != STRUCTURE_TYPE::LITERAL) {
-    return false;
+  switch (from->type) {
+    case STRUCTURE_TYPE::FIXED_ARRAY: {
+        if (to->type == STRUCTURE_TYPE::FIXED_ARRAY) {
+          const ArrayStructure* arr_f = (const ArrayStructure*)from;
+          const ArrayStructure* arr_t = (const ArrayStructure*)to;
+
+          return can_literal_cast(arr_f->base, arr_t->base);
+        }
+        else {
+          return false;
+        }
+      }
+    case STRUCTURE_TYPE::LITERAL: {
+        const LiteralStructure* const from_lit = (const LiteralStructure*)from;
+
+        switch (from_lit->literal_type) {
+          case LITERAL_TYPE::INTEGER:
+            return to->type == STRUCTURE_TYPE::INTEGER
+              || (to->type == STRUCTURE_TYPE::LITERAL
+                  && static_cast<const LiteralStructure*>(to)->literal_type == LITERAL_TYPE::SIGNED_INTEGER);
+
+          case LITERAL_TYPE::SIGNED_INTEGER:
+            return to->type == STRUCTURE_TYPE::INTEGER
+              && static_cast<const IntegerStructure*>(to)->is_signed;
+
+          case LITERAL_TYPE::EMPTY_ARR://cast to any array
+            return to->type == STRUCTURE_TYPE::FIXED_ARRAY;
+        }
+      }
+
+    default: return false;
   }
-
-  const LiteralStructure* const from_lit = (const LiteralStructure*)from;
-
-  switch (from_lit->literal_type) {
-    case LITERAL_TYPE::INTEGER:
-      return to->type == STRUCTURE_TYPE::INTEGER
-        || (to->type == STRUCTURE_TYPE::LITERAL
-            && static_cast<const LiteralStructure*>(to)->literal_type == LITERAL_TYPE::SIGNED_INTEGER);
-
-    case LITERAL_TYPE::SIGNED_INTEGER:
-      return to->type == STRUCTURE_TYPE::INTEGER
-        && static_cast<const IntegerStructure*>(to)->is_signed;
-  }
-
-  return false;
 }
 
 LiteralStructure* Types::new_literal() {
@@ -123,12 +141,12 @@ void init_types(Types* types, StringInterner* strings) {
   s_void->type = STRUCTURE_TYPE::VOID;
   s_void->name = strings->intern("void");
 
-  Structure* const s_ascii = types->base_structures.allocate();
-  types->s_ascii = s_ascii;
-  types->structures.insert(s_ascii);
+  Structure* const ascii = types->base_structures.allocate();
+  types->s_ascii = ascii;
+  types->structures.insert(ascii);
 
-  s_ascii->type = STRUCTURE_TYPE::ASCII_CHAR;
-  s_ascii->name = strings->intern("ascii");
+  ascii->type = STRUCTURE_TYPE::ASCII_CHAR;
+  ascii->name = strings->intern("ascii");
 
   LiteralStructure* const int_lit = types->new_literal();
   types->s_int_lit = int_lit;
@@ -141,6 +159,12 @@ void init_types(Types* types, StringInterner* strings) {
 
   sint_lit->name         = strings->intern("signed integer literal");
   sint_lit->literal_type = LITERAL_TYPE::SIGNED_INTEGER;
+
+  LiteralStructure* const empty_arr = types->new_literal();
+  types->s_empty_arr = empty_arr;
+
+  empty_arr->name         = strings->intern("empty array literal");
+  empty_arr->literal_type = LITERAL_TYPE::EMPTY_ARR;
 
 
   IntegerStructure* const u8 = types->new_int();
@@ -200,6 +224,9 @@ void init_types(Types* types, StringInterner* strings) {
 
   /////// CASTS ///////
 
+  ascii->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
+  ascii->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::u8_to_r64 });
+
   u8->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
   u8->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::u8_to_r64 });
 
@@ -251,7 +278,7 @@ Types::~Types() {
       enum_values.free(*i);
     }
   }
-  
+
 }
 
 const Structure* Types::structure_by_name(const InternString name) const {
@@ -301,16 +328,21 @@ void CASTS::no_cast(State*, CodeBlock*, ValueIndex) {
   return;
 }
 
+bool TYPE_TESTS::is_array(const Structure* s) {
+  return s->type == STRUCTURE_TYPE::FIXED_ARRAY ||
+    (s->type == STRUCTURE_TYPE::LITERAL && static_cast<const LiteralStructure*>(s)->literal_type == LITERAL_TYPE::EMPTY_ARR);
+}
+
 bool TYPE_TESTS::is_int(const Structure* s) {
-  return s->type == STRUCTURE_TYPE::INTEGER 
-    || (s->type == STRUCTURE_TYPE::LITERAL && 
-        (((const LiteralStructure*)s)->literal_type == LITERAL_TYPE::INTEGER 
+  return s->type == STRUCTURE_TYPE::INTEGER
+    || (s->type == STRUCTURE_TYPE::LITERAL &&
+        (((const LiteralStructure*)s)->literal_type == LITERAL_TYPE::INTEGER
         || ((const LiteralStructure*)s)->literal_type == LITERAL_TYPE::SIGNED_INTEGER));
 }
 
 bool TYPE_TESTS::is_signed_int(const Structure* s) {
   return (s->type == STRUCTURE_TYPE::INTEGER && ((const IntegerStructure*)s)->is_signed)
-    || (s->type == STRUCTURE_TYPE::LITERAL &&  ((const LiteralStructure*)s)->literal_type == LITERAL_TYPE::SIGNED_INTEGER );
+    || (s->type == STRUCTURE_TYPE::LITERAL &&  ((const LiteralStructure*)s)->literal_type == LITERAL_TYPE::SIGNED_INTEGER);
 }
 
 bool TYPE_TESTS::is_64_bit_int(const Structure* s) {
@@ -329,7 +361,7 @@ bool TYPE_TESTS::is_signed_64_bit_int(const Structure* s) {
   switch (s->type) {
     case STRUCTURE_TYPE::INTEGER: {
         auto* i =  static_cast<const IntegerStructure*>(s);
-        return i->bytes == 8 && i->is_signed; 
+        return i->bytes == 8 && i->is_signed;
       }
     case STRUCTURE_TYPE::LITERAL: {
         auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
@@ -343,7 +375,7 @@ bool TYPE_TESTS::is_unsigned_64_bit_int(const Structure* s) {
   switch (s->type) {
     case STRUCTURE_TYPE::INTEGER: {
         auto* i =  static_cast<const IntegerStructure*>(s);
-        return i->bytes == 8 && !i->is_signed; 
+        return i->bytes == 8 && !i->is_signed;
       }
     case STRUCTURE_TYPE::LITERAL: {
         auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
@@ -369,7 +401,7 @@ bool TYPE_TESTS::is_signed_8_bit_int(const Structure* s) {
   switch (s->type) {
     case STRUCTURE_TYPE::INTEGER: {
         auto* i =  static_cast<const IntegerStructure*>(s);
-        return i->bytes == 1 && i->is_signed; 
+        return i->bytes == 1 && i->is_signed;
       }
     case STRUCTURE_TYPE::LITERAL: {
         auto l =  static_cast<const LiteralStructure*>(s)->literal_type;
@@ -383,7 +415,7 @@ bool TYPE_TESTS::is_unsigned_8_bit_int(const Structure* s) {
   switch (s->type) {
     case STRUCTURE_TYPE::INTEGER: {
         auto* i =  static_cast<const IntegerStructure*>(s);
-        return i->bytes == 1 && !i->is_signed; 
+        return i->bytes == 1 && !i->is_signed;
       }
     case STRUCTURE_TYPE::LITERAL: {
         auto l =  static_cast<const LiteralStructure*>(s)->literal_type;

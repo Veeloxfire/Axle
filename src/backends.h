@@ -2,15 +2,30 @@
 #include "utility.h"
 
 namespace X64 {
+  struct SIB {
+    bool use_base = false;
+    bool use_index = false;
+
+    uint8_t base = 0;
+    uint8_t index = 0;
+    uint8_t scale = 0;
+    int32_t disp = 0;
+  };
+
   struct R {
     uint8_t r;
   };
 
   struct RM {
-    uint8_t r;
+    uint8_t r;//or base
 
     bool indirect = false;
-    int32_t disp = 0;
+    bool use_sib = false;
+
+    union {
+      SIB sib;
+      int32_t disp = 0;
+    };
   };
 
   inline constexpr uint8_t rex_r(uint8_t reg) {
@@ -40,10 +55,6 @@ namespace X64 {
     return modrm_reg(r) | modrm_rm(rm);
   }
 
-  inline constexpr uint8_t sib_i_b(uint8_t i, uint8_t b) {
-    return ((i & 0b111) << 3) | (b & 0b111);
-  }
-
   enum SIB_SCALE : uint8_t {
     SIB_SCALE_1 = 0b00'000'000,
     SIB_SCALE_2 = 0b01'000'000,
@@ -53,6 +64,27 @@ namespace X64 {
     SIB_INDEX_MASK = 0b00'111'000,
     SIB_BASE_MASK  = 0b00'000'111,
   };
+
+  inline constexpr uint8_t sib_scale(uint8_t scale) {
+    switch (scale)
+    {
+      case 1: return SIB_SCALE_1;
+      case 2: return SIB_SCALE_2;
+      case 4: return SIB_SCALE_4;
+      case 8: return SIB_SCALE_8;
+      default:
+        return 0;
+    }
+  }
+
+  inline constexpr uint8_t sib_i_b(uint8_t i, uint8_t b) {
+    return ((i & 0b111) << 3) | (b & 0b111);
+  }
+
+  inline constexpr uint8_t sib(uint8_t s, uint8_t i, uint8_t b) {
+    return sib_scale(s) | sib_i_b(i, b);
+  }
+
 
   enum MODRM_MOD_CODES : uint8_t {
     MODRM_MOD_DIRECT   = 0b11'000'000,
@@ -111,10 +143,10 @@ namespace X64 {
 
   void mov(Array<uint8_t>& arr,
            R r,
-           RM rm);
+           const RM& rm);
 
   void mov(Array<uint8_t>& arr,
-           RM rm,
+           const RM& rm,
            R r);
 
   void mov(Array<uint8_t>& arr,
@@ -122,7 +154,7 @@ namespace X64 {
            uint64_t u64);
 
   void mov(Array<uint8_t>& arr,
-           RM rm,
+           const RM& rm,
            uint32_t u32);
 
   void sub(Array<uint8_t>& arr,

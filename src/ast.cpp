@@ -13,6 +13,12 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
   {
     case EXPRESSION_TYPE::UNKNOWN:
       break;
+    case EXPRESSION_TYPE::ARRAY_EXPR:
+      array_expr = std::move(a.array_expr);
+      break;
+    case EXPRESSION_TYPE::INDEX:
+      index = std::move(a.index);
+      break;
     case EXPRESSION_TYPE::BINARY_OPERATOR:
       bin_op = std::move(a.bin_op);
       break;
@@ -38,6 +44,7 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
 ASTExpression::~ASTExpression() {
   switch (expr_type) {
     case EXPRESSION_TYPE::UNKNOWN: break;
+
     case EXPRESSION_TYPE::BINARY_OPERATOR: {
         bin_op.~BinaryOperatorExpr();
         break;
@@ -58,6 +65,15 @@ ASTExpression::~ASTExpression() {
         enum_value.~EnumValueExpr();
         break;
       }
+    case EXPRESSION_TYPE::INDEX: {
+        index.~IndexExpr();
+        break;
+      }
+    case EXPRESSION_TYPE::ARRAY_EXPR: {
+        array_expr.~ArrayExpr();
+        break;
+      }
+
     case EXPRESSION_TYPE::LOCAL:
     case EXPRESSION_TYPE::NAME:
     case EXPRESSION_TYPE::VALUE:

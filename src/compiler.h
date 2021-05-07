@@ -152,8 +152,17 @@ struct ValueTree {
 struct StackState {
   uint64_t current = 0;
   uint64_t max = 0;
+
+  uint64_t current_parameters = 0;
   uint64_t max_parameters = 0;
 
+  //Just for counting parameters/use of stack
+  void push_stack_params(uint64_t p) {
+    current_parameters += p;
+    if (current_parameters > max_parameters) {
+      max_parameters = current_parameters;
+    }
+  }
   uint64_t next_stack_local(uint64_t size, uint64_t alignment);
 };
 
@@ -166,13 +175,13 @@ struct State {
   uint64_t return_label = 0;
 
   bool made_call = false;
-
-  bool used_stack = false;
   StackState stack ={};
 
   bool comptime_compilation = false;
 
-  constexpr bool needs_new_frame() const { return made_call || used_stack; }
+  constexpr bool needs_new_frame() const { 
+    return made_call || stack.max_parameters > 0 || stack.max > 0; 
+  }
 
   ValueIndex new_value();
   ValueIndex new_value(ValueIndex created_by);
@@ -256,7 +265,7 @@ struct ConstantUnit {
   Array<CompilationUnitCarrier> dependecies ={};
   bool unfound_dependency = false;
 
-  ASTExpression* expr;
+  ASTExpression* expr = nullptr;
 };
 
 struct VM;

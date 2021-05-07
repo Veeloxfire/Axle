@@ -275,7 +275,84 @@ void X64::mov(Array<uint8_t>& arr,
   arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(from, to));
 }
 
-inline static void emit_mod_rm(Array<uint8_t>& arr, X64::R r, X64::RM rm) {
+static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte) {
+  if (!sib.use_base) {
+    assert(!sib.use_index);//Must use both if using index
+
+    if (!sib.use_index) {
+      arr.insert(00'000'000 | mod_byte);
+      arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, RBP.REG));
+
+      arr.reserve_extra(4);
+
+      memcpy_ts(arr.data + arr.size, arr.capacity - arr.size,
+                (const uint8_t*)&sib.disp, 4);
+
+      arr.size += 4;
+    }
+    else {
+      assert(sib.index != RSP.REG);//Not a valid code unfortunately
+      
+      arr.insert(00'000'000 | mod_byte);
+      arr.insert(X64::sib(sib.scale, sib.index, RBP.REG));
+
+      arr.reserve_extra(4);
+
+      memcpy_ts(arr.data + arr.size, arr.capacity - arr.size,
+                (const uint8_t*)&sib.disp, 4);
+
+      arr.size += 4;
+    }
+  }
+  else if (sib.use_base && !sib.use_index) {
+    if (sib.disp == 0 && (sib.base & 0b111) != RBP.REG) {
+      arr.insert(00'000'000 | mod_byte);
+      arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, sib.base));
+    }
+    else if (-128 <= sib.disp  && sib.disp <= 127) {
+      arr.insert(01'000'000 | mod_byte);
+      arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, sib.base));
+      arr.insert((uint8_t)sib.disp);
+    }
+    else {
+      arr.insert(10'000'000 | mod_byte);
+      arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, sib.base));
+
+      arr.reserve_extra(4);
+
+      memcpy_ts(arr.data + arr.size, arr.capacity - arr.size,
+                (const uint8_t*)&sib.disp, 4);
+
+      arr.size += 4;
+    }
+  }
+  else {
+    //use base and index
+
+    if (sib.disp == 0 && (sib.base & 0b111) != RBP.REG) {
+      arr.insert(00'000'000 | mod_byte);
+      arr.insert(X64::sib(sib.scale, sib.index, sib.base));
+    }
+    else if (-128 <= sib.disp  && sib.disp <= 127) {
+      arr.insert(01'000'000 | mod_byte);
+      arr.insert(X64::sib(sib.scale, sib.index, sib.base));
+      arr.insert((uint8_t)sib.disp);
+    }
+    else {
+      arr.insert(10'000'000 | mod_byte);
+      arr.insert(X64::sib(sib.scale, sib.index, sib.base));
+
+      arr.reserve_extra(4);
+
+      memcpy_ts(arr.data + arr.size, arr.capacity - arr.size,
+                (const uint8_t*)&sib.disp, 4);
+
+      arr.size += 4;
+    }
+  }
+}
+
+static void emit_mod_rm(Array<uint8_t>& arr, const X64::R r, const X64::RM& rm) {
   if (!rm.indirect) {
     arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(r.r, rm.r));
     return;
@@ -286,7 +363,10 @@ inline static void emit_mod_rm(Array<uint8_t>& arr, X64::R r, X64::RM rm) {
     case R12.REG: {
         //SIB byte time
 
-        if (rm.disp == 0) {
+        if (rm.use_sib) {
+          emit_sib(arr, rm.sib, X64::modrm_r_rm(r.r, rm.r));
+        }
+        else if (rm.disp == 0) {
           arr.insert(X64::MODRM_MOD_INDIRECT | X64::modrm_r_rm(r.r, rm.r));
           arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, rm.r));
         }
@@ -340,7 +420,7 @@ inline static void emit_mod_rm(Array<uint8_t>& arr, X64::R r, X64::RM rm) {
 
 void X64::mov(Array<uint8_t>& arr,
               R r,
-              RM rm) {
+              const RM& rm) {
 
   arr.insert(X64::REX_W | X64::rex_r_rm(r.r, rm.r));
   arr.insert(X64::MOV_R_TO_RM);
@@ -349,7 +429,7 @@ void X64::mov(Array<uint8_t>& arr,
 }
 
 void X64::mov(Array<uint8_t>& arr,
-              RM rm,
+              const RM& rm,
               R r) {
   arr.insert(X64::REX_W | X64::rex_r_rm(r.r, rm.r));
   arr.insert(X64::MOV_RM_TO_R);
@@ -369,7 +449,7 @@ void X64::mov(Array<uint8_t>& arr,
 }
 
 void X64::mov(Array<uint8_t>& arr,
-              RM rm,
+              const RM& rm,
               uint32_t u32) {
   if ((rm.r & 0b1000) > 0) {
     arr.insert(X64::REX | X64::rex_b(rm.r));
@@ -385,8 +465,8 @@ void X64::mov(Array<uint8_t>& arr,
 }
 
 void X64::sub(Array<uint8_t>& arr,
-                       uint8_t r,
-                       uint8_t rm) {
+              uint8_t r,
+              uint8_t rm) {
   arr.insert(X64::REX_W | X64::rex_r_rm(r, rm));
   arr.insert(X64::SUB_R_TO_RM);
   arr.insert(X64::MODRM_MOD_DIRECT
@@ -394,8 +474,8 @@ void X64::sub(Array<uint8_t>& arr,
 }
 
 void X64::sub(Array<uint8_t>& arr,
-                       uint8_t rm,
-                       int32_t i32) {
+              uint8_t rm,
+              int32_t i32) {
   arr.insert(X64::REX_W | X64::rex_rm(rm));
   arr.insert(X64::SUB_32_TO_RM);
   arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(5, rm));
@@ -786,7 +866,14 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_TO_STACK_TOP: {
               const auto i = ByteCode::PARSE::COPY_R64_TO_STACK_TOP(code_i);
 
-              X64::mov(out_code, X64::R{ i.val }, X64::RM{ RSP.REG, true, (int32_t)i.u64.sig_val });
+              X64::RM rm = {};
+
+              rm.r = RSP.REG;
+              rm.indirect = true;
+              rm.use_sib = false;
+              rm.disp = (int32_t)i.u64.sig_val;
+
+              X64::mov(out_code, X64::R{ i.val }, rm);
 
               code_i += ByteCode::SIZE_OF::COPY_R64_TO_STACK_TOP;
               break;
@@ -797,8 +884,18 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               const uint32_t low = i.u64_1.val & 0xFFFFFFFF;
               const uint32_t high = (i.u64_1.val >> (8 * 4)) & 0xFFFFFFFF;
 
-              X64::mov(out_code, X64::RM{ RSP.REG, true, (int32_t)i.u64_2.sig_val + 4 }, high);
-              X64::mov(out_code, X64::RM{ RSP.REG, true, (int32_t)i.u64_2.sig_val }, low);
+              X64::RM rm = {};
+
+              rm.r = RSP.REG;
+              rm.indirect = true;
+              rm.use_sib = false;
+              rm.disp = (int32_t)i.u64_2.sig_val + 4;
+
+              X64::mov(out_code, rm, high);
+
+              rm.disp = (int32_t)i.u64_2.sig_val;
+
+              X64::mov(out_code, rm, low);
 
               code_i += ByteCode::SIZE_OF::COPY_64_TO_STACK_TOP;
               break;
@@ -806,7 +903,14 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_TO_STACK: {
               const auto i = ByteCode::PARSE::COPY_R64_TO_STACK(code_i);
 
-              X64::mov(out_code, X64::R{ i.val }, X64::RM{ RBP.REG, true, (int32_t)i.u64.sig_val });
+              X64::RM rm = {};
+
+              rm.r = RBP.REG;
+              rm.indirect = true;
+              rm.use_sib = false;
+              rm.disp = (int32_t)i.u64.sig_val;
+
+              X64::mov(out_code, X64::R{ i.val }, rm);
 
               code_i += ByteCode::SIZE_OF::COPY_R64_TO_STACK;
               break;
@@ -816,9 +920,19 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
 
               const uint32_t low = i.u64_1.val & 0xFFFFFFFF;
               const uint32_t high = (i.u64_1.val >> (8 * 4)) & 0xFFFFFFFF;
+              
+              X64::RM rm = {};
 
-              X64::mov(out_code, X64::RM{ RBP.REG, true, (int32_t)i.u64_2.sig_val + 4 }, high);
-              X64::mov(out_code, X64::RM{ RBP.REG, true, (int32_t)i.u64_2.sig_val }, low);
+              rm.r = RBP.REG;
+              rm.indirect = true;
+              rm.use_sib = false;
+              rm.disp = (int32_t)i.u64_2.sig_val + 4;
+
+              X64::mov(out_code, rm, high);
+
+              rm.disp = (int32_t)i.u64_2.sig_val;
+
+              X64::mov(out_code, rm, low);
 
 
               code_i += ByteCode::SIZE_OF::COPY_64_TO_STACK;
@@ -827,9 +941,51 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_FROM_STACK: {
               const auto i = ByteCode::PARSE::COPY_R64_FROM_STACK(code_i);
 
-              X64::mov(out_code, X64::RM{ RBP.REG, true, (int32_t)i.u64.sig_val }, X64::R{ i.val });
+              X64::RM rm = {};
+
+              rm.r = RBP.REG;
+              rm.indirect = true;
+              rm.use_sib = false;
+              rm.disp = (int32_t)i.u64.sig_val;
+
+              X64::mov(out_code, rm, X64::R{ i.val });
 
               code_i += ByteCode::SIZE_OF::COPY_R64_FROM_STACK;
+              break;
+            }
+          case ByteCode::COPY_R64_FROM_MEM: {
+              const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(code_i);
+
+              X64::RM rm = {};
+
+              rm.r = i.val2;
+              rm.indirect = true;
+              rm.use_sib = false;
+              rm.disp = 0;
+
+              X64::mov(out_code, rm, X64::R{ i.val1 });
+
+              code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
+              break;
+            }
+          case ByteCode::COPY_R64_FROM_MEM_COMPLEX: {
+              const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM_COMPLEX(code_i);
+
+              X64::RM rm = {};
+
+              rm.r = RSP.REG;
+              rm.indirect = true;
+              rm.use_sib = true;
+
+              //use SIB
+              rm.sib.base = i.mem.base;
+              rm.sib.index = i.mem.index;
+              rm.sib.scale = i.mem.scale;
+              rm.sib.disp = i.mem.disp;
+
+              X64::mov(out_code, rm, X64::R{ i.val });
+
+              code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM_COMPLEX;
               break;
             }
           case ByteCode::CONV_RU8_TO_R64: {

@@ -47,9 +47,15 @@ constexpr auto constexpr_fibonacci(uint64_t a) -> uint64_t {
   return n1;
 }
 
-//Should be the equivalent of "fib_recurse.axl"
+//Should be the equivalent of "fib_recurse.axl" even though written differently
 constexpr auto fib_recurse_main() -> uint64_t {
-  return constexpr_fibonacci(15);
+  return constexpr_fibonacci(5);
+}
+
+constexpr auto arrays_main() -> uint64_t {
+  uint64_t a[4] = {1, 2, 3, 4};
+
+  return a[0] + a[1] + a[2] + a[3];
 }
 
 constexpr auto operations_optim() -> uint64_t {
@@ -93,6 +99,7 @@ static constexpr Test tests[] ={
   Test{"Operators Unsigned", TEST_DIR("operators_unsigned.axl"), operations_unsigned_cpp()},
   Test{"Operators Signed", TEST_DIR("operators_signed.axl"), operations_signed_cpp()},
   Test{"Operators Comptime", TEST_DIR("operators_comptime.axl"), operations_optim()},
+  Test{"Arrays", TEST_DIR("arrays.axl"), arrays_main()},
 };
 
 static constexpr size_t num_tests = sizeof(tests)/sizeof(Test);
@@ -103,7 +110,15 @@ bool run_test(const Options& opts, const uint64_t res) {
     const auto now = std::chrono::high_resolution_clock::now();
 
     //Run the compilation
-    RunOutput out = compile_file_and_run(opts);
+    Program prog ={};
+
+    RunOutput out = {0, 0};
+
+    out.return_code = compile_file(opts, &prog);
+
+    if (out.return_code == 0) {
+      out = run_program(opts, prog);
+    }
 
     const auto end = std::chrono::high_resolution_clock::now();
 
@@ -112,7 +127,7 @@ bool run_test(const Options& opts, const uint64_t res) {
       << "us\n";
 
     if (out.return_code != 0) {
-      std::cerr << "Return code: " << out.return_code << '\n';
+      std::cout << "Return code: " << out.return_code << '\n';
       return false;
     }
     else {
@@ -120,7 +135,10 @@ bool run_test(const Options& opts, const uint64_t res) {
         return true;
       }
       else {
-        std::cerr << "Program returned: " << out.program_return << ", Expected: " << res << '\n';
+        std::cout << "Program returned: " << out.program_return << ", Expected: " << res << '\n';
+        std::cout << "Printing Program:\n";
+        print_program(opts, prog);
+        std::cout << "\n\n";
         return false;
       }
     }
