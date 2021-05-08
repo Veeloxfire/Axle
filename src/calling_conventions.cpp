@@ -74,10 +74,6 @@ static constexpr System make_system(const char* name,
   system.all_registers = all_regs;
   system.num_registers = num_registers;
 
-  system.stack_pointers_are_regs = true;
-  system.stack_pointer = stack_pointer.REG;
-  system.base_pointer  = base_pointer.REG;
-
   system.reg_name_from_num = reg_name_from_num;
   system.backend = backend;
 
@@ -96,14 +92,40 @@ const System system_vm = make_system(System::vm_name,
 
 template<typename T, size_t size>
 struct ConstArray {
+  struct Loader {
+    T* arr;
+
+    template<typename U>
+    constexpr Loader& operator<<(U&& u) {
+      arr[0] = std::forward<U>(u);
+      arr++;
+      return *this;
+    }
+  };
+
+
   T arr[size];
+
+  template<typename ... U>
+  constexpr static auto fill_arr(U&& ... u) {
+    ConstArray<T, size> arr ={};
+
+    static_assert(sizeof...(U) == size, "Must be fully filled");
+
+
+    Loader load{ arr.arr };
+    (load << ... << std::forward<U>(u));
+
+    return arr;
+  }
 };
 
-template<size_t num_volatile, size_t num_non_volatile>
-constexpr static ConstArray<uint8_t, num_volatile + num_non_volatile>
+template<size_t num_volatile, size_t num_non_volatile, typename ... T>
+constexpr static auto
 combine_regs(const uint8_t(&volatiles)[num_volatile],
-             const uint8_t(&non_volatiles)[num_non_volatile]) {
-  ConstArray<uint8_t, num_volatile + num_non_volatile> arr ={};
+             const uint8_t(&non_volatiles)[num_non_volatile],
+             T&& ... extras) {
+  ConstArray<uint8_t, num_volatile + num_non_volatile + sizeof...(T)> arr ={};
 
   size_t i = 0;
   for (; i < num_volatile; i++) {
@@ -113,6 +135,16 @@ combine_regs(const uint8_t(&volatiles)[num_volatile],
   i = 0;
   for (; i < num_non_volatile; i++) {
     arr.arr[i + num_volatile] = non_volatiles[i];
+  }
+
+  if constexpr (sizeof...(T) > 0) {
+    using EXTRA_ARR = ConstArray<const REGISTER_CONSTANT*, sizeof...(T)>;
+    const auto extras_arr = EXTRA_ARR::fill_arr((&extras)...);
+
+    i = 0;
+    for (; i < sizeof...(T); i++) {
+      arr.arr[i + num_volatile + num_non_volatile] = extras_arr.arr[i]->REG;
+    }
   }
 
   return arr;
@@ -133,12 +165,13 @@ make_calling_convention(const uint8_t(&all_regs)[all],
                         const uint8_t(&volatiles)[num_volatile],
                         const uint8_t(&non_volatiles)[num_non_volatile],
                         const REGISTER_CONSTANT& ret_reg,
+                        const REGISTER_CONSTANT& sp_reg,
+                        const REGISTER_CONSTANT& bp_reg,
                         uint8_t shadow_space_size,
                         STACK_DIRECTION direction) {
 
   CallingConvention convention ={};
 
-  convention.return_register            = ret_reg.REG;
   convention.all_regs_unordered         = all_regs;
 
   convention.parameter_registers        = params;
@@ -149,6 +182,10 @@ make_calling_convention(const uint8_t(&all_regs)[all],
   for (size_t i = 0; i < num_non_volatile; i++) {
     mask |= ((uint64_t)1 << non_volatiles[i]);
   }
+
+  convention.return_register = ret_reg.REG;
+  convention.stack_pointer_reg = sp_reg.REG;
+  convention.base_pointer_reg = bp_reg.REG;
 
   convention.non_volatiles_bit_mask = mask;
 
@@ -167,6 +204,8 @@ const CallingConvention convention_microsoft_x64
                           MICROSOFT_X64::volatiles,
                           MICROSOFT_X64::non_volatiles,
                           RAX,
+                          RSP,
+                          RBP,
                           32,
                           STACK_DIRECTION::RIGHT_TO_LEFT);
 
@@ -190,6 +229,8 @@ const CallingConvention convention_vm
                           VM::volatiles,
                           VM::non_volatiles,
                           all_vm_regs[0],
+                          all_vm_regs[VM_SP_R],
+                          all_vm_regs[VM_BP_R],
                           0,
                           STACK_DIRECTION::RIGHT_TO_LEFT);
 

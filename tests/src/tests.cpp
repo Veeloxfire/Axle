@@ -53,9 +53,9 @@ constexpr auto fib_recurse_main() -> uint64_t {
 }
 
 constexpr auto arrays_main() -> uint64_t {
-  uint64_t a[4] = {1, 2, 3, 4};
+  uint64_t a[4] = { 3, 2, 0, 1 };
 
-  return a[0] + a[1] + a[2] + a[3];
+  return a[a[a[a[0]]]];
 }
 
 constexpr auto operations_optim() -> uint64_t {

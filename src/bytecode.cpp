@@ -23,7 +23,7 @@ namespace ByteCode {
     char c = mem.disp > 0 ? '+' : '-';
     printf("[$%s %c 0x%lx ", reg_name, c, absolute(mem.disp));
     reg_name = reg_name_from_num(mem.index);
-    printf("+ ($%s * 0x%hhx]", reg_name, mem.scale);
+    printf("+ ($%s * 0x%hhx)]", reg_name, mem.scale);
   }
 
   void print_bytecode(REG_NAME reg_name_from_num,

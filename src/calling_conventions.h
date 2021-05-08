@@ -35,10 +35,6 @@ struct System {
   const REGISTER_CONSTANT* all_registers;
   uint8_t num_registers;
 
-  bool stack_pointers_are_regs = false;
-  uint8_t stack_pointer;
-  uint8_t base_pointer;
-
   REG_NAME_FROM_NUM_PTR reg_name_from_num;
   BACKEND_PTR backend;
 };
@@ -52,7 +48,9 @@ extern const System system_vm;
 struct CallingConvention {
   static constexpr size_t OFFSET_TO_SHADOW = 8ull + 8ull;
 
-  uint8_t return_register = 0;//Usually RAX
+  uint8_t return_register = 0;//Usually RAX or 0
+  uint8_t stack_pointer_reg = 0;
+  uint8_t base_pointer_reg = 0;
 
   uint8_t num_parameter_registers = 0;
   uint8_t num_volatile_registers = 0;

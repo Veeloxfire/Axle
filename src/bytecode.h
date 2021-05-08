@@ -49,14 +49,14 @@ struct MemComplex {
     ptr[0] = base;
     ptr[1] = index;
     ptr[2] = scale;
-    x32_to_bytes(disp, ptr);
+    x32_to_bytes(disp, ptr + 3);
   }
 
   constexpr static void write(uint8_t* const ptr, const MemComplex& mem) {
     ptr[0] = mem.base;
     ptr[1] = mem.index;
     ptr[2] = mem.scale;
-    x32_to_bytes(mem.disp, ptr);
+    x32_to_bytes(mem.disp, ptr + 3);
   }
 
   inline static void emit(Array<uint8_t>& arr, uint8_t base, uint8_t index, uint8_t scale, int32_t disp) {

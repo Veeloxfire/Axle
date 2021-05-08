@@ -280,7 +280,7 @@ static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte)
     assert(!sib.use_index);//Must use both if using index
 
     if (!sib.use_index) {
-      arr.insert(00'000'000 | mod_byte);
+      arr.insert(0b00'000'000 | mod_byte);
       arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, RBP.REG));
 
       arr.reserve_extra(4);
@@ -293,7 +293,7 @@ static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte)
     else {
       assert(sib.index != RSP.REG);//Not a valid code unfortunately
       
-      arr.insert(00'000'000 | mod_byte);
+      arr.insert(0b00'000'000 | mod_byte);
       arr.insert(X64::sib(sib.scale, sib.index, RBP.REG));
 
       arr.reserve_extra(4);
@@ -306,16 +306,16 @@ static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte)
   }
   else if (sib.use_base && !sib.use_index) {
     if (sib.disp == 0 && (sib.base & 0b111) != RBP.REG) {
-      arr.insert(00'000'000 | mod_byte);
+      arr.insert(0b00'000'000 | mod_byte);
       arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, sib.base));
     }
     else if (-128 <= sib.disp  && sib.disp <= 127) {
-      arr.insert(01'000'000 | mod_byte);
+      arr.insert(0b01'000'000 | mod_byte);
       arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, sib.base));
       arr.insert((uint8_t)sib.disp);
     }
     else {
-      arr.insert(10'000'000 | mod_byte);
+      arr.insert(0b10'000'000 | mod_byte);
       arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, sib.base));
 
       arr.reserve_extra(4);
@@ -330,16 +330,16 @@ static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte)
     //use base and index
 
     if (sib.disp == 0 && (sib.base & 0b111) != RBP.REG) {
-      arr.insert(00'000'000 | mod_byte);
+      arr.insert(0b00'000'000 | mod_byte);
       arr.insert(X64::sib(sib.scale, sib.index, sib.base));
     }
     else if (-128 <= sib.disp  && sib.disp <= 127) {
-      arr.insert(01'000'000 | mod_byte);
+      arr.insert(0b01'000'000 | mod_byte);
       arr.insert(X64::sib(sib.scale, sib.index, sib.base));
       arr.insert((uint8_t)sib.disp);
     }
     else {
-      arr.insert(10'000'000 | mod_byte);
+      arr.insert(0b10'000'000 | mod_byte);
       arr.insert(X64::sib(sib.scale, sib.index, sib.base));
 
       arr.reserve_extra(4);
@@ -978,6 +978,9 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               rm.use_sib = true;
 
               //use SIB
+              rm.sib.use_base = true;
+              rm.sib.use_index = true;
+
               rm.sib.base = i.mem.base;
               rm.sib.index = i.mem.index;
               rm.sib.scale = i.mem.scale;
@@ -1260,7 +1263,7 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
               }
             }
           case 0b01: {
-              const uint8_t disp = *(*rest)++;
+              const int8_t disp = *(*rest)++;
 
               char sign = disp >= 0 ? '+' : '-';
 
@@ -1271,11 +1274,11 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
                               sign, absolute(disp));
               }
               else {
-                return format("{} [{} + ({} * {}) {} {}]",
+                return format("{} [{} {} {} + ({} * {})]",
                               size_operand,
                               p_opts->rm_name(base),
-                              p_opts->rm_name(index), scale,
-                              sign, absolute(disp));
+                              sign, absolute(disp),
+                              p_opts->rm_name(index), scale);
               }
             }
           case 0b10: {

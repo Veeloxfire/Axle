@@ -1217,12 +1217,14 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
           }
         }
 
-        auto* const expr_v = state->value_tree.values.data + expr_val_stack.val;
-
-
         const ValueOrConst index_val = compile_bytecode_of_expression(comp, expr->index.index, state, code);
+
+        result.index = state->new_value();
+
+        auto* const expr_v = state->value_tree.values.data + expr_val_stack.val;
+        assert(expr_v->on_stack());//hopefully temp
+
         if (index_val.is_constant) {
-          result.index = state->new_value();
 
           const uint64_t stack_offset = expr_v->stack_offset - (*(uint64_t*)index_val.constant * base_size);
 
@@ -1234,7 +1236,7 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
           auto& rbp_val = state->value_tree.values.data[rbp.val];
 
           rbp_val.value_type = ValueType::FIXED;
-          rbp_val.reg = comp->build_options.system->base_pointer;
+          rbp_val.reg = comp->build_options.calling_convention->base_pointer_reg;
 
           MemComplex complex ={};
           complex.base   = (uint8_t)rbp.val;
@@ -1243,6 +1245,7 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
           complex.disp = (int32_t)expr_v->stack_offset;
 
           ByteCode::EMIT::COPY_R64_FROM_MEM_COMPLEX(code->code, (uint8_t)result.index.val, complex);
+          state->use_value(result.index);
           state->use_value(index_val.index);
           state->use_value(rbp);
         }
@@ -1759,7 +1762,7 @@ static void map_values(const BuildOptions* const options,
           mem.scale = p.mem.scale;
           mem.disp = -p.mem.disp;//negate for stack
 
-          if (b->reg == options->system->base_pointer) {
+          if (b->reg == options->calling_convention->base_pointer_reg) {
             mem.disp += (int32_t)base_pointer_offset;
           }
 
