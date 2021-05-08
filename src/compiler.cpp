@@ -1235,7 +1235,7 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
           auto* const expr_v = state->value_tree.values.data + expr_val_stack.val;
           assert(expr_v->on_stack());//hopefully temp
           return expr_v->stack_offset;
-        })();//Immediately invocated
+        })();//Immediately invoked
 
         if (index_val.is_constant) {
 
@@ -1279,10 +1279,12 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
         result.is_constant = false;
         result.index = state->new_value();
 
-        auto* res_val = state->value_tree.values.data + result.index.val;
+        {
+          auto* const res_val = state->value_tree.values.data + result.index.val;
 
-        res_val->value_type = ValueType::NORMAL_STACK;
-        res_val->stack_offset = state->stack.next_stack_local(full_size, full_align);
+          res_val->value_type = ValueType::NORMAL_STACK;
+          res_val->stack_offset = state->stack.next_stack_local(full_size, full_align);
+        }
 
         int64_t offset = 0;
 
@@ -1486,11 +1488,13 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
         state->control_flow.expression_num++;
 
         const ValueIndex rax = state->new_value();
-        auto* rax_val = state->value_tree.values.data + rax.val;
 
-        rax_val->value_type = ValueType::FIXED;
-        rax_val->reg        = comp->build_options.calling_convention->return_register;
+        {
+          auto* rax_val = state->value_tree.values.data + rax.val;
 
+          rax_val->value_type = ValueType::FIXED;
+          rax_val->reg        = comp->build_options.calling_convention->return_register;
+        }
 
         //Fake copy so dont need to insert copy later if one is needed
         state->control_flow.expression_num++;
@@ -1535,10 +1539,12 @@ void compile_bytecode_of_statement(Compiler* const comp,
 
         const ValueIndex rax = copy_val_to_val(comp, state, code, expr->type, result);
 
-        auto& rax_val = state->value_tree.values.data[rax.val];
+        {
+          auto& rax_val = state->value_tree.values.data[rax.val];
 
-        rax_val.value_type = ValueType::FIXED;
-        rax_val.reg        = comp->build_options.calling_convention->return_register;
+          rax_val.value_type = ValueType::FIXED;
+          rax_val.reg        = comp->build_options.calling_convention->return_register;
+        }
 
         ByteCode::EMIT::JUMP_TO_FIXED(code->code, state->return_label);
         return;
@@ -2788,10 +2794,13 @@ CompileCode compile_all(Compiler* const comp) {
                     //Effectively do a return
                     const ValueIndex rax = copy_val_to_val(comp, comp->working_state, &block, unit->expr->type, result);
 
-                    auto& rax_val = comp->working_state->value_tree.values.data[rax.val];
+                    {
+                      auto& rax_val = comp->working_state->value_tree.values.data[rax.val];
 
-                    rax_val.value_type = ValueType::FIXED;
-                    rax_val.reg        = comp->build_options.calling_convention->return_register;
+                      rax_val.value_type = ValueType::FIXED;
+                      rax_val.reg        = comp->build_options.calling_convention->return_register;
+                    }
+                    
                     comp->working_state->use_value(rax);
 
                     ByteCode::EMIT::JUMP_TO_FIXED(block.code, comp->working_state->return_label);
