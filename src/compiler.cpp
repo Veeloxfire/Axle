@@ -980,14 +980,25 @@ static void load_const_to_stack(Compiler* const comp,
     auto mov_val = state->new_value();
 
     for (size_t itr = 0; itr < s_div_8; itr++) {
-      ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)mov_val.val, *from);
-      state->use_value(mov_val);
-      state->control_flow.expression_num++;
+      const int64_t val = (int64_t)*from;
 
-      ByteCode::EMIT::COPY_R64_TO_STACK(code->code, (uint8_t)mov_val.val, offset);
-      state->use_value(mov_val);
-      state->use_value(to);
-      state->control_flow.expression_num++;
+      if (can_be_from_sign_extension(val)) {
+        //Can just load the value as 32 bits and it will be sign extended
+        ByteCode::EMIT::COPY_64_TO_STACK(code->code, *from, offset);
+        state->control_flow.expression_num++;
+      }
+      else {
+        ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)mov_val.val, *from);
+        state->use_value(mov_val);
+        state->control_flow.expression_num++;
+
+        ByteCode::EMIT::COPY_R64_TO_STACK(code->code, (uint8_t)mov_val.val, offset);
+        state->use_value(mov_val);
+        state->use_value(to);
+        state->control_flow.expression_num++;
+      }
+
+
 
       from++;
       offset += 8;
@@ -1219,15 +1230,18 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
 
         const ValueOrConst index_val = compile_bytecode_of_expression(comp, expr->index.index, state, code);
 
-        result.index = state->new_value();
-
-        auto* const expr_v = state->value_tree.values.data + expr_val_stack.val;
-        assert(expr_v->on_stack());//hopefully temp
+        const uint64_t expr_stack_offset = ([&]() {
+          //inside a block to stop it being accidentally used after a new value is added - invalidades the pointer
+          auto* const expr_v = state->value_tree.values.data + expr_val_stack.val;
+          assert(expr_v->on_stack());//hopefully temp
+          return expr_v->stack_offset;
+        })();//Immediately invocated
 
         if (index_val.is_constant) {
 
-          const uint64_t stack_offset = expr_v->stack_offset - (*(uint64_t*)index_val.constant * base_size);
+          const uint64_t stack_offset = expr_stack_offset - (*(uint64_t*)index_val.constant * base_size);
 
+          result.index = state->new_value();
           ByteCode::EMIT::COPY_R64_FROM_STACK(code->code, (uint8_t)result.index.val, stack_offset);
           state->use_value(result.index);
         }
@@ -1242,11 +1256,12 @@ static ValueOrConst compile_bytecode_of_expression(Compiler* const comp,
           complex.base   = (uint8_t)rbp.val;
           complex.index  = (uint8_t)index_val.index.val;
           complex.scale  = (uint8_t)base_size;
-          complex.disp = (int32_t)expr_v->stack_offset;
+          complex.disp = (int32_t)expr_stack_offset;
 
+          result.index = state->new_value(index_val.index);
           ByteCode::EMIT::COPY_R64_FROM_MEM_COMPLEX(code->code, (uint8_t)result.index.val, complex);
+          state->use_value(index_val.index, result.index);
           state->use_value(result.index);
-          state->use_value(index_val.index);
           state->use_value(rbp);
         }
 

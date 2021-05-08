@@ -450,9 +450,10 @@ void X64::mov(Array<uint8_t>& arr,
 
 void X64::mov(Array<uint8_t>& arr,
               const RM& rm,
-              uint32_t u32) {
-  if ((rm.r & 0b1000) > 0) {
-    arr.insert(X64::REX | X64::rex_b(rm.r));
+              IMM32 u32) {
+  if ((rm.r & 0b1000) > 0 || u32.sign_extend) {
+    const uint8_t rex = (uint8_t)(u32.sign_extend ? X64::REX_W : X64::REX);
+    arr.insert(rex | X64::rex_b(rm.r));
   }
 
   arr.insert(X64::MOV_IMM32_RM);
@@ -460,7 +461,7 @@ void X64::mov(Array<uint8_t>& arr,
   emit_mod_rm(arr, R{ '\0' }, rm);
 
   arr.reserve_extra(sizeof(uint32_t));
-  x32_to_bytes(u32, arr.data + arr.size);
+  x32_to_bytes(u32.imm, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
@@ -866,7 +867,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_TO_STACK_TOP: {
               const auto i = ByteCode::PARSE::COPY_R64_TO_STACK_TOP(code_i);
 
-              X64::RM rm = {};
+              X64::RM rm ={};
 
               rm.r = RSP.REG;
               rm.indirect = true;
@@ -884,18 +885,25 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               const uint32_t low = i.u64_1.val & 0xFFFFFFFF;
               const uint32_t high = (i.u64_1.val >> (8 * 4)) & 0xFFFFFFFF;
 
-              X64::RM rm = {};
+              X64::RM rm ={};
 
               rm.r = RSP.REG;
               rm.indirect = true;
               rm.use_sib = false;
-              rm.disp = (int32_t)i.u64_2.sig_val + 4;
 
-              X64::mov(out_code, rm, high);
+              if (can_be_from_sign_extension(i.u64_1.val)) {
+                rm.disp = (int32_t)i.u64_2.sig_val;
 
-              rm.disp = (int32_t)i.u64_2.sig_val;
+                //Sign extend
+                X64::mov(out_code, rm, X64::IMM32{ true, low });
+              }
+              else {
+                rm.disp = (int32_t)i.u64_2.sig_val + 4;
+                X64::mov(out_code, rm, X64::IMM32{ false, high });
 
-              X64::mov(out_code, rm, low);
+                rm.disp = (int32_t)i.u64_2.sig_val;
+                X64::mov(out_code, rm, X64::IMM32{ false, low });
+              }
 
               code_i += ByteCode::SIZE_OF::COPY_64_TO_STACK_TOP;
               break;
@@ -903,7 +911,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_TO_STACK: {
               const auto i = ByteCode::PARSE::COPY_R64_TO_STACK(code_i);
 
-              X64::RM rm = {};
+              X64::RM rm ={};
 
               rm.r = RBP.REG;
               rm.indirect = true;
@@ -920,20 +928,26 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
 
               const uint32_t low = i.u64_1.val & 0xFFFFFFFF;
               const uint32_t high = (i.u64_1.val >> (8 * 4)) & 0xFFFFFFFF;
-              
-              X64::RM rm = {};
+
+              X64::RM rm ={};
 
               rm.r = RBP.REG;
               rm.indirect = true;
               rm.use_sib = false;
-              rm.disp = (int32_t)i.u64_2.sig_val + 4;
+              
+              if (can_be_from_sign_extension(i.u64_1.val)) {
+                rm.disp = (int32_t)i.u64_2.sig_val;
 
-              X64::mov(out_code, rm, high);
+                //Sign extend
+                X64::mov(out_code, rm, X64::IMM32{ true, low });
+              }
+              else {
+                rm.disp = (int32_t)i.u64_2.sig_val + 4;
+                X64::mov(out_code, rm, X64::IMM32{ false, high });
 
-              rm.disp = (int32_t)i.u64_2.sig_val;
-
-              X64::mov(out_code, rm, low);
-
+                rm.disp = (int32_t)i.u64_2.sig_val;
+                X64::mov(out_code, rm, X64::IMM32{ false, low });
+              }
 
               code_i += ByteCode::SIZE_OF::COPY_64_TO_STACK;
               break;
@@ -941,7 +955,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_FROM_STACK: {
               const auto i = ByteCode::PARSE::COPY_R64_FROM_STACK(code_i);
 
-              X64::RM rm = {};
+              X64::RM rm ={};
 
               rm.r = RBP.REG;
               rm.indirect = true;
@@ -956,7 +970,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_FROM_MEM: {
               const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(code_i);
 
-              X64::RM rm = {};
+              X64::RM rm ={};
 
               rm.r = i.val2;
               rm.indirect = true;
@@ -971,7 +985,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::COPY_R64_FROM_MEM_COMPLEX: {
               const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM_COMPLEX(code_i);
 
-              X64::RM rm = {};
+              X64::RM rm ={};
 
               rm.r = RSP.REG;
               rm.indirect = true;
@@ -1194,12 +1208,10 @@ const char* b32_reg_name(uint8_t reg) {
 }
 
 struct x86PrintOptions {
-  bool short_operand = false;
+  bool short_operand;
   FUNCTION_PTR<const char*, uint8_t> r_name;
   FUNCTION_PTR<const char*, uint8_t> rm_name;
 };
-
-
 
 static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
                                     uint8_t rex, uint8_t modrm, const uint8_t** rest) {
@@ -1212,8 +1224,12 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
     return format("{}", p_opts->rm_name(rm));
   }
 
-  constexpr auto SIZE = [](bool short_operand)->const char* {
-    if (short_operand) {
+  constexpr auto OPERAND_SIZE = [](bool short_prefix, bool rex_w) {
+    if (rex_w) {
+      return "QWORD PTR";
+    }
+    else if (short_prefix) {
+      //not 64bit and short
       return "WORD PTR";
     }
     else {
@@ -1221,7 +1237,7 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
     }
   };
 
-  const char* const size_operand = SIZE(p_opts->short_operand);
+  const char* const size_operand = OPERAND_SIZE(p_opts->short_operand, (rex & X64::REX_W) == X64::REX_W);
 
   switch (rm) {
     case RSP.REG: {
@@ -1500,6 +1516,19 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("mov %s, %s\n", names.rm.ptr, names.r.ptr);
+            break;
+          }
+        case X64::MOV_IMM32_RM: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            OwnedPtr<char> rm = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+
+            uint32_t val = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("mov %s, %u\n", rm.ptr, val);
             break;
           }
         case X64::MOV_RM_TO_R: {

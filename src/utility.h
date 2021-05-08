@@ -12,6 +12,22 @@
 #define JOIN2(a, b) a ## b
 #define JOIN(a, b) JOIN2(a, b)
 
+constexpr bool can_be_from_sign_extension(uint64_t u64) {
+  if ((u64 & 0xFFFFFFFF00000000ull) == 0xFFFFFFFF00000000ull) {
+    //Want to extend with 1s
+    //Must be a negative value
+    return (u64 & 0x80000000) > 0;
+  }
+  else if ((u64 & 0xFFFFFFFF00000000ull) == 0x0000000000000000ull) {
+    //Want to extend with 0s
+    //Must be positive value
+    return (u64 & 0x80000000) == 0;
+  }
+  else {
+    return false;
+  }
+}
+
 template<typename T>
 constexpr T slow_bit_fill_lower(uint8_t bits) {
   T t = 0;

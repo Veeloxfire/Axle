@@ -16,6 +16,11 @@ namespace X64 {
     uint8_t r;
   };
 
+  struct IMM32 {
+    bool sign_extend = false;
+    uint32_t imm = 0;
+  };
+
   struct RM {
     uint8_t r;//or base
 
@@ -155,7 +160,7 @@ namespace X64 {
 
   void mov(Array<uint8_t>& arr,
            const RM& rm,
-           uint32_t u32);
+           IMM32 u32);
 
   void sub(Array<uint8_t>& arr,
            uint8_t r,
