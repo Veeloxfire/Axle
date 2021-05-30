@@ -32,7 +32,7 @@ struct MemComplex {
   uint8_t scale;//must be power of 2
   int32_t disp;
 
-  static constexpr size_t SERIAL_SIZE = 7;
+  static constexpr size_t SERIAL_SIZE = 1 + 1 + 1 + 4;
 
   static constexpr MemComplex parse(const uint8_t* ptr) {
     MemComplex mem ={};
@@ -77,19 +77,27 @@ X(POP_TO_R64, OP_R)\
 X(PUSH_FRAME, OP)\
 X(POP_FRAME, OP)\
 X(ALLOCATE_STACK, OP_64)\
-X(COPY_R64_TO_STACK, OP_R_64)\
-X(COPY_R64_FROM_STACK, OP_R_64)\
-X(COPY_R64_FROM_MEM, OP_R_R)\
-X(COPY_R64_FROM_MEM_COMPLEX, OP_R_MEM)\
-X(COPY_64_TO_STACK, OP_64_64)\
-X(COPY_64_TO_STACK_TOP, OP_64_64)\
-X(COPY_8_TO_STACK, OP_8_64)\
-X(COPY_R8_TO_STACK, OP_R_64)\
-X(COPY_R8_FROM_STACK, OP_R_64)\
-X(COPY_R64_TO_STACK_TOP, OP_R_64)\
+X(COPY_64_TO_MEM, OP_64_MEM)\
+X(COPY_32_TO_MEM, OP_32_MEM)\
+X(COPY_16_TO_MEM, OP_16_MEM)\
+X(COPY_8_TO_MEM, OP_8_MEM)\
+X(COPY_R64_TO_MEM, OP_R_MEM)\
+X(COPY_R32_TO_MEM, OP_R_MEM)\
+X(COPY_R16_TO_MEM, OP_R_MEM)\
+X(COPY_R8_TO_MEM, OP_R_MEM)\
+X(COPY_R64_FROM_MEM, OP_R_MEM)\
+X(COPY_R32_FROM_MEM, OP_R_MEM)\
+X(COPY_R16_FROM_MEM, OP_R_MEM)\
+X(COPY_R8_FROM_MEM, OP_R_MEM)\
 X(COPY_R64_TO_R64, OP_R_R)\
+X(COPY_R32_TO_R32, OP_R_R)\
+X(COPY_R16_TO_R16, OP_R_R)\
+X(COPY_R8_TO_R8, OP_R_R)\
 X(SET_R64_TO_64, OP_R_64)\
-X(LOAD_ADDRESS, OP_R_R_R)\
+X(SET_R32_TO_32, OP_R_32)\
+X(SET_R16_TO_16, OP_R_16)\
+X(SET_R8_TO_8, OP_R_8)\
+X(LOAD_ADDRESS, OP_R_MEM)\
 X(ADD_R64S, OP_R_R)\
 X(SUB_R64S, OP_R_R)\
 X(MUL_R64S, OP_R_R)\
@@ -107,9 +115,6 @@ X(JUMP_TO_FIXED_IF_VAL_ZERO, OP_R_64)\
 X(JUMP_TO_FIXED_IF_VAL_NOT_ZERO, OP_R_64)
 
 
-//      REMOVED
-// X(CMP_R64S, OP_R_R)
-// X(CMP_64_TO_R64, OP_R_64)
 
 namespace ByteCode {
 
@@ -303,6 +308,102 @@ namespace ByteCode {
     }
   };
 
+  struct OP_R_32 {
+    uint8_t op;
+    uint8_t val;
+    uint32_t u32;
+
+    static constexpr OP_R_32 parse(const uint8_t* bytecode) {
+      OP_R_32 ret ={};
+
+      ret.op = bytecode[0];
+      ret.val = bytecode[1];
+      ret.u32 = x32_from_bytes(bytecode + 2);
+
+      return ret;
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 1 + 4;
+
+    constexpr static void write(uint8_t* ptr, uint8_t op, uint8_t val, uint32_t x32) {
+      ptr[0] = op;
+      ptr[1] = val;
+      x32_to_bytes(x32, ptr + 2);
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint8_t val, uint32_t x32) {
+      arr.reserve_extra(INSTRUCTION_SIZE);
+
+      write(arr.data + arr.size, opcode, val, x32);
+
+      arr.size += INSTRUCTION_SIZE;
+    }
+  };
+
+  struct OP_R_16 {
+    uint8_t op;
+    uint8_t val;
+    uint16_t u16;
+
+    static constexpr OP_R_16 parse(const uint8_t* bytecode) {
+      OP_R_16 ret ={};
+
+      ret.op = bytecode[0];
+      ret.val = bytecode[1];
+      ret.u16 = x16_from_bytes(bytecode + 2);
+
+      return ret;
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 1 + 2;
+
+    constexpr static void write(uint8_t* ptr, uint8_t op, uint8_t val, uint16_t x16) {
+      ptr[0] = op;
+      ptr[1] = val;
+      x16_to_bytes(x16, ptr + 2);
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint8_t val, uint16_t x16) {
+      arr.reserve_extra(INSTRUCTION_SIZE);
+
+      write(arr.data + arr.size, opcode, val, x16);
+
+      arr.size += INSTRUCTION_SIZE;
+    }
+  };
+
+  struct OP_R_8 {
+    uint8_t op;
+    uint8_t val;
+    uint8_t u8;
+
+    static constexpr OP_R_8 parse(const uint8_t* const bytecode) {
+      OP_R_8 ret ={};
+
+      ret.op = bytecode[0];
+      ret.val = bytecode[1];
+      ret.u8 = bytecode[2];
+
+      return ret;
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 1 + 2;
+
+    constexpr static void write(uint8_t* ptr, uint8_t op, uint8_t val, uint8_t x8) {
+      ptr[0] = op;
+      ptr[1] = val;
+      ptr[2] = x8;
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint8_t val, uint8_t x8) {
+      arr.reserve_extra(INSTRUCTION_SIZE);
+
+      write(arr.data + arr.size, opcode, val, x8);
+
+      arr.size += INSTRUCTION_SIZE;
+    }
+  };
+
   struct OP_R_MEM {
     uint8_t op;
     uint8_t val;
@@ -335,120 +436,203 @@ namespace ByteCode {
     }
   };
 
-  struct OP_8_64 {
+  struct OP_8_MEM {
     uint8_t op;
     uint8_t u8;
-    X64_UNION u64;
+    MemComplex mem;
 
-    static constexpr OP_8_64 parse(const uint8_t* bytecode) {
-      OP_8_64 ret ={};
+    static constexpr OP_8_MEM parse(const uint8_t* bytecode) {
+      OP_8_MEM ret ={};
 
       ret.op = bytecode[0];
       ret.u8 = bytecode[1];
-      ret.u64 = x64_from_bytes(bytecode + 2);
+      ret.mem = MemComplex::parse(bytecode + 2);
 
       return ret;
     }
 
-    static constexpr size_t INSTRUCTION_SIZE = 1 + 1 + 8;
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 1 + MemComplex::SERIAL_SIZE;
 
-    constexpr static void write(uint8_t* ptr, uint8_t op, uint8_t u8, X64_UNION x64) {
+    constexpr static void write(uint8_t* ptr, uint8_t op, uint8_t u8, const MemComplex& mem) {
       ptr[0] = op;
       ptr[1] = u8;
-      x64_to_bytes(x64, ptr + 2);
+      MemComplex::write(ptr + 2, mem);
     }
 
-    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint8_t u8, X64_UNION x64) {
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint8_t u8, const MemComplex& mem) {
       arr.reserve_extra(INSTRUCTION_SIZE);
 
-      write(arr.data + arr.size, opcode, u8, std::move(x64));
+      write(arr.data + arr.size, opcode, u8, mem);
 
       arr.size += INSTRUCTION_SIZE;
     }
   };
 
-  struct OP_64_64 {
+  struct OP_16_MEM {
     uint8_t op;
-    X64_UNION u64_1;
-    X64_UNION u64_2;
+    uint16_t u16;
+    MemComplex mem;
 
-    static constexpr OP_64_64 parse(const uint8_t* bytecode) {
-      OP_64_64 ret = {};
+    static constexpr OP_16_MEM parse(const uint8_t* bytecode) {
+      OP_16_MEM ret ={};
 
       ret.op = bytecode[0];
-      ret.u64_1 = x64_from_bytes(bytecode + 1);
-      ret.u64_2 = x64_from_bytes(bytecode + 1 + 8);
+      ret.u16 = x16_from_bytes(bytecode + 1);
+      ret.mem = MemComplex::parse(bytecode + 3);
 
       return ret;
     }
 
-    static constexpr size_t INSTRUCTION_SIZE = 1 + 8 + 8;
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 2 + MemComplex::SERIAL_SIZE;
 
-    constexpr static void write(uint8_t* ptr, uint8_t op, X64_UNION x64_1, X64_UNION x64_2) {
+    constexpr static void write(uint8_t* ptr, uint8_t op, uint16_t u16, const MemComplex& mem) {
       ptr[0] = op;
-      x64_to_bytes(x64_1, ptr + 1);
-      x64_to_bytes(x64_2, ptr + 1 + 8);
+      x16_to_bytes(u16, ptr + 1);
+      MemComplex::write(ptr + 1 + 2, mem);
     }
 
-    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, X64_UNION x64_1, X64_UNION x64_2) {
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint16_t u16, const MemComplex& mem) {
       arr.reserve_extra(INSTRUCTION_SIZE);
 
-      write(arr.data + arr.size, opcode,  std::move(x64_1), std::move(x64_2));
+      write(arr.data + arr.size, opcode, u16, mem);
+
+      arr.size += INSTRUCTION_SIZE;
+    }
+  };
+
+  struct OP_32_MEM {
+    uint8_t op;
+    uint32_t u32;
+    MemComplex mem;
+
+    static constexpr OP_32_MEM parse(const uint8_t* bytecode) {
+      OP_32_MEM ret ={};
+
+      ret.op = bytecode[0];
+      ret.u32 = x32_from_bytes(bytecode + 1);
+      ret.mem = MemComplex::parse(bytecode + 1 + 4);
+
+      return ret;
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 4 + MemComplex::SERIAL_SIZE;
+
+    constexpr static void write(uint8_t* ptr, uint8_t op, uint32_t u32, const MemComplex& mem) {
+      ptr[0] = op;
+      x16_to_bytes(u32, ptr + 1);
+      MemComplex::write(ptr + 1 + 4, mem);
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, uint32_t u32, const MemComplex& mem) {
+      arr.reserve_extra(INSTRUCTION_SIZE);
+
+      write(arr.data + arr.size, opcode, u32, mem);
+
+      arr.size += INSTRUCTION_SIZE;
+    }
+  };
+
+  struct OP_64_MEM {
+    uint8_t op;
+    X64_UNION u64;
+    MemComplex mem;
+
+    static constexpr OP_64_MEM parse(const uint8_t* bytecode) {
+      OP_64_MEM ret = {};
+
+      ret.op = bytecode[0];
+      ret.u64 = x64_from_bytes(bytecode + 1);
+      ret.mem = MemComplex::parse(bytecode + 1 + 8);
+
+      return ret;
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 8 + MemComplex::SERIAL_SIZE;
+
+    constexpr static void write(uint8_t* ptr, uint8_t op, X64_UNION x64, const MemComplex& mem) {
+      ptr[0] = op;
+      x64_to_bytes(x64, ptr + 1);
+      MemComplex::write(ptr + 1 + 8, mem);
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, X64_UNION x64, const MemComplex& mem) {
+      arr.reserve_extra(INSTRUCTION_SIZE);
+
+      write(arr.data + arr.size, opcode,  std::move(x64), mem);
 
       arr.size += INSTRUCTION_SIZE;
     }
   };
 
   namespace EMIT {
-  #define OP_64_64(name) inline void name (Array<uint8_t>& arr, X64_UNION x64_1, X64_UNION x64_2) {\
-    ByteCode::OP_64_64::emit(arr, ByteCode:: ## name, std::move(x64_1), std::move(x64_2));\
+    template<ByteCodeOp op>
+    void OP_64_MEM(Array<uint8_t>& arr, X64_UNION x64, const MemComplex& mem) {
+      ByteCode::OP_64_MEM::emit(arr, op, std::move(x64), mem);
     }
 
-  #define OP_R_64(name) inline void name (Array<uint8_t>& arr, uint8_t val, X64_UNION x64) {\
-    ByteCode::OP_R_64::emit(arr, ByteCode:: ## name, val, x64);\
+    template<ByteCodeOp op>
+    void OP_32_MEM(Array<uint8_t>& arr, uint32_t u32, const MemComplex& mem) {
+      ByteCode::OP_32_MEM::emit(arr, op, u32, mem);
     }
 
-  #define OP_8_64(name) inline void name (Array<uint8_t>& arr, uint8_t u8, X64_UNION x64) {\
-    ByteCode::OP_8_64::emit(arr, ByteCode:: ## name, u8, x64);\
+    template<ByteCodeOp op>
+    void OP_16_MEM(Array<uint8_t>& arr, uint16_t u16, const MemComplex& mem) {
+      ByteCode::OP_16_MEM::emit(arr, op, u16, mem);
     }
 
-  #define OP_64(name) inline void name (Array<uint8_t>& arr, X64_UNION x64) {\
-    ByteCode::OP_64::emit(arr, ByteCode:: ## name, x64);\
+    template<ByteCodeOp op>
+    void OP_8_MEM(Array<uint8_t>& arr, uint8_t u8, const MemComplex& mem) {
+      ByteCode::OP_8_MEM::emit(arr, op, u8, mem);
     }
 
-  #define OP(name) inline void name (Array<uint8_t>& arr) {\
-    ByteCode::OP::emit(arr, ByteCode:: ## name);\
-    }
-    
-  #define OP_R(name) inline void name (Array<uint8_t>& arr, uint8_t val) {\
-    ByteCode::OP_R::emit(arr, ByteCode:: ## name, val);\
+    template<ByteCodeOp op>
+    void OP_R_64(Array<uint8_t>& arr, uint8_t val, X64_UNION x64) {
+      ByteCode::OP_R_64::emit(arr, op, val, x64);
     }
 
-  #define OP_R_R(name) inline void name (Array<uint8_t>& arr, uint8_t val1, uint8_t val2) {\
-    ByteCode::OP_R_R::emit(arr, ByteCode:: ## name, val1, val2);\
+    template<ByteCodeOp op>
+    void OP_R_32(Array<uint8_t>& arr, uint8_t val, uint32_t u32) {
+      ByteCode::OP_R_32::emit(arr, op, val, u32);
     }
 
-  #define OP_R_MEM(name) inline void name (Array<uint8_t>& arr, uint8_t val, const MemComplex& mem) {\
-    ByteCode::OP_R_MEM::emit(arr, ByteCode:: ## name, val, mem);\
-    }
-  
-  #define OP_R_R_R(name) inline void name (Array<uint8_t>& arr, uint8_t val1, uint8_t val2, uint8_t val3) {\
-    ByteCode::OP_R_R_R::emit(arr, ByteCode:: ## name, val1, val2, val3);\
+    template<ByteCodeOp op>
+    void OP_R_16(Array<uint8_t>& arr, uint8_t val, uint16_t u16) {
+      ByteCode::OP_R_16::emit(arr, op, val, u16);
     }
 
-  #define X(name, structure) structure(name)
+    template<ByteCodeOp op>
+    void OP_R_8(Array<uint8_t>& arr, uint8_t val, uint8_t u8) {
+      ByteCode::OP_R_8::emit(arr, op, val, u8);
+    }
+
+    template<ByteCodeOp op>
+    void OP_64(Array<uint8_t>& arr, X64_UNION x64) {
+      ByteCode::OP_64::emit(arr, op, x64);
+    }
+
+    template<ByteCodeOp op>
+    void OP(Array<uint8_t>& arr) {
+      ByteCode::OP::emit(arr, op);
+    }
+
+    template<ByteCodeOp op>
+    void OP_R(Array<uint8_t>& arr, uint8_t val) {
+      ByteCode::OP_R::emit(arr, op, val);
+    }
+
+    template<ByteCodeOp op>
+    void OP_R_R(Array<uint8_t>& arr, uint8_t val1, uint8_t val2) {
+      ByteCode::OP_R_R::emit(arr, op, val1, val2);
+    }
+
+    template<ByteCodeOp op>
+    void OP_R_MEM(Array<uint8_t>& arr, uint8_t val, const MemComplex& mem) {
+      ByteCode::OP_R_MEM::emit(arr, op, val, mem);
+    }
+
+  #define X(name, structure) constexpr auto name = structure<ByteCode:: ## name>;
     BYTECODES_X
     #undef X
-
-    #undef OP_64_64
-    #undef OP_R_64
-    #undef OP_R_MEM
-    #undef OP_8_64
-    #undef OP_64
-    #undef OP
-    #undef OP_R
-    #undef OP_R_R
-    #undef OP_R_R_R
   }
 
   namespace PARSE {
@@ -474,55 +658,74 @@ namespace ByteCode {
   }
 
   namespace WRITE {
-  #define OP_64_64(name) inline void name (uint8_t* ptr, X64_UNION x64_1, X64_UNION x64_2) {\
-    ByteCode::OP_64_64::write(ptr, ByteCode:: ## name, std::move(x64_1), std::move(x64_2));\
+    template<ByteCodeOp op>
+    void OP_64_MEM(uint8_t* arr, X64_UNION x64, const MemComplex& mem) {
+      ByteCode::OP_64_MEM::write(arr, op, std::move(x64), mem);
     }
 
-  #define OP_R_64(name) inline void name (uint8_t* ptr, uint8_t val, X64_UNION x64) {\
-    ByteCode::OP_R_64::write(ptr, ByteCode:: ## name, val, x64);\
+    template<ByteCodeOp op>
+    void OP_32_MEM(uint8_t* arr, uint32_t u32, const MemComplex& mem) {
+      ByteCode::OP_32_MEM::write(arr, op, u32, mem);
     }
 
-  #define OP_8_64(name) inline void name (uint8_t* ptr, uint8_t u8, X64_UNION x64) {\
-    ByteCode::OP_8_64::write(ptr, ByteCode:: ## name, u8, x64);\
+    template<ByteCodeOp op>
+    void OP_16_MEM(uint8_t* arr, uint16_t u16, const MemComplex& mem) {
+      ByteCode::OP_16_MEM::write(arr, op, u16, mem);
     }
 
-  #define OP_64(name) inline void name (uint8_t* ptr, X64_UNION x64) {\
-    ByteCode::OP_64::write(ptr, ByteCode:: ## name, x64);\
+    template<ByteCodeOp op>
+    void OP_8_MEM(uint8_t* arr, uint8_t u8, const MemComplex& mem) {
+      ByteCode::OP_8_MEM::write(arr, op, u8, mem);
     }
 
-  #define OP(name) inline void name (uint8_t* ptr) {\
-    ByteCode::OP::write(ptr, ByteCode:: ## name);\
+    template<ByteCodeOp op>
+    void OP_R_64(uint8_t* arr, uint8_t val, X64_UNION x64) {
+      ByteCode::OP_R_64::write(arr, op, val, x64);
     }
 
-  #define OP_R(name) inline void name (uint8_t* ptr, uint8_t val) {\
-    ByteCode::OP_R::write(ptr, ByteCode:: ## name, val);\
+    template<ByteCodeOp op>
+    void OP_R_32(uint8_t* arr, uint8_t val, uint32_t u32) {
+      ByteCode::OP_R_32::write(arr, op, val, u32);
     }
 
-  #define OP_R_R(name) inline void name (uint8_t* ptr, uint8_t val1, uint8_t val2) {\
-    ByteCode::OP_R_R::write(ptr, ByteCode:: ## name, val1, val2);\
-    }
-    
-  #define OP_R_MEM(name) inline void name (uint8_t* ptr, uint8_t val, const MemComplex& mem) {\
-    ByteCode::OP_R_MEM::write(ptr, ByteCode:: ## name, val, mem);\
+    template<ByteCodeOp op>
+    void OP_R_16(uint8_t* arr, uint8_t val, uint16_t u16) {
+      ByteCode::OP_R_16::write(arr, op, val, u16);
     }
 
-   #define OP_R_R_R(name) inline void name (uint8_t* ptr, uint8_t val1, uint8_t val2, uint8_t val3) {\
-    ByteCode::OP_R_R_R::write(ptr, ByteCode:: ## name, val1, val2, val3);\
+    template<ByteCodeOp op>
+    void OP_R_8(uint8_t* arr, uint8_t val, uint8_t u8) {
+      ByteCode::OP_R_8::write(arr, op, val, u8);
     }
 
-  #define X(name, structure) structure(name)
+    template<ByteCodeOp op>
+    void OP_64(uint8_t* arr, X64_UNION x64) {
+      ByteCode::OP_64::write(arr, op, x64);
+    }
+
+    template<ByteCodeOp op>
+    void OP(uint8_t* arr) {
+      ByteCode::OP::write(arr, op);
+    }
+
+    template<ByteCodeOp op>
+    void OP_R(uint8_t* arr, uint8_t val) {
+      ByteCode::OP_R::write(arr, op, val);
+    }
+
+    template<ByteCodeOp op>
+    void OP_R_R(uint8_t* arr, uint8_t val1, uint8_t val2) {
+      ByteCode::OP_R_R::write(arr, op, val1, val2);
+    }
+
+    template<ByteCodeOp op>
+    void OP_R_MEM(uint8_t* arr, uint8_t val, const MemComplex& mem) {
+      ByteCode::OP_R_MEM::write(arr, op, val, mem);
+    }
+
+  #define X(name, structure) constexpr auto name = structure<ByteCode:: ## name>;
     BYTECODES_X
     #undef X
-
-    #undef OP_64_64
-    #undef OP_R_64
-    #undef OP_R_MEM
-    #undef OP_8_64
-    #undef OP_64
-    #undef OP
-    #undef OP_R
-    #undef OP_R_R
-    #undef OP_R_R_R
   }
 }
 

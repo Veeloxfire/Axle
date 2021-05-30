@@ -31,8 +31,8 @@ int main(int argc, const char** args) {
   options.print.fully_compiled  = true;
   options.print.run_headers     = false;
   
-  /*Program program ={};
-  return compile_file(options, &program);*/
+  //Program program ={};
+  //return compile_file(options, &program);
   
   RunOutput out = compile_file_and_run(options);
   

@@ -68,7 +68,7 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
   free_list = (void*)new_fl;
 }
 
-void* ArenaAllocator::alloc_no_construct(size_t bytes) {
+uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
   size_t req_size = ceil_div(bytes, 8);
 
   FreeList* prev = nullptr;
@@ -129,7 +129,7 @@ void* ArenaAllocator::alloc_no_construct(size_t bytes) {
   //How much data to free
   *used_space = req_size;
 
-  return current_alloc;
+  return (uint8_t*)current_alloc;
 }
 
 void ArenaAllocator::free_no_destruct(void* val) {
@@ -178,39 +178,53 @@ void SquareBitMatrix::free() {
 }
 
 bool SquareBitMatrix::test_a_intersects_b(size_t a, size_t b) const {
-  const size_t bytes_per_val = (side_length / 8) + 1;
+  assert(a < side_length);
+  assert(b < side_length);
+
+  const size_t bytes_per_val = bytes_per_val_per_side(side_length);
   const uint8_t* a_data = data + bytes_per_val * a;
 
   const size_t b_mod8 = b % 8;
   const size_t b_div8 = b / 8;
 
+  assert(a_data + b_div8 < data + capacity);
+
   return (a_data[b_div8] & (1 << b_mod8)) > 0;
 }
 
 void SquareBitMatrix::set_a_intersects_b(size_t a, size_t b) {
-  const size_t bytes_per_val = (side_length / 8) + 1;
+  assert(a < side_length);
+  assert(b < side_length);
+
+  const size_t bytes_per_val = bytes_per_val_per_side(side_length);
   uint8_t* a_data = data + bytes_per_val * a;
 
   const size_t b_mod8 = b % 8;
   const size_t b_div8 = b / 8;
+
+  assert(a_data + b_div8 < data + capacity);
 
   a_data[b_div8] |= (uint8_t)(1 << b_mod8);
 }
 
 void SquareBitMatrix::remove_a_intersects_b(size_t a, size_t b) {
-  const size_t bytes_per_val = (side_length / 8) + 1;
+  assert(a < side_length);
+  assert(b < side_length);
+
+  const size_t bytes_per_val = bytes_per_val_per_side(side_length);
   uint8_t* a_data = data + bytes_per_val * a;
 
   const size_t b_mod8 = b % 8;
   const size_t b_div8 = b / 8;
 
+  assert(a_data + b_div8 < data + capacity);
+
   a_data[b_div8] &= ~(uint8_t)(1 << b_mod8);
 }
 
 size_t SquareBitMatrix::new_value() {
-  const size_t bytes_per_val_now = side_length == 0 ? 0
-    : ((side_length - 1) / 8) + 1;
-  const size_t bytes_per_val_next = ((side_length + 1 - 1) / 8) + 1;
+  const size_t bytes_per_val_now = bytes_per_val_per_side(side_length);
+  const size_t bytes_per_val_next = bytes_per_val_per_side(side_length + 1);
   const size_t required_capacity = bytes_per_val_next * (side_length + 1);
 
   //check if we have enough space
@@ -255,4 +269,10 @@ size_t SquareBitMatrix::new_value() {
 
   //Finally return new value
   return side_length++;
+}
+
+void print_as_bytes(const uint8_t* bytes, size_t length) {
+  for (size_t i = 0; i < length; i++) {
+    printf("0x%hhx ", bytes[i]);
+  }
 }

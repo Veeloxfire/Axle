@@ -365,7 +365,7 @@ static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_
       {
         ASTExpression* new_right = allocate_default<ASTExpression>();
 
-        new_right->expr_type = EXPRESSION_TYPE::BINARY_OPERATOR;
+        new_right->set_union(EXPRESSION_TYPE::BINARY_OPERATOR);
         new_right->bin_op.op = new_op;
         new_right->bin_op.left = (*base)->bin_op.right;
         new_right->bin_op.right = allocate_default<ASTExpression>();
@@ -399,7 +399,7 @@ static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_
     {
       //Needs to be on the previous level
       ASTExpression* new_base = allocate_default<ASTExpression>();
-      new_base->expr_type = EXPRESSION_TYPE::BINARY_OPERATOR;
+      new_base->set_union(EXPRESSION_TYPE::BINARY_OPERATOR);
       new_base->bin_op.op = new_op;
 
       return new_base;
@@ -409,7 +409,7 @@ static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_
 
       //new_base needs to replace this level
       ASTExpression* new_base = allocate_default<ASTExpression>();
-      new_base->expr_type = EXPRESSION_TYPE::BINARY_OPERATOR;
+      new_base->set_union(EXPRESSION_TYPE::BINARY_OPERATOR);
       new_base->bin_op.op = new_op;
       new_base->bin_op.left = *base;
       *base = new_base;
@@ -427,7 +427,7 @@ static void parse_binary_operators(Parser* const parser, BINARY_OPERATOR op, AST
   ASTExpression* temp_base = allocate_default<ASTExpression>();
   DEFER(&) { free_destruct_single<ASTExpression>(temp_base); };
 
-  temp_base->expr_type    = EXPRESSION_TYPE::BINARY_OPERATOR;
+  temp_base->set_union(EXPRESSION_TYPE::BINARY_OPERATOR);
   temp_base->bin_op.op    = op;
   temp_base->bin_op.left  = allocate_default<ASTExpression>();
   temp_base->bin_op.right = allocate_default<ASTExpression>();
@@ -443,13 +443,7 @@ static void parse_binary_operators(Parser* const parser, BINARY_OPERATOR op, AST
     assert(temp == nullptr);
   }
 
-  base->expr_type    = temp_base->expr_type;
-  base->bin_op.op    = temp_base->bin_op.op;
-  base->bin_op.left  = temp_base->bin_op.left;
-  base->bin_op.right = temp_base->bin_op.right;
-
-  temp_base->bin_op.left = nullptr;
-  temp_base->bin_op.right = nullptr;
+  *base = std::move(*temp_base);
 }
 
 static void parse_expression(Parser* const parser, ASTExpression* const expr) {
@@ -468,9 +462,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
 
   switch (current.type) {
     case TokenType::Left_Square: {
-        expr->expr_type = EXPRESSION_TYPE::ARRAY_EXPR;
-
-        expr->array_expr = ArrayExpr();
+        expr->set_union(EXPRESSION_TYPE::ARRAY_EXPR);
 
         while (true) {
           expr->array_expr.elements.insert_uninit(1);
@@ -492,7 +484,8 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
         break;
       }
     case TokenType::String: {
-        expr->expr_type = EXPRESSION_TYPE::ASCII_STRING;
+        expr->set_union(EXPRESSION_TYPE::ASCII_STRING);
+
         expr->ascii_string = current.string;
         
         advance(parser);
@@ -500,7 +493,8 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
       }
     case TokenType::Cast: {
         expect(parser, TokenType::Left_Bracket);
-        expr->expr_type = EXPRESSION_TYPE::CAST;
+        expr->set_union(EXPRESSION_TYPE::CAST);
+
         parse_type(parser, &expr->cast.type);
 
         expect(parser, TokenType::Comma);
@@ -512,7 +506,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
         break;
       }
     case TokenType::Number: {
-        expr->expr_type = EXPRESSION_TYPE::VALUE;
+        expr->set_union(EXPRESSION_TYPE::VALUE);
         expr->value.value = string_to_uint(current.string.string);
         break;
       }
@@ -520,8 +514,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
         //Name or function call
 
         if (parser->current.type == TokenType::Left_Bracket) {
-          expr->expr_type = EXPRESSION_TYPE::FUNCTION_CALL;
-          expr->call = FunctionCallExpr();
+          expr->set_union(EXPRESSION_TYPE::FUNCTION_CALL);
           FunctionCallExpr& call = expr->call;
 
           call.function_name = current.string;
@@ -555,7 +548,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
           advance(parser);
         }
         else {
-          expr->expr_type = EXPRESSION_TYPE::NAME;
+          expr->set_union(EXPRESSION_TYPE::NAME);
           expr->name = current.string;
         }
 
@@ -563,8 +556,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
       }
     case TokenType::True:
     case TokenType::False: {
-        expr->expr_type = EXPRESSION_TYPE::ENUM;
-        expr->enum_value = EnumValueExpr();
+        expr->set_union(EXPRESSION_TYPE::ENUM);
         expr->enum_value.name = current.string;
         break;
       }
@@ -587,8 +579,10 @@ static void parse_primary_and_suffix(Parser* const parser, ASTExpression* const 
         
         //Move the expr into the suffix thing
         *new_expr = std::move(*expr);
+        default_init(expr);
 
-        expr->expr_type = EXPRESSION_TYPE::INDEX;
+        expr->set_union(EXPRESSION_TYPE::INDEX);
+
         expr->index.expr = new_expr;
         expr->index.index = index;
 
@@ -605,7 +599,8 @@ static void parse_primary_and_suffix(Parser* const parser, ASTExpression* const 
 
 static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
   if (parser->current.type == TokenType::Sub) {
-    expr->expr_type = EXPRESSION_TYPE::UNARY_OPERATOR;
+    expr->set_union(EXPRESSION_TYPE::UNARY_OPERATOR);
+
     expr->un_op.op = UNARY_OPERATOR::NEG;
     advance(parser);
 
@@ -631,7 +626,7 @@ static void parse_type(Parser* const parser, ASTType* const type) {
 
     advance(parser);//[
 
-                    //Base Type
+    //Base Type
     type->arr.base = allocate_default<ASTType>();
     parse_type(parser, type->arr.base);
 
@@ -667,14 +662,13 @@ static void parse_block(Parser* const parser, ASTBlock* const block);
 static void parse_statement(Parser* const parser, ASTStatement* const statement) {
   switch (parser->current.type) {
     case TokenType::Left_Brace: {
-        statement->type = STATEMENT_TYPE::BLOCK;
-        statement->block = ASTBlock();
+        statement->set_union(STATEMENT_TYPE::BLOCK);
+
         parse_block(parser, &statement->block);
         return;
       }
     case TokenType::Return: {
-        statement->type = STATEMENT_TYPE::RETURN;
-        statement->expression = ASTExpression();
+        statement->set_union(STATEMENT_TYPE::RETURN);
 
         advance(parser);
         parse_expression(parser, &statement->expression);
@@ -684,7 +678,7 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
       }
     case TokenType::If: {
         advance(parser);
-        statement->type = STATEMENT_TYPE::IF_ELSE;
+        statement->set_union(STATEMENT_TYPE::IF_ELSE);
 
         expect(parser, TokenType::Left_Bracket);
         parse_expression(parser, &statement->if_else.condition);
@@ -708,7 +702,8 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
     case TokenType::Left_Square:
     case TokenType::Identifier: {
         //Probs type at the moment
-        statement->type = STATEMENT_TYPE::DECLARATION;
+        statement->set_union(STATEMENT_TYPE::DECLARATION);
+
         parse_declaration(parser, &statement->declaration);
 
         expect(parser, TokenType::Equals);

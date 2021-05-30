@@ -292,7 +292,7 @@ static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte)
     }
     else {
       assert(sib.index != RSP.REG);//Not a valid code unfortunately
-      
+
       arr.insert(0b00'000'000 | mod_byte);
       arr.insert(X64::sib(sib.scale, sib.index, RBP.REG));
 
@@ -416,6 +416,45 @@ static void emit_mod_rm(Array<uint8_t>& arr, const X64::R r, const X64::RM& rm) 
         }
       }
   }
+}
+
+X64::RM X64::rm_from_mem_complex(const MemComplex& mem) {
+  X64::RM rm ={};
+  rm.indirect = true;
+
+  if (mem.scale == 0) {
+    if ((mem.base & 0b111) != RSP.REG) {
+      rm.use_sib = false;
+      rm.r = mem.base;
+      rm.disp = mem.disp;
+    }
+    else {
+      //have to encode using SIB unfortunately
+      rm.r = RSP.REG;
+      rm.use_sib = true;
+
+      rm.sib.use_base = true;
+      rm.sib.use_index = false;
+      rm.sib.base = RSP.REG;
+      rm.sib.disp = mem.disp;
+    }
+  }
+  else {
+    rm.r = RSP.REG;
+    rm.use_sib = true;
+
+    assert((mem.base & 0b111) != RSP.REG);//Not possible in x86 architecture
+
+
+    rm.sib.use_base = true;
+    rm.sib.use_index = true;
+    rm.sib.base = mem.base;
+    rm.sib.disp = mem.disp;
+    rm.sib.scale = mem.scale;
+    rm.sib.index = mem.index;
+  }
+
+  return rm;
 }
 
 void X64::mov(Array<uint8_t>& arr,
@@ -864,145 +903,49 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               code_i += ByteCode::SIZE_OF::ALLOCATE_STACK;
               break;
             }
-          case ByteCode::COPY_R64_TO_STACK_TOP: {
-              const auto i = ByteCode::PARSE::COPY_R64_TO_STACK_TOP(code_i);
+          case ByteCode::COPY_R64_TO_MEM: {
+              const auto i = ByteCode::PARSE::COPY_R64_TO_MEM(code_i);
 
-              X64::RM rm ={};
-
-              rm.r = RSP.REG;
-              rm.indirect = true;
-              rm.use_sib = false;
-              rm.disp = (int32_t)i.u64.sig_val;
+              X64::RM rm = X64::rm_from_mem_complex(i.mem);
 
               X64::mov(out_code, X64::R{ i.val }, rm);
 
-              code_i += ByteCode::SIZE_OF::COPY_R64_TO_STACK_TOP;
+              code_i += ByteCode::SIZE_OF::COPY_R64_TO_MEM;
               break;
             }
-          case ByteCode::COPY_64_TO_STACK_TOP: {
-              const auto i = ByteCode::PARSE::COPY_64_TO_STACK_TOP(code_i);
+          case ByteCode::COPY_64_TO_MEM: {
+              const auto i = ByteCode::PARSE::COPY_64_TO_MEM(code_i);
 
-              const uint32_t low = i.u64_1.val & 0xFFFFFFFF;
-              const uint32_t high = (i.u64_1.val >> (8 * 4)) & 0xFFFFFFFF;
+              X64::RM rm = X64::rm_from_mem_complex(i.mem);
 
-              X64::RM rm ={};
+              const uint32_t low = i.u64.val & 0xFFFFFFFF;
+              const uint32_t high = (i.u64.val >> (8 * 4)) & 0xFFFFFFFF;
 
-              rm.r = RSP.REG;
-              rm.indirect = true;
-              rm.use_sib = false;
 
-              if (can_be_from_sign_extension(i.u64_1.val)) {
-                rm.disp = (int32_t)i.u64_2.sig_val;
+              if (can_be_from_sign_extension(i.u64.val)) {
 
                 //Sign extend
                 X64::mov(out_code, rm, X64::IMM32{ true, low });
               }
               else {
-                rm.disp = (int32_t)i.u64_2.sig_val + 4;
+                rm.disp += 4;
                 X64::mov(out_code, rm, X64::IMM32{ false, high });
 
-                rm.disp = (int32_t)i.u64_2.sig_val;
+                rm.disp -= 4;
                 X64::mov(out_code, rm, X64::IMM32{ false, low });
               }
 
-              code_i += ByteCode::SIZE_OF::COPY_64_TO_STACK_TOP;
-              break;
-            }
-          case ByteCode::COPY_R64_TO_STACK: {
-              const auto i = ByteCode::PARSE::COPY_R64_TO_STACK(code_i);
-
-              X64::RM rm ={};
-
-              rm.r = RBP.REG;
-              rm.indirect = true;
-              rm.use_sib = false;
-              rm.disp = (int32_t)i.u64.sig_val;
-
-              X64::mov(out_code, X64::R{ i.val }, rm);
-
-              code_i += ByteCode::SIZE_OF::COPY_R64_TO_STACK;
-              break;
-            }
-          case ByteCode::COPY_64_TO_STACK: {
-              const auto i = ByteCode::PARSE::COPY_64_TO_STACK(code_i);
-
-              const uint32_t low = i.u64_1.val & 0xFFFFFFFF;
-              const uint32_t high = (i.u64_1.val >> (8 * 4)) & 0xFFFFFFFF;
-
-              X64::RM rm ={};
-
-              rm.r = RBP.REG;
-              rm.indirect = true;
-              rm.use_sib = false;
-              
-              if (can_be_from_sign_extension(i.u64_1.val)) {
-                rm.disp = (int32_t)i.u64_2.sig_val;
-
-                //Sign extend
-                X64::mov(out_code, rm, X64::IMM32{ true, low });
-              }
-              else {
-                rm.disp = (int32_t)i.u64_2.sig_val + 4;
-                X64::mov(out_code, rm, X64::IMM32{ false, high });
-
-                rm.disp = (int32_t)i.u64_2.sig_val;
-                X64::mov(out_code, rm, X64::IMM32{ false, low });
-              }
-
-              code_i += ByteCode::SIZE_OF::COPY_64_TO_STACK;
-              break;
-            }
-          case ByteCode::COPY_R64_FROM_STACK: {
-              const auto i = ByteCode::PARSE::COPY_R64_FROM_STACK(code_i);
-
-              X64::RM rm ={};
-
-              rm.r = RBP.REG;
-              rm.indirect = true;
-              rm.use_sib = false;
-              rm.disp = (int32_t)i.u64.sig_val;
-
-              X64::mov(out_code, rm, X64::R{ i.val });
-
-              code_i += ByteCode::SIZE_OF::COPY_R64_FROM_STACK;
+              code_i += ByteCode::SIZE_OF::COPY_64_TO_MEM;
               break;
             }
           case ByteCode::COPY_R64_FROM_MEM: {
               const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(code_i);
 
-              X64::RM rm ={};
-
-              rm.r = i.val2;
-              rm.indirect = true;
-              rm.use_sib = false;
-              rm.disp = 0;
-
-              X64::mov(out_code, rm, X64::R{ i.val1 });
-
-              code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
-              break;
-            }
-          case ByteCode::COPY_R64_FROM_MEM_COMPLEX: {
-              const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM_COMPLEX(code_i);
-
-              X64::RM rm ={};
-
-              rm.r = RSP.REG;
-              rm.indirect = true;
-              rm.use_sib = true;
-
-              //use SIB
-              rm.sib.use_base = true;
-              rm.sib.use_index = true;
-
-              rm.sib.base = i.mem.base;
-              rm.sib.index = i.mem.index;
-              rm.sib.scale = i.mem.scale;
-              rm.sib.disp = i.mem.disp;
+              X64::RM rm = X64::rm_from_mem_complex(i.mem);
 
               X64::mov(out_code, rm, X64::R{ i.val });
 
-              code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM_COMPLEX;
+              code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
               break;
             }
           case ByteCode::CONV_RU8_TO_R64: {
@@ -1024,7 +967,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               out_code.insert(X64::MOV_SX_RM8_TO_R);
               out_code.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(i.val, i.val));
 
-              code_i += ByteCode::SIZE_OF::COPY_R64_FROM_STACK;
+              code_i += ByteCode::SIZE_OF::CONV_RI8_TO_R64;
               break;
             }
           case ByteCode::LABEL: {

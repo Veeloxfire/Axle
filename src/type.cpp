@@ -8,6 +8,7 @@ FreelistBlockAllocator<EnumStructure> Types::enum_structures ={};
 FreelistBlockAllocator<Structure> Types::base_structures ={};
 FreelistBlockAllocator<EnumValue> Types::enum_values ={};
 FreelistBlockAllocator<ArrayStructure> Types::array_structures ={};
+FreelistBlockAllocator<PointerStructure> Types::pointer_structures ={};
 
 uint32_t Structure::size() const {
   switch (type) {
@@ -91,15 +92,25 @@ bool can_literal_cast(const Structure* from, const Structure* to) {
           case LITERAL_TYPE::EMPTY_ARR://cast to any array
             return to->type == STRUCTURE_TYPE::FIXED_ARRAY;
         }
+
+        return false;
       }
 
-    default: return false;
+    default: 
+      return false;
   }
 }
 
 LiteralStructure* Types::new_literal() {
   LiteralStructure* const type = literal_structures.allocate();
   type->type = STRUCTURE_TYPE::LITERAL;
+  structures.insert(type);
+  return type;
+}
+
+PointerStructure* Types::new_pointer() {
+  PointerStructure* const type = pointer_structures.allocate();
+  type->type = STRUCTURE_TYPE::POINTER;
   structures.insert(type);
   return type;
 }
@@ -251,6 +262,9 @@ Types::~Types() {
       const Structure* s = *i;
 
       switch (s->type) {
+        case STRUCTURE_TYPE::POINTER:
+          pointer_structures.free((const PointerStructure*)s);
+          break;
         case STRUCTURE_TYPE::LITERAL:
           literal_structures.free((const LiteralStructure*)s);
           break;
@@ -309,23 +323,49 @@ const EnumValue* Types::enum_by_name(const InternString name) const {
   return nullptr;
 }
 
+using CAST_BYTECODE = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;
 
-void CASTS::u8_to_r64(State* state, CodeBlock* code, ValueIndex val) {
-  ByteCode::EMIT::CONV_RU8_TO_R64(code->code, (uint8_t)val.val);
+RuntimeValue impl_single_cast(Compiler* const comp,
+                              State* const state,
+                              CodeBlock* const code,
+                              const Structure* type,
+                              RuntimeValue* const val,
+                              CAST_BYTECODE cast) {
+  RuntimeValue reg ={};
+  reg.type = RVT::REGISTER;
+  reg.reg = state->new_value();
 
-  state->use_value(val);
-  state->value_tree.values.data[val.val].is_modified = true;
+
+  copy_runtime_to_runtime(comp, state, code, type, val, &reg);
+
+  cast(code->code, (uint8_t)reg.reg.val);
+
+  state->get_val(reg.reg)->is_modified = true;
+  state->use_value(reg.reg);
+
+  return reg;
 }
 
-void CASTS::i8_to_r64(State* state, CodeBlock* code, ValueIndex val) {
-  ByteCode::EMIT::CONV_RI8_TO_R64(code->code, (uint8_t)val.val);
 
-  state->use_value(val);
-  state->value_tree.values.data[val.val].is_modified = true;
+RuntimeValue CASTS::u8_to_r64(Compiler* const comp,
+                              State* const state,
+                              CodeBlock* const code,
+                              RuntimeValue* const val) {
+  return impl_single_cast(comp, state, code, comp->types->s_u8, val, ByteCode::EMIT::CONV_RU8_TO_R64);
 }
 
-void CASTS::no_cast(State*, CodeBlock*, ValueIndex) {
-  return;
+RuntimeValue CASTS::i8_to_r64(Compiler* const comp,
+                              State* const state,
+                              CodeBlock* const code,
+                              RuntimeValue* const val) {
+  return impl_single_cast(comp, state, code, comp->types->s_i8, val, ByteCode::EMIT::CONV_RI8_TO_R64);
+}
+
+RuntimeValue CASTS::no_cast(Compiler* const comp,
+                            State* const state,
+                            CodeBlock* const code,
+                            RuntimeValue* const val) {
+  return *val;
 }
 
 bool TYPE_TESTS::is_array(const Structure* s) {

@@ -132,9 +132,12 @@ struct ArrayExpr {
 
 struct ASTExpression {
   const Structure* type = nullptr;
+
+  uint8_t valid_rvts = ALL_RVTS;
+
   bool makes_call = false;
   bool call_leaf = false;
-  bool compile_time_constant = false;
+  bool comptime_eval = false;
 
   void* const_val = nullptr;
 
@@ -146,7 +149,8 @@ struct ASTExpression {
     BinaryOperatorExpr bin_op;
     FunctionCallExpr call;
     EnumValueExpr enum_value;
-    InternString name;//e.g. local or global variable
+    InternString name;
+    size_t local;
     ValueExpr value;
     ArrayExpr array_expr;
     InternString ascii_string;
@@ -154,6 +158,7 @@ struct ASTExpression {
   };
 
   ASTExpression() = default;
+
 
   ASTExpression(ASTExpression&& a) noexcept {
     move_from(std::move(a));
@@ -165,6 +170,9 @@ struct ASTExpression {
   }
 
   void move_from(ASTExpression&&) noexcept;
+
+  void set_union(EXPRESSION_TYPE et) noexcept;
+  void destruct_union() noexcept;
   ~ASTExpression();
 };
 
@@ -172,10 +180,11 @@ struct ASTDeclaration {
   ASTExpression expression;
   ASTType type;
   InternString name;
+  size_t local_index;
 };
 
 enum struct STATEMENT_TYPE : uint8_t {
-  EXPRESSION, DECLARATION, RETURN, IF_ELSE, BLOCK,
+  UNKNOWN, EXPRESSION, DECLARATION, RETURN, IF_ELSE, BLOCK,
 };
 
 struct ASTIfElse {
@@ -194,7 +203,7 @@ struct ASTBlock {
 };
 
 struct ASTStatement {
-  STATEMENT_TYPE type ={};
+  STATEMENT_TYPE type = STATEMENT_TYPE::UNKNOWN;
 
   union {
     char _dummy ={};
@@ -203,6 +212,9 @@ struct ASTStatement {
     ASTIfElse if_else;
     ASTBlock block;
   };
+
+  void set_union(STATEMENT_TYPE st) noexcept;
+  void destruct_union() noexcept;
 
   ASTStatement() = default;
   ~ASTStatement();

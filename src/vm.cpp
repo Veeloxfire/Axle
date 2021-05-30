@@ -1,7 +1,8 @@
 #include "vm.h"
 #include "type.h"
 
-static_assert(sizeof(Reg64_8B) == 8, "Must be 8 bytes");
+static_assert(sizeof(Reg64_8BL) == 8, "Must be 8 bytes");
+static_assert(sizeof(Reg64_8BH) == 8, "Must be 8 bytes");
 static_assert(sizeof(Reg64_16B) == 8, "Must be 8 bytes");
 static_assert(sizeof(Reg64_32B) == 8, "Must be 8 bytes");
 static_assert(sizeof(Reg64_64B) == 8, "Must be 8 bytes");
@@ -9,30 +10,46 @@ static_assert(sizeof(Register) == 8, "Must be 8 bytes");
 
 static_assert(sizeof(uint64_t) == sizeof(void*), "MUST BE 64 BIT SYSTEM");
 
-void Reg64_8B::zero_padding() noexcept {
-  padding[0] = 0;
-  padding[1] = 0;
-  padding[2] = 0;
-  padding[3] = 0;
-  padding[4] = 0;
-  padding[5] = 0;
+void VM::allocate_stack(uint64_t bytes) {
+  SP -= bytes;
+
+  if (SP <= stack) {
+    throw std::exception("STACK OVERFLOW");
+  }
 }
 
-void Reg64_16B::zero_padding() noexcept {
-  padding[0] = 0;
-  padding[1] = 0;
-  padding[2] = 0;
-  padding[3] = 0;
-  padding[4] = 0;
-  padding[5] = 0;
+void VM::push(X64_UNION val) {
+  SP -= 8;
+
+  if (SP <= stack) {
+    throw std::exception("STACK OVERFLOW");
+    return;
+  }
+
+  x64_to_bytes(val, SP);
 }
 
-void Reg64_32B::zero_padding() noexcept {
-  padding[0] = 0;
-  padding[1] = 0;
-  padding[2] = 0;
-  padding[3] = 0;
+X64_UNION VM::pop() {
+  if (SP + 8 >= stack + STACK_SIZE) {
+    throw std::exception("STACK UNDERFLOW");
+    return { (uint64_t) 0 };
+  }
+
+  X64_UNION val = x64_from_bytes(SP);
+  SP += 8;
+  return val;
 }
+
+uint8_t* VM::load_mem(const MemComplex& mem) {
+  uint8_t* ptr_base = (registers[mem.base].b64.b_ptr + mem.disp);
+
+  if (mem.scale > 0) {
+    ptr_base += (registers[mem.index].b64.reg * mem.scale);
+  }
+
+  return ptr_base;
+}
+
 
 ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_point) noexcept {
 
@@ -109,7 +126,7 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
       case ByteCode::LOAD_ADDRESS: {
           const auto i = ByteCode::PARSE::LOAD_ADDRESS(vm->IP);
 
-          vm->registers[i.val1].b64.reg = vm->registers[i.val2].b64.reg + vm->registers[i.val3].b64.reg;
+          vm->registers[i.val].b64.b_ptr = vm->load_mem(i.mem);
 
           vm->IP += ByteCode::SIZE_OF::LOAD_ADDRESS;
           break;
@@ -138,6 +155,31 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->IP += ByteCode::SIZE_OF::COPY_R64_TO_R64;
           break;
         }
+      case ByteCode::COPY_R32_TO_R32: {
+          const auto i = ByteCode::PARSE::COPY_R32_TO_R32(vm->IP);
+
+          vm->registers[i.val2].b32.reg = vm->registers[i.val1].b32.reg;
+          vm->registers[i.val2].b32.padding = 0;
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R32_TO_R32;
+          break;
+        }
+      case ByteCode::COPY_R16_TO_R16: {
+          const auto i = ByteCode::PARSE::COPY_R16_TO_R16(vm->IP);
+
+          vm->registers[i.val2].b16.reg = vm->registers[i.val1].b16.reg;
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R16_TO_R16;
+          break;
+        }
+      case ByteCode::COPY_R8_TO_R8: {
+          const auto i = ByteCode::PARSE::COPY_R8_TO_R8(vm->IP);
+
+          vm->registers[i.val2].b8l.reg = vm->registers[i.val1].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R8_TO_R8;
+          break;
+        }
       case ByteCode::PUSH_R64: {
           const auto i = ByteCode::PARSE::PUSH_R64(vm->IP);
 
@@ -162,70 +204,106 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->IP += ByteCode::SIZE_OF::ALLOCATE_STACK;
           break;
         }
-      case ByteCode::COPY_R64_TO_STACK_TOP: {
-          const auto i = ByteCode::PARSE::COPY_R64_TO_STACK_TOP(vm->IP);
+      case ByteCode::COPY_64_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_64_TO_MEM(vm->IP);
 
-          x64_to_bytes(vm->registers[i.val].b64.reg, vm->SP + i.u64.sig_val);
+          x64_to_bytes(i.u64, vm->load_mem(i.mem));
 
-          vm->IP += ByteCode::SIZE_OF::COPY_R64_TO_STACK_TOP;
+          vm->IP += ByteCode::SIZE_OF::COPY_64_TO_MEM;
           break;
         }
-      case ByteCode::COPY_64_TO_STACK_TOP: {
-          const auto i = ByteCode::PARSE::COPY_64_TO_STACK_TOP(vm->IP);
+      case ByteCode::COPY_32_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_32_TO_MEM(vm->IP);
 
-          x64_to_bytes(i.u64_1, vm->SP + i.u64_2.sig_val);
+          x32_to_bytes(i.u32, vm->load_mem(i.mem));
 
-          vm->IP += ByteCode::SIZE_OF::COPY_64_TO_STACK_TOP;
+          vm->IP += ByteCode::SIZE_OF::COPY_32_TO_MEM;
           break;
         }
-      case ByteCode::COPY_64_TO_STACK: {
-          const auto i = ByteCode::PARSE::COPY_64_TO_STACK(vm->IP);
+      case ByteCode::COPY_16_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_16_TO_MEM(vm->IP);
 
-          x64_to_bytes(i.u64_1, vm->BP + i.u64_2.sig_val);
+          x16_to_bytes(i.u16, vm->load_mem(i.mem));
 
-          vm->IP += ByteCode::SIZE_OF::COPY_64_TO_STACK;
+          vm->IP += ByteCode::SIZE_OF::COPY_16_TO_MEM;
           break;
         }
-      case ByteCode::COPY_R64_TO_STACK: {
-          const auto i = ByteCode::PARSE::COPY_R64_TO_STACK(vm->IP);
+      case ByteCode::COPY_8_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_8_TO_MEM(vm->IP);
 
-          x64_to_bytes(vm->registers[i.val].b64.reg, vm->BP + i.u64.sig_val);
+          vm->load_mem(i.mem)[0] = i.u8;
 
-          vm->IP += ByteCode::SIZE_OF::COPY_R64_TO_STACK;
+          vm->IP += ByteCode::SIZE_OF::COPY_8_TO_MEM;
           break;
         }
-      case ByteCode::COPY_R64_FROM_STACK: {
-          const auto i = ByteCode::PARSE::COPY_R64_FROM_STACK(vm->IP);
+      case ByteCode::COPY_R64_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R64_TO_MEM(vm->IP);
 
-          vm->registers[i.val].b64.reg = x64_from_bytes(vm->BP + i.u64.sig_val);
+          x64_to_bytes(vm->registers[i.val].b64.reg, vm->load_mem(i.mem));
 
-          vm->IP += ByteCode::SIZE_OF::COPY_R64_FROM_STACK;
+          vm->IP += ByteCode::SIZE_OF::COPY_R64_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_R32_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R32_TO_MEM(vm->IP);
+
+          x32_to_bytes(vm->registers[i.val].b32.reg, vm->load_mem(i.mem));
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R32_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_R16_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R16_TO_MEM(vm->IP);
+
+          x16_to_bytes(vm->registers[i.val].b16.reg, vm->load_mem(i.mem));
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R16_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_R8_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R8_TO_MEM(vm->IP);
+
+          vm->load_mem(i.mem)[0] = vm->registers[i.val].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R8_TO_MEM;
           break;
         }
       case ByteCode::COPY_R64_FROM_MEM: {
           const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(vm->IP);
 
-          vm->registers[i.val1].b64.reg = *(uint64_t*)vm->registers[i.val2].b64.ptr;
+          vm->registers[i.val].b64.reg = x64_from_bytes(vm->load_mem(i.mem));
 
           vm->IP += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
           break;
         }
-      case ByteCode::COPY_R64_FROM_MEM_COMPLEX: {
-          const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM_COMPLEX(vm->IP);
+      case ByteCode::COPY_R32_FROM_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R32_FROM_MEM(vm->IP);
 
-          uint8_t* const ptr = (vm->registers[i.mem.base].b64.b_ptr
-            + i.mem.disp
-            + (vm->registers[i.mem.index].b64.reg * i.mem.scale));
+          vm->registers[i.val].b32.reg = x32_from_bytes(vm->load_mem(i.mem));
 
-          vm->registers[i.val].b64.reg = x64_from_bytes(ptr);
+          vm->IP += ByteCode::SIZE_OF::COPY_R32_FROM_MEM;
+          break;
+        }
+      case ByteCode::COPY_R16_FROM_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R16_FROM_MEM(vm->IP);
 
-          vm->IP += ByteCode::SIZE_OF::COPY_R64_FROM_MEM_COMPLEX;
+          vm->registers[i.val].b16.reg = x16_from_bytes(vm->load_mem(i.mem));
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R16_FROM_MEM;
+          break;
+        }
+      case ByteCode::COPY_R8_FROM_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R8_FROM_MEM(vm->IP);
+
+          vm->registers[i.val].b8l.reg = vm->load_mem(i.mem)[0];
+
+          vm->IP += ByteCode::SIZE_OF::COPY_R8_FROM_MEM;
           break;
         }
       case ByteCode::CONV_RU8_TO_R64: {
           const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(vm->IP);
 
-          vm->registers[i.val].b64.reg = (uint64_t)vm->registers[i.val].b8s.low_reg;
+          vm->registers[i.val].b64.reg = (uint64_t)vm->registers[i.val].b8l.reg;
 
           vm->IP += ByteCode::SIZE_OF::CONV_RU8_TO_R64;
           break;
@@ -233,7 +311,7 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
       case ByteCode::CONV_RI8_TO_R64: {
           const auto i = ByteCode::PARSE::CONV_RI8_TO_R64(vm->IP);
 
-          vm->registers[i.val].b64.reg = (uint64_t)vm->registers[i.val].b8s.low_reg_s;
+          vm->registers[i.val].b64.reg = (uint64_t)vm->registers[i.val].b8l.reg_s;
 
           vm->IP += ByteCode::SIZE_OF::CONV_RI8_TO_R64;
           break;

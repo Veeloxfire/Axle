@@ -2,6 +2,7 @@
 #include "utility.h"
 #include "bytecode.h"
 #include "strings.h"
+#include "runtime_vals.h"
 
 struct ASTFunctionDeclaration;
 struct ASTStructureDeclaration;
@@ -12,11 +13,11 @@ struct Function;
 
 
 enum struct STRUCTURE_TYPE : uint8_t {
-  INTEGER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY, ASCII_CHAR
+  INTEGER, POINTER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY, ASCII_CHAR
 };
 
 using CAST_TEST     = FUNCTION_PTR<bool, const Structure*>;
-using CAST_FUNCTION = FUNCTION_PTR<void, State*, CodeBlock*, ValueIndex>;
+using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, RuntimeValue*>;
 
 struct Cast {
   CAST_TEST test;
@@ -30,6 +31,10 @@ struct Structure {
 
   uint32_t size() const;
   uint32_t alignment() const;
+};
+
+struct PointerStructure : public Structure {
+  const Structure* base = nullptr;
 };
 
 struct ArrayStructure : public Structure {
@@ -61,7 +66,7 @@ enum struct LITERAL_TYPE {
 
 struct LiteralStructure : public Structure {
   LITERAL_TYPE literal_type = LITERAL_TYPE::INTEGER;
-  size_t str_length;
+  size_t str_length = 0;
 };
 
 struct StructElement {
@@ -80,6 +85,8 @@ struct CompositeStructure : public Structure {
 struct Function {
   InternString name ={};
   Array<const Structure*> parameter_types ={};
+
+  bool return_via_ptr = false;
   const Structure* return_type = nullptr;
 
   const ASTFunctionDeclaration* declaration = nullptr;
@@ -111,14 +118,15 @@ struct Types {
   static FreelistBlockAllocator<EnumStructure> enum_structures;
   static FreelistBlockAllocator<Structure> base_structures;
   static FreelistBlockAllocator<ArrayStructure> array_structures;
+  static FreelistBlockAllocator<PointerStructure> pointer_structures;
   static FreelistBlockAllocator<EnumValue> enum_values;
 
   LiteralStructure* new_literal();
+  PointerStructure* new_pointer();
   IntegerStructure* new_int();
   CompositeStructure* new_composite();
   EnumStructure* new_enum();
   ArrayStructure* new_array();
-
 
   const Structure* s_bool = nullptr;
 
@@ -159,9 +167,9 @@ void init_types(Types* types, StringInterner* strings);
 bool can_literal_cast(const Structure* from, const Structure* to);
 
 namespace CASTS {
-  void u8_to_r64(State*,  CodeBlock*, ValueIndex);
-  void i8_to_r64(State*,  CodeBlock*, ValueIndex);
-  void no_cast(State*,  CodeBlock*, ValueIndex);
+  RuntimeValue u8_to_r64(Compiler*, State*,  CodeBlock*, RuntimeValue*);
+  RuntimeValue i8_to_r64(Compiler*, State*,  CodeBlock*, RuntimeValue*);
+  RuntimeValue no_cast(Compiler*, State*,  CodeBlock*, RuntimeValue*);
 }
 
 namespace TYPE_TESTS {

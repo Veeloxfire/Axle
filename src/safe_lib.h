@@ -33,7 +33,21 @@ constexpr inline void default_init(T* const dest, const size_t dest_size) {
   }
 }
 
+template<typename T>
+constexpr inline void default_init(T* const dest) {
+  new(dest) T();
+}
+
 #ifdef COUNT_ALLOC
+template<typename T>
+void free_heap_check(T* ptr, size_t num_bytes) {
+  const uint8_t* ptr_end = (const uint8_t*)ptr + num_bytes;
+
+  for (size_t i = 0; i < 4; i++) {
+    assert(ptr_end[i] == 0xFD);
+  }
+}
+
 struct ALLOC_COUNTER {
   struct Allocation {
     const char* type_name;
@@ -67,8 +81,8 @@ struct ALLOC_COUNTER {
         capacity <<= 1;
       }
 
-      
-      auto* new_allocs = (Allocation*) std::realloc(allocs, capacity * sizeof(Allocation));
+
+      auto* new_allocs = (Allocation*)std::realloc(allocs, capacity * sizeof(Allocation));
       assert(new_allocs != nullptr);
 
       allocs = new_allocs;
@@ -136,6 +150,8 @@ struct ALLOC_COUNTER {
 
     for (; i < end; i++) {
       if (i->mem == t_v) {
+        free_heap_check(t, i->size);
+
         current_allocated_size -= i->size;
         num_allocs--;
         goto REMOVE;
@@ -190,30 +206,6 @@ T* allocate_single_constructed(U&& ... u) {
 }
 
 template<typename T>
-T* allocate_uninit(size_t num = 1) {
-  T* val = (T*)std::malloc(sizeof(T) * num);
-  assert(val != nullptr);
-
-#ifdef COUNT_ALLOC
-  ALLOC_COUNTER::allocated().insert(val, num);
-#endif
-
-  return val;
-}
-
-template<typename T>
-T* reallocate_uninit(T* ptr, const size_t num = 1) {
-  T* val = (T*)std::realloc((void*)ptr, sizeof(T) * num);
-  assert(val != nullptr);
-
-#ifdef COUNT_ALLOC
-  ALLOC_COUNTER::allocated().update(ptr, val, num);
-#endif
-
-  return val;
-}
-
-template<typename T>
 T* reallocate_default(T* ptr, const size_t old_size, const size_t new_size) {
   T* val = (T*)std::realloc((void*)ptr, sizeof(T) * new_size);
   assert(val != nullptr);
@@ -235,7 +227,7 @@ void free_destruct_single(T* ptr) {
   ALLOC_COUNTER::allocated().remove(ptr);
 #endif
 
-  if(ptr == nullptr) return;
+  if (ptr == nullptr) return;
 
   ptr->~T();
   std::free((void*)ptr);
@@ -247,7 +239,7 @@ void free_destruct_n(T* ptr, size_t num) {
   ALLOC_COUNTER::allocated().remove(ptr);
 #endif
 
-  if(ptr == nullptr) return;
+  if (ptr == nullptr) return;
 
   for (size_t i = 0; i < num; i++) {
     ptr[i].~T();
@@ -262,7 +254,7 @@ void free_no_destruct(T* ptr) {
   ALLOC_COUNTER::allocated().remove(ptr);
 #endif
 
-  if(ptr == nullptr) return;
+  if (ptr == nullptr) return;
 
   std::free((void*)ptr);
 }

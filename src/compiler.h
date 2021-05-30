@@ -4,6 +4,7 @@
 #include "calling_conventions.h"
 #include "options.h"
 #include "operators.h"
+#include "runtime_vals.h"
 
 #include "type.h"
 
@@ -81,22 +82,17 @@ struct ControlFlow {
   }
 };
 
-struct Local {
-  InternString name ={};
-  ValueIndex val ={};
-  const Structure* type = nullptr;
-};
-
 struct ValueUse {
   ValueIndex related_index ={};
   TimePoint time ={};
 };
 
 enum struct ValueType : uint8_t {
-  FREE = 0, FIXED, COALESCED, NORMAL_STACK, ARGUMENT_STACK, CONSTANT
+  FREE = 0, FIXED, COALESCED
 };
 
 struct Value {
+  bool has_value = false;
   bool is_modified = false;
   bool crosses_call = false;
 
@@ -105,9 +101,6 @@ struct Value {
   union {
     uint8_t reg = 0;
     ValueIndex index;
-    int64_t stack_offset;
-    uint64_t arg_num;
-    void* constant;
   };
 
   ValueUse creation ={};
@@ -116,10 +109,6 @@ struct Value {
   constexpr bool fixed() const { return value_type == ValueType::FIXED; }
   constexpr bool is_coalesced() const {
     return value_type == ValueType::COALESCED;
-  }
-  constexpr bool on_stack() const {
-    return value_type == ValueType::NORMAL_STACK
-      || value_type == ValueType::ARGUMENT_STACK;
   }
 };
 
@@ -163,13 +152,29 @@ struct StackState {
       max_parameters = current_parameters;
     }
   }
-  uint64_t next_stack_local(uint64_t size, uint64_t alignment);
+  
+  int32_t next_stack_local(uint64_t size, uint64_t alignment);
+};
+
+struct MemValue {
+  MemComplex mem;
+  size_t size;
+};
+
+struct Local {
+  InternString name ={};
+  const Structure* type = nullptr;
+
+  uint8_t valid_rvts = ALL_RVTS;
+  RuntimeValue val ={};
 };
 
 struct State {
-  Array<Local> locals ={};
+  Array<Local> all_locals ={};
+  Array<size_t> active_locals ={};
 
   ValueTree value_tree ={};
+  Array<MemValue> mem_values ={};
   ControlFlow control_flow ={};
 
   uint64_t return_label = 0;
@@ -179,54 +184,23 @@ struct State {
 
   bool comptime_compilation = false;
 
-  constexpr bool needs_new_frame() const { 
-    return made_call || stack.max_parameters > 0 || stack.max > 0; 
+  constexpr bool needs_new_frame() const {
+    return made_call || stack.max_parameters > 0 || stack.max > 0;
   }
 
+  MemIndex new_mem();
+  MemValue* get_mem(const MemIndex&);
   ValueIndex new_value();
-  ValueIndex new_value(ValueIndex created_by);
-  void use_value(ValueIndex index, ValueIndex creates);
+  void value_copy(ValueIndex a, ValueIndex b);
+  void set_value(ValueIndex index);
+
+  Value* get_val(const ValueIndex& i);
+
   void use_value(ValueIndex index);
-  const Local* find_local(InternString i_s) const;
+  void use_value(ValueIndex index, ValueIndex related);
+
+  Local* find_local(InternString i_s);
 };
-
-struct IteratorForASTBlock {
-  struct StatementLayer {
-    ASTStatement* itr;
-    const ASTStatement* end;
-  };
-
-  ASTExpression* current_expression;
-  StatementLayer current_statement_layer;
-
-  Array<ASTExpression*> to_do_expressions;
-  Array<StatementLayer> to_do_statements;
-};
-
-
-#define COMPCODEINC \
-MOD(NO_ERRORS)\
-MOD(UNFOUND_DEPENDENCY)\
-MOD(FOUND_DEPENDENCY)\
-MOD(CIRCULAR_DEPENDENCY)\
-MOD(TYPE_CHECK_ERROR)\
-MOD(INTERNAL_ERROR)
-
-enum struct CompileCode : uint8_t {
-#define MOD(E) E,
-  COMPCODEINC
-#undef MOD
-};
-
-constexpr const char* compile_code_string(CompileCode c) {
-  switch (c) {
-  #define MOD(E) case CompileCode:: ## E: return #E;
-    COMPCODEINC
-  #undef MOD
-  }
-
-  return "Invalid code";
-}
 
 enum struct COMPILATION_TYPE : uint8_t {
   SIGNATURE, FUNCTION, STRUCTURE, CONSTANT, NONE
@@ -311,4 +285,10 @@ void build_compilation_units(Compiler* const comp, ASTFile* const func);
 
 void print_compiled_functions(const Compiler* comp);
 
+void copy_runtime_to_runtime(Compiler* const comp,
+                             State* const state,
+                             CodeBlock* const code,
+                             const Structure* type,
+                             const RuntimeValue* from,
+                             RuntimeValue* to);
 

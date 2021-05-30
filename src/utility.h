@@ -324,6 +324,8 @@ struct Array {
 
   void insert_uninit(const size_t num) noexcept {
     reserve_extra(num);
+
+    default_init<T>(data + size, num);
     size += num;
   }
 
@@ -366,8 +368,9 @@ struct Array {
       free();
     }
     else {
+      size_t old_cap = capacity;
       capacity = size;
-      data = reallocate_uninit<T>(data, capacity);
+      data = reallocate_default<T>(data, old_cap, capacity);
     }
   }
 
@@ -568,7 +571,7 @@ struct ArenaAllocator {
   void new_block();
   void add_to_free_list(FreeList* fl);
 
-  void* alloc_no_construct(size_t bytes);
+  uint8_t* alloc_no_construct(size_t bytes);
   void free_no_destruct(void* val);
 };
 
@@ -675,6 +678,11 @@ struct SquareBitMatrix {
   void free();
 
   ~SquareBitMatrix();
+
+  constexpr static size_t bytes_per_val_per_side(size_t side_length) {
+    return side_length == 0 ? 0
+      : ((side_length - 1) / 8) + 1;
+  }
 
   bool test_a_intersects_b(size_t a, size_t b) const;
   void set_a_intersects_b(size_t a, size_t b);
@@ -909,6 +917,11 @@ inline constexpr uint32_t x32_from_bytes(const uint8_t* const bytes) noexcept {
     |  static_cast<uint32_t>(bytes[0]);
 }
 
+inline constexpr uint16_t x16_from_bytes(const uint8_t* const bytes) noexcept {
+  return (static_cast<uint16_t>(bytes[1]) << 8)
+    |  static_cast<uint16_t>(bytes[0]);
+}
+
 //TODO: Big endian??
 inline constexpr void x64_to_bytes(const X64_UNION uint, uint8_t* const bytes) noexcept {
   bytes[7] = static_cast<uint8_t>(uint.val >> 56);
@@ -924,6 +937,11 @@ inline constexpr void x64_to_bytes(const X64_UNION uint, uint8_t* const bytes) n
 inline constexpr void x32_to_bytes(const uint32_t uint, uint8_t* const bytes) noexcept {
   bytes[3] = static_cast<uint8_t>(uint >> 24);
   bytes[2] = static_cast<uint8_t>(uint >> 16);
+  bytes[1] = static_cast<uint8_t>(uint >> 8);
+  bytes[0] = static_cast<uint8_t>(uint);
+}
+
+inline constexpr void x16_to_bytes(const uint16_t uint, uint8_t* const bytes) noexcept {
   bytes[1] = static_cast<uint8_t>(uint >> 8);
   bytes[0] = static_cast<uint8_t>(uint);
 }
@@ -955,14 +973,6 @@ using FUNCTION_PTR = typename FUNCTION_PTR_IMPL<RET, PARAMS...>::TYPE;
 template<typename T>
 constexpr inline T square(T t) { return t * t; }
 
-struct ValueIndex {
-  uint64_t val;
-
-  constexpr bool operator==(const ValueIndex v) const {
-    return v.val == val;
-  }
-};
-
 template<typename T>
 constexpr inline T larger(T t1, T t2) noexcept {
   return t1 > t2 ? t1 : t2;
@@ -972,6 +982,8 @@ template<typename T>
 constexpr inline T smaller(T t1, T t2) noexcept {
   return t1 < t2 ? t1 : t2;
 }
+
+void print_as_bytes(const uint8_t* bytes, size_t length);
 
 template<typename T>
 struct EXECUTE_AT_END {

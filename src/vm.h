@@ -1,21 +1,27 @@
 #pragma once
 #include "utility.h"
 #include "bytecode.h"
+#include "options.h"
 #include "calling_conventions.h"
 
-struct Reg64_8B {
+struct Reg64_8BL {
+  uint8_t padding[7];
+
+  union {
+    uint8_t reg;
+    int8_t reg_s;
+  };
+};
+
+struct Reg64_8BH {
   uint8_t padding[6];
-  union {
-    uint8_t high_reg;
-    int8_t high_reg_s;
-  };
 
   union {
-    uint8_t low_reg;
-    int8_t low_reg_s;
+    uint8_t reg;
+    int8_t reg_s;
   };
 
-  void zero_padding() noexcept;
+  uint8_t padding2;
 };
 
 struct Reg64_16B {
@@ -24,12 +30,10 @@ struct Reg64_16B {
     uint16_t reg;
     int16_t reg_s;
   };
-
-  void zero_padding() noexcept;
 };
 
 struct Reg64_32B {
-  uint8_t padding[4];
+  uint32_t padding;
 
   union {
     int32_t reg_s;
@@ -50,7 +54,8 @@ struct Reg64_64B {
 
 struct Register {
   union {
-    Reg64_8B  b8s;
+    Reg64_8BL b8l;
+    Reg64_8BH b8h;
     Reg64_16B b16;
     Reg64_32B b32;
     Reg64_64B b64;
@@ -76,35 +81,49 @@ struct VM {
     BP = stack + STACK_SIZE - 1;
   }
 
-  void allocate_stack(uint64_t bytes) {
-    SP -= bytes;
+  void allocate_stack(uint64_t bytes);
+  void push(X64_UNION val);
+  X64_UNION pop();
+  uint8_t* load_mem(const MemComplex&);
+};
 
-    if (SP <= stack) {
-      throw std::exception("STACK OVERFLOW");
+struct VM_LOADER {
+  VM* vm = nullptr;
+
+  size_t param_reg_itr = 0;
+  size_t stack_itr = 0;
+
+  const uint8_t* param_regs = 0;
+  size_t num_param_regs = 0;
+
+  constexpr VM_LOADER& operator<<(const X64_UNION& u64) {
+    if (param_reg_itr < num_param_regs) {
+      const uint8_t reg = param_regs[param_reg_itr];
+      vm->registers[reg].b64.reg = u64.val;
+      param_reg_itr++;
     }
-  }
-
-  void push(X64_UNION val) {
-    SP -= 8;
-
-    if (SP <= stack) {
-      throw std::exception("STACK OVERFLOW");
-      return;
+    else {
+      x64_to_bytes(u64, vm->SP + stack_itr * 8);
+      stack_itr++;
     }
-     
-    x64_to_bytes(val, SP);
-  }
-
-  X64_UNION pop() {
-    if (SP + 8 >= stack + STACK_SIZE) {
-      throw std::exception("STACK UNDERFLOW");
-      return { (uint64_t) 0 };
-    }
-
-    X64_UNION val = x64_from_bytes(SP);
-    SP += 8;
-    return val;
+    return *this;
   }
 };
+
+template<typename ... T>
+void vm_set_parameters(const BuildOptions* opts, VM* vm, T&& ... t) {
+  const size_t num_param_regs = opts->calling_convention->num_parameter_registers;
+  
+  VM_LOADER loader ={};
+  loader.vm = vm;
+  loader.param_regs = opts->calling_convention->parameter_registers;
+  loader.num_param_regs  = num_param_regs;
+
+  if (sizeof...(T) > num_param_regs) {
+    vm->SP -= (sizeof...(T) - num_param_regs) * 8;
+  }
+
+  (loader << ... << std::forward<T>(t));
+}
 
 ErrorCode vm_rum(VM* vm, const uint8_t* code, size_t entry_point) noexcept;

@@ -1,6 +1,8 @@
 #pragma once
 #include "utility.h"
 
+struct MemComplex;
+
 namespace X64 {
   struct SIB {
     bool use_base = false;
@@ -32,6 +34,8 @@ namespace X64 {
       int32_t disp = 0;
     };
   };
+
+  RM rm_from_mem_complex(const MemComplex& mem);
 
   inline constexpr uint8_t rex_r(uint8_t reg) {
     return (reg & 0b0000'1000) >> 1;

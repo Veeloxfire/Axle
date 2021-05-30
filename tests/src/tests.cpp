@@ -53,7 +53,7 @@ constexpr auto fib_recurse_main() -> uint64_t {
 }
 
 constexpr auto arrays_main() -> uint64_t {
-  uint64_t a[4] = { 3, 2, 0, 1 };
+  uint64_t a[4] ={ 3, 2, 0, 1 };
 
   return a[a[a[a[0]]]];
 }
@@ -112,7 +112,7 @@ bool run_test(const Options& opts, const uint64_t res) {
     //Run the compilation
     Program prog ={};
 
-    RunOutput out = {0, 0};
+    RunOutput out ={ 0, 0 };
 
     out.return_code = compile_file(opts, &prog);
 
@@ -158,20 +158,22 @@ bool run_test(const Options& opts, const uint64_t res) {
 }
 
 bool run_all_tests_in_env_and_optimization(const Environment& env, const OptimizationOptions& optimize) {
-  
+
   {
     size_t num_optimizations = (size_t)optimize.non_stack_locals;
 
     if (num_optimizations == 0) {
       std::cout << "\n-----------------------------------\n";
-      std::cout << "-- Testing with no optimizations --\n";
-      std::cout << "-----------------------------------\n";
+      std::cout <<   "-- Testing with no optimizations --\n";
+      std::cout <<   "-----------------------------------\n";
     }
     else {
       std::cout << "\n--------------------------------\n";
-      std::cout << "-- Testing with optimizations --\n";
-      if (optimize.non_stack_locals) { std::cout << "--      Non stack locals      --\n"; }
-      std::cout << "--------------------------------\n";
+      std::cout <<   "-- Testing with optimizations --\n";
+      if (optimize.non_stack_locals) {
+        std::cout << "--      Non stack locals      --\n"; 
+      }
+      std::cout <<   "--------------------------------\n";
     }
   }
 
@@ -197,7 +199,7 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
 
     std::cout << "\nStarting Test: " << test.test_name << "\n";
 
-    const bool passed = run_test(options, test.return_value);    
+    const bool passed = run_test(options, test.return_value);
 
     if (passed) {
       std::cout << "Test passed!\n";
@@ -257,14 +259,14 @@ bool run_all_tests_in_env(const Environment& env) {
 int main() {
   std::cout << "Current Working Directory: " << std::filesystem::current_path() << '\n';
 
-  const Environment env_x86_64 = {&system_x86_64, &convention_microsoft_x64};
-  const Environment env_vm = {&system_vm, &convention_vm};
+  const Environment env_x86_64 ={ &system_x86_64, &convention_microsoft_x64 };
+  const Environment env_vm ={ &system_vm, &convention_vm };
 
   bool any_failed = false;
 
   std::cout << "\n========== Started all tests ==========\n\n";
-  any_failed |= run_all_tests_in_env(env_x86_64);
   any_failed |= run_all_tests_in_env(env_vm);
+  any_failed |= run_all_tests_in_env(env_x86_64);
   std::cout << "==========  Ended all tests  ==========\n\n";
 
   if (any_failed) {
