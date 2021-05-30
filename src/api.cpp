@@ -105,7 +105,7 @@ int compile_file(const Options& options,
 
 
   if (parser.current.type == TokenType::Error) {
-    std::cerr << "PARSE ERROR: " << parser.current.string.string << '\n'
+    std::cerr << "PARSE ERROR: " << parser.current.string->string << '\n'
       << "At File: " << parser.current.file_name
       << ", Line: " << parser.current.line
       << ", Character: " << parser.current.character << '\n';

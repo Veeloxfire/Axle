@@ -12,6 +12,22 @@
 #define JOIN2(a, b) a ## b
 #define JOIN(a, b) JOIN2(a, b)
 
+constexpr uint64_t fnv1_hash(const char* c, size_t size) {
+  constexpr uint64_t prime = 0x100000001b3;
+
+  uint64_t base = 0xcbf29ce484222325;
+
+  while (size > 0) {
+    base ^= *c;
+    base *= prime;
+
+    c++;
+    size--;
+  }
+
+  return base;
+}
+
 constexpr bool can_be_from_sign_extension(uint64_t u64) {
   if ((u64 & 0xFFFFFFFF00000000ull) == 0xFFFFFFFF00000000ull) {
     //Want to extend with 1s
@@ -573,6 +589,26 @@ struct ArenaAllocator {
 
   uint8_t* alloc_no_construct(size_t bytes);
   void free_no_destruct(void* val);
+};
+
+struct BumpAllocator {
+  struct BLOCK {
+    constexpr static size_t BLOCK_SIZE = 1024;
+
+    size_t filled = 0;
+    BLOCK* prev = nullptr;
+
+    uint8_t data[BLOCK_SIZE] ={};
+  };
+
+  BLOCK* top = nullptr;
+
+  BumpAllocator();
+
+  ~BumpAllocator();
+
+  void new_block();
+  uint8_t* allocate_no_construct(size_t bytes);
 };
 
 template<typename T>

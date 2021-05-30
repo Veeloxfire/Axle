@@ -34,7 +34,7 @@ MODIFY(Left_Square)\
 MODIFY(Right_Square)\
 MODIFY(Comma)\
 MODIFY(Semicolon)\
-MODIFY(String)\
+MODIFY(String)
 
 enum class TokenType : uint8_t {
 #define MODIFY(n) n,
@@ -51,7 +51,7 @@ TokenTypeString token_type_string(TokenType);
 
 struct Token {
   TokenType type = TokenType::Error;
-  InternString string ={};
+  const InternString* string ={};
 
   //Position
   const char* file_name = nullptr;

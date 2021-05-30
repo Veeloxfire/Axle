@@ -162,7 +162,7 @@ struct MemValue {
 };
 
 struct Local {
-  InternString name ={};
+  const InternString* name ={};
   const Structure* type = nullptr;
 
   uint8_t valid_rvts = ALL_RVTS;
@@ -199,7 +199,7 @@ struct State {
   void use_value(ValueIndex index);
   void use_value(ValueIndex index, ValueIndex related);
 
-  Local* find_local(InternString i_s);
+  Local* find_local(const InternString* i_s);
 };
 
 enum struct COMPILATION_TYPE : uint8_t {
@@ -274,7 +274,7 @@ struct Compiler {
   Types* types = nullptr;
   StringInterner* strings = nullptr;
 
-  InternString entry_point ={};
+  const InternString* entry_point ={};
   uint64_t labels = 0;
 
   Function* new_function();

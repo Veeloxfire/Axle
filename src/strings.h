@@ -1,9 +1,10 @@
 #pragma once
 #include "utility.h"
 
-
 struct InternString {
-  const char* string;
+  uint64_t hash;
+  size_t len;
+  char string[0];
 
   constexpr bool operator==(const InternString& i)const {
     return i.string == string;
@@ -12,16 +13,34 @@ struct InternString {
   constexpr bool operator!=(const InternString& i)const {
     return i.string != string;
   }
+
+  constexpr static size_t alloc_size(size_t string_len) {
+    return sizeof(InternString) + string_len + 1 /* for null byte */;
+  }
+};
+
+extern const InternString* TOMBSTONE;
+
+struct Table {
+  constexpr static float LOAD_FACTOR = 0.75;
+  
+  const InternString** data = nullptr;
+  size_t num_full = 0;
+  size_t size = 0;
+
+  Table();
+
+  void try_resize();
+  const InternString** find(const char* str, size_t len, uint64_t hash) const;
+  const InternString** find_empty(uint64_t hash) const;
 };
 
 struct StringInterner {
-  //CONSIDER: Hash table
-  Array<const char*> strings;
+  BumpAllocator allocs ={};
+  Table table ={};
 
-  InternString intern(const char* string);
-  InternString intern(const char* string, size_t len);
-
-  ~StringInterner();
+  const InternString* intern(const char* string);
+  const InternString* intern(const char* string, size_t len);
 };
 
 struct TempUTF8String {
@@ -39,7 +58,4 @@ struct TempUTF8String {
     free_no_destruct(bytes);
   }
 };
-
-//NOT IMPLEMENTED YET - DO NOT USE
-TempUTF8String ascii_to_utf8(const char* string);
 

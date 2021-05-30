@@ -21,7 +21,7 @@ void load_string(Array<char>& res, uint64_t u64);
 
 void load_string(Array<char>& res, DisplayChar c);
 void load_string(Array<char>& res, const char* str);
-void load_string(Array<char>& res, const InternString& str);
+void load_string(Array<char>& res, const InternString* str);
 void load_string(Array<char>& res, const TokenTypeString& str);
 void load_string(Array<char>& res, TokenType tt);
 

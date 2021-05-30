@@ -26,7 +26,7 @@ struct Cast {
 
 struct Structure {
   STRUCTURE_TYPE type = STRUCTURE_TYPE::VOID;
-  InternString name = { nullptr };
+  const InternString* name = nullptr;
   Array<Cast> casts ={};
 
   uint32_t size() const;
@@ -35,11 +35,15 @@ struct Structure {
 
 struct PointerStructure : public Structure {
   const Structure* base = nullptr;
+
+  static OwnedPtr<char> make_name(const PointerStructure*);
 };
 
 struct ArrayStructure : public Structure {
   const Structure* base = nullptr;
   size_t length = 0;
+
+  static OwnedPtr<char> make_name(const ArrayStructure*);
 };
 
 struct IntegerStructure : public Structure {
@@ -51,7 +55,7 @@ struct EnumStructure;
 
 struct EnumValue {
   const EnumStructure* type = nullptr;
-  InternString name ={};
+  const InternString* name = nullptr;
   uint64_t representation = 0;
 };
 
@@ -70,7 +74,7 @@ struct LiteralStructure : public Structure {
 };
 
 struct StructElement {
-  InternString name ={};
+  const InternString* name ={};
   const Structure* element = nullptr;
 };
 
@@ -83,7 +87,7 @@ struct CompositeStructure : public Structure {
 };
 
 struct Function {
-  InternString name ={};
+  const InternString* name ={};
   Array<const Structure*> parameter_types ={};
 
   bool return_via_ptr = false;
@@ -156,8 +160,8 @@ struct Types {
     return s == s_bool || is_numeric_type(s);
   }
 
-  const Structure* structure_by_name(InternString) const;
-  const EnumValue* enum_by_name(InternString) const;
+  const Structure* structure_by_name(const InternString*) const;
+  const EnumValue* enum_by_name(const InternString*) const;
 };
 
 void init_types(Types* types, StringInterner* strings);

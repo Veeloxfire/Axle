@@ -353,7 +353,7 @@ CompileCode find_binary_operator(Types* types,
   const char* const op_string = BINARY_OP_STRING::get(expr->bin_op.op);
 
   printf("TYPE ERROR: No binary operator '%s' with operands left: '%s' and right: '%s'\n",
-         op_string, left->name.string, right->name.string);
+         op_string, left->name->string, right->name->string);
   return CompileCode::TYPE_CHECK_ERROR;
 }
 
@@ -382,6 +382,6 @@ CompileCode find_unary_operator(Types* types,
   const char* const op_string = UNARY_OP_STRING::get(expr->un_op.op);
 
   printf("TYPE ERROR: No unary operator '%s' with operand type: '%s'\n",
-         op_string, prim->name.string);
+         op_string, prim->name->string);
   return CompileCode::TYPE_CHECK_ERROR;
 }

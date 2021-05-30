@@ -28,7 +28,7 @@ VA ConstantTable::get_constant_va(ConstantOffset offset) const {
 }
 
 
-ConstantOffset ConstantTable::string_constant(InternString string) {
+ConstantOffset ConstantTable::string_constant(const InternString* string) {
   const size_t size = constants.size;
   size_t i = 0;
 
@@ -49,7 +49,7 @@ ConstantOffset ConstantTable::string_constant(InternString string) {
   return ConstantOffset{ i };
 }
 
-Import* new_import(InternString dll_name, ImportTable* imports, ConstantTable* constants) {
+Import* new_import(const InternString* dll_name, ImportTable* imports, ConstantTable* constants) {
   imports->imports.insert_uninit(1);
 
   Import* new_i = imports->imports.data + imports->imports.size - 1;
@@ -58,7 +58,7 @@ Import* new_import(InternString dll_name, ImportTable* imports, ConstantTable* c
   return new_i;
 }
 
-void add_name_to_import(Import* import_ptr, InternString name_to_import, ImportTable* table) {
+void add_name_to_import(Import* import_ptr, const InternString* name_to_import, ImportTable* table) {
   {
     auto i = import_ptr->imported_names.begin();
     const auto end = import_ptr->imported_names.end();
@@ -131,7 +131,7 @@ static void constants_to_bytes(const RVA rva, const VA va, ConstantTable* const 
     i->loaded_offset = offset;
 
     switch (i->type) {
-      case ConstantType::UTF8_STRING: {
+      /*case ConstantType::UTF8_STRING: {
           TempUTF8String utf8 = ascii_to_utf8(i->string.string);
 
           bytes.reserve_extra(utf8.size);
@@ -140,10 +140,10 @@ static void constants_to_bytes(const RVA rva, const VA va, ConstantTable* const 
 
           offset += (uint32_t)utf8.size;
           break;
-        }
+        }*/
       case ConstantType::STRING: {
           const size_t save = bytes.size;
-          const char* str = i->string.string;
+          const char* str = i->string->string;
           while (str[0] != '\0') {
             bytes.insert(str[0]);
             str++;
@@ -180,7 +180,7 @@ static void import_names_to_bytes(VA va, Array<ImportNameEntry>& import_names, A
     bytes.data[bytes.size + 1] = 0xFF;
     bytes.size += 2;
 
-    const char* str = i->name.string;
+    const char* str = i->name->string;
     while (str[0] != '\0') {
       bytes.insert(str[0]);
       str++;

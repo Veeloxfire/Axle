@@ -105,7 +105,7 @@ void State::value_copy(ValueIndex a, ValueIndex b) {
   use_value(b);
 }
 
-Local* State::find_local(InternString i_s) {
+Local* State::find_local(const InternString* i_s) {
   auto i = active_locals.begin();
   const auto end = active_locals.end();
 
@@ -211,11 +211,11 @@ const Structure* find_or_make_array_type(const Compiler* comp, const Structure* 
 
   //Doesnt exist - need to make new type
   {
-    OwnedPtr<char> name = format("[{}; {}]", base->name, length);
-
     ArrayStructure* const arr = types->new_array();
     arr->base = base;
     arr->length = length;
+
+    OwnedPtr<char> name = ArrayStructure::make_name(arr);
     arr->name = comp->strings->intern(name.ptr);
 
     return arr;
@@ -244,10 +244,10 @@ const Structure* find_or_make_pointer_type(const Compiler* comp, const Structure
 
   //Doesnt exist - need to make new type
   {
-    OwnedPtr<char> name = format("*{}", base->name);
-
     PointerStructure* const ptr = types->new_pointer();
     ptr->base = base;
+
+    OwnedPtr<char> name = PointerStructure::make_name(ptr);
     ptr->name = comp->strings->intern(name.ptr);
 
     return ptr;
@@ -303,7 +303,7 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
         else {
           if (!TYPE_TESTS::is_int(type->arr.expr->type)) {
             printf("TYPE ERROR: Expected an integer type!\n"
-                   "            Instead found %s", type->arr.expr->type->name.string);
+                   "            Instead found %s", type->arr.expr->type->name->string);
             return CompileCode::TYPE_CHECK_ERROR;
           }
 
@@ -335,7 +335,7 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
   }
 
   if (type->type == nullptr) {
-    printf("ERROR: could not find structure '%s'\n", type->name.string);
+    printf("ERROR: could not find structure '%s'\n", type->name->string);
     return CompileCode::UNFOUND_DEPENDENCY;
   }
   else {
@@ -344,17 +344,17 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
 }
 
 static void print_function_call(const FunctionCallExpr* const call) {
-  printf("%s(", call->function_name.string);
+  printf("%s(", call->function_name->string);
 
   auto i = call->arguments.begin();
   const auto end = call->arguments.end();
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      printf("%s, ", i->type->name.string);
+      printf("%s, ", i->type->name->string);
     }
 
-    printf("%s", i->type->name.string);
+    printf("%s", i->type->name->string);
   }
 
   printf(")");
@@ -368,13 +368,13 @@ static void print_function_signature(const Function* func) {
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      printf("%s, ", (*i)->name.string);
+      printf("%s, ", (*i)->name->string);
     }
 
-    printf("%s", (*i)->name.string);
+    printf("%s", (*i)->name->string);
   }
 
-  printf(") -> %s", func->return_type->name.string);
+  printf(") -> %s", func->return_type->name->string);
 }
 
 static Array<const Function*> generate_overload_set(Compiler* const comp,
@@ -441,7 +441,7 @@ static CompileCode find_function_for_call(Compiler* const comp,
 
   if (possible_overloads.size == 0) {
     printf("TYPE ERROR: Could not find function '%s' with appropriate signature\n"
-           "            Call: '", call->function_name.string);
+           "            Call: '", call->function_name->string);
     print_function_call(call);
     printf("'\n");
     return CompileCode::UNFOUND_DEPENDENCY;
@@ -452,7 +452,7 @@ static CompileCode find_function_for_call(Compiler* const comp,
   }
   else {
     printf("TYPE ERROR: Found more than one function '%s' with signature that required implicit casts\n"
-           "            Call: '", call->function_name.string);
+           "            Call: '", call->function_name->string);
 
     print_function_call(call);
     printf("'\n");
@@ -544,7 +544,7 @@ static CompileCode cast_operator_type(const Types* const types,
   }
 
   printf("CAST ERROR: Cannot cast type '%s' to type '%s'\n",
-         cast_from->name.string, cast_to->name.string);
+         cast_from->name->string, cast_to->name->string);
   return CompileCode::TYPE_CHECK_ERROR;
 }
 
@@ -554,8 +554,7 @@ static CompileCode check_cast(const Structure* from, const Structure* to) {
   }
   else {
     printf("CAST ERROR: Cannot implicilty cast from '%s' to '%s'\n",
-           from->name.string,
-           to->name.string);
+           from->name->string, to->name->string);
     return CompileCode::TYPE_CHECK_ERROR;
   }
 }
@@ -627,7 +626,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
 
         if (!TYPE_TESTS::is_int(index_type)) {
           printf("TYPE_ERROR: An index must be in integer\n"
-                 "            Found non-integer type: %s\n", index_type->name.string);
+                 "            Found non-integer type: %s\n", index_type->name->string);
           return CompileCode::TYPE_CHECK_ERROR;
         }
 
@@ -645,7 +644,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         assert(arr_expr->type != nullptr);
 
         if (!TYPE_TESTS::is_array(arr_expr->type)) {
-          printf("TYPE_ERROR: Cannot take index of non-array type: %s\n", arr_expr->type->name.string);
+          printf("TYPE_ERROR: Cannot take index of non-array type: %s\n", arr_expr->type->name->string);
           return CompileCode::TYPE_CHECK_ERROR;
         }
 
@@ -699,7 +698,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::ASCII_STRING: {
-        const size_t len = strlen_ts(expr->ascii_string.string) + 1;
+        const size_t len = strlen_ts(expr->ascii_string->string) + 1;
 
         expr->type = find_or_make_array_type(comp, comp->types->s_ascii, len);
         expr->comptime_eval = true;
@@ -709,7 +708,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
       expr->enum_value.enum_value = comp->types->enum_by_name(expr->enum_value.name);
 
       if (expr->enum_value.enum_value == nullptr) {
-        printf("TYPE ERROR: Enum value not found '%s'\n", expr->enum_value.name.string);
+        printf("TYPE ERROR: Enum value not found '%s'\n", expr->enum_value.name->string);
         return CompileCode::UNFOUND_DEPENDENCY;
       }
 
@@ -720,7 +719,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
     case EXPRESSION_TYPE::VALUE: {
         ValueExpr* const val = &expr->value;
 
-        if (val->suffix.string == nullptr) {
+        if (val->suffix == nullptr) {
           expr->type = comp->types->s_int_lit;
         }
         else if (val->suffix == comp->types->s_i64->name) {
@@ -730,7 +729,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           expr->type = comp->types->s_u64;
         }
         else {
-          printf("DEPENDENCY ERROR: Invalid integer literal suffix '%s'", val->suffix.string);
+          printf("DEPENDENCY ERROR: Invalid integer literal suffix '%s'", val->suffix->string);
           return CompileCode::UNFOUND_DEPENDENCY;
         }
 
@@ -740,7 +739,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
       }
 
     case EXPRESSION_TYPE::NAME: {
-        const InternString name = expr->name;
+        const InternString* name = expr->name;
 
         Local* const loc = state->find_local(name);
 
@@ -752,7 +751,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           loc->valid_rvts &= expr->valid_rvts;
         }
         else {
-          printf("DEPENDENCY ERROR: '%s' is not a variable in this scope\n", name.string);
+          printf("DEPENDENCY ERROR: '%s' is not a variable in this scope\n", name->string);
           return CompileCode::UNFOUND_DEPENDENCY;
         }
 
@@ -989,7 +988,7 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
         if (shadowing != nullptr) {
           printf("NAME ERROR: Declare a variable with the same name as an existing variable: %s"
                  "            Shadowing variables is illegal!\n",
-                 shadowing->name.string);
+                 shadowing->name->string);
 
           return CompileCode::NAME_ERROR;
         }
@@ -1720,7 +1719,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
         const ConstantVal constant ={ string_c, size };
 
-        auto i = expr->ascii_string.string;
+        auto i = expr->ascii_string->string;
         const auto end = i + arr_type->length;
 
         for (; i < end; (i++, string_c++)) {
@@ -3442,7 +3441,7 @@ void print_compiled_functions(const Compiler* const comp) {
   for (; i != end; i.next()) {
     const Function* func = i.get();
 
-    printf("FUNCTION %s:\n", func->name.string);
+    printf("FUNCTION %s:\n", func->name->string);
     ByteCode::print_bytecode(comp->build_options.system->reg_name_from_num, stdout, func->code_block.code.data, func->code_block.code.size);
     printf("\n");
   }

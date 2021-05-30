@@ -12,8 +12,7 @@ struct Function;
 struct EnumValue;
 
 struct ASTName {
-  InternString name ={};
-
+  const InternString* name ={};
   const Structure* type = nullptr;
 };
 
@@ -37,7 +36,7 @@ struct ASTType {
   TYPE_TYPE type_type;
 
   union {
-    InternString name ={};
+    const InternString* name ={};
     ASTArrayType arr;
   };
 
@@ -80,14 +79,14 @@ struct BinaryOperatorExpr {
 
 struct FunctionCallExpr {
   Array<ASTExpression> arguments ={};
-  InternString function_name ={};
 
+  const InternString* function_name = nullptr;
   const Function* function = nullptr;
 };
 
 struct EnumValueExpr {
   const EnumValue* enum_value = nullptr;
-  InternString name ={};
+  const InternString* name ={};
 };
 
 struct UnaryOperatorExpr {
@@ -123,7 +122,7 @@ struct IndexExpr {
 
 struct ValueExpr {
   uint64_t value = 0;
-  InternString suffix ={};
+  const InternString* suffix =nullptr;
 };
 
 struct ArrayExpr {
@@ -149,11 +148,11 @@ struct ASTExpression {
     BinaryOperatorExpr bin_op;
     FunctionCallExpr call;
     EnumValueExpr enum_value;
-    InternString name;
+    const InternString* name;
     size_t local;
     ValueExpr value;
     ArrayExpr array_expr;
-    InternString ascii_string;
+    const InternString* ascii_string;
     IndexExpr index;
   };
 
@@ -177,10 +176,10 @@ struct ASTExpression {
 };
 
 struct ASTDeclaration {
-  ASTExpression expression;
-  ASTType type;
-  InternString name;
-  size_t local_index;
+  ASTExpression expression ={};
+  ASTType type ={};
+  const InternString* name = nullptr;
+  size_t local_index = 0;
 };
 
 enum struct STATEMENT_TYPE : uint8_t {
@@ -221,7 +220,7 @@ struct ASTStatement {
 };
 
 struct ASTFunctionDeclaration {
-  InternString name;
+  const InternString* name = nullptr;
   ASTType return_type;
   Array<ASTDeclaration> parameters;
 
@@ -229,7 +228,7 @@ struct ASTFunctionDeclaration {
 };
 
 struct ASTStructureDeclaration {
-  InternString name;
+  const InternString* name = nullptr;
   Array<ASTDeclaration> elements;
 
   Structure* structure;

@@ -240,7 +240,7 @@ struct CodeSection {
 };
 
 enum struct ConstantType : uint8_t {
-  UTF8_STRING,
+  //UTF8_STRING,
   STRING,
   INTEGER,
 };
@@ -248,7 +248,7 @@ enum struct ConstantType : uint8_t {
 struct ConstantEntry {
   ConstantType type;
   union {
-    InternString string;
+    const InternString* string;
     uint64_t integer;
   };
 
@@ -264,13 +264,13 @@ struct ConstantTable {
   RVA table_rva;
   VA table_va;
 
-  ConstantOffset string_constant(InternString);
+  ConstantOffset string_constant(const InternString*);
   RVA get_constant_rva(ConstantOffset offset) const;
   VA get_constant_va(ConstantOffset offset) const;
 };
 
 struct ImportNameEntry {
-  InternString name;
+  const InternString* name;
   VA va;
 };
 
@@ -288,8 +288,8 @@ struct ImportTable {
   Array<Import> imports;
 };
 
-Import* new_import(InternString dll_name, ImportTable* imports, ConstantTable* constants);
-void add_name_to_import(Import* import_ptr, InternString name_to_import, ImportTable* table);
+Import* new_import(const InternString* dll_name, ImportTable* imports, ConstantTable* constants);
+void add_name_to_import(Import* import_ptr, const InternString* name_to_import, ImportTable* table);
 
 
 struct PE_File {

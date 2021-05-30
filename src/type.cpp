@@ -1,5 +1,6 @@
 #include "type.h"
 #include "compiler.h"
+#include "format.h"
 
 FreelistBlockAllocator<LiteralStructure> Types::literal_structures ={};
 FreelistBlockAllocator<IntegerStructure> Types::int_structures ={};
@@ -141,6 +142,14 @@ ArrayStructure* Types::new_array() {
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
   structures.insert(type);
   return type;
+}
+
+OwnedPtr<char> PointerStructure::make_name(const PointerStructure* ps) {
+  return format("*{}", ps->base->name);
+}
+
+OwnedPtr<char> ArrayStructure::make_name(const ArrayStructure* as) {
+  return format("[{}, {}]", as->base->name, as->length);
 }
 
 void init_types(Types* types, StringInterner* strings) {
@@ -295,7 +304,7 @@ Types::~Types() {
 
 }
 
-const Structure* Types::structure_by_name(const InternString name) const {
+const Structure* Types::structure_by_name(const InternString* name) const {
   auto i = structures.begin();
   const auto end = structures.end();
 
@@ -309,7 +318,7 @@ const Structure* Types::structure_by_name(const InternString name) const {
   return nullptr;
 }
 
-const EnumValue* Types::enum_by_name(const InternString name) const {
+const EnumValue* Types::enum_by_name(const InternString* name) const {
   auto i = enums.begin();
   const auto end = enums.end();
 

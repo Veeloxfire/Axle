@@ -1,59 +1,115 @@
 #include "strings.h"
 #include "safe_lib.h"
 
-InternString StringInterner::intern(const char* string) {
-  assert(string != nullptr);
+constexpr char TOMBSTONE_DATA[sizeof(InternString)] ={};
+const InternString* TOMBSTONE = (const InternString*)TOMBSTONE_DATA;
 
-  //Compute outside loop for obvious reasons
-  const size_t str_len_new = strlen_ts(string);
 
-  for (const char* str : strings) {
-    const size_t str_len_in = strlen_ts(str);
 
-    if (str_len_in == str_len_new
-        && memcmp_ts(string, str, str_len_new) == 0) {
-      return { str };
+Table::Table() : data(allocate_default<const InternString*>(8)), size(8) {}
+
+const InternString** Table::find(const char* str, size_t len, uint64_t hash) const {
+  uint64_t test_index = hash % size;
+
+  const InternString** first_tombstone = nullptr;
+
+  const InternString* el = data[test_index];
+  while (el != nullptr) {
+
+    if (el == TOMBSTONE && first_tombstone != nullptr) {
+      //Tombstone space
+      first_tombstone =  data + test_index;
     }
+    else if (el->hash == hash && el->len == len && memcmp_ts(str, el->string, len) == 0) {
+      //Success
+      return data + test_index;
+    }
+
+    //Try next one
+    test_index++;
+    test_index %= size;
+    el = data[test_index];
   }
 
-  //Copy string
-  char* c = allocate_default<char>(str_len_new + 1);
-  memcpy_ts(c, str_len_new + 1, string, str_len_new);
-
-  strings.insert(c);
-  return { c };
-}
-
-InternString StringInterner::intern(const char* string, const size_t str_len_new) {
-  assert(string != nullptr);
-  
-  for (const char* str : strings) {
-    const size_t str_len_in = strlen_ts(str);
-
-    if (str_len_in == str_len_new
-        && memcmp_ts(string, str, str_len_new) == 0) {
-      return { str };
-    }
+  //Test for tombstone
+  if (first_tombstone != nullptr) {
+    return first_tombstone;
   }
-
-  //Copy string
-  char* c = allocate_default<char>(str_len_new + 1);
-  memcpy_ts(c, str_len_new + 1, string, str_len_new);
-
-  strings.insert(c);
-  return { c };
+  else {
+    return data + test_index;
+  }
 }
 
-TempUTF8String ascii_to_utf8(const char* string) {
-  assert(false);//Not implemented yet
-  return {};
+const InternString** Table::find_empty(uint64_t hash) const {
+  uint64_t test_index = hash % size;
+
+  const InternString* el = data[test_index];
+  while (true) {
+
+    if (el == nullptr || el == TOMBSTONE) {
+      //Empty space
+      return data + test_index;
+    }
+
+    //Try next one
+    test_index++;
+    test_index %= size;
+    el = data[test_index];
+  }
 }
 
-StringInterner::~StringInterner() {
-  auto i = strings.begin();
-  const auto end = strings.end();
+void Table::try_resize() {
+  if (num_full >= size * LOAD_FACTOR) {
+    const size_t old_size = size;
+    const InternString** const old_data = data;
 
-  for (; i < end; i++) {
-    free_no_destruct(*i);
+    size <<= 1;
+    data = allocate_default<const InternString*>(size);
+
+    {
+      auto i = old_data;
+      const auto end = old_data + old_size;
+      for (; i < end; i++) {
+        const InternString* i_str = *i;
+
+        if (i_str != nullptr && i_str != TOMBSTONE) {
+          auto** place = find_empty(i_str->hash);
+          *place = i_str;
+        }
+      }
+    }
+
+    free_no_destruct(old_data);
+  }
+}
+
+const InternString* StringInterner::intern(const char* string) {
+  return intern(string, strlen_ts(string));
+}
+
+const InternString* StringInterner::intern(const char* string, const size_t length) {
+  assert(string != nullptr);
+
+  const uint64_t hash = fnv1_hash(string, length);
+
+  const InternString** const place = table.find(string, length, hash);
+
+  const InternString* el = *place;
+  if (el == nullptr || el == TOMBSTONE) {
+    InternString* new_el = (InternString*)allocs.allocate_no_construct(InternString::alloc_size(length));
+    new_el->hash = hash;
+    new_el->len = length;
+
+    memcpy_ts(new_el->string, length + 1, string, length);
+    *place = new_el;
+
+    new_el->string[length + 1] = '\0';
+
+    table.num_full++;
+    table.try_resize();
+    return new_el;
+  }
+  else {
+    return el;
   }
 }

@@ -276,3 +276,34 @@ void print_as_bytes(const uint8_t* bytes, size_t length) {
     printf("0x%hhx ", bytes[i]);
   }
 }
+
+BumpAllocator::BumpAllocator()
+  : top(::allocate_default<BLOCK>()) {
+}
+
+BumpAllocator::~BumpAllocator() {
+  while (top != nullptr) {
+    BLOCK* const next = top->prev;
+    free_no_destruct<BLOCK>(top);
+    top = next;
+  }
+}
+
+void BumpAllocator::new_block() {
+  BLOCK* const new_b = ::allocate_default<BLOCK>();
+  new_b->prev = top;
+  top = new_b;
+}
+
+uint8_t* BumpAllocator::allocate_no_construct(size_t bytes) {
+  assert(bytes < BLOCK::BLOCK_SIZE);
+
+  if (top->filled + bytes > BLOCK::BLOCK_SIZE) {
+    new_block();
+  }
+
+  uint8_t* ptr = top->data + top->filled;
+  top->filled += bytes;
+
+  return ptr;
+}

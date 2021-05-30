@@ -82,7 +82,7 @@ constexpr static void copy_position(const Lexer* lex, Token* tok) {
   tok->character = lex->character;
 }
 
-constexpr static Token make_token(Lexer* const lex, const TokenType type, const InternString string) {
+constexpr static Token make_token(Lexer* const lex, const TokenType type, const InternString* string) {
   Token tok;
 
   tok.type = type;
@@ -161,7 +161,7 @@ static Token lex_identifier(Lexer* const lex) {
     const KeywordPair& pair = keywords[i];
 
     if (pair.size == ident_len
-        && memcmp_ts(pair.keyword, ident.string.string, ident_len) == 0) {
+        && memcmp_ts(pair.keyword, ident.string->string, ident_len) == 0) {
       //Is keyword
       ident.type = pair.type;
       //Exit early
@@ -507,7 +507,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
       }
     case TokenType::Number: {
         expr->set_union(EXPRESSION_TYPE::VALUE);
-        expr->value.value = string_to_uint(current.string.string);
+        expr->value.value = string_to_uint(current.string->string);
         break;
       }
     case TokenType::Identifier: {
@@ -826,7 +826,7 @@ static void print_ast_expression(const ASTExpression* expr);
 static void print_type(const ASTType* type) {
   switch (type->type_type) {
     case TYPE_TYPE::NORMAL:
-      print(type->name.string);
+      print(type->name->string);
       break;
     case TYPE_TYPE::ARRAY:
       print('[');
@@ -868,11 +868,11 @@ static void print_ast_expression(const ASTExpression* expr) {
         break;
       }
     case EXPRESSION_TYPE::ASCII_STRING: {
-        printf("\"%s\"", expr->ascii_string.string);
+        printf("\"%s\"", expr->ascii_string->string);
         break;
       }
     case EXPRESSION_TYPE::FUNCTION_CALL: {
-        printf("%s(", expr->call.function_name.string);
+        printf("%s(", expr->call.function_name->string);
         auto i = expr->call.arguments.begin();
         const auto end = expr->call.arguments.end();
 
@@ -889,12 +889,12 @@ static void print_ast_expression(const ASTExpression* expr) {
         break;
       }
     case EXPRESSION_TYPE::NAME:
-      printf("%s", expr->name.string);
+      printf("%s", expr->name->string);
       break;
     case EXPRESSION_TYPE::VALUE:
       printf("%llu", expr->value.value);
-      if (expr->value.suffix.string != nullptr) {
-        printf("%s", expr->value.suffix.string);
+      if (expr->value.suffix->string != nullptr) {
+        printf("%s", expr->value.suffix->string);
       }
       break;
     case EXPRESSION_TYPE::CAST: {
@@ -939,7 +939,7 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
   switch (statement->type) {
     case STATEMENT_TYPE::DECLARATION:
       print_type(&statement->declaration.type);
-      printf(" %s = ", statement->declaration.name.string);
+      printf(" %s = ", statement->declaration.name->string);
       print_ast_expression(&statement->declaration.expression);
       print(';');
       break;
@@ -1005,7 +1005,7 @@ void print_ast(const ASTFile* file) {
   auto i = file->functions.begin();
   const auto end = file->functions.end();
   for (; i < end; i++) {
-    printf("function %s(", i->name.string);
+    printf("function %s(", i->name->string);
 
     //Parameters
     {
@@ -1015,11 +1015,11 @@ void print_ast(const ASTFile* file) {
       if (p_end - p_i > 0) {
         for (; p_i < (p_end - 1); p_i++) {
           print_type(&p_i->type);
-          printf(" %s,", p_i->name.string);
+          printf(" %s,", p_i->name->string);
         }
 
         print_type(&p_i->type);
-        printf(" %s", p_i->name.string);
+        printf(" %s", p_i->name->string);
       }
     }
 

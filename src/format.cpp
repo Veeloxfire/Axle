@@ -51,8 +51,8 @@ void load_string(Array<char>& res, const char* str) {
   res.size += size;
 }
 
-void load_string(Array<char>& res, const InternString& str) {
-  load_string(res, str.string);
+void load_string(Array<char>& res, const InternString* str) {
+  load_string(res, str->string);
 }
 
 
