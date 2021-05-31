@@ -133,6 +133,7 @@ void ASTStatement::set_union(STATEMENT_TYPE st) noexcept {
 
   type = st;
   switch (type) {
+    case STATEMENT_TYPE::UNKNOWN: break;
     case STATEMENT_TYPE::RETURN:
     case STATEMENT_TYPE::EXPRESSION: {
         default_init(&expression);
@@ -181,12 +182,38 @@ ASTStatement::~ASTStatement() {
   destruct_union();
 }
 
-ASTType::~ASTType() {
+void ASTType::set_union(TYPE_TYPE ty) {
+  destruct_union();
+
+  type_type = ty;
+
   switch (type_type) {
+    case TYPE_TYPE::PTR: {
+        default_init(&ptr);
+        break;
+      }
     case TYPE_TYPE::ARRAY: {
-      arr.~ASTArrayType();
-      break;
-    }
+        default_init(&arr);
+        break;
+      }
     case TYPE_TYPE::NORMAL: break;
   }
+}
+
+void ASTType::destruct_union() {
+  switch (type_type) {
+    case TYPE_TYPE::PTR: {
+        ptr.~ASTPtrType();
+        break;
+      }
+    case TYPE_TYPE::ARRAY: {
+        arr.~ASTArrayType();
+        break;
+      }
+    case TYPE_TYPE::NORMAL: break;
+  }
+}
+
+ASTType::~ASTType() {
+  destruct_union();
 }

@@ -3,7 +3,6 @@
 #include "strings.h"
 #include "calling_conventions.h"
 #include "options.h"
-#include "operators.h"
 #include "runtime_vals.h"
 
 #include "type.h"
@@ -292,3 +291,9 @@ void copy_runtime_to_runtime(Compiler* const comp,
                              const RuntimeValue* from,
                              RuntimeValue* to);
 
+const Structure* find_or_make_array_type(const Compiler* comp,
+                                         const Structure* base,
+                                         size_t length);
+
+const Structure* find_or_make_pointer_type(const Compiler* comp,
+                                           const Structure* base);

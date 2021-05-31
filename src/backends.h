@@ -130,6 +130,7 @@ namespace X64 {
     JNE_NEAR = 0x85,
     MOV_R_TO_RM = 0x89,
     MOV_RM_TO_R = 0x8B,
+    LEA_RM_TO_R = 0x8D,
     SETE_RM8 = 0x94,
     CQO = 0x99,
     IMUL_RM_TO_R = 0xAF,
@@ -155,6 +156,10 @@ namespace X64 {
            const RM& rm);
 
   void mov(Array<uint8_t>& arr,
+           const RM& rm,
+           R r);
+
+  void lea(Array<uint8_t>& arr,
            const RM& rm,
            R r);
 

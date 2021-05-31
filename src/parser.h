@@ -19,8 +19,8 @@ MODIFY(False)\
 MODIFY(Cast)\
 MODIFY(Add)\
 MODIFY(Sub)\
-MODIFY(Mul)\
-MODIFY(Div)\
+MODIFY(Star)\
+MODIFY(BackSlash)\
 MODIFY(Lesser)\
 MODIFY(Greater)\
 MODIFY(Or)\
@@ -49,22 +49,23 @@ struct TokenTypeString {
 
 TokenTypeString token_type_string(TokenType);
 
-struct Token {
-  TokenType type = TokenType::Error;
-  const InternString* string ={};
-
-  //Position
+struct Position {
   const char* file_name = nullptr;
   size_t line = 0;
   size_t character = 0;
 };
 
+struct Token {
+  TokenType type = TokenType::Error;
+  const InternString* string = nullptr;
+
+  Position pos ={};
+};
+
 struct Lexer {
   StringInterner* strings = nullptr;
 
-  const char* file_name = nullptr;
-  size_t line = 0;
-  size_t character = 0;
+  Position curr_pos ={};
 
   const char* top = nullptr;
 };

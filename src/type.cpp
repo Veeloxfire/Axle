@@ -14,6 +14,7 @@ FreelistBlockAllocator<PointerStructure> Types::pointer_structures ={};
 uint32_t Structure::size() const {
   switch (type) {
     case STRUCTURE_TYPE::ASCII_CHAR: return 1;
+    case STRUCTURE_TYPE::POINTER: return 8;
     case STRUCTURE_TYPE::COMPOSITE: return static_cast<const CompositeStructure*>(this)->total_size;
     case STRUCTURE_TYPE::INTEGER: return static_cast<const IntegerStructure*>(this)->bytes;
     case STRUCTURE_TYPE::ENUM: return static_cast<const EnumStructure*>(this)->base->bytes;
@@ -42,6 +43,7 @@ uint32_t Structure::size() const {
 uint32_t Structure::alignment() const {
   switch (type) {
     case STRUCTURE_TYPE::ASCII_CHAR: return 1;
+    case STRUCTURE_TYPE::POINTER: return 8;
     case STRUCTURE_TYPE::COMPOSITE: return static_cast<const CompositeStructure*>(this)->total_alignment;
     case STRUCTURE_TYPE::INTEGER: return static_cast<const IntegerStructure*>(this)->bytes;
     case STRUCTURE_TYPE::ENUM: return static_cast<const EnumStructure*>(this)->base->bytes;

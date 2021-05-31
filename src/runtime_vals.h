@@ -141,31 +141,31 @@ constexpr const char* compile_code_string(CompileCode c) {
 }
 
 #define BIN_OP_INCS \
-MODIFY(ADD, "+")\
-MODIFY(SUB, "-")\
-MODIFY(MUL, "*")\
-MODIFY(DIV, "/")\
-MODIFY(LESSER, "<")\
-MODIFY(GREATER, ">")\
-MODIFY(EQUIVALENT, "==")\
-MODIFY(OR, "|")\
-MODIFY(AND, "&")
+MODIFY(ADD, "+", 3)\
+MODIFY(SUB, "-", 3)\
+MODIFY(MUL, "*", 4)\
+MODIFY(DIV, "/", 4)\
+MODIFY(LESSER, "<", 2)\
+MODIFY(GREATER, ">", 2)\
+MODIFY(EQUIVALENT, "==", 2)\
+MODIFY(OR, "|", 1)\
+MODIFY(AND, "&", 1)
 
 enum struct BINARY_OPERATOR : uint8_t {
-#define MODIFY(name, str) name,
+#define MODIFY(name, str, prec) name,
   BIN_OP_INCS
 #undef MODIFY
 };
 
 namespace BINARY_OP_STRING {
-#define MODIFY(name, str) inline constexpr auto name = str;
+#define MODIFY(name, str, prec) inline constexpr auto name = str;
   BIN_OP_INCS;
 #undef MODIFY
 
   constexpr const char* get(BINARY_OPERATOR op) noexcept {
     switch (op)
     {
-    #define MODIFY(name, str) case BINARY_OPERATOR:: ## name : return name;
+    #define MODIFY(name, str, prec) case BINARY_OPERATOR:: ## name : return name;
       BIN_OP_INCS;
     #undef MODIFY
 
@@ -176,7 +176,8 @@ namespace BINARY_OP_STRING {
 
 #define UN_OP_INCS \
 MODIFY(NEG, "-") \
-MODIFY(ADDRESS, "&")
+MODIFY(ADDRESS, "&")\
+MODIFY(DEREF, "*")
 
 enum struct UNARY_OPERATOR : uint8_t {
 #define MODIFY(name, str) name,

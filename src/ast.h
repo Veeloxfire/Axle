@@ -3,6 +3,7 @@
 #include "strings.h"
 #include "operators.h"
 #include "type.h"
+#include "parser.h"
 
 struct ASTExpression;
 struct ASTStatement;
@@ -17,7 +18,7 @@ struct ASTName {
 };
 
 enum struct TYPE_TYPE {
-  NORMAL, ARRAY
+  NORMAL, ARRAY, PTR
 };
 
 struct ASTType;
@@ -32,16 +33,27 @@ struct ASTArrayType {
   }
 };
 
+struct ASTPtrType {
+  ASTType* base = nullptr;
+
+  ~ASTPtrType() {
+    free_destruct_single(base);
+  }
+};
+
 struct ASTType {
   TYPE_TYPE type_type;
 
   union {
     const InternString* name ={};
     ASTArrayType arr;
+    ASTPtrType ptr;
   };
 
   const Structure* type = nullptr;
 
+  void set_union(TYPE_TYPE);
+  void destruct_union();
   ~ASTType();
 };
 

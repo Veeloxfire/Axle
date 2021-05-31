@@ -69,31 +69,37 @@ namespace OP {
                             State* const state,
                             CodeBlock* const code,
                             const RuntimeValue*);
+
+  RuntimeValue emit_deref(Compiler* const comp,
+                          State* const state,
+                          CodeBlock* const code,
+                          const RuntimeValue*);
 }
 
 struct BinaryOperation {
-  FUNCTION_PTR<const Structure*, Types*, const Structure*, const Structure*> test;
+  FUNCTION_PTR<const Structure*, Compiler*, const Structure*, const Structure*> test;
   BINARY_OPERATOR_FUNCTION func;
 };
 
 struct UnaryOperation {
-  FUNCTION_PTR<const Structure*, Types*, const Structure*> test;
+  FUNCTION_PTR<const Structure*, Compiler*, const Structure*> test;
   UNARY_OPERATOR_FUNCTION func;
 };
 
 namespace BIN_OP_TESTS {
-  const Structure* num_int_64_bit(Types* types, const Structure* left, const Structure* right);
-  const Structure* num_signed_int_64_bit(Types* types, const Structure* left, const Structure* right);
-  const Structure* num_unsigned_int_64_bit(Types* types, const Structure* left, const Structure* right);
+  const Structure* num_int_64_bit(Compiler* comp, const Structure* left, const Structure* right);
+  const Structure* num_signed_int_64_bit(Compiler* comp, const Structure* left, const Structure* right);
+  const Structure* num_unsigned_int_64_bit(Compiler* comp, const Structure* left, const Structure* right);
 
-  const Structure* eq_int_64_bit(Types* types, const Structure* left, const Structure* right);
+  const Structure* eq_int_64_bit(Compiler* comp, const Structure* left, const Structure* right);
 
-  const Structure* bools(Types* types, const Structure* left, const Structure* right);
+  const Structure* bools(Compiler* comp, const Structure* left, const Structure* right);
 }
 
 namespace UN_OP_TESTS {
-  const Structure* address(Types* types, const Structure* s);
-  const Structure* signed_int_64_bit(Types* types, const Structure* s);
+  const Structure* address(Compiler* comp, const Structure* s);
+  const Structure* deref(Compiler* comp, const Structure* s);
+  const Structure* signed_int_64_bit(Compiler* comp, const Structure* s);
 }
 
 inline constexpr BinaryOperation add_operators[] ={
@@ -136,12 +142,16 @@ inline constexpr UnaryOperation address_operators[] ={
   {&UN_OP_TESTS::address, &OP::emit_address},//ADD u64 or i64
 };
 
-CompileCode find_binary_operator(Types* types,
+inline constexpr UnaryOperation deref_operators[] ={
+  {&UN_OP_TESTS::deref, &OP::emit_deref},//ADD u64 or i64
+};
+
+CompileCode find_binary_operator(Compiler* comp,
                                  ASTExpression* expr,
                                  const BinaryOperation* operations,
                                  size_t num_ops);
 
-CompileCode find_unary_operator(Types* types,
+CompileCode find_unary_operator(Compiler* comp,
                                 ASTExpression* expr,
                                 const UnaryOperation* operations,
                                 size_t num_ops);

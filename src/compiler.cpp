@@ -6,6 +6,7 @@
 #include "vm.h"
 #include "backends.h"
 #include "format.h"
+#include "operators.h"
 
 Function* Compiler::new_function() {
   return functions.insert();
@@ -302,7 +303,7 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
         }
         else {
           if (!TYPE_TESTS::is_int(type->arr.expr->type)) {
-            printf("TYPE ERROR: Expected an integer type!\n"
+            printf("TYPE ERROR: Expected an integer type value for array length!\n"
                    "            Instead found %s", type->arr.expr->type->name->string);
             return CompileCode::TYPE_CHECK_ERROR;
           }
@@ -310,8 +311,8 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
           uint64_t length;
           if (TYPE_TESTS::is_signed_int(type->arr.expr->type)) {
             int64_t i_length = *(const int64_t*)type->arr.expr->const_val;
-            if (i_length <= 0) {
-              printf("TYPE ERROR: Length of array must be greater than 0"
+            if (i_length < 0) {
+              printf("TYPE ERROR: Length of array must positive"
                      "            Instead found %lld", i_length);
               return CompileCode::TYPE_CHECK_ERROR;
             }
@@ -327,15 +328,22 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
           break;
         }
 
+        break;
+      }
+    case TYPE_TYPE::PTR: {
+        CompileCode ret = compile_type(comp, type->ptr.base);
+        if (ret != CompileCode::NO_ERRORS) {
+          return ret;
+        }
 
-        printf("INTERNAL ERROR: Not yet built\n");
-        return CompileCode::INTERNAL_ERROR;
+        assert(type->ptr.base != nullptr);
+
+        type->type = find_or_make_pointer_type(comp, type->ptr.base->type);
         break;
       }
   }
 
   if (type->type == nullptr) {
-    printf("ERROR: could not find structure '%s'\n", type->name->string);
     return CompileCode::UNFOUND_DEPENDENCY;
   }
   else {
@@ -472,54 +480,6 @@ static CompileCode find_function_for_call(Compiler* const comp,
   }
 }
 
-static CompileCode binary_operator_type(Types* const types,
-                                        ASTExpression* const expr) {
-
-  const auto op = expr->bin_op.op;
-
-  switch (op) {
-    case BINARY_OPERATOR::ADD:
-      return find_binary_operator(types, expr, add_operators, array_size(add_operators));
-    case BINARY_OPERATOR::SUB:
-      return find_binary_operator(types, expr, sub_operators, array_size(sub_operators));
-    case BINARY_OPERATOR::MUL:
-      return find_binary_operator(types, expr, mul_operators, array_size(mul_operators));
-    case BINARY_OPERATOR::DIV:
-      return find_binary_operator(types, expr, div_operators, array_size(div_operators));
-    case BINARY_OPERATOR::EQUIVALENT:
-      return find_binary_operator(types, expr, eq_operators, array_size(eq_operators));
-    case BINARY_OPERATOR::OR:
-      return find_binary_operator(types, expr, or_operators, array_size(or_operators));
-    case BINARY_OPERATOR::AND:
-      return find_binary_operator(types, expr, and_operators, array_size(and_operators));
-    default: {
-        const char* const name = BINARY_OP_STRING::get(op);
-
-        printf("INTERNAL ERROR: Binary Operator not implemented '%s'\n", name);
-        return CompileCode::INTERNAL_ERROR;
-      }
-  }
-}
-
-static CompileCode unary_operator_type(Types* const types,
-                                       ASTExpression* const expr) {
-
-  const auto op = expr->un_op.op;
-
-  switch (op) {
-    case UNARY_OPERATOR::NEG:
-      return find_unary_operator(types, expr, neg_operators, array_size(neg_operators));
-    case UNARY_OPERATOR::ADDRESS:
-      return find_unary_operator(types, expr, address_operators, array_size(address_operators));
-    default: {
-        const char* const name = UNARY_OP_STRING::get(op);
-
-        printf("INTERNAL ERROR: Unary Operator not implemented '%s'\n", name);
-        return CompileCode::INTERNAL_ERROR;
-      }
-  }
-}
-
 static CompileCode cast_operator_type(const Types* const types,
                                       ASTExpression* const expr) {
   const Structure* const cast_to = expr->cast.type.type;
@@ -591,6 +551,16 @@ CompileCode make_constant_typed_dependency(ASTExpression* expr, State* const sta
   return CompileCode::FOUND_DEPENDENCY;
 }
 
+void set_valid_rvts(ASTExpression* const expr, State* const state, uint8_t valid_rvts) {
+  expr->valid_rvts &= valid_rvts;
+
+  if (expr->expr_type == EXPRESSION_TYPE::LOCAL) {
+    Local* local = state->all_locals.data + expr->local;
+
+    local->valid_rvts &= expr->valid_rvts;
+  }
+}
+
 //Note: Recursive
 static CompileCode compile_type_of_expression(Compiler* const comp,
                                               ASTExpression* const expr,
@@ -614,28 +584,6 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         arr_expr->call_leaf = expr->call_leaf;
         index_expr->call_leaf = expr->call_leaf;
 
-        //Check the index first - important later (but do the reverse at runtime)
-        ret_code = compile_type_of_expression(comp, index_expr, state);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
-        }
-
-        auto* index_type = index_expr->type;
-        assert(index_type != nullptr);
-
-
-        if (!TYPE_TESTS::is_int(index_type)) {
-          printf("TYPE_ERROR: An index must be in integer\n"
-                 "            Found non-integer type: %s\n", index_type->name->string);
-          return CompileCode::TYPE_CHECK_ERROR;
-        }
-
-        //This is why we check index first
-        if (!index_expr->comptime_eval) {
-          //Can only index something at runtime its in memory not a register or a constant
-          arr_expr->valid_rvts &= RVT::MEMORY;
-        }
-
         ret_code = compile_type_of_expression(comp, arr_expr, state);
         if (ret_code != CompileCode::NO_ERRORS) {
           return ret_code;
@@ -646,6 +594,25 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         if (!TYPE_TESTS::is_array(arr_expr->type)) {
           printf("TYPE_ERROR: Cannot take index of non-array type: %s\n", arr_expr->type->name->string);
           return CompileCode::TYPE_CHECK_ERROR;
+        }
+
+        ret_code = compile_type_of_expression(comp, index_expr, state);
+        if (ret_code != CompileCode::NO_ERRORS) {
+          return ret_code;
+        }
+
+        auto* index_type = index_expr->type;
+        assert(index_type != nullptr);
+
+        if (!TYPE_TESTS::is_int(index_type)) {
+          printf("TYPE_ERROR: An index must be in integer\n"
+                 "            Found non-integer type: %s\n", index_type->name->string);
+          return CompileCode::TYPE_CHECK_ERROR;
+        }
+
+        if (!index_expr->comptime_eval) {
+          //If the index is not known at compile time then the array must in memory and in a register
+          set_valid_rvts(arr_expr, state, (uint8_t)RVT::MEMORY);
         }
 
         expr->type = static_cast<const ArrayStructure*>(arr_expr->type)->base;
@@ -794,9 +761,28 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         expr->comptime_eval = expr->un_op.primary->comptime_eval;
         expr->makes_call = expr->un_op.primary->makes_call;
 
-        ret_code = unary_operator_type(comp->types, expr);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        switch (expr->un_op.op) {
+          case UNARY_OPERATOR::NEG:
+            return find_unary_operator(comp, expr, neg_operators, array_size(neg_operators));
+          case UNARY_OPERATOR::ADDRESS: {
+              CompileCode ret = find_unary_operator(comp, expr, address_operators, array_size(address_operators));
+              if (ret != CompileCode::NO_ERRORS) {
+                return ret;
+              }
+
+              //Can only load the address of somewhere in memory
+              set_valid_rvts(expr->un_op.primary, state, (uint8_t)RVT::MEMORY);
+
+              return CompileCode::NO_ERRORS;
+            }
+          case UNARY_OPERATOR::DEREF:
+            return find_unary_operator(comp, expr, deref_operators, array_size(deref_operators));
+          default: {
+              const char* const name = UNARY_OP_STRING::get(expr->un_op.op);
+
+              printf("INTERNAL ERROR: Unary Operator not implemented '%s'\n", name);
+              return CompileCode::INTERNAL_ERROR;
+            }
         }
 
         break;
@@ -837,9 +823,27 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
 
         expr->makes_call = bin_op->left->makes_call || bin_op->right->makes_call;
 
-        ret_code = binary_operator_type(comp->types, expr);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        switch (expr->bin_op.op) {
+          case BINARY_OPERATOR::ADD:
+            return find_binary_operator(comp, expr, add_operators, array_size(add_operators));
+          case BINARY_OPERATOR::SUB:
+            return find_binary_operator(comp, expr, sub_operators, array_size(sub_operators));
+          case BINARY_OPERATOR::MUL:
+            return find_binary_operator(comp, expr, mul_operators, array_size(mul_operators));
+          case BINARY_OPERATOR::DIV:
+            return find_binary_operator(comp, expr, div_operators, array_size(div_operators));
+          case BINARY_OPERATOR::EQUIVALENT:
+            return find_binary_operator(comp, expr, eq_operators, array_size(eq_operators));
+          case BINARY_OPERATOR::OR:
+            return find_binary_operator(comp, expr, or_operators, array_size(or_operators));
+          case BINARY_OPERATOR::AND:
+            return find_binary_operator(comp, expr, and_operators, array_size(and_operators));
+          default: {
+              const char* const name = BINARY_OP_STRING::get(expr->bin_op.op);
+
+              printf("INTERNAL ERROR: Binary Operator not implemented '%s'\n", name);
+              return CompileCode::INTERNAL_ERROR;
+            }
         }
 
         break;
@@ -1098,8 +1102,6 @@ static void load_const_to_mem(Compiler* const comp,
         state->use_value(mov_val);
         state->control_flow.expression_num++;
       }
-
-
 
       iptr++;
       indexed_mem.disp += 8;
@@ -2199,12 +2201,12 @@ static void map_values(const BuildOptions* const options,
   };
 
   const auto OP_R_64 = [&](ByteCode::OP_R_64&& p) {
-      auto* v = UNROLL_COALESCE(p.val);
-      ByteCode::OP_R_64::emit(temp, p.op, v->reg, p.u64);
+    auto* v = UNROLL_COALESCE(p.val);
+    ByteCode::OP_R_64::emit(temp, p.op, v->reg, p.u64);
   };
 
   const auto OP_R_32 = [&](ByteCode::OP_R_32&& p) {
-     auto* v = UNROLL_COALESCE(p.val);
+    auto* v = UNROLL_COALESCE(p.val);
     ByteCode::OP_R_32::emit(temp, p.op, v->reg, p.u32);
   };
 
@@ -2219,8 +2221,8 @@ static void map_values(const BuildOptions* const options,
   };
 
   const auto OP_R_MEM = [&](ByteCode::OP_R_MEM&& p) {
-      auto* v = UNROLL_COALESCE(p.val);
-      ByteCode::OP_R_MEM::emit(temp, p.op, v->reg, check_mem(p.mem));
+    auto* v = UNROLL_COALESCE(p.val);
+    ByteCode::OP_R_MEM::emit(temp, p.op, v->reg, check_mem(p.mem));
   };
 
   const auto OP_8_MEM = [&](ByteCode::OP_8_MEM&& p) {
@@ -2666,7 +2668,7 @@ void coalesce(const Compiler* const comp, State* const state) {
           for (; vi < end; vi++) {
             const size_t other_i = resolve_coalesced(*vi, tree).val;
 
-            if(other_i == to) continue;
+            if (other_i == to) continue;
 
             const auto& other_val = tree.values.data[other_i];
 

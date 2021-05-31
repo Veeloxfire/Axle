@@ -85,8 +85,7 @@ namespace ByteCode {
 
   #define X(name, structure) case name: {\
       auto p = ByteCode::PARSE:: ## name ## (bytecode + i);\
-      printf("0x%-4llx: ", i);\
-      print_bytecodeop(stream, p.op);\
+      printf("0x%-4llx: %s", i, bytecode_string((ByteCodeOp)p.op));\
       structure;\
       i += ByteCode::SIZE_OF:: ## name;\
       break;\

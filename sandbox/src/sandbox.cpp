@@ -30,6 +30,8 @@ int main(int argc, const char** args) {
   options.print.coalesce_values = false;
   options.print.fully_compiled  = true;
   options.print.run_headers     = false;
+
+  options.optimize.non_stack_locals = true;
   
   //Program program ={};
   //return compile_file(options, &program);

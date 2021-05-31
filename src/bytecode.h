@@ -124,6 +124,15 @@ namespace ByteCode {
   #undef X
   };
 
+  constexpr const char* bytecode_string(ByteCodeOp op) {
+    switch (op) {
+    #define X(NAME, s) case NAME: return #NAME;
+      BYTECODES_X
+      #undef X
+      default: return "Unknown OP";
+    }
+  }
+
   using REG_NAME = FUNCTION_PTR<const char*, uint8_t>;
 
   void print_bytecode(REG_NAME reg_name_from_num,

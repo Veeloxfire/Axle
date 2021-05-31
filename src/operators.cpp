@@ -204,11 +204,68 @@ RuntimeValue OP::emit_address(Compiler* const comp,
   ptr_val.reg = state->new_value();
 
   ByteCode::EMIT::LOAD_ADDRESS(code->code, (uint8_t)ptr_val.reg.val, state->get_mem(val->mem)->mem);
+  state->set_value(ptr_val.reg);
 
   return ptr_val;
 }
 
-const Structure* BIN_OP_TESTS::num_int_64_bit(Types* types, const Structure* left, const Structure* right) {
+RuntimeValue OP::emit_deref(Compiler* const comp,
+                            State* const state,
+                            CodeBlock* const code,
+                            const RuntimeValue* val) {
+
+  RuntimeValue deref_val ={};
+  deref_val.type = RVT::MEMORY;
+
+  switch (val->type) {
+    case RVT::REGISTER: {
+        MemIndex mi = state->new_mem();
+        auto* mem = state->get_mem(mi);
+
+        mem->mem.base = (uint8_t)val->reg.val;
+        mem->size = 8;
+
+        deref_val.mem = mi;
+        break;
+      }
+    case RVT::MEMORY: {
+        ValueIndex r = state->new_value();
+
+        ByteCode::EMIT::COPY_R64_FROM_MEM(code->code, (uint8_t)r.val, state->get_mem(val->mem)->mem);
+        state->set_value(r);
+
+        MemIndex mi = state->new_mem();
+        auto* mem = state->get_mem(mi);
+        mem->mem.base = (uint8_t)r.val;
+        mem->size = 8;
+
+        deref_val.mem = mi;
+        break;
+      }
+    case RVT::CONST: {
+        ValueIndex r = state->new_value();
+
+        const uint64_t ptr_v = x64_from_bytes(val->constant.ptr);
+
+        ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)r.val, ptr_v);
+        state->set_value(r);
+
+        MemIndex mi = state->new_mem();
+        auto* mem = state->get_mem(mi);
+        mem->mem.base = (uint8_t)r.val;
+        mem->size = 8;
+
+        deref_val.mem = mi;
+        break;
+      }
+  }
+
+  return deref_val;
+}
+
+const Structure* BIN_OP_TESTS::num_int_64_bit(Compiler* comp, const Structure* left, const Structure* right) {
+  const Types* types = comp->types;
+  
   constexpr auto is_valid_type = [](const Types* types, const Structure* s) {
     return s == types->s_u64 || s == types->s_i64 || s == types->s_int_lit || s == types->s_sint_lit;
   };
@@ -232,7 +289,8 @@ const Structure* BIN_OP_TESTS::num_int_64_bit(Types* types, const Structure* lef
   }
 }
 
-const Structure* BIN_OP_TESTS::num_signed_int_64_bit(Types* types, const Structure* left, const Structure* right) {
+const Structure* BIN_OP_TESTS::num_signed_int_64_bit(Compiler* comp, const Structure* left, const Structure* right) {
+  const Types* types = comp->types;
 
   constexpr auto is_valid_type = [](const Types* types, const Structure* s) {
     return s == types->s_i64 || s == types->s_int_lit || s == types->s_sint_lit;
@@ -256,7 +314,9 @@ const Structure* BIN_OP_TESTS::num_signed_int_64_bit(Types* types, const Structu
   }
 }
 
-const Structure* BIN_OP_TESTS::num_unsigned_int_64_bit(Types* types, const Structure* left, const Structure* right) {
+const Structure* BIN_OP_TESTS::num_unsigned_int_64_bit(Compiler* comp, const Structure* left, const Structure* right) {
+  const Types* types = comp->types;
+  
   const bool left_lit = types->s_int_lit == left;
   const bool right_lit =  types->s_int_lit == right;
 
@@ -271,7 +331,9 @@ const Structure* BIN_OP_TESTS::num_unsigned_int_64_bit(Types* types, const Struc
   }
 }
 
-const Structure* BIN_OP_TESTS::eq_int_64_bit(Types* types, const Structure* left, const Structure* right) {
+const Structure* BIN_OP_TESTS::eq_int_64_bit(Compiler* comp, const Structure* left, const Structure* right) {
+  const Types* types = comp->types;
+  
   constexpr auto is_valid_type = [](const Types* types, const Structure* s) {
     return s == types->s_u64 || s == types->s_i64 || s == types->s_int_lit || s == types->s_sint_lit;
   };
@@ -288,7 +350,9 @@ const Structure* BIN_OP_TESTS::eq_int_64_bit(Types* types, const Structure* left
   }
 }
 
-const Structure* BIN_OP_TESTS::bools(Types* types, const Structure* left, const Structure* right) {
+const Structure* BIN_OP_TESTS::bools(Compiler* comp, const Structure* left, const Structure* right) {
+  const Types* types = comp->types;
+  
   if (left == right && left == types->s_bool) {
     return types->s_bool;
   }
@@ -297,7 +361,9 @@ const Structure* BIN_OP_TESTS::bools(Types* types, const Structure* left, const 
   }
 }
 
-const Structure* UN_OP_TESTS::signed_int_64_bit(Types* types, const Structure* s) {
+const Structure* UN_OP_TESTS::signed_int_64_bit(Compiler* comp, const Structure* s) {
+  const Types* types = comp->types;
+  
   if (types->s_sint_lit == s || types->s_i64 == s) {
     return s;
   }
@@ -309,24 +375,20 @@ const Structure* UN_OP_TESTS::signed_int_64_bit(Types* types, const Structure* s
   }
 }
 
-const Structure* UN_OP_TESTS::address(Types* types, const Structure* s) {
-  auto i = types->structures.begin();
-  const auto end = types->structures.end();
-
-  for (; i < end; i++) {
-    const Structure* ptr = *i;
-    if (ptr->type == STRUCTURE_TYPE::POINTER && ((const PointerStructure*)ptr)->base == s) {
-      return ptr;
-    }
-  }
-
-  PointerStructure* ptr = types->new_pointer();
-
-  ptr->base = s;
-  return ptr;
+const Structure* UN_OP_TESTS::address(Compiler* comp, const Structure* s) {
+  return find_or_make_pointer_type(comp, s);
 }
 
-CompileCode find_binary_operator(Types* types,
+const Structure* UN_OP_TESTS::deref(Compiler* comp, const Structure* s) {
+  if (s->type == STRUCTURE_TYPE::POINTER) {
+    return static_cast<const PointerStructure*>(s)->base;
+  }
+  else {
+    return nullptr;
+  }
+}
+
+CompileCode find_binary_operator(Compiler* comp,
                                  ASTExpression* expr,
                                  const BinaryOperation* operations,
                                  size_t num_ops) {
@@ -341,7 +403,7 @@ CompileCode find_binary_operator(Types* types,
   const auto end = operations + num_ops;
 
   for (; op < end; op++) {
-    expr->type = op->test(types, left, right);
+    expr->type = op->test(comp, left, right);
 
     if (expr->type != nullptr) {
       expr->bin_op.emit = op->func;
@@ -357,7 +419,7 @@ CompileCode find_binary_operator(Types* types,
   return CompileCode::TYPE_CHECK_ERROR;
 }
 
-CompileCode find_unary_operator(Types* types,
+CompileCode find_unary_operator(Compiler* comp,
                                 ASTExpression* expr,
                                 const UnaryOperation* operations,
                                 size_t num_ops) {
@@ -370,7 +432,7 @@ CompileCode find_unary_operator(Types* types,
   const auto end = operations + num_ops;
 
   for (; op < end; op++) {
-    expr->type = op->test(types, prim);
+    expr->type = op->test(comp, prim);
 
     if (expr->type != nullptr) {
       expr->un_op.emit = op->func;

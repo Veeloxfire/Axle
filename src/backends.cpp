@@ -467,6 +467,15 @@ void X64::mov(Array<uint8_t>& arr,
   emit_mod_rm(arr, r, rm);
 }
 
+void X64::lea(Array<uint8_t>& arr,
+              const RM& rm,
+              R r) {
+  arr.insert(X64::REX_W | X64::rex_r_rm(r.r, rm.r));
+  arr.insert(X64::LEA_RM_TO_R);
+
+  emit_mod_rm(arr, r, rm);
+}
+
 void X64::mov(Array<uint8_t>& arr,
               const RM& rm,
               R r) {
@@ -938,6 +947,17 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               code_i += ByteCode::SIZE_OF::COPY_64_TO_MEM;
               break;
             }
+          case ByteCode::LOAD_ADDRESS: {
+              const auto i = ByteCode::PARSE::LOAD_ADDRESS(code_i);
+
+              X64::RM rm = X64::rm_from_mem_complex(i.mem);
+
+              X64::lea(out_code, rm, X64::R{ i.val });
+
+
+              code_i += ByteCode::SIZE_OF::LOAD_ADDRESS;
+              break;
+            }
           case ByteCode::COPY_R64_FROM_MEM: {
               const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(code_i);
 
@@ -1047,8 +1067,10 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               break;
             }
           default: {
+              uint8_t op = *code_i;
               printf("INTERNAL ERROR: Backend found unsupported bytecode instruction\n"
-                     "                Instruction: %d\n", (int)*code_i);
+                     "                Code: %d, Name: %s\n",
+                     (int)op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
               return -1;
             }
         }
@@ -1483,6 +1505,17 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("mov %s, %s\n", names.r.ptr, names.rm.ptr);
+            break;
+          }
+        case X64::LEA_RM_TO_R: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.r_name = x86_64_reg_name_from_num;
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+
+            printf("lea %s, %s\n", names.r.ptr, names.rm.ptr);
             break;
           }
         case X64::CQO: {

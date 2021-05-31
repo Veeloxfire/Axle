@@ -39,8 +39,8 @@ constexpr KeywordPair keywords[] ={
 constexpr KeywordPair operators[] ={
   {"+", TokenType::Add},
   {"-", TokenType::Sub},
-  {"*", TokenType::Mul},
-  {"/", TokenType::Div},
+  {"*", TokenType::Star},
+  {"/", TokenType::BackSlash},
   {"<", TokenType::Lesser},
   {">", TokenType::Greater},
   {"(", TokenType::Left_Bracket},
@@ -76,18 +76,12 @@ constexpr static  bool is_letter_or_number(const char c) {
     || is_number(c);
 }
 
-constexpr static void copy_position(const Lexer* lex, Token* tok) {
-  tok->file_name = lex->file_name;
-  tok->line = lex->line;
-  tok->character = lex->character;
-}
-
 constexpr static Token make_token(Lexer* const lex, const TokenType type, const InternString* string) {
   Token tok;
 
   tok.type = type;
   tok.string = string;
-  copy_position(lex, &tok);
+  tok.pos = lex->curr_pos;
 
   return tok;
 }
@@ -96,7 +90,7 @@ static Token error_token(Lexer* const lex, const char* string) {
   Token error ={};
   error.type = TokenType::Error;
   error.string = lex->strings->intern(string);
-  copy_position(lex, &error);
+  error.pos = lex->curr_pos;
 
   return error;
 }
@@ -114,11 +108,11 @@ constexpr static void skip_whitespace(Lexer* const lex) {
       case '\t':
       case '\f':
         lex->top++;
-        lex->character++;
+        lex->curr_pos.character++;
         break;
       case '\n': {
-          lex->line++;
-          lex->character = 0;
+          lex->curr_pos.line++;
+          lex->curr_pos.character = 0;
           const char c2 = (++lex->top)[0];
           if (c2 == '\r') {
             ++lex->top;
@@ -126,8 +120,8 @@ constexpr static void skip_whitespace(Lexer* const lex) {
           break;
         }
       case '\r': {
-          lex->line++;
-          lex->character = 0;
+          lex->curr_pos.line++;
+          lex->curr_pos.character = 0;
           const char c2 = (++lex->top)[0];
           if (c2 == '\n') {
             ++lex->top;
@@ -145,7 +139,7 @@ static Token lex_identifier(Lexer* const lex) {
 
   do {
     lex->top++;
-    lex->character++;
+    lex->curr_pos.character++;
   } while (is_identifier_char(lex->top[0]) || is_number(lex->top[0]));
 
   const size_t ident_len = lex->top - name_base;
@@ -153,7 +147,7 @@ static Token lex_identifier(Lexer* const lex) {
   Token ident ={};
   ident.type = TokenType::Identifier;
   ident.string = lex->strings->intern(name_base, ident_len);
-  copy_position(lex, &ident);
+  ident.pos = lex->curr_pos;
 
   constexpr size_t num_keywords = sizeof(keywords) / sizeof(KeywordPair);
 
@@ -178,7 +172,7 @@ static Token lex_number(Lexer* const lex) {
 
   do {
     lex->top++;
-    lex->character++;
+    lex->curr_pos.character++;
   } while (is_number(lex->top[0]));
 
   const size_t ident_length = lex->top - number_base;
@@ -187,7 +181,7 @@ static Token lex_number(Lexer* const lex) {
   num.type = TokenType::Number;
   num.string = lex->strings->intern(number_base, ident_length);
 
-  copy_position(lex, &num);
+  num.pos = lex->curr_pos;
   return num;
 }
 
@@ -204,10 +198,10 @@ static Token make_single_char_token(Lexer* lex) {
       tok.type = pair.type;
       tok.string = lex->strings->intern(pair.keyword);
 
-      copy_position(lex, &tok);
+      tok.pos = lex->curr_pos;
 
       lex->top += pair.size;
-      lex->character += pair.size;
+      lex->curr_pos.character += pair.size;
 
       return tok;
     }
@@ -219,26 +213,26 @@ static Token make_single_char_token(Lexer* lex) {
 
 static Token lex_string(Lexer* const lex) {
   lex->top++;
-  lex->character++;
+  lex->curr_pos.character++;
 
   const char* const start = lex->top;
 
   while (!is_new_line(lex) && lex->top[0] != '\0' && lex->top[0] != '"') {
     lex->top++;
-    lex->character++;
+    lex->curr_pos.character++;
   }
 
   const char* end = lex->top;
 
   if (lex->top[0] == '"') {
     lex->top++;
-    lex->character++;
+    lex->curr_pos.character++;
 
     Token tok;
     tok.type = TokenType::String;
     tok.string = lex->strings->intern(start, end - start);
 
-    copy_position(lex, &tok);
+    tok.pos = lex->curr_pos;
 
     return tok;
   }
@@ -266,7 +260,7 @@ static Token lex_token(Lexer* const lex) {
     Token eof ={};
     eof.type = TokenType::Eof;
     eof.string = lex->strings->intern("End of file");
-    copy_position(lex, &eof);
+    eof.pos = lex->curr_pos;
 
     return eof;
   }
@@ -300,7 +294,7 @@ static bool expect(Parser* parser, const TokenType t) {
 void init_parser(Parser* const parser, const char* file_name, const char* source) {
 
   parser->lexer.top = source;
-  parser->lexer.file_name = file_name;
+  parser->lexer.curr_pos.file_name = file_name;
 
   parser->current = lex_token(&parser->lexer);
 }
@@ -308,17 +302,10 @@ void init_parser(Parser* const parser, const char* file_name, const char* source
 static void parse_type(Parser* const parser, ASTType* const type);
 static void parse_unary_op(Parser* const parser, ASTExpression* const expr);
 
-//Should never be 0!
 static constexpr uint8_t precidence_table[] ={
-  3,// BINARY_OPERATOR::ADD
-  3,// BINARY_OPERATOR::SUB
-  4,// BINARY_OPERATOR::MUL
-  4,// BINARY_OPERATOR::DIV
-  2,// BINARY_OPERATOR::LESSER
-  2,// BINARY_OPERATOR::GREATER
-  2,// BINARY_OPERATOR::EQUIVALENT
-  1,// BINARY_OPERATOR::OR
-  1,// BINARY_OPERATOR::AND
+#define MODIFY(name, str, precidence) precidence,
+  BIN_OP_INCS
+#undef MODIFY
 };
 
 static bool is_binary_operator(const TokenType t) {
@@ -329,8 +316,8 @@ static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
   switch (parser->current.type) {
     case TokenType::Add: advance(parser); return BINARY_OPERATOR::ADD;
     case TokenType::Sub: advance(parser); return BINARY_OPERATOR::SUB;
-    case TokenType::Mul: advance(parser); return BINARY_OPERATOR::MUL;
-    case TokenType::Div: advance(parser); return BINARY_OPERATOR::DIV;
+    case TokenType::Star: advance(parser); return BINARY_OPERATOR::MUL;
+    case TokenType::BackSlash: advance(parser); return BINARY_OPERATOR::DIV;
     case TokenType::Lesser: advance(parser); return BINARY_OPERATOR::LESSER;
     case TokenType::Greater: advance(parser); return BINARY_OPERATOR::GREATER;
     case TokenType::Equals: {
@@ -598,51 +585,87 @@ static void parse_primary_and_suffix(Parser* const parser, ASTExpression* const 
 }
 
 static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
-  if (parser->current.type == TokenType::Sub) {
-    expr->set_union(EXPRESSION_TYPE::UNARY_OPERATOR);
+  switch (parser->current.type) {
+    case TokenType::Sub: {
+        expr->set_union(EXPRESSION_TYPE::UNARY_OPERATOR);
 
-    expr->un_op.op = UNARY_OPERATOR::NEG;
-    advance(parser);
+        expr->un_op.op = UNARY_OPERATOR::NEG;
+        advance(parser);
 
-    expr->un_op.primary = allocate_default<ASTExpression>(1);
+        expr->un_op.primary = allocate_default<ASTExpression>();
 
-    parse_primary_and_suffix(parser, expr->un_op.primary);
+        parse_primary_and_suffix(parser, expr->un_op.primary);
+        break;
+      }
+    case TokenType::Star: {
+        expr->set_union(EXPRESSION_TYPE::UNARY_OPERATOR);
+
+        expr->un_op.op = UNARY_OPERATOR::DEREF;
+        advance(parser);
+
+        expr->un_op.primary = allocate_default<ASTExpression>();
+
+        parse_primary_and_suffix(parser, expr->un_op.primary);
+        break;
+      }
+    case TokenType::And: {
+        expr->set_union(EXPRESSION_TYPE::UNARY_OPERATOR);
+
+        expr->un_op.op = UNARY_OPERATOR::ADDRESS;
+        advance(parser);
+
+        expr->un_op.primary = allocate_default<ASTExpression>();
+
+        parse_primary_and_suffix(parser, expr->un_op.primary);
+        break;
+      }
+
+    default:
+      parse_primary_and_suffix(parser, expr);
+      break;
   }
-  else {
-    parse_primary_and_suffix(parser, expr);
-  }
-
 }
 
 static void parse_type(Parser* const parser, ASTType* const type) {
-  if (parser->current.type == TokenType::Identifier) {
-    type->type_type = TYPE_TYPE::NORMAL;
-    type->name = parser->current.string;
-    advance(parser);
+  switch (parser->current.type) {
+    case TokenType::Identifier: {
+        type->set_union(TYPE_TYPE::NORMAL);
+        type->name = parser->current.string;
+        advance(parser);
+        break;
+      }
+    case TokenType::Left_Square: {
+        // [ BASE ; EXPR ]
+        type->set_union(TYPE_TYPE::ARRAY);
+
+        advance(parser);//[
+
+        //Base Type
+        type->arr.base = allocate_default<ASTType>();
+        parse_type(parser, type->arr.base);
+
+        expect(parser, TokenType::Semicolon);
+
+        //Expression
+        type->arr.expr = allocate_default<ASTExpression>();
+        parse_expression(parser, type->arr.expr);
+
+        expect(parser, TokenType::Right_Square);
+        break;
+      }
+    case TokenType::Star: {
+        // *BASE
+        type->set_union(TYPE_TYPE::PTR);
+
+        advance(parser);//*
+
+        //Base
+        type->ptr.base = allocate_default<ASTType>();
+        parse_type(parser, type->ptr.base);
+        break;
+      }
+    default: parser->report_error("Expected Type!");
   }
-  else if (parser->current.type == TokenType::Left_Square) {
-    // [ BASE ; EXPR ]
-    type->type_type = TYPE_TYPE::ARRAY;
-
-    advance(parser);//[
-
-    //Base Type
-    type->arr.base = allocate_default<ASTType>();
-    parse_type(parser, type->arr.base);
-
-    expect(parser, TokenType::Semicolon);
-
-    //Expression
-    type->arr.expr = allocate_default<ASTExpression>();
-    parse_expression(parser, type->arr.expr);
-
-    expect(parser, TokenType::Right_Square);
-  }
-  else {
-    parser->report_error("Expected Type!");
-    return;
-  }
-
 }
 
 static void parse_declaration(Parser* const parser, ASTDeclaration* const decl) {
@@ -674,7 +697,7 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
         parse_expression(parser, &statement->expression);
 
         expect(parser, TokenType::Semicolon);
-        return;
+        break;
       }
     case TokenType::If: {
         advance(parser);
@@ -697,19 +720,33 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
         else {
           statement->if_else.else_statement = nullptr;
         }
-        return;
+        break;
       }
-    case TokenType::Left_Square:
-    case TokenType::Identifier: {
-        //Probs type at the moment
+    default: {
+        //Ambiguous at this point - save the position
+        Parser save = *parser;
+        
+        //try declaration first
         statement->set_union(STATEMENT_TYPE::DECLARATION);
+        parse_type(parser, &statement->declaration.type);
 
-        parse_declaration(parser, &statement->declaration);
+        if (parser->current.type == TokenType::Identifier) {
+          //Is declaration
+          statement->declaration.name = parser->current.string;
+          advance(parser);
 
-        expect(parser, TokenType::Equals);
+          expect(parser, TokenType::Equals);
 
-        parse_expression(parser, &statement->declaration.expression);
-        return;
+          parse_expression(parser, &statement->declaration.expression);
+        }
+        else {
+          //Not a declaration - expression
+          *parser = std::move(save);
+          statement->set_union(STATEMENT_TYPE::EXPRESSION);
+
+          parse_expression(parser, &statement->expression);
+        }
+        break;
       }
   }
 }
@@ -835,6 +872,10 @@ static void print_type(const ASTType* type) {
       print_ast_expression(type->arr.expr);
       print(']');
       break;
+    case TYPE_TYPE::PTR:
+      print('*');
+      print_type(type->arr.base);
+      break;
   }
 }
 
@@ -893,7 +934,7 @@ static void print_ast_expression(const ASTExpression* expr) {
       break;
     case EXPRESSION_TYPE::VALUE:
       printf("%llu", expr->value.value);
-      if (expr->value.suffix->string != nullptr) {
+      if (expr->value.suffix != nullptr) {
         printf("%s", expr->value.suffix->string);
       }
       break;
@@ -906,26 +947,14 @@ static void print_ast_expression(const ASTExpression* expr) {
         break;
       }
     case EXPRESSION_TYPE::UNARY_OPERATOR:
-      switch (expr->un_op.op) {
-        case UNARY_OPERATOR::NEG: print("-"); break;
-      }
+      print(UNARY_OP_STRING::get(expr->un_op.op));
       print_ast_expression(expr->un_op.primary);
       break;
     case EXPRESSION_TYPE::BINARY_OPERATOR:
       print("(");
       print_ast_expression(expr->bin_op.left);
 
-      switch (expr->bin_op.op) {
-        case BINARY_OPERATOR::ADD: print(" + "); break;
-        case BINARY_OPERATOR::SUB: print(" - "); break;
-        case BINARY_OPERATOR::DIV: print(" / "); break;
-        case BINARY_OPERATOR::MUL: print(" * "); break;
-        case BINARY_OPERATOR::LESSER: print(" < "); break;
-        case BINARY_OPERATOR::GREATER: print(" > "); break;
-        case BINARY_OPERATOR::EQUIVALENT: print(" == "); break;
-        case BINARY_OPERATOR::OR: print(" | "); break;
-        case BINARY_OPERATOR::AND: print(" & "); break;
-      }
+      printf(" %s ", BINARY_OP_STRING::get(expr->bin_op.op));
 
       print_ast_expression(expr->bin_op.right);
       print(")");
