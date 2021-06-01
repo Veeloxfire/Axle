@@ -4,7 +4,7 @@
 struct InternString {
   uint64_t hash;
   size_t len;
-  char string[0];
+  char string[1];//placeholder for any length array
 
   constexpr bool operator==(const InternString& i)const {
     return i.string == string;
