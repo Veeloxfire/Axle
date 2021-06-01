@@ -60,6 +60,21 @@ namespace OP {
                             CodeBlock* const code,
                             const RuntimeValue*, const RuntimeValue*);
 
+  RuntimeValue emit_shift_l_64_by_8(Compiler* const comp,
+                                    State* const state,
+                                    CodeBlock* const code,
+                                    const RuntimeValue*, const RuntimeValue*);
+
+  RuntimeValue emit_shift_r_u64_by_8(Compiler* const comp,
+                                      State* const state,
+                                      CodeBlock* const code,
+                                      const RuntimeValue*, const RuntimeValue*);
+
+  RuntimeValue emit_shift_r_i64_by_8(Compiler* const comp,
+                                      State* const state,
+                                      CodeBlock* const code,
+                                      const RuntimeValue*, const RuntimeValue*);
+
   RuntimeValue emit_neg_i64(Compiler* const comp,
                             State* const state,
                             CodeBlock* const code,
@@ -92,6 +107,10 @@ namespace BIN_OP_TESTS {
   const Structure* num_unsigned_int_64_bit(Compiler* comp, const Structure* left, const Structure* right);
 
   const Structure* eq_int_64_bit(Compiler* comp, const Structure* left, const Structure* right);
+  const Structure* shift_64(Compiler* comp, const Structure* left, const Structure* right);
+
+  const Structure* u_shift_64(Compiler* comp, const Structure* left, const Structure* right);
+  const Structure* s_shift_64(Compiler* comp, const Structure* left, const Structure* right);
 
   const Structure* bools(Compiler* comp, const Structure* left, const Structure* right);
 }
@@ -132,6 +151,15 @@ inline constexpr BinaryOperation or_operators[] ={
 inline constexpr BinaryOperation and_operators[] ={
   {&BIN_OP_TESTS::num_int_64_bit, &OP::emit_and_64s},//AND u64 or i64
   {&BIN_OP_TESTS::bools, &OP::emit_and_64s},
+};
+
+inline constexpr BinaryOperation left_shift[] ={
+  {&BIN_OP_TESTS::shift_64, &OP::emit_shift_l_64_by_8},
+};
+
+inline constexpr BinaryOperation right_shift[] ={
+  {&BIN_OP_TESTS::u_shift_64, &OP::emit_shift_r_u64_by_8},
+  {&BIN_OP_TESTS::s_shift_64, &OP::emit_shift_r_i64_by_8},
 };
 
 inline constexpr UnaryOperation neg_operators[] ={

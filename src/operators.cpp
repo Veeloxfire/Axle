@@ -5,78 +5,74 @@
 using UN_OP_EMIT = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;
 using BIN_OP_EMIT = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t, uint8_t>;
 
-static RuntimeValue bin_op_impl(Compiler* const comp,
-                                State* const state,
-                                CodeBlock* const code,
-                                const Structure* type,
-                                const RuntimeValue* left, const RuntimeValue* right,
-                                BIN_OP_EMIT func) {
+//Will always move to a register
+static RuntimeValue load_to_mod_op(Compiler* comp, State* state, CodeBlock* code, const Structure* ty, const RuntimeValue* v) {
+  RuntimeValue temp ={};
+  temp.type = RVT::REGISTER;
+  temp.reg  = state->new_value();
 
-  assert(left->type != RVT::UNKNOWN);
-  assert(right->type != RVT::UNKNOWN);
-
-  const auto load_to_reg = [&](const RuntimeValue* v) -> RuntimeValue {
-
-      RuntimeValue temp ={};
-      temp.type = RVT::REGISTER;
-      temp.reg  = state->new_value();
-
-      copy_runtime_to_runtime(comp, state, code, type, v, &temp);
-
-      return temp;
-
-  };
-
-  RuntimeValue temp_left = load_to_reg(left);
-  RuntimeValue temp_right = load_to_reg(right);
-
-  func(code->code, (uint8_t)temp_right.reg.val, (uint8_t)temp_left.reg.val);
- 
-  state->get_val(temp_left.reg)->is_modified = true;
-
-  state->use_value(temp_left.reg);
-  state->use_value(temp_right.reg);
-
-  return temp_left;
-}
-
-static RuntimeValue un_op_impl(Compiler* const comp,
-                               State* const state,
-                               CodeBlock* const code,
-                               const Structure* type,
-                               const RuntimeValue* val,
-                               UN_OP_EMIT func) {
-
-  assert(val->type != RVT::UNKNOWN);
-
-  const auto load_to_reg = [&](const RuntimeValue* v) -> RuntimeValue {
-
-      RuntimeValue temp ={};
-      temp.type = RVT::REGISTER;
-      temp.reg  = state->new_value();
-
-      copy_runtime_to_runtime(comp, state, code, type, v, &temp);
-
-      return temp;
-
-  };
-
-  RuntimeValue temp = load_to_reg(val);
-
-  func(code->code, (uint8_t)temp.reg.val);
-
-  state->get_val(temp.reg)->is_modified = true;
-  state->use_value(temp.reg);
+  copy_runtime_to_runtime(comp, state, code, ty, v, &temp);
 
   return temp;
+};
+
+//Will only move to a new register if its not a register
+static RuntimeValue load_to_const_op(Compiler* comp, State* state, CodeBlock* code, const Structure* ty, const RuntimeValue* v) {
+  if (v->type != RVT::REGISTER) {
+    RuntimeValue temp ={};
+    temp.type = RVT::REGISTER;
+    temp.reg  = state->new_value();
+
+    copy_runtime_to_runtime(comp, state, code, ty, v, &temp);
+
+    return temp;
+  }
+  else {
+    return *v;
+  }
+};
+
+static void bin_op_impl(Compiler* const comp,
+                        State* const state,
+                        CodeBlock* const code,
+                        const RuntimeValue* left, const RuntimeValue* right,
+                        BIN_OP_EMIT func) {
+  assert(left->type == RVT::REGISTER);
+  assert(right->type == RVT::REGISTER);
+
+  func(code->code, (uint8_t)right->reg.val, (uint8_t)left->reg.val);
+ 
+  state->get_val(left->reg)->is_modified = true;
+
+  state->use_value(left->reg);
+  state->use_value(right->reg);
+}
+
+static void un_op_impl(Compiler* const comp,
+                       State* const state,
+                       CodeBlock* const code,
+                       const RuntimeValue* val,
+                       UN_OP_EMIT func) {
+  assert(val->type == RVT::REGISTER);
+
+  func(code->code, (uint8_t)val->reg.val);
+
+  state->get_val(val->reg)->is_modified = true;
+  state->use_value(val->reg);
 }
 
 RuntimeValue OP::emit_add_64s(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const RuntimeValue* left, const RuntimeValue* right) {
+  const Structure* ty = comp->types->s_u64;
 
-  return bin_op_impl(comp, state, code, comp->types->s_u64, left, right, ByteCode::EMIT::ADD_R64S);
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::ADD_R64S);
+
+  return temp_left;
 }
 
 RuntimeValue OP::emit_sub_64s(Compiler* const comp,
@@ -84,7 +80,14 @@ RuntimeValue OP::emit_sub_64s(Compiler* const comp,
                               CodeBlock* const code,
                               const RuntimeValue* left, const RuntimeValue* right) {
 
-  return bin_op_impl(comp, state, code, comp->types->s_u64, left, right, ByteCode::EMIT::SUB_R64S);
+  const Structure* ty = comp->types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SUB_R64S);
+
+  return temp_left;
 }
 
 RuntimeValue OP::emit_mul_64s(Compiler* const comp,
@@ -92,7 +95,14 @@ RuntimeValue OP::emit_mul_64s(Compiler* const comp,
                               CodeBlock* const code,
                               const RuntimeValue* left, const RuntimeValue* right) {
 
-  return bin_op_impl(comp, state, code, comp->types->s_u64, left, right, ByteCode::EMIT::MUL_R64S);
+  const Structure* ty = comp->types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::MUL_R64S);
+
+  return temp_left;
 }
 
 RuntimeValue OP::emit_div_u64s(Compiler* const comp,
@@ -101,32 +111,39 @@ RuntimeValue OP::emit_div_u64s(Compiler* const comp,
                                const RuntimeValue* left, const RuntimeValue* right) {
   const Structure* type = comp->types->s_u64;
 
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, type, right);
+
   if (comp->build_options.system == &system_x86_64) {
+    {
+      auto* res_val       = state->value_tree.values.data + temp_left.reg.val;
+      res_val->value_type = ValueType::FIXED;
+      res_val->reg        = RAX.REG;
+    }
+
     ValueIndex save_rdx = state->new_value();
     state->set_value(save_rdx);
 
-    auto* save_val = state->value_tree.values.data + save_rdx.val;
+    auto* save_val       = state->value_tree.values.data + save_rdx.val;
     save_val->value_type = ValueType::FIXED;
-    save_val->reg   = RDX.REG;
+    save_val->reg        = RDX.REG;
 
-    //Stop it from being removed
-    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);
-    state->use_value(save_rdx);
+    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);//Just show its being reserved
 
     state->control_flow.expression_num++;
-    RuntimeValue res = bin_op_impl(comp, state, code, type, left, right, ByteCode::EMIT::DIV_RU64S);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RU64S);
     
+    //Stop it from being removed
     state->use_value(save_rdx);
     state->control_flow.expression_num++;
 
-    auto* res_val = state->value_tree.values.data + res.reg.val;
-    res_val->value_type = ValueType::FIXED;
-    res_val->reg   = RAX.REG;
 
-    return res;
+    return temp_left;
   }
   else {
-    return bin_op_impl(comp, state, code, type, left, right, ByteCode::EMIT::DIV_RU64S);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RU64S);
+
+    return temp_left;
   }
 }
 
@@ -134,64 +151,179 @@ RuntimeValue OP::emit_div_i64s(Compiler* const comp,
                                State* const state,
                                CodeBlock* const code,
                                const RuntimeValue* left, const RuntimeValue* right) {
-  const Structure* type = comp->types->s_i64;
+  const Structure* type = comp->types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, type, right);
 
   if (comp->build_options.system == &system_x86_64) {
+    {
+      auto* res_val       = state->value_tree.values.data + temp_left.reg.val;
+      res_val->value_type = ValueType::FIXED;
+      res_val->reg        = RAX.REG;
+    }
+
     ValueIndex save_rdx = state->new_value();
     state->set_value(save_rdx);
 
-    auto* save_val = state->value_tree.values.data + save_rdx.val;
+    auto* save_val       = state->value_tree.values.data + save_rdx.val;
     save_val->value_type = ValueType::FIXED;
-    save_val->reg   = RDX.REG;
+    save_val->reg        = RDX.REG;
+
+    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);//Just show its being reserved
+
+    state->control_flow.expression_num++;
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RI64S);
 
     //Stop it from being removed
-    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);
-    state->use_value(save_rdx);
-
-    state->control_flow.expression_num++;
-    RuntimeValue res = bin_op_impl(comp, state, code, type, left, right, ByteCode::EMIT::DIV_RI64S);
-
     state->use_value(save_rdx);
     state->control_flow.expression_num++;
 
-    auto* res_val = state->value_tree.values.data + res.reg.val;
-    res_val->value_type = ValueType::FIXED;
-    res_val->reg   = RAX.REG;
 
-    return res;
+    return temp_left;
   }
   else {
-    return bin_op_impl(comp, state, code, type, left, right, ByteCode::EMIT::DIV_RI64S);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RI64S);
+
+    return temp_left;
   }
 }
 
 RuntimeValue OP::emit_eq_64s(Compiler* const comp,
-                             State* const state,
-                             CodeBlock* const code,
-                             const RuntimeValue* left, const RuntimeValue* right) {
-  return bin_op_impl(comp, state, code, comp->types->s_u64, left, right, ByteCode::EMIT::EQ_R64S);
+                              State* const state,
+                              CodeBlock* const code,
+                              const RuntimeValue* left, const RuntimeValue* right) {
+
+  const Structure* ty = comp->types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::EQ_R64S);
+
+  return temp_left;
 }
 
 RuntimeValue OP::emit_or_64s(Compiler* const comp,
                              State* const state,
                              CodeBlock* const code,
                              const RuntimeValue* left, const RuntimeValue* right) {
-  return bin_op_impl(comp, state, code, comp->types->s_u64, left, right, ByteCode::EMIT::OR_R64S);
+
+  const Structure* ty = comp->types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::OR_R64S);
+
+  return temp_left;
 }
 
 RuntimeValue OP::emit_and_64s(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const RuntimeValue* left, const RuntimeValue* right) {
-  return bin_op_impl(comp, state, code, comp->types->s_u64, left, right, ByteCode::EMIT::AND_R64S);
+  const Structure* ty = comp->types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::AND_R64S);
+
+  return temp_left;
+}
+
+RuntimeValue OP::emit_shift_l_64_by_8(Compiler* const comp,
+                                      State* const state,
+                                      CodeBlock* const code,
+                                      const RuntimeValue* left, const RuntimeValue* right) {
+  const Structure* left_t = comp->types->s_u64;
+  const Structure* right_t = comp->types->s_u8;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
+  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
+
+  if (comp->build_options.system == &system_x86_64) {
+    auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
+    res_val->value_type = ValueType::FIXED;
+    res_val->reg        = RCX.REG;
+
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_L_R64_BY_R8);
+
+    return temp_left;
+  }
+  else {
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_L_R64_BY_R8);
+
+    return temp_left;
+  }
+}
+
+RuntimeValue OP::emit_shift_r_u64_by_8(Compiler* const comp,
+                                      State* const state,
+                                      CodeBlock* const code,
+                                      const RuntimeValue* left, const RuntimeValue* right) {
+  const Structure* left_t = comp->types->s_u64;
+  const Structure* right_t = comp->types->s_u8;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
+  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
+
+  if (comp->build_options.system == &system_x86_64) {
+    auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
+    res_val->value_type = ValueType::FIXED;
+    res_val->reg        = RCX.REG;
+
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_U64_BY_R8);
+
+    return temp_left;
+  }
+  else {
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_U64_BY_R8);
+
+    return temp_left;
+  }
+}
+
+RuntimeValue OP::emit_shift_r_i64_by_8(Compiler* const comp,
+                                      State* const state,
+                                      CodeBlock* const code,
+                                      const RuntimeValue* left, const RuntimeValue* right) {
+  const Structure* left_t = comp->types->s_i64;
+  const Structure* right_t = comp->types->s_u8;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
+  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
+
+  if (comp->build_options.system == &system_x86_64) {
+    auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
+    res_val->value_type = ValueType::FIXED;
+    res_val->reg        = RCX.REG;
+
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_I64_BY_R8);
+
+    return temp_left;
+  }
+  else {
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_I64_BY_R8);
+
+    return temp_left;
+  }
 }
 
 RuntimeValue OP::emit_neg_i64(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const RuntimeValue* val) {
-  return un_op_impl(comp, state, code, comp->types->s_i64, val, ByteCode::EMIT::NEG_R64);
+
+  const RuntimeValue temp = load_to_mod_op(comp, state, code, comp->types->s_i64, val);
+
+  un_op_impl(comp, state, code, &temp, ByteCode::EMIT::NEG_R64);
+
+  return temp;
 }
+
+
 
 RuntimeValue OP::emit_address(Compiler* const comp,
                               State* const state,
@@ -359,6 +491,60 @@ const Structure* BIN_OP_TESTS::bools(Compiler* comp, const Structure* left, cons
   else {
     return nullptr;
   }
+}
+
+const Structure* BIN_OP_TESTS::shift_64(Compiler* comp, const Structure* left, const Structure* right) {
+  const Types* types = comp->types;
+
+  constexpr auto is_valid_left = [](const Types* types, const Structure* s) {
+    return s == types->s_u64 || s == types->s_i64 || s == types->s_int_lit || s == types->s_sint_lit;
+  };
+
+  constexpr auto is_valid_right = [](const Types* types, const Structure* s) {
+    return s == types->s_u8 || s == types->s_int_lit;
+  };
+
+  if (!is_valid_left(types, left) || !is_valid_right(types, right)) {
+    return nullptr;
+  }
+
+  return left;
+}
+
+const Structure* BIN_OP_TESTS::s_shift_64(Compiler* comp, const Structure* left, const Structure* right) {
+  const Types* types = comp->types;
+
+  constexpr auto is_valid_left = [](const Types* types, const Structure* s) {
+    return s == types->s_i64 || s == types->s_sint_lit;
+  };
+
+  constexpr auto is_valid_right = [](const Types* types, const Structure* s) {
+    return s == types->s_u8 || s == types->s_int_lit;
+  };
+
+  if (!is_valid_left(types, left) || !is_valid_right(types, right)) {
+    return nullptr;
+  }
+
+  return left;
+}
+
+const Structure* BIN_OP_TESTS::u_shift_64(Compiler* comp, const Structure* left, const Structure* right) {
+  const Types* types = comp->types;
+
+  constexpr auto is_valid_left = [](const Types* types, const Structure* s) {
+    return s == types->s_u64 || s == types->s_int_lit;
+  };
+
+  constexpr auto is_valid_right = [](const Types* types, const Structure* s) {
+    return s == types->s_u8 || s == types->s_int_lit;
+  };
+
+  if (!is_valid_left(types, left) || !is_valid_right(types, right)) {
+    return nullptr;
+  }
+
+  return left;
 }
 
 const Structure* UN_OP_TESTS::signed_int_64_bit(Compiler* comp, const Structure* s) {

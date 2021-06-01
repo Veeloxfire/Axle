@@ -149,7 +149,9 @@ MODIFY(LESSER, "<", 2)\
 MODIFY(GREATER, ">", 2)\
 MODIFY(EQUIVALENT, "==", 2)\
 MODIFY(OR, "|", 1)\
-MODIFY(AND, "&", 1)
+MODIFY(AND, "&", 1)\
+MODIFY(RIGHT_SHIFT, ">>", 4)\
+MODIFY(LEFT_SHIFT, "<<", 4)
 
 enum struct BINARY_OPERATOR : uint8_t {
 #define MODIFY(name, str, prec) name,
