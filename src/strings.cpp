@@ -8,6 +8,14 @@ const InternString* TOMBSTONE = (const InternString*)TOMBSTONE_DATA;
 
 Table::Table() : data(allocate_default<const InternString*>(8)), size(8) {}
 
+
+Table::~Table() {
+  free_destruct_n(data, size);
+  data = nullptr;
+  size = 0;
+  num_full = 0;
+}
+
 const InternString** Table::find(const char* str, size_t len, uint64_t hash) const {
   uint64_t test_index = hash % size;
 
@@ -16,7 +24,7 @@ const InternString** Table::find(const char* str, size_t len, uint64_t hash) con
   const InternString* el = data[test_index];
   while (el != nullptr) {
 
-    if (el == TOMBSTONE && first_tombstone != nullptr) {
+    if (el == TOMBSTONE && first_tombstone == nullptr) {
       //Tombstone space
       first_tombstone =  data + test_index;
     }
@@ -63,7 +71,9 @@ void Table::try_resize() {
     const size_t old_size = size;
     const InternString** const old_data = data;
 
-    size <<= 1;
+    do {
+      size <<= 1;
+    } while (num_full >= size * LOAD_FACTOR);
     data = allocate_default<const InternString*>(size);
 
     {

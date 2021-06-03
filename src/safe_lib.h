@@ -34,6 +34,18 @@ constexpr inline void default_init(T* const dest, const size_t dest_size) {
 }
 
 template<typename T>
+constexpr inline void destruct_arr(T* const ptr, const size_t num) {
+  for (size_t i = 0; i < num; i++) {
+    ptr[i].~T();
+  }
+}
+
+template<typename T>
+constexpr inline void destruct_single(T* const ptr) {
+  ptr->~T();
+}
+
+template<typename T>
 constexpr inline void default_init(T* const dest) {
   new(dest) T();
 }

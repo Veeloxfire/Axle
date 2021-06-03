@@ -1,4 +1,5 @@
 #include "utility.h"
+#include "strings.h"
 
 void load_to_bytes(Array<uint8_t>& bytes,
                    const size_t offset,
@@ -14,10 +15,10 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
 
 
   FreeList* prev = nullptr;
-  FreeList* fl = (FreeList*)free_list;
+  FreeList* fl = free_list;
 
   if (fl == nullptr) {
-    free_list = (void*)new_fl;
+    free_list = new_fl;
     return;
   }
 
@@ -25,7 +26,9 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
   bool found_after = false;
 
   while (fl != nullptr) {
-    if (!found_after && fl == (new_fl + new_fl->qwords_available + 1)) {
+    if (!found_after && (uint64_t*)fl == ((uint64_t*)new_fl + new_fl->qwords_available + 1)) {
+      //fl comes directly after new_fl
+
       //Remove from list
       if (prev != nullptr) {
         prev->next = fl->next;
@@ -37,24 +40,30 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
 
       //Can we exit?
       if (found_before) {
-        return;
+        break;
       }
       found_after = true;
     }
-    else if (!found_before && new_fl == (fl + fl->qwords_available + 1)) {
+    else if (!found_before && (uint64_t*)new_fl == ((uint64_t*)fl + fl->qwords_available + 1)) {
+      //new_fl comes directly after fl
+
       //Remove from list
       if (prev != nullptr) {
         prev->next = fl->next;
       }
 
+      auto* save_next = fl->next;
+
       fl->qwords_available += new_fl->qwords_available + 1;
-      
+      fl->next = nullptr;
+
       new_fl = fl;
-      fl = fl->next;
+      
+      fl = save_next;
 
       //Can we exit
       if (found_after) {
-        return;
+        break;
       }
       found_before = true;
     }
@@ -64,8 +73,11 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
     }
   }
 
-  new_fl->next = (FreeList*)free_list;
-  free_list = (void*)new_fl;
+  if (prev != nullptr) {
+    //free_list is not new_fl
+    new_fl->next = (FreeList*)free_list;
+  }
+  free_list = new_fl;
 }
 
 uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
@@ -87,7 +99,7 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
   if (fl == nullptr) {
     //Allocate more data
     new_block();
-    fl = (FreeList*)free_list;
+    fl = free_list;
   }
 
   const uint64_t available_space = fl->qwords_available;
@@ -96,7 +108,7 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
   uint64_t* current_alloc = (uint64_t*)used_space + 1;
 
 
-  //Fix the free list - do we need a new node?
+  //can we fit a new node?
   if (available_space - req_size >= 2) {
     //Yay there is more space
 
@@ -109,9 +121,7 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
       free_list = new_fl;
     }
 
-    //-1 for the bytes available
-    //not -2 because the free list ptr is part of allocated space
-    new_fl->qwords_available = available_space - req_size - 1;
+    new_fl->qwords_available = available_space - (req_size + 1);
     new_fl->next = fl->next;
   }
   else {
@@ -119,10 +129,12 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
     req_size = available_space;
 
     if (prev != nullptr) {
+      //not the top of the free list
       prev->next = fl->next;
     }
     else {
-      free_list = nullptr;
+      //is top of free list
+      free_list = fl->next;
     }
   }
 
@@ -133,7 +145,6 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
 }
 
 void ArenaAllocator::free_no_destruct(void* val) {
-
   uint64_t* ptr = (uint64_t*)val;
 
   const uint64_t free_size = ptr[-1];
@@ -152,8 +163,8 @@ void ArenaAllocator::new_block() {
 
   fl->qwords_available = Block::BLOCK_SIZE - 1;
 
-  fl->next = (FreeList*)free_list;
-  free_list = (void*)fl;
+  fl->next = free_list;
+  free_list = fl;
 
   block->next = base;
   base = block;
@@ -306,4 +317,28 @@ uint8_t* BumpAllocator::allocate_no_construct(size_t bytes) {
   top->filled += bytes;
 
   return ptr;
+}
+
+void IO::print(const char* string) {
+  fputs(string, stdout);
+}
+
+void IO::print(const OwnedPtr<char>& string) {
+  fputs(string.ptr, stdout);
+}
+
+void IO::print(const char c) {
+  putc(c, stdout);
+}
+
+void IO::err_print(const char* string) {
+  fputs(string, stderr);
+}
+
+void IO::err_print(const OwnedPtr<char>& string) {
+  fputs(string.ptr, stderr);
+}
+
+void IO::err_print(const char c)  {
+  putc(c, stderr);
 }

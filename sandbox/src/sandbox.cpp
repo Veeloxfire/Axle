@@ -27,25 +27,26 @@ int main(int argc, const char** args) {
   options.print.pre_reg_alloc   = true;
   options.print.normal_bytecode = true;
   options.print.comptime_exec   = true;
-  options.print.coalesce_values = false;
+  options.print.coalesce_values = true;
   options.print.fully_compiled  = true;
   options.print.run_headers     = false;
 
   options.optimize.non_stack_locals = true;
   
-  //Program program ={};
-  //return compile_file(options, &program);
+  Program program ={};
+  int out = compile_file(options, &program);
   
-  RunOutput out = compile_file_and_run(options);
-  
-  if (out.return_code == 0) {
-    std::cout << "Returned: " << out.program_return;
+  if (out == 0) {
+    /*RunOutput res = run_program(options, program);
+    std::cout << "Returned: " << res.program_return;
+    */
+    return 0;
   }
   else {
     std::cerr << "Error!";
+    return out;
   }
   
-  return out.return_code;
 
   //int ret = compile_file_and_write(options);
   //if (ret != 0) {

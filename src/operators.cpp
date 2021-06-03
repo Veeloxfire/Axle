@@ -41,7 +41,7 @@ static void bin_op_impl(Compiler* const comp,
   assert(right->type == RVT::REGISTER);
 
   func(code->code, (uint8_t)right->reg.val, (uint8_t)left->reg.val);
- 
+
   state->get_val(left->reg)->is_modified = true;
 
   state->use_value(left->reg);
@@ -112,7 +112,7 @@ RuntimeValue OP::emit_div_u64s(Compiler* const comp,
   const Structure* type = comp->types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, type, right);
+  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
 
   if (comp->build_options.system == &system_x86_64) {
     {
@@ -132,7 +132,7 @@ RuntimeValue OP::emit_div_u64s(Compiler* const comp,
 
     state->control_flow.expression_num++;
     bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RU64S);
-    
+
     //Stop it from being removed
     state->use_value(save_rdx);
     state->control_flow.expression_num++;
@@ -154,7 +154,7 @@ RuntimeValue OP::emit_div_i64s(Compiler* const comp,
   const Structure* type = comp->types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, type, right);
+  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
 
   if (comp->build_options.system == &system_x86_64) {
     {
@@ -190,9 +190,9 @@ RuntimeValue OP::emit_div_i64s(Compiler* const comp,
 }
 
 RuntimeValue OP::emit_eq_64s(Compiler* const comp,
-                              State* const state,
-                              CodeBlock* const code,
-                              const RuntimeValue* left, const RuntimeValue* right) {
+                             State* const state,
+                             CodeBlock* const code,
+                             const RuntimeValue* left, const RuntimeValue* right) {
 
   const Structure* ty = comp->types->s_u64;
 
@@ -248,21 +248,21 @@ RuntimeValue OP::emit_shift_l_64_by_8(Compiler* const comp,
     res_val->value_type = ValueType::FIXED;
     res_val->reg        = RCX.REG;
 
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_L_R64_BY_R8);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_L_BY_R8_R64);
 
     return temp_left;
   }
   else {
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_L_R64_BY_R8);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_L_BY_R8_R64);
 
     return temp_left;
   }
 }
 
 RuntimeValue OP::emit_shift_r_u64_by_8(Compiler* const comp,
-                                      State* const state,
-                                      CodeBlock* const code,
-                                      const RuntimeValue* left, const RuntimeValue* right) {
+                                       State* const state,
+                                       CodeBlock* const code,
+                                       const RuntimeValue* left, const RuntimeValue* right) {
   const Structure* left_t = comp->types->s_u64;
   const Structure* right_t = comp->types->s_u8;
 
@@ -274,21 +274,21 @@ RuntimeValue OP::emit_shift_r_u64_by_8(Compiler* const comp,
     res_val->value_type = ValueType::FIXED;
     res_val->reg        = RCX.REG;
 
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_U64_BY_R8);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_BY_R8_RU64);
 
     return temp_left;
   }
   else {
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_U64_BY_R8);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_BY_R8_RU64);
 
     return temp_left;
   }
 }
 
 RuntimeValue OP::emit_shift_r_i64_by_8(Compiler* const comp,
-                                      State* const state,
-                                      CodeBlock* const code,
-                                      const RuntimeValue* left, const RuntimeValue* right) {
+                                       State* const state,
+                                       CodeBlock* const code,
+                                       const RuntimeValue* left, const RuntimeValue* right) {
   const Structure* left_t = comp->types->s_i64;
   const Structure* right_t = comp->types->s_u8;
 
@@ -300,12 +300,12 @@ RuntimeValue OP::emit_shift_r_i64_by_8(Compiler* const comp,
     res_val->value_type = ValueType::FIXED;
     res_val->reg        = RCX.REG;
 
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_I64_BY_R8);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_BY_R8_RI64);
 
     return temp_left;
   }
   else {
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_I64_BY_R8);
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_BY_R8_RI64);
 
     return temp_left;
   }
@@ -395,241 +395,276 @@ RuntimeValue OP::emit_deref(Compiler* const comp,
   return deref_val;
 }
 
-const Structure* BIN_OP_TESTS::num_int_64_bit(Compiler* comp, const Structure* left, const Structure* right) {
-  const Types* types = comp->types;
-  
-  constexpr auto is_valid_type = [](const Types* types, const Structure* s) {
-    return s == types->s_u64 || s == types->s_i64 || s == types->s_int_lit || s == types->s_sint_lit;
-  };
+template<typename L>
+void impl_compile_balanced_binary_op(Compiler* comp, ASTExpression* expr, const BalancedBinOpOptions& op, L&& try_emit) {
+  assert(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
 
-  if (!is_valid_type(types, left) || !is_valid_type(types, right)) {
-    return nullptr;
-  }
+  const Types* const types = comp->types;
 
+  const auto try_normal_options = [&](ASTExpression* main, ASTExpression* other) {
+    const Structure* const main_type = main->type;
 
-  if (left == right) {
-    return left;
-  }
-  else if (can_literal_cast(left, right)) {
-    return right;
-  }
-  else if (can_literal_cast(right, left)) {
-    return left;
-  }
-  else {
-    return nullptr;
-  }
-}
-
-const Structure* BIN_OP_TESTS::num_signed_int_64_bit(Compiler* comp, const Structure* left, const Structure* right) {
-  const Types* types = comp->types;
-
-  constexpr auto is_valid_type = [](const Types* types, const Structure* s) {
-    return s == types->s_i64 || s == types->s_int_lit || s == types->s_sint_lit;
-  };
-
-  if (!is_valid_type(types, left) || !is_valid_type(types, right)) {
-    return nullptr;
-  }
-
-  if (left == right) {
-    return left;
-  }
-  else if (can_literal_cast(left, right)) {
-    return right;
-  }
-  else if (can_literal_cast(right, left)) {
-    return left;
-  }
-  else {
-    return nullptr;
-  }
-}
-
-const Structure* BIN_OP_TESTS::num_unsigned_int_64_bit(Compiler* comp, const Structure* left, const Structure* right) {
-  const Types* types = comp->types;
-  
-  const bool left_lit = types->s_int_lit == left;
-  const bool right_lit =  types->s_int_lit == right;
-
-  if ((left == right || right_lit) && (left == types->s_u64 || left_lit)) {
-    return left;
-  }
-  else if (left_lit && (right == types->s_u64 || right_lit)) {
-    return right;
-  }
-  else {
-    return nullptr;
-  }
-}
-
-const Structure* BIN_OP_TESTS::eq_int_64_bit(Compiler* comp, const Structure* left, const Structure* right) {
-  const Types* types = comp->types;
-  
-  constexpr auto is_valid_type = [](const Types* types, const Structure* s) {
-    return s == types->s_u64 || s == types->s_i64 || s == types->s_int_lit || s == types->s_sint_lit;
-  };
-
-  if (!is_valid_type(types, left) || !is_valid_type(types, right)) {
-    return nullptr;
-  }
-
-  if (left == right || can_literal_cast(left, right) || can_literal_cast(right, left)) {
-    return types->s_bool;
-  }
-  else {
-    return nullptr;
-  }
-}
-
-const Structure* BIN_OP_TESTS::bools(Compiler* comp, const Structure* left, const Structure* right) {
-  const Types* types = comp->types;
-  
-  if (left == right && left == types->s_bool) {
-    return types->s_bool;
-  }
-  else {
-    return nullptr;
-  }
-}
-
-const Structure* BIN_OP_TESTS::shift_64(Compiler* comp, const Structure* left, const Structure* right) {
-  const Types* types = comp->types;
-
-  constexpr auto is_valid_left = [](const Types* types, const Structure* s) {
-    return s == types->s_u64 || s == types->s_i64 || s == types->s_int_lit || s == types->s_sint_lit;
-  };
-
-  constexpr auto is_valid_right = [](const Types* types, const Structure* s) {
-    return s == types->s_u8 || s == types->s_int_lit;
-  };
-
-  if (!is_valid_left(types, left) || !is_valid_right(types, right)) {
-    return nullptr;
-  }
-
-  return left;
-}
-
-const Structure* BIN_OP_TESTS::s_shift_64(Compiler* comp, const Structure* left, const Structure* right) {
-  const Types* types = comp->types;
-
-  constexpr auto is_valid_left = [](const Types* types, const Structure* s) {
-    return s == types->s_i64 || s == types->s_sint_lit;
-  };
-
-  constexpr auto is_valid_right = [](const Types* types, const Structure* s) {
-    return s == types->s_u8 || s == types->s_int_lit;
-  };
-
-  if (!is_valid_left(types, left) || !is_valid_right(types, right)) {
-    return nullptr;
-  }
-
-  return left;
-}
-
-const Structure* BIN_OP_TESTS::u_shift_64(Compiler* comp, const Structure* left, const Structure* right) {
-  const Types* types = comp->types;
-
-  constexpr auto is_valid_left = [](const Types* types, const Structure* s) {
-    return s == types->s_u64 || s == types->s_int_lit;
-  };
-
-  constexpr auto is_valid_right = [](const Types* types, const Structure* s) {
-    return s == types->s_u8 || s == types->s_int_lit;
-  };
-
-  if (!is_valid_left(types, left) || !is_valid_right(types, right)) {
-    return nullptr;
-  }
-
-  return left;
-}
-
-const Structure* UN_OP_TESTS::signed_int_64_bit(Compiler* comp, const Structure* s) {
-  const Types* types = comp->types;
-  
-  if (types->s_sint_lit == s || types->s_i64 == s) {
-    return s;
-  }
-  else if (types->s_int_lit == s) {
-    return types->s_sint_lit;
-  }
-  else {
-    return nullptr;
-  }
-}
-
-const Structure* UN_OP_TESTS::address(Compiler* comp, const Structure* s) {
-  return find_or_make_pointer_type(comp, s);
-}
-
-const Structure* UN_OP_TESTS::deref(Compiler* comp, const Structure* s) {
-  if (s->type == STRUCTURE_TYPE::POINTER) {
-    return static_cast<const PointerStructure*>(s)->base;
-  }
-  else {
-    return nullptr;
-  }
-}
-
-CompileCode find_binary_operator(Compiler* comp,
-                                 ASTExpression* expr,
-                                 const BinaryOperation* operations,
-                                 size_t num_ops) {
-
-  const auto left = expr->bin_op.left->type;
-  const auto right = expr->bin_op.right->type;
-
-  assert(left != nullptr);
-  assert(right != nullptr);
-
-  auto op = operations;
-  const auto end = operations + num_ops;
-
-  for (; op < end; op++) {
-    expr->type = op->test(comp, left, right);
-
-    if (expr->type != nullptr) {
-      expr->bin_op.emit = op->func;
-
-      return CompileCode::NO_ERRORS;
+    if (op.u64_emit != nullptr && main_type == types->s_u64) {
+      //is a valid unsigned type
+      try_emit(main, other, op.u64_emit);
+      if (expr->bin_op.emit != nullptr) {
+        return;
+      }
     }
+    else if (op.i64_emit != nullptr && main_type == types->s_i64) {
+      //is a valid signed type
+      try_emit(main, other, op.i64_emit);
+      if (expr->bin_op.emit != nullptr) {
+        return;
+      }
+    }
+    else if (op.bools_emit != nullptr && main_type == types->s_bool) {
+      //is a valid bool type
+      try_emit(main, other, op.bools_emit);
+      if (expr->bin_op.emit != nullptr) {
+        return;
+      }
+    }
+  };
+
+  const auto try_literal_options = [&](ASTExpression* main, ASTExpression* other) {
+    const Structure* const main_type = main->type;
+
+    if (op.u64_emit != nullptr && main_type == types->s_int_lit) {
+      //Left is an unsigned literal type
+      try_emit(main, other, op.u64_emit);
+      if (expr->bin_op.emit != nullptr) {
+        return;
+      }
+    }
+    else if (op.i64_emit != nullptr && main_type == types->s_sint_lit) {
+      //Left is a signed literal type
+      try_emit(main, other, op.i64_emit);
+      if (expr->bin_op.emit != nullptr) {
+        return;
+      }
+    }
+  };
+
+  ASTExpression* const left = expr->bin_op.left;
+  ASTExpression* const right = expr->bin_op.right;
+
+  try_normal_options(left, right);
+  if (expr->bin_op.emit != nullptr) {
+    return;
+  }
+
+  try_normal_options(right, left);
+  if (expr->bin_op.emit != nullptr) {
+    return;
+  }
+
+  try_literal_options(left, right);
+  if (expr->bin_op.emit != nullptr) {
+    return;
+  }
+
+  try_literal_options(right, left);
+  if (expr->bin_op.emit != nullptr) {
+    return;
   }
 
   const char* const op_string = BINARY_OP_STRING::get(expr->bin_op.op);
 
-  printf("TYPE ERROR: No binary operator '%s' with operands left: '%s' and right: '%s'\n",
-         op_string, left->name->string, right->name->string);
-  return CompileCode::TYPE_CHECK_ERROR;
+  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                     "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
+                     op_string, left->type->name, right->type->name);
 }
 
-CompileCode find_unary_operator(Compiler* comp,
-                                ASTExpression* expr,
-                                const UnaryOperation* operations,
-                                size_t num_ops) {
+void impl_compile_unbalanced_binary_op(Compiler* comp, ASTExpression* expr, const UnbalancedBinOpOptions& op) {
+  assert(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
 
-  const auto prim = expr->un_op.primary->type;
+  const Types* const types = comp->types;
 
-  assert(prim != nullptr);
+  ASTExpression* const left = expr->bin_op.left;
+  ASTExpression* const right = expr->bin_op.right;
 
-  auto op = operations;
-  const auto end = operations + num_ops;
+  if (op.Lu64_Ru8_emit != nullptr && left->type == types->s_u64) {
+    compile_implicit_cast(comp, right, types->s_u8);
+    expr->bin_op.emit = op.Lu64_Ru8_emit;
+    expr->type        = left->type;
+    return;
+  }
+  else if (op.Li64_Ru8_emit != nullptr && left->type == types->s_i64) {
+    compile_implicit_cast(comp, right, types->s_u8);
+    expr->bin_op.emit = op.Li64_Ru8_emit;
+    expr->type        = left->type;
+    return;
+  }
 
-  for (; op < end; op++) {
-    expr->type = op->test(comp, prim);
+  const char* const op_string = BINARY_OP_STRING::get(expr->bin_op.op);
 
-    if (expr->type != nullptr) {
-      expr->un_op.emit = op->func;
+  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                     "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
+                     op_string, left->type->name, right->type->name);
+}
 
-      return CompileCode::NO_ERRORS;
+void impl_compile_unary_op(Compiler* comp, ASTExpression* expr, const UnaryOpOptions& op) {
+  assert(expr->expr_type == EXPRESSION_TYPE::UNARY_OPERATOR);
+
+  const Types* const types = comp->types;
+
+  ASTExpression* const prim = expr->un_op.primary;
+
+  if (op.i64_emit != nullptr) {
+    if (prim->type == types->s_i64 || prim->type == types->s_sint_lit) {
+      expr->un_op.emit = op.i64_emit;
+      expr->type        = prim->type;
+      return;
+    }
+    else if (prim->type == types->s_int_lit) {
+      //convert to signed type
+      expr->un_op.emit = op.i64_emit;
+      expr->type       = types->s_sint_lit;
+      return;
     }
   }
 
   const char* const op_string = UNARY_OP_STRING::get(expr->un_op.op);
 
-  printf("TYPE ERROR: No unary operator '%s' with operand type: '%s'\n",
-         op_string, prim->name->string);
-  return CompileCode::TYPE_CHECK_ERROR;
+  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                     "No unary operator '{}' exists for type: '{}'",
+                     op_string, prim->type->name);
+}
+
+//Overload for unbalanced operators
+void compile_binary_operator(Compiler* comp,
+                             ASTExpression* expr,
+                             const UnbalancedBinOpOptions& op) {
+  //Set up like this to mimic the other types
+  impl_compile_unbalanced_binary_op(comp, expr, op);
+}
+
+//Overload for unbalanced operators that dont care about left sign
+void compile_binary_operator(Compiler* comp,
+                             ASTExpression* expr,
+                             const UnbalancedLeftSignAgnBin& op) {
+  UnbalancedBinOpOptions normal ={};
+  normal.Li64_Ru8_emit = op.Lr64_Ru8_emit;
+  normal.Lu64_Ru8_emit = op.Lr64_Ru8_emit;
+
+  impl_compile_unbalanced_binary_op(comp, expr, normal);
+}
+
+
+void compile_binary_operator(Compiler* comp,
+                             ASTExpression* expr,
+                             const EqOpBin& op) {
+
+  //returns bool instead of main->type
+  const auto try_emit = [&](ASTExpression* main, ASTExpression* other, BINARY_OPERATOR_FUNCTION emit_op) {
+    if (can_implicit_cast(other->type, main->type)) {
+      expr->bin_op.emit = emit_op;
+      expr->type        = comp->types->s_bool;
+    }
+    else if (can_comptime_cast(other->type, main->type)) {
+      compile_implicit_cast(comp, other, main->type);
+      expr->bin_op.emit = emit_op;
+      expr->type        = comp->types->s_bool;
+    }
+  };
+
+  BalancedBinOpOptions balanced_op ={};
+  balanced_op.u64_emit = op.r64_emit;
+  balanced_op.i64_emit = op.r64_emit;
+  balanced_op.bools_emit = op.bools_emit;
+
+  impl_compile_balanced_binary_op(comp, expr, balanced_op, try_emit);
+}
+
+void compile_binary_operator(Compiler* comp, ASTExpression* expr, const SignAgnArithBinOp& op) {
+  const auto try_emit = [&](ASTExpression* main, ASTExpression* other, BINARY_OPERATOR_FUNCTION emit_op) {
+    if (can_implicit_cast(other->type, main->type)) {
+      expr->bin_op.emit = emit_op;
+      expr->type        = main->type;
+    }
+    else if (can_comptime_cast(other->type, main->type)) {
+      compile_implicit_cast(comp, other, main->type);
+      expr->bin_op.emit = emit_op;
+      expr->type        = main->type;
+    }
+  };
+
+  BalancedBinOpOptions balanced_op ={};
+  balanced_op.u64_emit = op.r64_emit;
+  balanced_op.i64_emit = op.r64_emit;
+  balanced_op.bools_emit = op.bools_emit;
+
+  impl_compile_balanced_binary_op(comp, expr, balanced_op, try_emit);
+}
+
+
+void compile_binary_operator(Compiler* comp,
+                             ASTExpression* expr,
+                             const SignedArithBinOp& op) {
+
+  const auto try_emit = [&](ASTExpression* main, ASTExpression* other, BINARY_OPERATOR_FUNCTION emit_op) {
+    if (can_implicit_cast(other->type, main->type)) {
+      expr->bin_op.emit = emit_op;
+      expr->type        = main->type;
+    }
+    else if (can_comptime_cast(other->type, main->type)) {
+      compile_implicit_cast(comp, other, main->type);
+      expr->bin_op.emit = emit_op;
+      expr->type        = main->type;
+    }
+  };
+
+  BalancedBinOpOptions balanced_op ={};
+  balanced_op.u64_emit = op.u64_emit;
+  balanced_op.i64_emit = op.i64_emit;
+
+  impl_compile_balanced_binary_op(comp, expr, balanced_op, try_emit);
+}
+
+//Overload for unary operators
+void compile_unary_operator(Compiler* comp,
+                            ASTExpression* expr,
+                            const UnaryOpOptions& op) {
+  //just to match stuff
+  impl_compile_unary_op(comp, expr, op);
+}
+
+//Overload for taking address
+void compile_take_address(Compiler* comp,
+                          State* state,
+                          ASTExpression* expr) {
+  //Cant actually fail
+  assert(expr->expr_type == EXPRESSION_TYPE::UNARY_OPERATOR);
+
+  const Structure* base = expr->un_op.primary->type;
+
+  const Structure* ptr = find_or_make_pointer_type(comp, base);
+  expr->type = ptr;
+  expr->un_op.emit = &OP::emit_address;
+
+  //Can only load the address of somewhere in memory
+  set_valid_rvts(expr->un_op.primary, state, (uint8_t)RVT::MEMORY);
+}
+
+//Overload for dereferencing
+void compile_deref(Compiler* comp,
+                   ASTExpression* expr) {
+  assert(expr->expr_type == EXPRESSION_TYPE::UNARY_OPERATOR);
+
+  ASTExpression* prim = expr->un_op.primary;
+
+  if (prim->type->type == STRUCTURE_TYPE::POINTER) {
+    const PointerStructure* ptr = (const PointerStructure*)prim->type;
+
+    expr->un_op.emit = &OP::emit_deref;
+    expr->type = ptr->base;
+  }
+  else {
+    const char* const op_string = UNARY_OP_STRING::get(expr->un_op.op);
+
+    comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                       "No unary operator '{}' exists for type: '{}'",
+                       op_string, prim->type->name);
+  }
 }

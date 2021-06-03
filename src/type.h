@@ -36,14 +36,14 @@ struct Structure {
 struct PointerStructure : public Structure {
   const Structure* base = nullptr;
 
-  static OwnedPtr<char> make_name(const PointerStructure*);
+  static OwnedPtr<char> gen_name(const Structure* base);
 };
 
 struct ArrayStructure : public Structure {
   const Structure* base = nullptr;
   size_t length = 0;
 
-  static OwnedPtr<char> make_name(const ArrayStructure*);
+  static OwnedPtr<char> gen_name(const Structure* base, size_t length);
 };
 
 struct IntegerStructure : public Structure {
@@ -83,16 +83,15 @@ struct CompositeStructure : public Structure {
 
   uint32_t total_size = 0;
   uint32_t total_alignment = 0;
-  Array<StructElement> elements = {};
+  Array<StructElement> elements ={};
 };
 
 struct Function {
   const InternString* name ={};
   Array<const Structure*> parameter_types ={};
-
-  bool return_via_ptr = false;
   const Structure* return_type = nullptr;
 
+  bool return_via_ptr = false;
   const ASTFunctionDeclaration* declaration = nullptr;
 
   CodeBlock code_block ={};
@@ -102,14 +101,14 @@ constexpr bool is_negatable(const Structure* s) {
   const bool signed_int = s->type == STRUCTURE_TYPE::INTEGER &&
     static_cast<const IntegerStructure*>(s)->is_signed;
   const bool int_lit = s->type == STRUCTURE_TYPE::LITERAL &&
-    static_cast<const LiteralStructure*>(s)->literal_type == LITERAL_TYPE::INTEGER; 
+    static_cast<const LiteralStructure*>(s)->literal_type == LITERAL_TYPE::INTEGER;
 
   return signed_int || int_lit;
 }
 
 constexpr bool is_numeric_type(const Structure* s) {
   const bool int_lit = s->type == STRUCTURE_TYPE::LITERAL &&
-    static_cast<const LiteralStructure*>(s)->literal_type == LITERAL_TYPE::INTEGER; 
+    static_cast<const LiteralStructure*>(s)->literal_type == LITERAL_TYPE::INTEGER;
 
 
   return s->type == STRUCTURE_TYPE::INTEGER || int_lit;
@@ -124,13 +123,6 @@ struct Types {
   static FreelistBlockAllocator<ArrayStructure> array_structures;
   static FreelistBlockAllocator<PointerStructure> pointer_structures;
   static FreelistBlockAllocator<EnumValue> enum_values;
-
-  LiteralStructure* new_literal();
-  PointerStructure* new_pointer();
-  IntegerStructure* new_int();
-  CompositeStructure* new_composite();
-  EnumStructure* new_enum();
-  ArrayStructure* new_array();
 
   const Structure* s_bool = nullptr;
 
@@ -154,8 +146,6 @@ struct Types {
 
   ~Types();
 
-
-
   constexpr bool is_logical_type(const Structure* s) const {
     return s == s_bool || is_numeric_type(s);
   }
@@ -164,16 +154,60 @@ struct Types {
   const EnumValue* enum_by_name(const InternString*) const;
 };
 
-void init_types(Types* types, StringInterner* strings);
+void init_types(Compiler* comp);
+
+LiteralStructure* new_literal_type(Compiler* const comp,
+                                   const InternString* name);
+
+IntegerStructure* new_int_type(Compiler* const comp,
+                               const InternString* name);
+
+CompositeStructure* new_composite_type(Compiler* const comp,
+                                       const InternString* name);
+
+EnumStructure* new_enum_type(Compiler* const comp,
+                             const InternString* name);
+
+Structure* new_base_type(Compiler* const comp,
+                         const InternString* name);
+
+ArrayStructure* new_array_type(Compiler* const comp,
+                               const Structure* base,
+                               size_t length);
+
+PointerStructure* new_pointer_type(Compiler* const comp,
+                                   const Structure* base);
+
+EnumValue* new_enum_value(Compiler* const comp,
+                          EnumStructure* enum_s,
+                          const InternString* name);
 
 
-//Can cast from a literal to a fixed type
-bool can_literal_cast(const Structure* from, const Structure* to);
+//Can cast without any value modification or checks
+constexpr bool can_implicit_cast(const Structure* from, const Structure* to) {
+  if(from == to) return true;
+  else if (from->type == STRUCTURE_TYPE::LITERAL 
+           && to->type == STRUCTURE_TYPE::LITERAL) {
+    //both literals
+    const LiteralStructure* f_ls = (const LiteralStructure*)from;
+    const LiteralStructure* t_ls = (const LiteralStructure*)to;
+
+    //can cast unsigned literal to signed literal
+    return f_ls->literal_type == LITERAL_TYPE::INTEGER
+      && t_ls->literal_type == LITERAL_TYPE::SIGNED_INTEGER;
+  }
+  else {
+    return false;
+  }
+}
+
+//Can cast with modification that can only be done at compile time
+bool can_comptime_cast(const Structure* from, const Structure* to);
 
 namespace CASTS {
-  RuntimeValue u8_to_r64(Compiler*, State*,  CodeBlock*, RuntimeValue*);
-  RuntimeValue i8_to_r64(Compiler*, State*,  CodeBlock*, RuntimeValue*);
-  RuntimeValue no_cast(Compiler*, State*,  CodeBlock*, RuntimeValue*);
+  RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, RuntimeValue*);
+  RuntimeValue i8_to_r64(Compiler*, State*, CodeBlock*, RuntimeValue*);
+  RuntimeValue no_cast(Compiler*, State*, CodeBlock*, RuntimeValue*);
 }
 
 namespace TYPE_TESTS {

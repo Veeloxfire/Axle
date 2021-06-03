@@ -7,9 +7,70 @@
 #include "backends.h"
 #include "format.h"
 #include "operators.h"
+#include "files.h"
 
 Function* Compiler::new_function() {
   return functions.insert();
+}
+
+void Compiler::set_unfound_name(const InternString* name, const Span& span) {
+  assert(name != nullptr);
+  unfound_deps.panic = true;
+
+  unfound_deps.units.insert_uninit(1);
+  UnfoundDep* dep = unfound_deps.units.back();
+
+  dep->set_union(UnfoundDepType::Name);
+  dep->name = name;
+  dep->unit_waiting = current_unit;
+  dep->span = span;
+
+  switch (current_unit.type) {
+    case COMPILATION_TYPE::CONSTANT: {
+        (constant_units.data + current_unit.index)->unfound_dependency = true;
+        break;
+      }
+    case COMPILATION_TYPE::FUNCTION: {
+        (function_units.data + current_unit.index)->unfound_dependency = true;
+        break;
+      }
+  }
+}
+
+void Compiler::set_unfound_signature(CallSignature&& sig, const Span& span) {
+  unfound_deps.panic = true;
+
+  unfound_deps.units.insert_uninit(1);
+  UnfoundDep* dep = unfound_deps.units.back();
+
+  dep->set_union(UnfoundDepType::Function);
+  dep->signature = std::move(sig);
+  dep->unit_waiting = current_unit;
+  dep->span = span;
+
+  switch (current_unit.type) {
+    case COMPILATION_TYPE::CONSTANT: {
+        (constant_units.data + current_unit.index)->unfound_dependency = true;
+        break;
+      }
+    case COMPILATION_TYPE::FUNCTION: {
+        (function_units.data + current_unit.index)->unfound_dependency = true;
+        break;
+      }
+  }
+}
+
+void Compiler::set_dep(CompilationUnitCarrier unit) {
+  unfound_deps.panic = true;
+
+  switch (current_unit.type) {
+    case COMPILATION_TYPE::FUNCTION:
+      (function_units.data + current_unit.index)->dependencies.insert(unit);
+      break;
+    case COMPILATION_TYPE::CONSTANT:
+      (constant_units.data + current_unit.index)->dependencies.insert(unit);
+      break;
+  }
 }
 
 Value* State::get_val(const ValueIndex& i) {
@@ -189,7 +250,59 @@ void ValueTree::combine_intersection(const ValueIndex from, const ValueIndex to)
   }
 }
 
-const Structure* find_or_make_array_type(const Compiler* comp, const Structure* base, size_t length) {
+void UnfoundDep::move_from(UnfoundDep&& dp) noexcept {
+  unit_waiting = std::move(dp.unit_waiting);
+  type = std::exchange(dp.type, UnfoundDepType::Unkown);
+
+  switch (type) {
+    case UnfoundDepType::Unkown: break;
+    case UnfoundDepType::Function: {
+        signature = std::move(dp.signature);
+        break;
+      }
+    case UnfoundDepType::Name: {
+        name = std::exchange(dp.name, nullptr);
+        break;
+      }
+  }
+}
+
+void UnfoundDep::set_union(UnfoundDepType et) noexcept {
+  destruct_union();
+  type = et;
+  switch (type) {
+    case UnfoundDepType::Unkown: break;
+    case UnfoundDepType::Function: {
+        default_init(&signature);
+        break;
+      }
+    case UnfoundDepType::Name: {
+        name = nullptr;
+        break;
+      }
+  }
+}
+
+void UnfoundDep::destruct_union() noexcept {
+  switch (type) {
+    case UnfoundDepType::Unkown: break;
+    case UnfoundDepType::Function: {
+        signature.~CallSignature();
+        break;
+      }
+    case UnfoundDepType::Name: {
+        name = nullptr;
+        break;
+      }
+  }
+}
+
+UnfoundDep::~UnfoundDep() {
+  destruct_single(&unit_waiting);
+  destruct_union();
+}
+
+const Structure* find_or_make_array_type(Compiler* const comp, const Structure* base, size_t length) {
   Types* types = comp->types;
 
   {
@@ -211,19 +324,10 @@ const Structure* find_or_make_array_type(const Compiler* comp, const Structure* 
   }
 
   //Doesnt exist - need to make new type
-  {
-    ArrayStructure* const arr = types->new_array();
-    arr->base = base;
-    arr->length = length;
-
-    OwnedPtr<char> name = ArrayStructure::make_name(arr);
-    arr->name = comp->strings->intern(name.ptr);
-
-    return arr;
-  }
+  return new_array_type(comp, base, length);
 }
 
-const Structure* find_or_make_pointer_type(const Compiler* comp, const Structure* base) {
+const Structure* find_or_make_pointer_type(Compiler* const comp, const Structure* base) {
   Types* types = comp->types;
 
   {
@@ -244,33 +348,29 @@ const Structure* find_or_make_pointer_type(const Compiler* comp, const Structure
   }
 
   //Doesnt exist - need to make new type
-  {
-    PointerStructure* const ptr = types->new_pointer();
-    ptr->base = base;
-
-    OwnedPtr<char> name = PointerStructure::make_name(ptr);
-    ptr->name = comp->strings->intern(name.ptr);
-
-    return ptr;
-  }
+  return new_pointer_type(comp, base);
 }
 
 //Note: Recursive for array types
-CompileCode compile_type(Compiler* const comp, ASTType* type) {
+void compile_type(Compiler* const comp, ASTType* type) {
   if (type->type != nullptr) {
     //Incase function re-called
-    return CompileCode::NO_ERRORS;
+    return;
   }
 
   switch (type->type_type) {
     case TYPE_TYPE::NORMAL: {
         type->type = comp->types->structure_by_name(type->name);
+        if (type->type == nullptr) {
+          comp->set_unfound_name(type->name, type->span);
+          return;
+        }
         break;
       }
     case TYPE_TYPE::ARRAY: {
-        CompileCode ret = compile_type(comp, type->arr.base);
-        if (ret != CompileCode::NO_ERRORS) {
-          return ret;
+        compile_type(comp, type->arr.base);
+        if (comp->is_panic()) {
+          return;
         }
 
         assert(type->arr.base->type != nullptr);
@@ -290,31 +390,25 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
           carrier.index = comp->constant_units.size - 1;
           carrier.type  = COMPILATION_TYPE::CONSTANT;
 
-          switch (comp->current_unit.type) {
-            case COMPILATION_TYPE::FUNCTION:
-              (comp->function_units.data + comp->current_unit.index)->dependecies.insert(carrier);
-              break;
-            case COMPILATION_TYPE::CONSTANT:
-              (comp->constant_units.data + comp->current_unit.index)->dependecies.insert(carrier);
-              break;
-          }
-
-          return CompileCode::FOUND_DEPENDENCY;
+          comp->set_dep(carrier);
+          return;
         }
         else {
           if (!TYPE_TESTS::is_int(type->arr.expr->type)) {
-            printf("TYPE ERROR: Expected an integer type value for array length!\n"
-                   "            Instead found %s", type->arr.expr->type->name->string);
-            return CompileCode::TYPE_CHECK_ERROR;
+            comp->report_error(CompileCode::TYPE_CHECK_ERROR, type->arr.expr->span,
+                               "Expected an integer type value for array length\n"
+                               "Instead found: {}", type->arr.expr->type->name);
+            return;
           }
 
           uint64_t length;
           if (TYPE_TESTS::is_signed_int(type->arr.expr->type)) {
             int64_t i_length = *(const int64_t*)type->arr.expr->const_val;
             if (i_length < 0) {
-              printf("TYPE ERROR: Length of array must positive"
-                     "            Instead found %lld", i_length);
-              return CompileCode::TYPE_CHECK_ERROR;
+              comp->report_error(CompileCode::TYPE_CHECK_ERROR, type->arr.expr->span,
+                                 "Length of array must positive\n"
+                                 "Instead found: {}", i_length);
+              return;
             }
             else {
               length = (uint64_t)i_length;
@@ -331,9 +425,9 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
         break;
       }
     case TYPE_TYPE::PTR: {
-        CompileCode ret = compile_type(comp, type->ptr.base);
-        if (ret != CompileCode::NO_ERRORS) {
-          return ret;
+        compile_type(comp, type->ptr.base);
+        if (comp->is_panic()) {
+          return;
         }
 
         assert(type->ptr.base != nullptr);
@@ -343,78 +437,69 @@ CompileCode compile_type(Compiler* const comp, ASTType* type) {
       }
   }
 
-  if (type->type == nullptr) {
-    return CompileCode::UNFOUND_DEPENDENCY;
-  }
-  else {
-    return CompileCode::NO_ERRORS;
-  }
+  assert(type->type != nullptr);
 }
 
-static void print_function_call(const FunctionCallExpr* const call) {
-  printf("%s(", call->function_name->string);
+//static void print_function_call(const FunctionCallExpr* const call) {
+//  printf("%s(", call->function_name->string);
+//
+//  auto i = call->arguments.begin();
+//  const auto end = call->arguments.end();
+//
+//  if (i < end) {
+//    for (; i < (end - 1); i++) {
+//      printf("%s, ", i->type->name->string);
+//    }
+//
+//    printf("%s", i->type->name->string);
+//  }
+//
+//  printf(")");
+//}
 
-  auto i = call->arguments.begin();
-  const auto end = call->arguments.end();
+//static void print_function_signature(const Function* func) {
+//  printf("(");
+//
+//  auto i = func->parameter_types.begin();
+//  const auto end = func->parameter_types.end();
+//
+//  if (i < end) {
+//    for (; i < (end - 1); i++) {
+//      printf("%s, ", (*i)->name->string);
+//    }
+//
+//    printf("%s", (*i)->name->string);
+//  }
+//
+//  printf(") -> %s", func->return_type->name->string);
+//}
 
-  if (i < end) {
-    for (; i < (end - 1); i++) {
-      printf("%s, ", i->type->name->string);
-    }
-
-    printf("%s", i->type->name->string);
-  }
-
-  printf(")");
-}
-
-static void print_function_signature(const Function* func) {
-  printf("(");
-
-  auto i = func->parameter_types.begin();
-  const auto end = func->parameter_types.end();
-
-  if (i < end) {
-    for (; i < (end - 1); i++) {
-      printf("%s, ", (*i)->name->string);
-    }
-
-    printf("%s", (*i)->name->string);
-  }
-
-  printf(") -> %s", func->return_type->name->string);
-}
-
-static Array<const Function*> generate_overload_set(Compiler* const comp,
-                                                    FunctionCallExpr* const call) {
-  auto i = comp->functions.begin_iter();
-  const auto end = comp->functions.end_iter();
+static Array<const Function*> generate_overload_set(const Compiler* const comp,
+                                                    const CallSignature* call) {
+  auto i = comp->functions.begin_const_iter();
+  const auto end = comp->functions.end_const_iter();
 
   Array<const Function*> possible_overloads ={};
 
   for (; i != end; i.next()) {
     const Function* const func = i.get();
 
-    if (func->return_type == nullptr) {
-      continue;
-    }
-
     //Correct name and number of args
-    if (call->function_name == func->name
+    if (call->name == func->name
         && call->arguments.size == func->parameter_types.size) {
       auto p_call = call->arguments.begin();
       const auto end_call = call->arguments.end();
 
       auto p_func = func->parameter_types.begin();
 
-      bool implicit_cast = false;
+      bool requires_cast = false;
 
       while (p_call < end_call) {
-        if (p_call->type == *p_func) {
+        if (*p_call == *p_func) {
           //Do nothing
         }
-        else if (can_literal_cast(p_call->type, *p_func)) {
-          implicit_cast = true;
+        else if (can_comptime_cast(*p_call, *p_func)) {
+          requires_cast = true;
         }
         else {
           //Escape out
@@ -425,7 +510,7 @@ static Array<const Function*> generate_overload_set(Compiler* const comp,
         p_func++;
       }
 
-      if (!implicit_cast) {
+      if (!requires_cast) {
         //Complete match
         possible_overloads.clear();
         possible_overloads.insert(func);
@@ -443,54 +528,66 @@ static Array<const Function*> generate_overload_set(Compiler* const comp,
   return possible_overloads;
 }
 
-static CompileCode find_function_for_call(Compiler* const comp,
-                                          FunctionCallExpr* const call) {
-  Array<const Function*> possible_overloads = generate_overload_set(comp, call);
+static void compile_find_function_call(Compiler* const comp,
+                                       ASTExpression* const expr) {
+  assert(expr->expr_type == EXPRESSION_TYPE::FUNCTION_CALL);
+  FunctionCallExpr* const call = &expr->call;
+
+  CallSignature sig ={};
+
+  sig.name = call->function_name;
+
+  {
+    sig.arguments.reserve_total(call->arguments.size);
+
+    auto i = call->arguments.begin();
+    const auto end = call->arguments.end();
+
+    for (; i < end; i++) {
+      sig.arguments.insert(i->type);
+    }
+  }
+
+  Array<const Function*> possible_overloads = generate_overload_set(comp, &sig);
 
   if (possible_overloads.size == 0) {
-    printf("TYPE ERROR: Could not find function '%s' with appropriate signature\n"
-           "            Call: '", call->function_name->string);
-    print_function_call(call);
-    printf("'\n");
-    return CompileCode::UNFOUND_DEPENDENCY;
+    comp->set_unfound_signature(std::move(sig), expr->span);
+    return;
   }
   else if (possible_overloads.size == 1) {
     call->function = possible_overloads.data[0];
-    return CompileCode::NO_ERRORS;
   }
   else {
-    printf("TYPE ERROR: Found more than one function '%s' with signature that required implicit casts\n"
-           "            Call: '", call->function_name->string);
+    Array<char> options_message ={};
 
-    print_function_call(call);
-    printf("'\n");
-
-    auto i = possible_overloads.begin();
-    const auto end = possible_overloads.end();
-
+    //Load all the options into a string
     for (size_t i = 0; i < possible_overloads.size; i++) {
       const Function* func = possible_overloads.data[i];
 
-      printf("            Option %llu: '", i + 1);
-      print_function_signature(func);
-      printf("'\n");
+      format_to_array(options_message, "Option {}: {}", i + 1, PrintFuncSignature{ func });
     }
 
-    return CompileCode::TYPE_CHECK_ERROR;
+    comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                       "Found more than one function '{}' with signature that required implicit casts\n"
+                       "Expcted: {}\n"
+                       "{}", call->function_name, sig, options_message);
+    return;
   }
 }
 
-static CompileCode cast_operator_type(const Types* const types,
-                                      ASTExpression* const expr) {
+static void cast_operator_type(Compiler* const comp,
+                               ASTExpression* const expr) {
+  const Types* const types = comp->types;
+
   const Structure* const cast_to = expr->cast.type.type;
   const Structure* const cast_from = expr->cast.expr->type;
 
   assert(cast_to != nullptr);
   assert(cast_from != nullptr);
 
-  if (cast_from == cast_to || can_literal_cast(cast_from, cast_to)) {
+  if (can_implicit_cast(cast_from, cast_to)) {
     expr->cast.emit = &CASTS::no_cast;
-    return CompileCode::NO_ERRORS;
+    return;
   }
 
   auto i = cast_from->casts.begin();
@@ -499,56 +596,222 @@ static CompileCode cast_operator_type(const Types* const types,
   for (; i < end; i++) {
     if (i->test(cast_to)) {
       expr->cast.emit = i->cast;
-      return CompileCode::NO_ERRORS;
+      return;
     }
   }
 
-  printf("CAST ERROR: Cannot cast type '%s' to type '%s'\n",
-         cast_from->name->string, cast_to->name->string);
-  return CompileCode::TYPE_CHECK_ERROR;
+  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                     "Cannot cast type '{}' to type '{}'",
+                     cast_from->name, cast_to->name);
+  return;
 }
 
-static CompileCode check_cast(const Structure* from, const Structure* to) {
-  if (from == to || can_literal_cast(from, to)) {
-    return CompileCode::NO_ERRORS;
+constexpr static bool already_const_type(EXPRESSION_TYPE et) {
+  return et == EXPRESSION_TYPE::ENUM
+    || et == EXPRESSION_TYPE::VALUE
+    || et== EXPRESSION_TYPE::ASCII_STRING;
+}
+
+constexpr static bool can_load_const_value(const ASTExpression* const expr) {
+  return expr->comptime_eval && expr->const_val == nullptr && !already_const_type(expr->expr_type);
+}
+
+void force_load_const_value(Compiler* const comp, ASTExpression* expr) {
+  assert(expr->comptime_eval);
+
+  if (expr->const_val != nullptr) {
+    return;
   }
-  else {
-    printf("CAST ERROR: Cannot implicilty cast from '%s' to '%s'\n",
-           from->name->string, to->name->string);
-    return CompileCode::TYPE_CHECK_ERROR;
+
+  //If not already const then must be an "already const type"
+  assert(already_const_type(expr->expr_type));
+
+  switch (expr->expr_type) {
+    case EXPRESSION_TYPE::ENUM: {
+        uint8_t* enum_c = comp->constants.alloc_no_construct(8);
+        x64_to_bytes(expr->enum_value.enum_value->representation, enum_c);
+
+        expr->const_val = enum_c;
+        break;
+      }
+    case EXPRESSION_TYPE::VALUE: {
+        const size_t size = expr->type->size();
+
+        uint8_t* val_c = comp->constants.alloc_no_construct(size);
+        memcpy_ts(val_c, size, (uint8_t*)&expr->value.value, size);
+
+        expr->const_val = val_c;
+        break;
+      }
+    case EXPRESSION_TYPE::ASCII_STRING: {
+        const ArrayStructure* const arr_type = (const ArrayStructure*)expr->type;
+
+        const size_t size = arr_type->size();
+        char* string_c = (char*)comp->constants.alloc_no_construct(size);
+
+        expr->const_val = (uint8_t*)string_c;
+        break;
+      }
   }
 }
 
-constexpr static bool already_const_value(const ASTExpression* expr) {
-  return expr->expr_type == EXPRESSION_TYPE::ENUM
-    || expr->expr_type == EXPRESSION_TYPE::VALUE
-    || expr->expr_type == EXPRESSION_TYPE::ASCII_STRING;
-}
 
-CompileCode make_constant_typed_dependency(ASTExpression* expr, State* const state, Compiler* const comp) {
-  expr->const_val = comp->constants.alloc_no_construct(expr->type->size());
-
-  ConstantUnit unit ={};
-  unit.expr   = expr;
-  unit.stage  = EXPRESSION_COMPILE_STAGE::TYPED;
-
-  comp->constant_units.insert(std::move(unit));
-
+void make_constant_typed_dependency(Compiler* const comp, ASTExpression* expr, const Structure* cast_to) {
+  comp->constant_units.insert_uninit(1);
+  ConstantUnit* unit = comp->constant_units.back();
+  unit->expr    = expr;
+  unit->stage   = EXPRESSION_COMPILE_STAGE::TYPED;
+  unit->cast_to = cast_to;
 
   CompilationUnitCarrier carrier ={};
   carrier.index = comp->constant_units.size - 1;
   carrier.type  = COMPILATION_TYPE::CONSTANT;
 
-  switch (comp->current_unit.type) {
-    case COMPILATION_TYPE::FUNCTION:
-      (comp->function_units.data + comp->current_unit.index)->dependecies.insert(carrier);
-      break;
-    case COMPILATION_TYPE::CONSTANT:
-      (comp->constant_units.data + comp->current_unit.index)->dependecies.insert(carrier);
-      break;
+  comp->set_dep(carrier);
+}
+
+static void do_literal_cast(Compiler* const comp,
+                            const ASTExpression* expr, const Structure* to_type,
+                            const uint8_t* from, uint8_t* to) {
+  //Should be guaranteed that this cast will be ok
+
+  const Structure* from_type = expr->type;
+
+  if (from_type == to_type) {
+    const size_t size = from_type->size();
+    memcpy_ts(to, size, from, size);
+    return;
   }
 
-  return CompileCode::FOUND_DEPENDENCY;
+  switch (from_type->type) {
+    case STRUCTURE_TYPE::FIXED_ARRAY: {
+        const ArrayStructure* from_arr = (const ArrayStructure*)from_type;
+        const ArrayStructure* to_arr = (const ArrayStructure*)to_type;
+
+        assert(to_type->type == STRUCTURE_TYPE::FIXED_ARRAY);
+        assert(from_arr->length == to_arr->length);
+        assert(expr->expr_type == EXPRESSION_TYPE::ARRAY_EXPR);
+
+        size_t from_base_size = from_arr->base->size();
+        size_t to_base_size = to_arr->base->size();
+
+        for (size_t i = 0; i < from_arr->length; i++) {
+          auto* base_expr = expr->array_expr.elements.data + i;
+
+          do_literal_cast(comp, base_expr, to_arr->base, from + (i * from_base_size), to + (i * to_base_size));
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        break;
+      }
+    case STRUCTURE_TYPE::LITERAL: {
+        const LiteralStructure* ls = (const LiteralStructure*)from_type;
+
+        switch (ls->literal_type) {
+          case LITERAL_TYPE::EMPTY_ARR: {
+              assert(false);//Should fix this later
+              break;
+            }
+          case LITERAL_TYPE::SIGNED_INTEGER: {
+              const IntegerStructure* to_is = (const IntegerStructure*)to_type;
+              assert(to_type->type == STRUCTURE_TYPE::INTEGER);
+              assert(to_is->is_signed == true);
+              assert(to_is->bytes <= 8);
+
+              int64_t comptime_val = x64_from_bytes(from);
+              int64_t max_negative_val = ~bit_fill_lower<uint64_t>(to_is->bytes * 8 - 1);
+              const int64_t max_positive_val = bit_fill_lower<uint64_t>(to_is->bytes * 8 - 1);
+
+              if (comptime_val < max_negative_val) {
+                comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                                   "'{}' value is too large to fit in type '{}'\n"
+                                   "The maximum negative value is: '{}'",
+                                   comptime_val, to_is->name, max_positive_val);
+                return;
+
+              }
+              else if (comptime_val > max_positive_val) {
+                comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                                   "'{}' value is too large to fit in type '{}'\n"
+                                   "The maximum positive value is: '{}'",
+                                   comptime_val, to_is->name, max_positive_val);
+                return;
+              }
+
+              //Should theoretically be able to just memcpy ... 
+              memcpy_ts(to, to_is->bytes, from, to_is->bytes);
+              break;
+            }
+          case LITERAL_TYPE::INTEGER: {
+              const IntegerStructure* to_is = (const IntegerStructure*)to_type;
+              assert(to_type->type == STRUCTURE_TYPE::INTEGER);
+
+              assert(to_is->bytes <= 8);
+
+              uint64_t comptime_val = x64_from_bytes(from);
+              if (to_is->is_signed) {
+                const uint64_t max_positive_val = bit_fill_lower<uint64_t>(to_is->bytes * 8 - 1);
+                if (comptime_val > max_positive_val) {
+                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                                     "'{}' value is too large to fit in type '{}'\n"
+                                     "The maximum value is: '{}'",
+                                     comptime_val, to_is->name, max_positive_val);
+                  return;
+                }
+              }
+              else {
+                const uint64_t max_val = bit_fill_lower<uint64_t>(to_is->bytes * 8);
+                if (comptime_val > max_val) {
+                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                                     "'{}' value is too large to fit in type '{}'\n"
+                                     "The maximum value is: '{}'",
+                                     comptime_val, to_is->name, max_val);
+                  return;
+                }
+              }
+
+              //Unsigned values should simply be loaded in byte by byte
+              memcpy_ts(to, to_is->bytes, from, to_is->bytes);
+              break;
+            }
+        }
+
+        break;
+      }
+    default:
+      assert(false);//should never be here
+  }
+}
+
+
+void compile_implicit_cast(Compiler* const comp, ASTExpression* from_expr, const Structure* to) {
+  const Structure* from = from_expr->type;
+
+  if (can_implicit_cast(from, to)) {
+    return;
+  }
+  else if (can_comptime_cast(from, to) && from_expr->comptime_eval) {
+    if (can_load_const_value(from_expr)) {
+      make_constant_typed_dependency(comp, from_expr, to);
+    }
+    else {
+      force_load_const_value(comp, from_expr);
+
+      uint8_t* new_const = comp->constants.alloc_no_construct(from_expr->type->size());
+
+      do_literal_cast(comp, from_expr, to, from_expr->const_val, new_const);
+      comp->constants.free_no_destruct(from_expr->const_val);
+
+      from_expr->const_val = new_const;
+    }
+  }
+  else {
+    comp->report_error(CompileCode::TYPE_CHECK_ERROR, from_expr->span,
+                       "Cannot implicilty cast from '{}' to '{}'",
+                       from->name, to->name);
+  }
 }
 
 void set_valid_rvts(ASTExpression* const expr, State* const state, uint8_t valid_rvts) {
@@ -562,19 +825,16 @@ void set_valid_rvts(ASTExpression* const expr, State* const state, uint8_t valid
 }
 
 //Note: Recursive
-static CompileCode compile_type_of_expression(Compiler* const comp,
-                                              ASTExpression* const expr,
-                                              State* const state) {
+static void compile_type_of_expression(Compiler* const comp,
+                                       ASTExpression* const expr,
+                                       State* const state) {
   assert(expr->valid_rvts != 0);//shouldnt start 0
   DEFER(&) { assert(expr->valid_rvts != 0); };//shouldnt end 0
 
   //Already typed
   if (expr->type != nullptr) {
-    return CompileCode::NO_ERRORS;
+    return;
   }
-
-  //just a lil buffer so I dont have to allocate one in every switch case
-  CompileCode ret_code = CompileCode::NO_ERRORS;
 
   switch (expr->expr_type) {
     case EXPRESSION_TYPE::INDEX: {
@@ -584,35 +844,46 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         arr_expr->call_leaf = expr->call_leaf;
         index_expr->call_leaf = expr->call_leaf;
 
-        ret_code = compile_type_of_expression(comp, arr_expr, state);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        compile_type_of_expression(comp, arr_expr, state);
+        if (comp->is_panic()) {
+          return;
         }
 
         assert(arr_expr->type != nullptr);
 
         if (!TYPE_TESTS::is_array(arr_expr->type)) {
-          printf("TYPE_ERROR: Cannot take index of non-array type: %s\n", arr_expr->type->name->string);
-          return CompileCode::TYPE_CHECK_ERROR;
+          comp->report_error(CompileCode::TYPE_CHECK_ERROR, arr_expr->span,
+                             "Cannot take index of non-array type: {}",
+                             arr_expr->type->name);
+          return;
         }
 
-        ret_code = compile_type_of_expression(comp, index_expr, state);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        compile_type_of_expression(comp, index_expr, state);
+        if (comp->is_panic()) {
+          return;
         }
 
         auto* index_type = index_expr->type;
         assert(index_type != nullptr);
 
         if (!TYPE_TESTS::is_int(index_type)) {
-          printf("TYPE_ERROR: An index must be in integer\n"
-                 "            Found non-integer type: %s\n", index_type->name->string);
-          return CompileCode::TYPE_CHECK_ERROR;
+          comp->report_error(CompileCode::TYPE_CHECK_ERROR, index_expr->span,
+                             "An index must be in integer\n"
+                             "Found non-integer type: {}",
+                             index_type->name);
+          return;
         }
 
         if (!index_expr->comptime_eval) {
           //If the index is not known at compile time then the array must in memory and in a register
-          set_valid_rvts(arr_expr, state, (uint8_t)RVT::MEMORY);
+          uint8_t valids = (uint8_t)RVT::MEMORY;
+
+          if (arr_expr->type->size() <= 8) {
+            //Can be in a register if it will fit
+            valids |= RVT::REGISTER;
+          }
+
+          set_valid_rvts(arr_expr, state, valids);
         }
 
         expr->type = static_cast<const ArrayStructure*>(arr_expr->type)->base;
@@ -632,9 +903,9 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         for (; i < end; i++) {
           i->call_leaf = expr->call_leaf;
 
-          ret_code = compile_type_of_expression(comp, i, state);
-          if (ret_code != CompileCode::NO_ERRORS) {
-            return ret_code;
+          compile_type_of_expression(comp, i, state);
+          if (comp->is_panic()) {
+            return;
           }
 
           if (base_type == nullptr) {
@@ -643,9 +914,9 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           }
           else {
             //Check rest of the elements match
-            ret_code = check_cast(i->type, base_type);
-            if (ret_code != CompileCode::NO_ERRORS) {
-              return ret_code;
+            compile_implicit_cast(comp, i, base_type);
+            if (comp->is_panic()) {
+              return;
             }
 
             base_type = i->type;//Will always be either same or more specific
@@ -665,7 +936,7 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::ASCII_STRING: {
-        const size_t len = strlen_ts(expr->ascii_string->string) + 1;
+        const size_t len = expr->ascii_string->len + 1;
 
         expr->type = find_or_make_array_type(comp, comp->types->s_ascii, len);
         expr->comptime_eval = true;
@@ -675,8 +946,8 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
       expr->enum_value.enum_value = comp->types->enum_by_name(expr->enum_value.name);
 
       if (expr->enum_value.enum_value == nullptr) {
-        printf("TYPE ERROR: Enum value not found '%s'\n", expr->enum_value.name->string);
-        return CompileCode::UNFOUND_DEPENDENCY;
+        comp->set_unfound_name(expr->enum_value.name, expr->span);
+        return;
       }
 
       expr->type = expr->enum_value.enum_value->type;
@@ -696,8 +967,10 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           expr->type = comp->types->s_u64;
         }
         else {
-          printf("DEPENDENCY ERROR: Invalid integer literal suffix '%s'", val->suffix->string);
-          return CompileCode::UNFOUND_DEPENDENCY;
+          comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                             "Invalid integer literal suffix type '{}'",
+                             val->suffix);
+          return;
         }
 
         expr->comptime_eval = true;
@@ -718,8 +991,8 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           loc->valid_rvts &= expr->valid_rvts;
         }
         else {
-          printf("DEPENDENCY ERROR: '%s' is not a variable in this scope\n", name->string);
-          return CompileCode::UNFOUND_DEPENDENCY;
+          comp->set_unfound_name(name, expr->span);
+          return;
         }
 
         expr->comptime_eval = false;
@@ -729,20 +1002,19 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
     case EXPRESSION_TYPE::CAST: {
         expr->cast.expr->call_leaf = expr->call_leaf;
 
-        ret_code = compile_type(comp, &expr->cast.type);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        compile_type(comp, &expr->cast.type);
+        if (comp->is_panic()) {
+          return;
         }
 
-        ret_code = compile_type_of_expression(comp, expr->cast.expr, state);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        compile_type_of_expression(comp, expr->cast.expr, state);
+        if (comp->is_panic()) {
+          return;
         }
 
-
-        ret_code = cast_operator_type(comp->types, expr);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        cast_operator_type(comp, expr);
+        if (comp->is_panic()) {
+          return;
         }
 
         expr->comptime_eval = expr->cast.expr->comptime_eval;
@@ -753,9 +1025,9 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
     case EXPRESSION_TYPE::UNARY_OPERATOR: {
         expr->un_op.primary->call_leaf = expr->call_leaf;
 
-        ret_code = compile_type_of_expression(comp, expr->un_op.primary, state);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        compile_type_of_expression(comp, expr->un_op.primary, state);
+        if (comp->is_panic()) {
+          return;
         }
 
         expr->comptime_eval = expr->un_op.primary->comptime_eval;
@@ -763,26 +1035,27 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
 
         switch (expr->un_op.op) {
           case UNARY_OPERATOR::NEG:
-            return find_unary_operator(comp, expr, neg_operators, array_size(neg_operators));
-          case UNARY_OPERATOR::ADDRESS: {
-              CompileCode ret = find_unary_operator(comp, expr, address_operators, array_size(address_operators));
-              if (ret != CompileCode::NO_ERRORS) {
-                return ret;
-              }
-
-              //Can only load the address of somewhere in memory
-              set_valid_rvts(expr->un_op.primary, state, (uint8_t)RVT::MEMORY);
-
-              return CompileCode::NO_ERRORS;
-            }
+            compile_unary_operator(comp, expr, neg_operators);
+            break;
+          case UNARY_OPERATOR::ADDRESS:
+            compile_take_address(comp, state, expr);
+            break;
           case UNARY_OPERATOR::DEREF:
-            return find_unary_operator(comp, expr, deref_operators, array_size(deref_operators));
+            compile_deref(comp, expr);
+            break;
           default: {
-              const char* const name = UNARY_OP_STRING::get(expr->un_op.op);
+              const char* name = UNARY_OP_STRING::get(expr->un_op.op);
 
-              printf("INTERNAL ERROR: Unary Operator not implemented '%s'\n", name);
-              return CompileCode::INTERNAL_ERROR;
+              comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+                                 "Type checking is not implemented for unary operator '{}'",
+                                 name);
+              return;
             }
+        }
+
+        //Check if the op type check failed
+        if (comp->is_panic()) {
+          return;
         }
 
         break;
@@ -794,28 +1067,30 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         bin_op->right->call_leaf = expr->call_leaf;
 
 
-        ret_code = compile_type_of_expression(comp, bin_op->left, state);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        compile_type_of_expression(comp, bin_op->left, state);
+        if (comp->is_panic()) {
+          return;
         }
 
-        ret_code = compile_type_of_expression(comp, bin_op->right, state);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        compile_type_of_expression(comp, bin_op->right, state);
+        if (comp->is_panic()) {
+          return;
         }
 
         if (bin_op->left->comptime_eval && bin_op->right->comptime_eval) {
           expr->comptime_eval = true;
         }
-        else if (bin_op->left->comptime_eval && !already_const_value(bin_op->left)) {
+        else if (can_load_const_value(bin_op->left)) {
           expr->comptime_eval = false;
 
-          return make_constant_typed_dependency(bin_op->left, state, comp);
+          make_constant_typed_dependency(comp, bin_op->left, nullptr);
+          return;//guaranteed to have panic
         }
-        else if (bin_op->right->comptime_eval && !already_const_value(bin_op->right)) {
+        else if (can_load_const_value(bin_op->right)) {
           expr->comptime_eval = false;
 
-          return make_constant_typed_dependency(bin_op->right, state, comp);
+          make_constant_typed_dependency(comp, bin_op->right, nullptr);
+          return;//guaranteed to have panic
         }
         else {
           expr->comptime_eval = false;
@@ -825,25 +1100,45 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
 
         switch (expr->bin_op.op) {
           case BINARY_OPERATOR::ADD:
-            return find_binary_operator(comp, expr, add_operators, array_size(add_operators));
+            compile_binary_operator(comp, expr, add_operators);
+            break;
           case BINARY_OPERATOR::SUB:
-            return find_binary_operator(comp, expr, sub_operators, array_size(sub_operators));
+            compile_binary_operator(comp, expr, sub_operators);
+            break;
           case BINARY_OPERATOR::MUL:
-            return find_binary_operator(comp, expr, mul_operators, array_size(mul_operators));
+            compile_binary_operator(comp, expr, mul_operators);
+            break;
           case BINARY_OPERATOR::DIV:
-            return find_binary_operator(comp, expr, div_operators, array_size(div_operators));
+            compile_binary_operator(comp, expr, div_operators);
+            break;
           case BINARY_OPERATOR::EQUIVALENT:
-            return find_binary_operator(comp, expr, eq_operators, array_size(eq_operators));
+            compile_binary_operator(comp, expr, eq_operators);
+            break;
           case BINARY_OPERATOR::OR:
-            return find_binary_operator(comp, expr, or_operators, array_size(or_operators));
+            compile_binary_operator(comp, expr, or_operators);
+            break;
           case BINARY_OPERATOR::AND:
-            return find_binary_operator(comp, expr, and_operators, array_size(and_operators));
+            compile_binary_operator(comp, expr, and_operators);
+            break;
+          case BINARY_OPERATOR::LEFT_SHIFT:
+            compile_binary_operator(comp, expr, left_shift_operators);
+            break;
+          case BINARY_OPERATOR::RIGHT_SHIFT:
+            compile_binary_operator(comp, expr, right_shift_operators);
+            break;
           default: {
               const char* const name = BINARY_OP_STRING::get(expr->bin_op.op);
 
-              printf("INTERNAL ERROR: Binary Operator not implemented '%s'\n", name);
-              return CompileCode::INTERNAL_ERROR;
+              comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+                                 "Type Checking is not implemented for binary operator '{}'",
+                                 name);
+              return;
             }
+        }
+
+        //Type check might have failed in binary operator
+        if (comp->is_panic()) {
+          return;
         }
 
         break;
@@ -860,18 +1155,43 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           for (; i < end; i++) {
             i->call_leaf = true;
 
-            ret_code = compile_type_of_expression(comp, i, state);
-            if (ret_code != CompileCode::NO_ERRORS) {
-              return ret_code;
+            compile_type_of_expression(comp, i, state);
+            if (comp->is_panic()) {
+              return;
             }
 
             expr->comptime_eval &= i->comptime_eval;
           }
         }
 
-        ret_code = find_function_for_call(comp, call);
-        if (ret_code != CompileCode::NO_ERRORS) {
-          return ret_code;
+        if (call->function == nullptr) {
+          compile_find_function_call(comp, expr);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        const auto* func = call->function;
+
+        {
+          const size_t size = func->parameter_types.size;
+
+          if (call->arguments.size != size) {
+            comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+                               "Compiler linked a function with {} parameters for a call with {} arguments!",
+                               size, call->arguments.size);
+            return;
+          }
+
+          for (size_t i = 0; i < size; i++) {
+            const Structure* param_t = func->parameter_types.data[i];
+            ASTExpression* arg_expr = call->arguments.data + i;
+
+            compile_implicit_cast(comp, arg_expr, param_t);
+            if (comp->is_panic()) {
+              return;
+            }
+          }
         }
 
         //Cant currently call functions at compile time
@@ -882,8 +1202,11 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
           const auto end = call->arguments.mut_end();
 
           for (; i < end; i++) {
-            if (i->comptime_eval && !already_const_value(i)) {
-              return make_constant_typed_dependency(i, state, comp);
+            if (can_load_const_value(i)) {
+              make_constant_typed_dependency(comp, i, nullptr);
+              if (comp->is_panic()) {
+                return;
+              }
             }
           }
         }
@@ -894,52 +1217,47 @@ static CompileCode compile_type_of_expression(Compiler* const comp,
         break;
       }
     default: {
-        printf("INTERNAL ERROR: Invalid expression type\n"
-               "                Expression type: %d\n", (int)expr->expr_type);
-        return CompileCode::INTERNAL_ERROR;
+        comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+                           "Invalid Expression type found! Expression id: '{}'",
+                           (int)expr->expr_type);
+        return;
       }
   }
 
   assert(expr->type != nullptr);
-  return CompileCode::NO_ERRORS;
 }
 
-static CompileCode compile_type_of_statement(Compiler* const comp,
-                                             Function* const func,
-                                             State* const state,
-                                             ASTStatement* const statement) {
-
-  CompileCode ret = CompileCode::NO_ERRORS;
-
+static void compile_type_of_statement(Compiler* const comp,
+                                      Function* const func,
+                                      State* const state,
+                                      ASTStatement* const statement) {
   switch (statement->type) {
     case STATEMENT_TYPE::IF_ELSE: {
         ASTIfElse* const if_else = &statement->if_else;
 
         if (if_else->condition.type == nullptr) {
-          ret = compile_type_of_expression(comp, &if_else->condition, state);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_type_of_expression(comp, &if_else->condition, state);
+          if (comp->is_panic()) {
+            return;
           }
 
-          ret = check_cast(if_else->condition.type, comp->types->s_bool);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_implicit_cast(comp, &if_else->condition, comp->types->s_bool);
+          if (comp->is_panic()) {
+            return;
           }
         }
 
-        assert(if_else->condition.type != nullptr);
-
-        ret = compile_type_of_statement(comp, func, state, if_else->if_statement);
-        if (ret != CompileCode::NO_ERRORS) {
-          return ret;
+        compile_type_of_statement(comp, func, state, if_else->if_statement);
+        if (comp->is_panic()) {
+          return;
         }
 
-        ret = compile_type_of_statement(comp, func, state, if_else->else_statement);
-        if (ret != CompileCode::NO_ERRORS) {
-          return ret;
+        compile_type_of_statement(comp, func, state, if_else->else_statement);
+        if (comp->is_panic()) {
+          return;
         }
 
-        return CompileCode::NO_ERRORS;
+        return;
       }
     case STATEMENT_TYPE::BLOCK: {
         auto locals = state->active_locals.size;
@@ -949,40 +1267,41 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
         const auto end = statement->block.block.mut_end();
 
         for (; i < end; i++) {
-          ret = compile_type_of_statement(comp, func, state, i);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_type_of_statement(comp, func, state, i);
+          if (comp->is_panic()) {
+            return;
           }
         }
 
-        return ret;
+        return;
       }
     case STATEMENT_TYPE::DECLARATION: {
         ASTDeclaration* const decl = &statement->declaration;
 
         if (decl->type.type == nullptr) {
-          ret = compile_type(comp, &decl->type);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_type(comp, &decl->type);
+          if (comp->is_panic()) {
+            return;
           }
         }
         assert(decl->type.type != nullptr);
 
         if (decl->expression.type == nullptr) {
-          ret = compile_type_of_expression(comp, &decl->expression, state);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_type_of_expression(comp, &decl->expression, state);
+          if (comp->is_panic()) {
+            return;
           }
 
           assert(decl->expression.type != nullptr);
 
-          ret = check_cast(decl->expression.type, decl->type.type);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_implicit_cast(comp, &decl->expression, decl->type.type);
+          if (comp->is_panic()) {
+            return;
           }
 
-          if (decl->expression.comptime_eval && !already_const_value(&decl->expression)) {
-            return make_constant_typed_dependency(&decl->expression, state, comp);
+          if (can_load_const_value(&decl->expression)) {
+            make_constant_typed_dependency(comp, &decl->expression, nullptr);
+            return;
           }
         }
         assert(decl->expression.type != nullptr);
@@ -990,11 +1309,10 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
         const Local* shadowing = state->find_local(decl->name);
 
         if (shadowing != nullptr) {
-          printf("NAME ERROR: Declare a variable with the same name as an existing variable: %s"
-                 "            Shadowing variables is illegal!\n",
-                 shadowing->name->string);
-
-          return CompileCode::NAME_ERROR;
+          comp->report_error(CompileCode::NAME_ERROR, statement->span,
+                             "Attempted to shadow local variable '{}'",
+                             decl->name);
+          return;
         }
 
         size_t loc_index = state->all_locals.size;
@@ -1007,56 +1325,56 @@ static CompileCode compile_type_of_statement(Compiler* const comp,
         loc->name = decl->name;
         loc->type = decl->type.type;
 
-
-        return CompileCode::NO_ERRORS;
+        return;
       }
     case STATEMENT_TYPE::EXPRESSION: {
         ASTExpression* const expr = &statement->expression;
         if (expr->type == nullptr) {
-          ret = compile_type_of_expression(comp, expr, state);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_type_of_expression(comp, expr, state);
+          if (comp->is_panic()) {
+            return;
           }
 
           assert(expr->type != nullptr);
 
-          if (expr->comptime_eval && !already_const_value(expr)) {
-            return make_constant_typed_dependency(expr, state, comp);
+          if (can_load_const_value(expr)) {
+            make_constant_typed_dependency(comp, expr, nullptr);
+            return;
           }
         }
 
-        return CompileCode::NO_ERRORS;
+        return;
       }
     case STATEMENT_TYPE::RETURN: {
         ASTExpression* const expr = &statement->expression;
 
         if (expr->type == nullptr) {
-          ret = compile_type_of_expression(comp, expr, state);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_type_of_expression(comp, expr, state);
+          if (comp->is_panic()) {
+            return;
           }
 
           assert(expr->type != nullptr);
 
-          ret = check_cast(expr->type, func->return_type);
-          if (ret != CompileCode::NO_ERRORS) {
-            return ret;
+          compile_implicit_cast(comp, expr, func->return_type);
+          if (comp->is_panic()) {
+            return;
           }
 
-          if (expr->comptime_eval && !already_const_value(expr)) {
-            return make_constant_typed_dependency(expr, state, comp);
+          if (can_load_const_value(expr)) {
+            make_constant_typed_dependency(comp, expr, nullptr);
+            return;
           }
         }
 
         assert(expr->type != nullptr);
-        return CompileCode::NO_ERRORS;
+        return;
       }
-
   }
 
-  printf("INTERNAL ERROR: Reached end of statement type checking without exiting\n"
-         "                Statement type: %d\n", (int)statement->type);
-  return CompileCode::INTERNAL_ERROR;
+  comp->report_error(CompileCode::INTERNAL_ERROR, statement->span,
+                     "Reached end of statement type checking without exiting\n"
+                     "Statement type: {}\n", statement->type);
 }
 
 static void load_const_to_mem(Compiler* const comp,
@@ -1587,7 +1905,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
     state->control_flow.expression_num++;
   };
 
-  if (expr->comptime_eval && !state->comptime_compilation && !already_const_value(expr)) {
+  if (expr->comptime_eval && !state->comptime_compilation && !already_const_type(expr->expr_type)) {
     //Compile time expression
     assert(expr->const_val != nullptr);
 
@@ -1620,7 +1938,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                                               state,
                                                               code,
                                                               expr->index.expr,
-                                                              (uint8_t)RVT::MEMORY);
+                                                              RVT::REGISTER | RVT::MEMORY);
 
         RuntimeValue index_val = compile_bytecode_of_expression_new(comp,
                                                                     state,
@@ -1628,48 +1946,85 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                                                     expr->index.index,
                                                                     RVT::REGISTER | RVT::CONST);
 
-        const MemIndex arr_index = state->new_mem();
-
         if (hint->is_hint) {
           load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts & NON_CONST_RVTS);
         }
 
-        if (index_val.type == RVT::CONST) {
-          auto index = *(uint64_t*)index_val.constant.ptr;
+        if (arr.type == RVT::REGISTER) {
+          //If its in a register then a shift is equivalent to the 
+          RuntimeValue use_val ={};
+          use_val.type = RVT::REGISTER;
+          use_val.reg = state->new_value();
 
-          {
-            const MemValue* arr_mem = state->get_mem(arr.mem);
-            MemValue* index_mem = state->get_mem(arr_index);
+          RuntimeValue res;
+          if (index_val.type == RVT::CONST) {
+            auto index = *(uint64_t*)index_val.constant.ptr;
 
-            const size_t disp_index = (expr->type->size() * index);
-            assert(arr_mem->size >= disp_index);//Semi Bounds checking
+            const uint8_t shift = (uint8_t)(base_size * index * 8);
 
-            index_mem->mem = arr_mem->mem;
-            index_mem->size = base_size;
-            index_mem->mem.disp += (int32_t)disp_index;
+            ByteCode::EMIT::SET_R8_TO_8(code->code, (uint8_t)use_val.reg.val, shift);
+            state->set_value(use_val.reg);
+            state->control_flow.expression_num++;
+
+            res = OP::emit_shift_r_u64_by_8(comp, state, code, &arr, &use_val);
+          }
+          else {
+            assert(index_val.type == RVT::REGISTER);
+
+            ByteCode::EMIT::SET_R8_TO_8(code->code, (uint8_t)use_val.reg.val, (uint8_t)(base_size * 8));
+            state->set_value(use_val.reg);
+            state->control_flow.expression_num++;
+
+            RuntimeValue fixed_index = OP::emit_mul_64s(comp, state, code, &use_val, &index_val);
+
+            res = OP::emit_shift_r_u64_by_8(comp, state, code, &arr, &fixed_index);
           }
 
-          copy_mem_to_runtime(comp, state, code, expr->type, arr_index, &hint->val);
+          copy_runtime_to_runtime(comp, state, code, expr->type, &res, &hint->val);
         }
         else {
-          assert(index_val.type == RVT::REGISTER);
-          ValueIndex index = index_val.reg;
 
-          {
-            const MemValue* arr_mem = state->get_mem(arr.mem);
-            MemValue* index_mem = state->get_mem(arr_index);
+          const MemIndex arr_index = state->new_mem();
 
-            assert(arr_mem->mem.scale == 0);
+          assert(arr.type == RVT::MEMORY);
+          //In memory - do a memory index
 
-            index_mem->mem = arr_mem->mem;
-            index_mem->size = base_size;
-            index_mem->mem.index = (uint8_t)index.val;
-            index_mem->mem.scale = (uint8_t)base_size;
+          if (index_val.type == RVT::CONST) {
+            auto index = *(uint64_t*)index_val.constant.ptr;
+
+            {
+              const MemValue* arr_mem = state->get_mem(arr.mem);
+              MemValue* index_mem = state->get_mem(arr_index);
+
+              const size_t disp_index = (base_size * index);
+              assert(arr_mem->size >= disp_index);//Semi Bounds checking
+
+              index_mem->mem = arr_mem->mem;
+              index_mem->size = base_size;
+              index_mem->mem.disp += (int32_t)disp_index;
+            }
+
+            copy_mem_to_runtime(comp, state, code, expr->type, arr_index, &hint->val);
           }
+          else {
+            assert(index_val.type == RVT::REGISTER);
+            ValueIndex index = index_val.reg;
 
-          copy_mem_to_runtime(comp, state, code, expr->type, arr_index, &hint->val);
+            {
+              const MemValue* arr_mem = state->get_mem(arr.mem);
+              MemValue* index_mem = state->get_mem(arr_index);
+
+              assert(arr_mem->mem.scale == 0);
+
+              index_mem->mem = arr_mem->mem;
+              index_mem->size = base_size;
+              index_mem->mem.index = (uint8_t)index.val;
+              index_mem->mem.scale = (uint8_t)base_size;
+            }
+
+            copy_mem_to_runtime(comp, state, code, expr->type, arr_index, &hint->val);
+          }
         }
-
 
         break;
       }
@@ -1717,16 +2072,11 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         const ArrayStructure* const arr_type = (const ArrayStructure*)expr->type;
 
         const size_t size = arr_type->size();
-        uint8_t* string_c = (uint8_t*)comp->constants.alloc_no_construct(size);
+        char* string_c = (char*)comp->constants.alloc_no_construct(size);
 
-        const ConstantVal constant ={ string_c, size };
+        const ConstantVal constant ={ (uint8_t*)string_c, size };
 
-        auto i = expr->ascii_string->string;
-        const auto end = i + arr_type->length;
-
-        for (; i < end; (i++, string_c++)) {
-          *string_c = *i;
-        }
+        memcpy_ts(string_c, size, expr->ascii_string->string, size);
 
         if (hint->is_hint) {
           load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
@@ -1737,9 +2087,8 @@ static void compile_bytecode_of_expression(Compiler* const comp,
       }
     case EXPRESSION_TYPE::ENUM: {
         assert(expr->type->size() == 8);
-        size_t size = 8;
-        uint64_t* enum_c = (uint64_t*)comp->constants.alloc_no_construct(8);
-        *enum_c = expr->enum_value.enum_value->representation;
+        uint8_t* enum_c = comp->constants.alloc_no_construct(8);
+        x64_to_bytes(expr->enum_value.enum_value->representation, enum_c);
 
         const ConstantVal constant ={ (uint8_t*)enum_c, 8 };
 
@@ -1751,9 +2100,12 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::VALUE: {
-        uint64_t* val_c = (uint64_t*)comp->constants.alloc_no_construct(expr->type->size());
-        *val_c = expr->value.value;
-        const ConstantVal constant ={ (uint8_t*)val_c, expr->type->size() };
+        const size_t size = expr->type->size();
+
+        uint8_t* val_c = comp->constants.alloc_no_construct(size);
+        memcpy_ts(val_c, size, (uint8_t*)&expr->value.value, size);
+
+        const ConstantVal constant ={ val_c, size };
 
         if (hint->is_hint) {
           load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
@@ -1774,9 +2126,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           copy_to.ptr = comp->constants.alloc_no_construct(to_copy.size);
           copy_to.size = to_copy.size;
 
-          for (size_t i = 0; i < to_copy.size; i++) {
-            copy_to.ptr[i] = to_copy.ptr[i];
-          }
+          memcpy_ts(copy_to.ptr, copy_to.size, to_copy.ptr, copy_to.size);
 
           hint->is_hint = false;
           hint->val.type     = RVT::CONST;
@@ -2109,7 +2459,6 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                         code,
                                                         &decl->expression,
                                                         valid_hints);
-
         return;
       }
   }
@@ -2129,12 +2478,12 @@ static void map_values(const BuildOptions* const options,
   ByteCode::EMIT::LABEL(temp, code->label);
 
   int64_t base_pointer_offset = 0;
-  int64_t offset_to_prev_frame = 0;
+  int64_t offset_to_prev_frame = 8;//return pointer
 
   if (state->needs_new_frame()) {
     ByteCode::EMIT::PUSH_FRAME(temp);
 
-    offset_to_prev_frame += 8 + 8;//pushed rbp and the return pointer
+    offset_to_prev_frame += 8;//pushed rbp
 
     const uint8_t num_regs = options->system->num_registers;
     uint8_t non_v_regs = 0;
@@ -2176,6 +2525,11 @@ static void map_values(const BuildOptions* const options,
     out_mem.disp = mem.disp;
 
     if (b->reg == options->calling_convention->base_pointer_reg) {
+      if (!state->needs_new_frame()) {
+        //No new frame, use stack pointer instead
+        out_mem.base = options->calling_convention->stack_pointer_reg;
+      }
+
       if (out_mem.disp >= 0) {
         out_mem.disp += (int32_t)offset_to_prev_frame;
       }
@@ -2604,6 +2958,135 @@ static void combine_last_uses(Array<ValueUse>& arr1, const Array<ValueUse>& arr2
   arr1.concat(std::move(temp));
 }
 
+bool test_is_child(const Compiler* const comp, const ValueTree& tree,
+                   size_t pos_child_index, const Value& possible_child,
+                   size_t pos_parent_index, const Value& possible_parent,
+                   Array<size_t>& ignore_vals) {
+  if (pos_child_index == pos_parent_index) {
+    return false;//just in case
+  }
+
+  //cant merge 2 values that are fixed at different values
+  if (possible_child.value_type == ValueType::FIXED
+      && possible_parent.value_type == ValueType::FIXED
+      && possible_child.reg != possible_parent.reg) {
+    return false;
+  }
+
+  //cant merge values that cross function calls with a volatile register
+
+  if ((possible_child.crosses_call
+      && possible_parent.value_type == ValueType::FIXED
+      && comp->build_options.calling_convention->is_volatile(possible_parent.reg))
+      ||
+      (possible_parent.crosses_call
+      && possible_child.value_type == ValueType::FIXED
+      && comp->build_options.calling_convention->is_volatile(possible_child.reg))) {
+    return false;
+  }
+
+  //Could be child
+  if (possible_child.value_type == ValueType::FIXED) {
+    //Test if there is a fixed value that stops us from merging
+    uint8_t fixed_reg = possible_child.reg;
+
+    auto* vi = tree.adjacency_list.data[pos_parent_index].begin();
+    const auto* end = tree.adjacency_list.data[pos_parent_index].end();
+
+    for (; vi < end; vi++) {
+      const ValueIndex other = resolve_coalesced(*vi, tree);
+
+      if (other.val == pos_parent_index || other.val == pos_child_index || ignore_vals.contains(other.val)) continue;
+
+      const auto& other_val = tree.values.data[other.val];
+
+      if (other_val.fixed() && other_val.reg == fixed_reg) {
+        //could be special case where the last use is fixed to the same as the creating type
+        if (possible_parent.creation.related_index == other) {
+
+          ignore_vals.insert(pos_child_index);
+          bool res = test_is_child(comp, tree, pos_parent_index, possible_parent, other.val, other_val, ignore_vals);
+          ignore_vals.pop();
+
+          if (res) {
+            //Will actually be resolved later
+            continue;
+          }
+          else {
+            return false;
+          }
+        }
+        else {
+          //Cant be child :(
+          return false;
+        }
+      }
+    }
+  }
+
+  if (possible_parent.value_type == ValueType::FIXED) {
+    //Test if there is a fixed value that stops us from merging
+    uint8_t fixed_reg = possible_parent.reg;
+
+    auto* vi = tree.adjacency_list.data[pos_child_index].begin();
+    const auto* end = tree.adjacency_list.data[pos_child_index].end();
+
+    for (; vi < end; vi++) {
+      const ValueIndex other = resolve_coalesced(*vi, tree);
+
+      if (other.val == pos_parent_index || other.val == pos_child_index || ignore_vals.contains(other.val)) continue;
+
+      const auto& other_val = tree.values.data[other.val];
+
+      if (other_val.fixed() && other_val.reg == fixed_reg) {
+
+        //Could be special case where other is actually a child of the possible child
+        if (other_val.creation.related_index.val == pos_child_index) {
+            
+          ignore_vals.insert(pos_parent_index);
+          bool res = test_is_child(comp, tree, other.val, other_val, pos_child_index, possible_child, ignore_vals);
+          ignore_vals.pop();
+
+          if (res) {
+            //Will actually be resolved later
+            continue;
+          }
+          else {
+            return false;
+          }
+        }
+        else {
+          //Cant be parent :(
+          return false;
+        }
+      }
+    }
+  }
+
+  if (!possible_child.is_modified && !possible_parent.is_modified) {
+    //l1 created l2 and l1 or l2 are ever modified so can merge
+    return true;
+  }
+
+  //l1 created by l2
+  //was it the last thing l2 did?
+  for (const ValueUse& use : possible_parent.last_uses) {
+    const size_t use_created = resolve_coalesced(use.related_index, tree).val;
+
+    if (use_created == pos_child_index //last thing l2 did was related to l1
+        && use.time.flow == possible_child.creation.time.flow //same block
+        && use.time.time == possible_child.creation.time.time /*same time*/) {
+      //Last thing l2 did is create l1
+
+      //Coalesce l1 into l2
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
 void coalesce(const Compiler* const comp, State* const state) {
   ValueTree& tree = state->value_tree;
   const ControlFlow& c_flow = state->control_flow;
@@ -2612,142 +3095,39 @@ void coalesce(const Compiler* const comp, State* const state) {
   for (size_t l1 = 0; l1 < size; l1++) {
     auto& l1_val = tree.values.data[l1];
 
-    //Store info needed to coalesce later
-    bool is_child = false;
-    bool is_child_by_modify = false;
-    size_t child_of = 0;
+    ValueIndex created_by = resolve_coalesced(l1_val.creation.related_index, tree);
+    auto& possible_parent = tree.values.data[created_by.val];
 
-    auto& list = tree.adjacency_list.data[l1];
+    Array<size_t> ignore_vals = {};
 
-    //Find values to coalsce into
-    for (size_t i_el = 0; i_el < list.size; i_el++) {
-      auto* i_index = list.data + i_el;
+    bool is_child = test_is_child(comp, tree,
+                                  l1, l1_val,
+                                  created_by.val, possible_parent,
+                                  ignore_vals);
 
-      //Reduce indirections
-      *i_index = resolve_coalesced(*i_index, tree);
-      const size_t l2 = i_index->val;
+    if (is_child) {
+      auto& parent_val = tree.values.data[created_by.val];
 
-      if (l2 == l1) {
-        continue;//just in case
+      if (comp->print_options.coalesce_values) {
+        printf("%llu is child of %llu\n", l1, created_by.val);
       }
 
-      auto& l2_val = tree.values.data[l2];
-
-      //cant merge 2 values that are fixed at different values
-      if (l1_val.value_type == ValueType::FIXED
-          && l2_val.value_type == ValueType::FIXED
-          && l1_val.reg != l2_val.reg) {
-        continue;
+      if (l1_val.fixed()) {
+        parent_val.value_type = ValueType::FIXED;
+        parent_val.reg = l1_val.reg;
       }
 
+      l1_val.value_type = ValueType::COALESCED;
+      l1_val.index.val  = created_by.val;
 
-      //cant merge values that cross function calls with a volatile register
-
-      if ((l1_val.crosses_call
-          && l2_val.value_type == ValueType::FIXED
-          && comp->build_options.calling_convention->is_volatile(l2_val.reg))
-          ||
-          (l2_val.crosses_call
-          && l1_val.value_type == ValueType::FIXED
-          && comp->build_options.calling_convention->is_volatile(l1_val.reg))) {
-        continue;
-      }
-
-
-      const size_t created_by = resolve_coalesced(l1_val.creation.related_index, tree).val;
-
-      //Test to see if l1 is a 'child' of l2
-      if (created_by == l2) {
-
-        const auto is_fixed_conflict = [&](const size_t from, const size_t to)-> bool {
-          //check if intersects with another fixed of the same reg
-
-          auto* vi = tree.adjacency_list.data[from].begin();
-          const auto* end = tree.adjacency_list.data[from].end();
-
-          for (; vi < end; vi++) {
-            const size_t other_i = resolve_coalesced(*vi, tree).val;
-
-            if (other_i == to) continue;
-
-            const auto& other_val = tree.values.data[other_i];
-
-            if (other_val.fixed() && other_val.reg == l1_val.reg) {
-              return true;
-            }
-          }
-
-          return false;
-        };
-
-        if ((l1_val.value_type == ValueType::FIXED && is_fixed_conflict(l2, l1))
-            || (l2_val.value_type == ValueType::FIXED && is_fixed_conflict(l1, l2))) {
-          continue;
-        }
-
-        if (!l1_val.is_modified && !l2_val.is_modified) {
-            //l1 created l2 and l1 or l2 are ever modified so can potentially merge
-
-          if (comp->print_options.coalesce_values) {
-            printf("%llu is potential child of %llu\n", l1, l2);
-          }
-
-          is_child_by_modify = true;
-          child_of = l2;
-        }
-
-        //l1 created by l2
-        //was it the last thing l2 did?
-        for (const ValueUse& use : l2_val.last_uses) {
-          const size_t use_created = resolve_coalesced(use.related_index, tree).val;
-
-          if (use_created == l1 //last thing l2 did was related to l1
-              && use.time.flow == l1_val.creation.time.flow //same block
-              && use.time.time == l1_val.creation.time.time /*same time*/) {
-              //Last thing l2 did is create l1
-
-              //Coalesce l1 into l2
-            if (comp->print_options.coalesce_values) {
-              printf("%llu is child of %llu\n", l1, l2);
-            }
-
-            is_child_by_modify = false;
-            is_child = true;
-            child_of = l2;
-          }
-        }
-
-        //dont need to check any others - can only be created by one value
-        break;
-      }
-    }
-
-    if (is_child || is_child_by_modify) {
-      auto& parent_val = tree.values.data[child_of];
-
-      //Test for modify
-      if (is_child || (!parent_val.is_modified && !l1_val.is_modified)) {
-
-        if (is_child_by_modify && comp->print_options.coalesce_values) {
-          printf("%llu is child of %llu\n", l1, child_of);
-        }
-
-        if (l1_val.fixed()) {
-          parent_val.value_type = ValueType::FIXED;
-          parent_val.reg = l1_val.reg;
-        }
-
-        l1_val.value_type = ValueType::COALESCED;
-        l1_val.index.val  = child_of;
-
-        parent_val.crosses_call |= l1_val.crosses_call;
-        parent_val.is_modified  |= l1_val.is_modified;
+      parent_val.crosses_call |= l1_val.crosses_call;
+      parent_val.is_modified  |= l1_val.is_modified;
 
 
 
-        combine_last_uses(parent_val.last_uses, l1_val.last_uses, &c_flow);
-        tree.combine_intersection(ValueIndex{ l1 }, ValueIndex{ child_of });
-      }
+      combine_last_uses(parent_val.last_uses, l1_val.last_uses, &c_flow);
+      tree.combine_intersection(ValueIndex{ l1 }, ValueIndex{ created_by.val });
+
     }
   }
 }
@@ -2782,13 +3162,11 @@ void graph_colour_algo(Compiler* const comp, CodeBlock* const code, State* const
   }
 }
 
-CompileCode compile_function_body_unit(Compiler* const comp,
-                                       ASTFunctionDeclaration* const ast_func,
-                                       Function* const func,
-                                       State* const state) {
+void compile_function_body_unit(Compiler* const comp,
+                                ASTFunctionDeclaration* const ast_func,
+                                Function* const func,
+                                State* const state) {
   const BuildOptions* const build_options = &comp->build_options;
-
-  CompileCode ret = CompileCode::NO_ERRORS;
 
   {
     const auto locals = state->active_locals.size;
@@ -2799,9 +3177,9 @@ CompileCode compile_function_body_unit(Compiler* const comp,
     auto i = statements.mut_begin();
     const auto end = statements.mut_end();
     for (; i < end; i++) {
-      ret = compile_type_of_statement(comp, func, state, i);
-      if (ret != CompileCode::NO_ERRORS) {
-        return ret;
+      compile_type_of_statement(comp, func, state, i);
+      if (comp->is_panic()) {
+        return;
       }
     }
   }
@@ -2881,15 +3259,13 @@ CompileCode compile_function_body_unit(Compiler* const comp,
   state->active_locals.free();
   state->value_tree.free();
   state->control_flow.free();
-
-  return ret;
 }
 
-static CompileCode compile_function_signature(Compiler* const comp,
-                                              ASTFunctionDeclaration* const ast_func,
-                                              Function* const func,
-                                              State* const state) {
-  CompileCode ret = CompileCode::NO_ERRORS;
+static void compile_function_signature(Compiler* const comp,
+                                       ASTFunctionDeclaration* const ast_func,
+                                       Function* const func,
+                                       State* const state) {
+  DO_NOTHING;//helps with formatting
 
   //Parameters
   {
@@ -2899,9 +3275,9 @@ static CompileCode compile_function_signature(Compiler* const comp,
 
     while (i < end) {
       if (*i == nullptr) {
-        ret = compile_type(comp, &i_ast->type);
-        if (ret != CompileCode::NO_ERRORS) {
-          return ret;
+        compile_type(comp, &i_ast->type);
+        if (comp->is_panic()) {
+          return;
         }
 
         *i = i_ast->type.type;
@@ -2971,11 +3347,12 @@ static CompileCode compile_function_signature(Compiler* const comp,
   func->code_block.label = comp->labels++;
   state->control_flow.expression_num++;
 
-  //Last thing we do is the return type
-  //This means it is a test if return type is nullptr to see if its compiled
-  ret = compile_type(comp, &ast_func->return_type);
+  compile_type(comp, &ast_func->return_type);
+  if (comp->is_panic()) {
+    return;
+  }
+
   func->return_type = ast_func->return_type.type;
-  return ret;
 }
 
 void build_compilation_units(Compiler* const comp, ASTFile* const func) {
@@ -3007,95 +3384,53 @@ void build_compilation_units(Compiler* const comp, ASTFile* const func) {
   comp->function_units.shrink();
 }
 
-static CompileCode test_circular_dependencies_impl(Compiler* const comp,
-                                                   Array<CompilationUnitCarrier>& checked,
-                                                   Array<CompilationUnitCarrier>& deps_stack,
-                                                   const CompilationUnitCarrier* carrier) {
-  if (!checked.contains(*carrier)) {
-    if (deps_stack.contains(*carrier)) {
-      printf("CIRCULAR DEPENDENCY ERROR!\n");
-      return CompileCode::CIRCULAR_DEPENDENCY;
-    }
+CompileCode print_compile_errors(const Compiler* const comp) {
+  CompileCode ret = CompileCode::NO_ERRORS;
 
-    const CompilationUnitCarrier* i = nullptr;
-    const CompilationUnitCarrier* end = nullptr;
+  IO::err_print("--- Compiler Encountered A Fatal Error ---\n\n");
 
-    switch (carrier->type) {
-      case COMPILATION_TYPE::FUNCTION: {
-          auto& deps = (comp->function_units.data + carrier->index)->dependecies;
-          i = deps.begin();
-          end = deps.end();
-          break;
-        }
-      case COMPILATION_TYPE::CONSTANT: {
-          auto& deps = (comp->constant_units.data + carrier->index)->dependecies;
-          i = deps.begin();
-          end = deps.end();
-          break;
-        }
-    }
+  auto i = comp->errors.error_messages.begin();
+  const auto end = comp->errors.error_messages.end();
 
-    deps_stack.insert(*carrier);
+  InternHashTable<OwnedPtr<const char>> files ={};
 
-    for (; i < end; i++) {
-      CompileCode ret = test_circular_dependencies_impl(comp, checked, deps_stack, i);
+  for (; i < end; i++) {
+    ret = i->type;
 
-      if (ret != CompileCode::NO_ERRORS) {
-        return ret;
+    const char* message_type = compile_code_string(i->type);
+    IO::err_print(message_type);
+    IO::err_print(":\n");
+
+    OwnedPtr<char> type_set_message = format_type_set(i->message.ptr, 4, 70);
+
+    IO::err_print(type_set_message.ptr);
+    IO::err_print('\n');
+
+    if (i->span.file_name != nullptr) {
+      const Span& span = i->span;
+
+      IO::err_print("Location: ");
+
+      if (!files.contains(i->span.file_name)) {
+        auto load_file = FILES::load_file_to_string(i->span.file_name->string);
+
+        files.insert(i->span.file_name, std::move(load_file));
       }
-    }
 
-    deps_stack.pop();
+      OwnedPtr<const char>* ptr_ptr = files.get_val(i->span.file_name);
+      assert(ptr_ptr != nullptr);
 
-    checked.insert(*carrier);
-  }
+      const char* source = ptr_ptr->ptr;
+      OwnedPtr<char> string = load_span_from_file(span, source);
 
-  return CompileCode::NO_ERRORS;
-}
-
-static CompileCode test_circular_dependencies(Compiler* const comp) {
-  Array<CompilationUnitCarrier> checked ={};
-  Array<CompilationUnitCarrier> deps_stack ={};
-
-  {
-    auto i = comp->function_units.mut_begin();
-    const auto end = comp->function_units.mut_end();
-
-    for (; i < end; i++) {
-      if (i->dependecies.size > 0) {
-        CompilationUnitCarrier i_carrier ={};
-        i_carrier.type = COMPILATION_TYPE::FUNCTION;
-        i_carrier.index = i - comp->function_units.data;
-
-        CompileCode ret = test_circular_dependencies_impl(comp, checked, deps_stack, &i_carrier);
-
-        if (ret != CompileCode::NO_ERRORS) {
-          return ret;
-        }
-      }
+      IO::err_print(format("{} {}:{}\n\n", span.file_name, span.char_start, span.line_start));
+      IO::err_print(string.ptr);
+      IO::err_print("\n\n");
     }
   }
 
-  {
-    auto i = comp->constant_units.mut_begin();
-    const auto end = comp->constant_units.mut_end();
-
-    for (; i < end; i++) {
-      if (i->dependecies.size > 0) {
-        CompilationUnitCarrier i_carrier ={};
-        i_carrier.type = COMPILATION_TYPE::CONSTANT;
-        i_carrier.index = i - comp->constant_units.data;
-
-        CompileCode ret = test_circular_dependencies_impl(comp, checked, deps_stack, &i_carrier);
-
-        if (ret != CompileCode::NO_ERRORS) {
-          return ret;
-        }
-      }
-    }
-  }
-
-  return CompileCode::NO_ERRORS;
+  IO::err_print("------------------------------------------\n");
+  return ret;
 }
 
 CompileCode compile_all(Compiler* const comp) {
@@ -3114,50 +3449,42 @@ CompileCode compile_all(Compiler* const comp) {
 
               switch (unit->stage) {
                 case FUNCTION_COMPILE_STAGE::SIGNATURE: {
-                    const CompileCode ret = compile_function_signature(comp,
-                                                                       unit->source,
-                                                                       unit->destination,
-                                                                       &unit->state);
+                    compile_function_signature(comp,
+                                               unit->source,
+                                               unit->destination,
+                                               &unit->state);
 
-                    switch (ret) {
-                      case CompileCode::NO_ERRORS:
-                        unit->stage = FUNCTION_COMPILE_STAGE::BODY;
-                        unit->state.return_label = comp->labels++;
-                        i--;//Do it again straight away
-                        break;
-
-                      case CompileCode::FOUND_DEPENDENCY:
-                        break;
-
-                      case CompileCode::UNFOUND_DEPENDENCY:
-                        unit->unfound_dependency = true;
-                        break;
-
-                      default:
-                        return ret;
+                    if (comp->is_panic()) {
+                      if (comp->is_fatal()) {
+                        return print_compile_errors(comp);
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
+                    }
+                    else {
+                      unit->stage = FUNCTION_COMPILE_STAGE::BODY;
+                      unit->state.return_label = comp->labels++;
+                      i--;//Do it again straight away
                     }
                     break;
                   }
                 case FUNCTION_COMPILE_STAGE::BODY: {
-                    const CompileCode ret = compile_function_body_unit(comp,
-                                                                       unit->source,
-                                                                       unit->destination,
-                                                                       &unit->state);
+                    compile_function_body_unit(comp,
+                                               unit->source,
+                                               unit->destination,
+                                               &unit->state);
 
-                    switch (ret) {
-                      case CompileCode::NO_ERRORS:
-                        unit->stage = FUNCTION_COMPILE_STAGE::FINISHED;
-                        break;
-
-                      case CompileCode::FOUND_DEPENDENCY:
-                        break;
-
-                      case CompileCode::UNFOUND_DEPENDENCY:
-                        unit->unfound_dependency = true;
-                        break;
-
-                      default:
-                        return ret;
+                    if (comp->is_panic()) {
+                      if (comp->is_fatal()) {
+                        return print_compile_errors(comp);
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
+                    }
+                    else {
+                      unit->stage = FUNCTION_COMPILE_STAGE::FINISHED;
                     }
                     break;
                   }
@@ -3169,31 +3496,31 @@ CompileCode compile_all(Compiler* const comp) {
 
               switch (unit->stage) {
                 case EXPRESSION_COMPILE_STAGE::UNTYPED: {
-                    reset_type(comp->working_state);
+                    compile_type_of_expression(comp, unit->expr, &unit->state);
 
-                    const CompileCode ret = compile_type_of_expression(comp, unit->expr, comp->working_state);
-
-                    switch (ret) {
-                      case CompileCode::NO_ERRORS:
-                        unit->stage = EXPRESSION_COMPILE_STAGE::TYPED;
-                        unit->expr->const_val = comp->constants.alloc_no_construct(unit->expr->type->size());
-                        i--;
-                        break;
-
-                      case CompileCode::FOUND_DEPENDENCY:
-                        break;
-
-                      case CompileCode::UNFOUND_DEPENDENCY:
-                        unit->unfound_dependency = true;
-                        break;
-
-                      default:
-                        return ret;
+                    if (comp->is_panic()) {
+                      if (comp->is_fatal()) {
+                        return print_compile_errors(comp);
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
+                    }
+                    else {
+                      unit->stage = EXPRESSION_COMPILE_STAGE::TYPED;
+                      i--;
                     }
                     break;
                   }
                 case EXPRESSION_COMPILE_STAGE::TYPED: {
-                    reset_type(comp->working_state);
+                    if (unit->cast_to != nullptr) {
+                      bool implicit_cast = can_implicit_cast(unit->expr->type, unit->cast_to);
+                      bool comptime_cast = can_comptime_cast(unit->expr->type, unit->cast_to);
+
+                      assert(implicit_cast || comptime_cast);
+                    }
+
+                    State* state = &unit->state;
 
                     //maybe need??
                     //unit->constants = std::move(comp->working_state->constants);
@@ -3213,38 +3540,40 @@ CompileCode compile_all(Compiler* const comp) {
                     std::swap(options, comp->build_options);
 
                     //Set up new flow
-                    size_t new_flow = comp->working_state->control_flow.new_flow();
-                    comp->working_state->control_flow.current_flow = new_flow;
+                    size_t new_flow = state->control_flow.new_flow();
+                    state->control_flow.current_flow = new_flow;
 
                     //Compile bytecode
-                    comp->working_state->comptime_compilation = true;
+                    state->comptime_compilation = true;
 
                     const Structure* type = unit->expr->type;
                     const bool pass_ptr = type->size() > 8;
+
+                    uint8_t* const_val = comp->constants.alloc_no_construct(unit->expr->type->size());
 
                     if (!pass_ptr) {
                       //Load to rax
                       RuntimeValue ret_v ={};
 
                       ret_v.type = RVT::REGISTER;
-                      ret_v.reg = comp->working_state->new_value();
+                      ret_v.reg = state->new_value();
 
-                      auto& rax_val = comp->working_state->value_tree.values.data[ret_v.reg.val];
+                      auto& rax_val = state->value_tree.values.data[ret_v.reg.val];
 
                       rax_val.value_type = ValueType::FIXED;
                       rax_val.reg        = comp->build_options.calling_convention->return_register;
 
-                      compile_bytecode_of_expression_existing(comp, comp->working_state, &block, unit->expr, &ret_v);
+                      compile_bytecode_of_expression_existing(comp, state, &block, unit->expr, &ret_v);
 
-                      comp->working_state->use_value(ret_v.reg);
+                      state->use_value(ret_v.reg);
                     }
                     else {
-                      ValueIndex reg = comp->working_state->new_value();
+                      ValueIndex reg = state->new_value();
 
-                      comp->working_state->set_value(reg);
+                      state->set_value(reg);
 
                       //Load RCX as a memory location
-                      auto& rcx_val = comp->working_state->value_tree.values.data[reg.val];
+                      auto& rcx_val = state->value_tree.values.data[reg.val];
 
                       rcx_val.value_type = ValueType::FIXED;
                       rcx_val.reg        = comp->build_options.calling_convention->parameter_registers[0];
@@ -3252,24 +3581,24 @@ CompileCode compile_all(Compiler* const comp) {
                       RuntimeValue ret_v ={};
 
                       ret_v.type = RVT::MEMORY;
-                      ret_v.mem  = comp->working_state->new_mem();
+                      ret_v.mem  = state->new_mem();
 
-                      auto* passed_mem = comp->working_state->get_mem(ret_v.mem);
+                      auto* passed_mem = state->get_mem(ret_v.mem);
                       passed_mem->mem.base = (uint8_t)reg.val;
                       passed_mem->mem.disp = 0;
                       passed_mem->mem.scale = 0;
 
                       passed_mem->size = type->size();
 
-                      compile_bytecode_of_expression_existing(comp, comp->working_state, &block, unit->expr, &ret_v);
+                      compile_bytecode_of_expression_existing(comp, state, &block, unit->expr, &ret_v);
 
-                      comp->working_state->use_value(reg);
+                      state->use_value(reg);
                     }
 
-                    ByteCode::EMIT::JUMP_TO_FIXED(block.code, comp->working_state->return_label);
+                    ByteCode::EMIT::JUMP_TO_FIXED(block.code, state->return_label);
 
                     //Graph colour
-                    graph_colour_algo(comp, &block, comp->working_state);
+                    graph_colour_algo(comp, &block, state);
 
                     //Backend
                     Array<uint8_t> code ={};
@@ -3282,29 +3611,50 @@ CompileCode compile_all(Compiler* const comp) {
 
                     //Run the VM
                     if (pass_ptr) {
-                      X64_UNION pass_rcx = unit->expr->const_val;
+                      X64_UNION pass_rcx = const_val;
                       vm_set_parameters(&comp->build_options, comp->vm, pass_rcx);
                     }
 
-                    vm_rum(comp->vm, code.data, entry);
+                    ErrorCode err = vm_rum(comp->vm, code.data, entry);
+                    if (err != ErrorCode::OK) {
+                      comp->report_error(CompileCode::INTERNAL_ERROR, unit->expr->span,
+                                         "VM returned error code '{}' in compile time execution",
+                                         err);
+                      return print_compile_errors(comp);
+                    }
 
                     //Get the value back
                     if (pass_ptr) {
                       if (comp->print_options.comptime_exec) {
                         printf("\nComptime Res In Bytes: ");
-                        print_as_bytes((uint8_t*)unit->expr->const_val, type->size());
+                        print_as_bytes(const_val, type->size());
                         putc('\n', stdout);
                       }
                     }
                     else {
                       //Effectively stored in RAX
                       uint64_t val = comp->vm->registers[convention_vm.return_register].b64.reg;
-                      *((uint64_t*)unit->expr->const_val) = val;
+                      x64_to_bytes(val, const_val);
 
                       if (comp->print_options.comptime_exec) {
                         printf("\nComptime Res: %llu\n", val);
                       }
                     }
+
+                    if (unit->cast_to != nullptr) {
+                      uint8_t* res = comp->constants.alloc_no_construct(unit->cast_to->size());
+                      do_literal_cast(comp, unit->expr, unit->cast_to, const_val, res);
+                      if (comp->is_panic()) {
+                        return print_compile_errors(comp);
+                      }
+
+                      comp->constants.free_no_destruct(const_val);
+                      const_val = res;
+
+                      unit->expr->type = unit->cast_to;
+                    }
+
+                    unit->expr->const_val = const_val;
 
                     //Swap back
                     std::swap(options, comp->build_options);
@@ -3342,9 +3692,9 @@ CompileCode compile_all(Compiler* const comp) {
       const auto end = comp->function_units.mut_end();
 
       for (; i < end; i++) {
-        i->dependecies.remove_if(DependencyFinished{ comp });
+        i->dependencies.remove_if(DependencyFinished{ comp });
 
-        if (i->stage != FUNCTION_COMPILE_STAGE::FINISHED && i->dependecies.size == 0 && !i->unfound_dependency) {
+        if (i->stage != FUNCTION_COMPILE_STAGE::FINISHED && i->dependencies.size == 0 && !i->unfound_dependency) {
           comp->compiling.insert_uninit(1);
           CompilationUnitCarrier* const carrier = comp->compiling.back();
 
@@ -3359,9 +3709,9 @@ CompileCode compile_all(Compiler* const comp) {
       const auto end = comp->constant_units.mut_end();
 
       for (; i < end; i++) {
-        i->dependecies.remove_if(DependencyFinished{ comp });
+        i->dependencies.remove_if(DependencyFinished{ comp });
 
-        if (i->stage != EXPRESSION_COMPILE_STAGE::FINISHED && i->dependecies.size == 0 && !i->unfound_dependency) {
+        if (i->stage != EXPRESSION_COMPILE_STAGE::FINISHED && i->dependencies.size == 0 && !i->unfound_dependency) {
           comp->compiling.insert_uninit(1);
           CompilationUnitCarrier* const carrier = comp->compiling.back();
 
@@ -3373,59 +3723,61 @@ CompileCode compile_all(Compiler* const comp) {
 
 
     if (comp->compiling.size == 0) {
-      //Test for circular dependencies
-      CompileCode ret = test_circular_dependencies(comp);
-      if (ret != CompileCode::NO_ERRORS) {
-        return ret;
-      }
+      if (comp->unfound_deps.units.size > 0) {
+        const size_t num_deps = comp->unfound_deps.units.size;
+        //Remove units if dependency has been found
+        comp->unfound_deps.units.remove_if([comp](const UnfoundDep& dep) {
+          switch (dep.type) {
+            case UnfoundDepType::Name: {
+                if (!comp->global.names.contains(dep.name)) {
+                  return false;
+                }
+                break;
+              }
+            case UnfoundDepType::Function: {
+                auto overloads = generate_overload_set(comp, &dep.signature);
 
-      //Cant be any defined dependencies
-      if (comp->unfound_dep_info.panic
-          && comp->unfound_dep_info.num_function_units == comp->function_units.size
-          && comp->unfound_dep_info.num_constant_units == comp->constant_units.size) {
-        printf("DEPENDENCY ERROR: 1 or more Compilation units failed due to unfound dependencies!\n");
-        return CompileCode::UNFOUND_DEPENDENCY;
-      }
-      else {
-        comp->unfound_dep_info.panic = true;
+                if (overloads.size == 0) {
+                  return false;
+                }
 
-        comp->unfound_dep_info.num_function_units = comp->function_units.size;
-        comp->unfound_dep_info.num_constant_units = comp->constant_units.size;
+                //if there are multiple overloads then let it error in the type check phase
+                break;
+              }
+          }
 
-        //Remove unfound dependencies
+          //Success!
+          switch (dep.unit_waiting.type) {
+            case COMPILATION_TYPE::FUNCTION:
+              (comp->function_units.data + dep.unit_waiting.index)->unfound_dependency = false;
+              break;
+            case COMPILATION_TYPE::CONSTANT:
+              (comp->constant_units.data + dep.unit_waiting.index)->unfound_dependency = false;
+              break;
+          }
 
-        {
-          auto i = comp->function_units.mut_begin();
-          const auto end = comp->function_units.mut_end();
+          return true;
+        });
 
+        if (num_deps == comp->unfound_deps.units.size) {
+          auto i = comp->unfound_deps.units.begin();
+          auto end = comp->unfound_deps.units.end();
           for (; i < end; i++) {
-            if (i->stage != FUNCTION_COMPILE_STAGE::FINISHED) {
-              i->unfound_dependency = true;
-
-              comp->compiling.insert_uninit(1);
-              CompilationUnitCarrier* const carrier = comp->compiling.back();
-
-              carrier->type = COMPILATION_TYPE::FUNCTION;
-              carrier->index = i - comp->function_units.data;
+            switch (i->type) {
+              case UnfoundDepType::Name: {
+                  comp->report_error(CompileCode::UNFOUND_DEPENDENCY, i->span,
+                                     "'{}' does not exist", i->name);
+                  break;
+                }
+              case UnfoundDepType::Function: {
+                  comp->report_error(CompileCode::UNFOUND_DEPENDENCY, i->span,
+                                     "'{}' does not exist", i->signature);
+                  break;
+                }
             }
           }
-        }
 
-        {
-          auto i = comp->constant_units.mut_begin();
-          const auto end = comp->constant_units.mut_end();
-
-          for (; i < end; i++) {
-            if (i->stage != EXPRESSION_COMPILE_STAGE::FINISHED) {
-              i->unfound_dependency = false;
-
-              comp->compiling.insert_uninit(1);
-              CompilationUnitCarrier* const carrier = comp->compiling.back();
-
-              carrier->type = COMPILATION_TYPE::CONSTANT;
-              carrier->index = i - comp->constant_units.data;
-            }
-          }
+          return print_compile_errors(comp);
         }
       }
     }

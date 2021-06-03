@@ -18,6 +18,10 @@ namespace X64 {
     uint8_t r;
   };
 
+  struct R8 { 
+    R r;
+  };
+
   struct IMM32 {
     bool sign_extend = false;
     uint32_t imm = 0;
@@ -33,6 +37,10 @@ namespace X64 {
       SIB sib;
       int32_t disp = 0;
     };
+  };
+
+  struct RM8 {
+    RM rm;
   };
 
   RM rm_from_mem_complex(const MemComplex& mem);
@@ -128,6 +136,7 @@ namespace X64 {
     CMP_32_TO_RM = 0x81,// r = 7
     JZ_NEAR = 0x84,
     JNE_NEAR = 0x85,
+    MOV_R8_TO_RM8 = 0x88,
     MOV_R_TO_RM = 0x89,
     MOV_RM_TO_R = 0x8B,
     LEA_RM_TO_R = 0x8D,
@@ -136,12 +145,16 @@ namespace X64 {
     IMUL_RM_TO_R = 0xAF,
     MOV_ZX_RM8_TO_R = 0xB6,
     MOV_SX_RM8_TO_R = 0xBE,
+    MOV_8_TO_R8 = 0xB0,//+ register
     MOV_64_TO_R = 0xB8,//+ register
     RET_NEAR = 0xC3,
     MOV_IMM32_RM = 0xC7,
+    SAL_R_BY_CL = 0xD3,// r = 4
+    SHR_R_BY_CL = 0xD3,// r = 5
+    SAR_R_BY_CL = 0xD3,// r = 7
     CALL_NEAR = 0xE8,
     JMP_NEAR = 0xE9,
-    NEG_RM = 0xF7,//        r = 3
+    NEG_RM = 0xF7,// r = 3
     MUL_RM_TO_RAX = 0xF7,// r = 4
     DIV_RM_TO_RAX = 0xF7,// r = 6
     IDIV_RM_TO_RAX = 0xF7,// r = 7
@@ -156,6 +169,10 @@ namespace X64 {
            const RM& rm);
 
   void mov(Array<uint8_t>& arr,
+           R8 r8,
+           const RM8& rm8);
+
+  void mov(Array<uint8_t>& arr,
            const RM& rm,
            R r);
 
@@ -166,6 +183,10 @@ namespace X64 {
   void mov(Array<uint8_t>& arr,
            R r,
            uint64_t u64);
+
+  void mov(Array<uint8_t>& arr,
+           R8 r8,
+           uint8_t u8);
 
   void mov(Array<uint8_t>& arr,
            const RM& rm,

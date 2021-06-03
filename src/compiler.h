@@ -4,10 +4,13 @@
 #include "calling_conventions.h"
 #include "options.h"
 #include "runtime_vals.h"
+#include "format.h"
+#include "parser.h"
 
 #include "type.h"
 
 
+struct VM;
 struct ASTType;
 struct ASTFunctionDeclaration;
 struct ASTStructureDeclaration;
@@ -202,7 +205,7 @@ struct State {
 };
 
 enum struct COMPILATION_TYPE : uint8_t {
-  SIGNATURE, FUNCTION, STRUCTURE, CONSTANT, NONE
+  FUNCTION, CONSTANT, NONE
 };
 
 enum struct EXPRESSION_COMPILE_STAGE : uint8_t {
@@ -224,7 +227,7 @@ struct CompilationUnitCarrier {
 
 struct FunctionUnit {
   FUNCTION_COMPILE_STAGE stage = FUNCTION_COMPILE_STAGE::FINISHED;
-  Array<CompilationUnitCarrier> dependecies;
+  Array<CompilationUnitCarrier> dependencies;
   bool unfound_dependency = false;
 
   ASTFunctionDeclaration* source = nullptr;
@@ -235,28 +238,95 @@ struct FunctionUnit {
 
 struct ConstantUnit {
   EXPRESSION_COMPILE_STAGE stage = EXPRESSION_COMPILE_STAGE::FINISHED;
-  Array<CompilationUnitCarrier> dependecies ={};
+  Array<CompilationUnitCarrier> dependencies ={};
   bool unfound_dependency = false;
 
   ASTExpression* expr = nullptr;
+  const Structure* cast_to = nullptr;
+
+
+  State state ={};
 };
 
-struct VM;
+struct ErrorMessage {
+  CompileCode type;
+  Span span;
+  OwnedPtr<char> message;
+};
 
-struct UnfoundDependenciesInfo {
+struct Errors {
   bool panic = false;
+  Array<ErrorMessage> error_messages ={};
+};
 
-  size_t num_function_units = 0;
-  size_t num_constant_units = 0;
+struct CallSignature {
+  const InternString* name;
+  Array<const Structure*> arguments;
+};
+
+enum struct UnfoundDepType {
+  Unkown, Name, Function
+};
+
+struct UnfoundDep {
+  CompilationUnitCarrier unit_waiting ={};
+  UnfoundDepType type = UnfoundDepType::Unkown;
+  Span span ={};
+
+  union {
+    char _dummpy = {};
+    const InternString* name;
+    CallSignature signature;
+  };
+
+  UnfoundDep() = default;
+  UnfoundDep(UnfoundDep&& a) noexcept {
+    move_from(std::move(a));
+  }
+  UnfoundDep& operator=(UnfoundDep&& a) noexcept {
+    this->~UnfoundDep();
+    move_from(std::move(a));
+    return *this;
+  }
+
+  void move_from(UnfoundDep&&) noexcept;
+
+  void set_union(UnfoundDepType et) noexcept;
+  void destruct_union() noexcept;
+
+  ~UnfoundDep();
+};
+
+struct UnfoundDependencies {
+  bool panic = false;
+  Array<UnfoundDep> units ={};
+};
+
+enum struct NameElementType {
+  FUNCTION, STRUCTURE, ENUM
+};
+
+struct NamedElement {
+  NameElementType type;
+  union {
+    const Function* function;
+    const Structure* structure;
+    const EnumValue* enum_value;
+  };
+};
+
+struct Namespace {
+  InternHashTable<NamedElement> names ={};
 };
 
 struct Compiler {
   VM* vm = nullptr;
-  State* working_state = nullptr;
-
-  UnfoundDependenciesInfo unfound_dep_info;
 
   CompilationUnitCarrier current_unit ={};
+
+  Errors errors ={};
+  UnfoundDependencies unfound_deps = {};
+  Namespace global ={};
 
   PrintOptions        print_options        ={};
   BuildOptions        build_options        ={};
@@ -277,9 +347,32 @@ struct Compiler {
   uint64_t labels = 0;
 
   Function* new_function();
+
+  constexpr bool is_panic() const { return errors.panic || unfound_deps.panic; }
+  constexpr bool is_fatal() const { return errors.panic; }
+  constexpr void reset_panic() { errors.panic = false; unfound_deps.panic = false; }
+
+  template<typename ... T>
+  void report_error(CompileCode code, const Span& span, const char* f_message, T&& ... ts) {
+    errors.panic = true;
+
+    OwnedPtr<char> message = format(f_message, std::forward<T>(ts)...);
+    errors.error_messages.insert({code, span, std::move(message)});
+  }
+
+  void set_unfound_name(const InternString* name, const Span& span);
+  void set_unfound_signature(CallSignature&& sig, const Span& span);
+  void set_dep(CompilationUnitCarrier unit);
 };
 
 CompileCode compile_all(Compiler* const comp);
+
+void compile_implicit_cast(Compiler* const comp,
+                           ASTExpression* from_expr,
+                           const Structure* to);
+
+void set_valid_rvts(ASTExpression* const expr, State* const state, uint8_t valid_rvts);
+
 void build_compilation_units(Compiler* const comp, ASTFile* const func);
 
 void print_compiled_functions(const Compiler* comp);
@@ -291,9 +384,9 @@ void copy_runtime_to_runtime(Compiler* const comp,
                              const RuntimeValue* from,
                              RuntimeValue* to);
 
-const Structure* find_or_make_array_type(const Compiler* comp,
+const Structure* find_or_make_array_type(Compiler* const comp,
                                          const Structure* base,
                                          size_t length);
 
-const Structure* find_or_make_pointer_type(const Compiler* comp,
+const Structure* find_or_make_pointer_type(Compiler* const comp,
                                            const Structure* base);

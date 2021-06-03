@@ -43,6 +43,7 @@ struct ASTPtrType {
 
 struct ASTType {
   TYPE_TYPE type_type;
+  Span span;
 
   union {
     const InternString* name ={};
@@ -150,7 +151,9 @@ struct ASTExpression {
   bool call_leaf = false;
   bool comptime_eval = false;
 
-  void* const_val = nullptr;
+  uint8_t* const_val = nullptr;
+
+  Span span;
 
   EXPRESSION_TYPE expr_type = EXPRESSION_TYPE::UNKNOWN;
   union {
@@ -194,8 +197,18 @@ struct ASTDeclaration {
   size_t local_index = 0;
 };
 
+#define MOD_STATEMENTS \
+MOD(UNKNOWN) \
+MOD(EXPRESSION) \
+MOD(DECLARATION) \
+MOD(RETURN) \
+MOD(IF_ELSE) \
+MOD(BLOCK)
+
 enum struct STATEMENT_TYPE : uint8_t {
-  UNKNOWN, EXPRESSION, DECLARATION, RETURN, IF_ELSE, BLOCK,
+#define MOD(name) name,
+  MOD_STATEMENTS
+#undef MOD
 };
 
 struct ASTIfElse {
@@ -215,6 +228,7 @@ struct ASTBlock {
 
 struct ASTStatement {
   STATEMENT_TYPE type = STATEMENT_TYPE::UNKNOWN;
+  Span span;
 
   union {
     char _dummy ={};

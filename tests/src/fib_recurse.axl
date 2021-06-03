@@ -10,3 +10,4 @@ function fib(u64 a) -> u64 {
 function main() -> u64 {
   return fib(5);
 }
+

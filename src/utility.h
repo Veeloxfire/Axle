@@ -45,14 +45,17 @@ constexpr bool can_be_from_sign_extension(uint64_t u64) {
 }
 
 template<typename T>
-constexpr T slow_bit_fill_lower(uint8_t bits) {
-  T t = 0;
+constexpr T bit_fill_upper(uint8_t bits) {
+  int64_t fill = ((uint64_t)1) << 63;
 
-  for (uint8_t i = 0; i < bits; i++) {
-    t |= ((T)1 << i);
-  }
+  fill >>= (bits - (uint8_t)1 + (uint8_t)(bits == 0));
 
-  return t;
+  return static_cast<T>(fill << (uint8_t)(bits == 0));
+}
+
+template<typename T>
+constexpr T bit_fill_lower(uint8_t bits) {
+  return ~bit_fill_upper<T>(64 - bits);
 }
 
 template<typename T>
@@ -578,7 +581,7 @@ struct ArenaAllocator {
   };
 
   Block* base = nullptr;
-  void* free_list = nullptr;
+  FreeList* free_list = nullptr;
 
   ArenaAllocator() = default;
   ~ArenaAllocator();
@@ -729,23 +732,40 @@ struct SquareBitMatrix {
 
 template<typename T>
 struct OwnedPtr {
-  T* ptr;
-
-  OwnedPtr() = delete;
+  T* ptr = nullptr;
   OwnedPtr(const OwnedPtr&) = delete;
 
-  OwnedPtr(OwnedPtr&& ptr_in) : ptr(ptr_in.ptr) {
+  OwnedPtr() = default;
+
+  OwnedPtr(OwnedPtr&& ptr_in) noexcept : ptr(ptr_in.ptr) {
     ptr_in.ptr = nullptr;
   }
 
-  OwnedPtr(Array<T>&& arr) : ptr(arr.data) {
+  OwnedPtr& operator=(OwnedPtr&& ptr_in) noexcept {
+    free_no_destruct();
+    ptr = ptr_in.ptr;
+    ptr_in.ptr = nullptr;
+    return *this;
+  }
+
+  OwnedPtr(T* ptr_in) : ptr(ptr_in) {}
+
+  OwnedPtr(Array<T>&& arr) {
+    arr.shrink();
+    ptr = arr.data;
+
     arr.data     = nullptr;
     arr.size     = 0;
     arr.capacity = 0;
   }
 
   ~OwnedPtr() {
-    free_destruct_single<T>(ptr);
+    free_no_destruct();
+  }
+
+  void free_no_destruct() {
+    ::free_no_destruct<T>(ptr);
+    ptr = nullptr;
   }
 };
 
@@ -806,7 +826,7 @@ modify(COULD_NOT_CLOSE_FILE)\
 modify(UNDEFINED_INSTRUCTION)\
 modify(STACK_OVERFLOW)
 
-enum class ErrorCode {
+enum struct ErrorCode : uint8_t {
 #define modify(NAME) NAME,
   ERROR_CODES_X
 #undef modify
@@ -1036,3 +1056,15 @@ template<typename T>
 EXECUTE_AT_END(T&& t) -> EXECUTE_AT_END<T>;
 
 #define DEFER(...) EXECUTE_AT_END JOIN(defer, __LINE__) = [__VA_ARGS__]() mutable ->void 
+
+namespace IO {
+  void print(const char* string);
+  void print(const OwnedPtr<char>& string);
+  void print(const char c);
+
+  void err_print(const char* string);
+  void err_print(const OwnedPtr<char>& string);
+  void err_print(const char c);
+}
+
+#define DO_NOTHING ((void)0)

@@ -5,7 +5,7 @@
 
 struct ASTFile;
 
-#define TOKEN_TYPE_MODIFY \
+#define AXLE_TOKEN_MODIFY \
 MODIFY(Error)\
 MODIFY(Eof)\
 MODIFY(Identifier)\
@@ -36,9 +36,9 @@ MODIFY(Comma)\
 MODIFY(Semicolon)\
 MODIFY(String)
 
-enum class TokenType : uint8_t {
+enum class AxleTokenType : uint8_t {
 #define MODIFY(n) n,
-  TOKEN_TYPE_MODIFY
+  AXLE_TOKEN_MODIFY
 #undef MODIFY
 };
 
@@ -47,20 +47,33 @@ struct TokenTypeString {
   size_t length = 0;
 };
 
-TokenTypeString token_type_string(TokenType);
+TokenTypeString token_type_string(AxleTokenType);
 
 struct Position {
-  const char* file_name = nullptr;
+  const InternString* file_name = nullptr;
   size_t line = 0;
   size_t character = 0;
 };
 
 struct Token {
-  TokenType type = TokenType::Error;
+  AxleTokenType type = AxleTokenType::Error;
   const InternString* string = nullptr;
 
   Position pos ={};
 };
+
+struct Span {
+  //is null if file_name == nullptr
+  const InternString* file_name = nullptr;
+  size_t line_start = 0;
+  size_t line_end = 0;
+  size_t char_start = 0;
+  size_t char_end = 0;
+};
+
+
+Span span_of_token(const Token& tok);
+OwnedPtr<char> load_span_from_file(const Span& span, const char* source);
 
 struct Lexer {
   StringInterner* strings = nullptr;
@@ -78,15 +91,15 @@ struct Parser {
   void report_error(const char* error_message);
 };
 
-void init_parser(Parser* const parser, const char* file_name, const char* source);
+void init_parser(Parser* const parser,  const InternString* file_name, const char* source);
 void parse_file(Parser* const parser, ASTFile* const file);
 
 struct KeywordPair {
   const char* keyword = nullptr;
-  TokenType type = TokenType::Error;
+  AxleTokenType type = AxleTokenType::Error;
   size_t size = 0;
 
-  constexpr KeywordPair(const char* kw, TokenType t)
+  constexpr KeywordPair(const char* kw, AxleTokenType t)
     :keyword(kw), type(t), size(strlen_ts(kw))
   {}
 };

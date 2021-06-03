@@ -1,5 +1,8 @@
 #include "format.h"
 #include "parser.h"
+#include "type.h"
+#include "compiler.h"
+#include "ast.h"
 
 void load_string(Array<char>& res, char c) {
   res.insert(c);
@@ -51,8 +54,26 @@ void load_string(Array<char>& res, const char* str) {
   res.size += size;
 }
 
+void load_string(Array<char>& res, const Array<char>& str) {
+  res.reserve_extra(str.size);
+
+  memcpy_ts(res.data + res.size,
+            res.capacity - res.size,
+            str.data, str.size);
+
+  res.size += str.size;
+}
+
 void load_string(Array<char>& res, const InternString* str) {
-  load_string(res, str->string);
+  const size_t size = str->len;
+
+  res.reserve_extra(size);
+
+  memcpy_ts(res.data + res.size,
+            res.capacity - res.size,
+            str->string, size);
+
+  res.size += size;
 }
 
 
@@ -66,9 +87,29 @@ void load_string(Array<char>& res, const TokenTypeString& str) {
   res.size += str.length - 1;
 }
 
-void load_string(Array<char>& res, const TokenType tt) {
+void load_string(Array<char>& res, const AxleTokenType tt) {
   const TokenTypeString str = token_type_string(tt);
   load_string(res, str);
+}
+
+void load_string(Array<char>& res, STATEMENT_TYPE st) {
+
+  switch (st) {
+  #define MOD(name) case STATEMENT_TYPE:: ## name: load_string(res, #name); break;
+    MOD_STATEMENTS
+    #undef MOD
+
+    default:
+      load_string(res, "unknown_statement(");
+      load_string(res, (uint8_t)st);
+      load_string(res, ')');
+      break;
+  }
+}
+
+void load_string(Array<char>& res, ErrorCode er) {
+  const char* err_str = error_code_string(er);
+  load_string(res, err_str);
 }
 
 static void load_unsigned(Array<char>& res, uint64_t u64) {
@@ -147,4 +188,105 @@ void load_string(Array<char>& res, int32_t i32) {
 
 void load_string(Array<char>& res, uint32_t u32) {
   load_unsigned(res, (uint64_t) u32);
+}
+
+void load_string(Array<char>& res, PrintFuncSignature p_func) {
+  const Function* func = p_func.func;
+
+  res.insert('(');
+
+  auto i = func->parameter_types.begin();
+  const auto end = func->parameter_types.end();
+
+  if (i < end) {
+    for (; i < (end - 1); i++) {
+      load_string(res, (*i)->name);
+      load_string(res, ", ");
+    }
+
+    load_string(res, (*i)->name);
+  }
+
+  load_string(res, ") -> ");
+  load_string(res, func->return_type->name);
+}
+
+void load_string(Array<char>& res, const CallSignature& call_sig) {
+  load_string(res, call_sig.name);
+
+  auto i = call_sig.arguments.begin();
+  const auto end = call_sig.arguments.end();
+
+  res.insert('(');
+
+  if (i < end) {
+    for (; i < (end - 1); i++) {
+      load_string(res, (*i)->name->string);
+      load_string(res, ", ");
+    }
+
+    load_string(res, (*i)->name->string);
+  }
+
+  res.insert(')');
+}
+
+OwnedPtr<char> format_type_set(const char* format, const size_t prepend_spaces, const size_t max_width) {
+  Array<char> result ={};
+
+  const char* string = format;
+  const char* last_space = format;
+  size_t curr_length = 0;
+
+  const auto load_to_string = [&](const char* start, const char* end) {
+    const size_t num_chars = end - start;
+    result.reserve_extra(num_chars);
+
+    memcpy_ts(result.data + result.size,
+              result.capacity - result.size,
+              start, num_chars);
+
+    result.size += num_chars;
+  };
+
+  const auto prepend = [&] {
+    result.reserve_extra(prepend_spaces);
+    for (size_t i = 0; i < prepend_spaces; i++) {
+      result.insert(' ');
+    }
+  };
+
+  prepend();
+
+  while (true) {
+    if (curr_length == max_width && format[0] != '\n') {
+      //Need to insert a new line
+      load_to_string(string, last_space);
+      result.insert('\n');
+      prepend();
+      string = last_space + 1;
+    }
+    else if (format[0] == '\n') {
+      load_to_string(string, format + 1);
+      prepend();
+      string = format + 1;
+      last_space = string;
+
+      format++;
+      curr_length = prepend_spaces;
+      continue;
+    }
+    else if (format[0] == ' ') {
+      last_space = format;
+    }
+    else if (format[0] == '\0') {
+      load_to_string(string, format + 1);
+
+      result.shrink();
+      return result;
+    }
+
+    format++;
+    curr_length++;
+  }
 }

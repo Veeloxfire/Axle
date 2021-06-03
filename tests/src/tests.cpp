@@ -100,6 +100,7 @@ static constexpr Test tests[] ={
   Test{"Operators Signed", TEST_DIR("operators_signed.axl"), operations_signed_cpp()},
   Test{"Operators Comptime", TEST_DIR("operators_comptime.axl"), operations_optim()},
   Test{"Arrays", TEST_DIR("arrays.axl"), arrays_main()},
+  Test{"Pointers", TEST_DIR("pointers.axl"), 3},
 };
 
 static constexpr size_t num_tests = sizeof(tests)/sizeof(Test);

@@ -36,7 +36,7 @@ namespace FILES {
     return size;
   }
 
-  const char* load_file_to_string(const char* file_name) {
+  OwnedPtr<const char> load_file_to_string(const char* file_name) {
     const OpenedFile file = open(file_name, OPEN_MODE::READ, DATA_MODE::BINARY);
 
     if (file.error_code != 0) {
@@ -45,7 +45,7 @@ namespace FILES {
 
     const size_t file_size = size_of_file(file.file);
 
-    char* string;
+    char* string = nullptr;
     read_as_string(file.file, file_size, &string);
 
     fclose(file.file);

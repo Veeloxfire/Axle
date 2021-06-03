@@ -7,7 +7,12 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
   call_leaf = std::exchange(a.call_leaf, false);
   comptime_eval = std::exchange(a.comptime_eval, false);
 
+  const_val = std::exchange(a.const_val, nullptr);
+  span = std::exchange(a.span, {});
+  
   expr_type = std::exchange(a.expr_type, EXPRESSION_TYPE::UNKNOWN);
+
+
 
   switch (expr_type)
   {

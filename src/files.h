@@ -25,7 +25,7 @@ namespace FILES {
 
   size_t size_of_file(FILE* file);
 
-  const char* load_file_to_string(const char* file_name);
+  OwnedPtr<const char> load_file_to_string(const char* file_name);
 
   ErrorCode write(FILE* file, const uint8_t* arr, size_t length);
   ErrorCode write_padding_bytes(FILE* file, uint8_t byte, size_t num);

@@ -467,6 +467,21 @@ void X64::mov(Array<uint8_t>& arr,
   emit_mod_rm(arr, r, rm);
 }
 
+void X64::mov(Array<uint8_t>& arr,
+         R8 r8,
+         const RM8& rm8) {
+  R r = r8.r;
+  const RM& rm = rm8.rm;
+
+  if ((r.r & 0b1000) > 0 || (rm.r & 0b1000) > 0) {
+    arr.insert(X64::REX | X64::rex_r_rm(r.r, rm.r));
+  }
+
+  arr.insert(X64::MOV_R8_TO_RM8);
+
+  emit_mod_rm(arr, r, rm);
+}
+
 void X64::lea(Array<uint8_t>& arr,
               const RM& rm,
               R r) {
@@ -488,12 +503,25 @@ void X64::mov(Array<uint8_t>& arr,
 void X64::mov(Array<uint8_t>& arr,
               R r,
               uint64_t u64) {
-  arr.insert(X64::REX_W | X64::rex_b(r.r));
+  arr.insert(X64::REX_W | X64::rex_rm(r.r));//yes rm is correct
   arr.insert(X64::MOV_64_TO_R + (r.r & 0b111));
 
   arr.reserve_extra(sizeof(uint64_t));
   x64_to_bytes(u64, arr.data + arr.size);
   arr.size += sizeof(uint64_t);
+}
+
+void X64::mov(Array<uint8_t>& arr,
+              R8 r8,
+              uint8_t u8) {
+  R r = r8.r;
+
+  if ((r.r & 0b1000) > 0) {
+    arr.insert(X64::REX | X64::rex_rm(r.r));//yes rm is correct
+  }
+
+  arr.insert(X64::MOV_8_TO_R8 + (r.r & 0b111));
+  arr.insert(u8);
 }
 
 void X64::mov(Array<uint8_t>& arr,
@@ -746,10 +774,28 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               code_i += ByteCode::SIZE_OF::COPY_R64_TO_R64;
               break;
             }
+          case ByteCode::COPY_R8_TO_R8: {
+              const auto p = ByteCode::PARSE::COPY_R8_TO_R8(code_i);
+
+              X64::RM rm ={};
+              rm.r = p.val2;
+              rm.indirect = false;
+
+              X64::mov(out_code, X64::R8{ X64::R{p.val1} }, X64::RM8{ rm });
+              code_i += ByteCode::SIZE_OF::COPY_R8_TO_R8;
+              break;
+            }
           case ByteCode::SET_R64_TO_64: {
               const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
               X64::mov(out_code, X64::R{ p.val }, p.u64);
               code_i += ByteCode::SIZE_OF::SET_R64_TO_64;
+              break;
+            }
+          case ByteCode::SET_R8_TO_8: {
+              const auto p = ByteCode::PARSE::SET_R8_TO_8(code_i);
+
+              X64::mov(out_code, X64::R8{ X64::R{ p.val } }, p.u8);
+              code_i += ByteCode::SIZE_OF::SET_R8_TO_8;
               break;
             }
           case ByteCode::ADD_R64S: {
@@ -793,7 +839,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::DIV_RU64S: {
               const auto p = ByteCode::PARSE::DIV_RU64S(code_i);
 
-              assert(p.val2 == 0);
+              assert(p.val2 == RAX.REG);
 
               //Set RDX to 0
               X64::mov(out_code, X64::R{ RDX.REG }, 0ull);
@@ -803,7 +849,6 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               out_code.insert(X64::MODRM_MOD_DIRECT
                               | X64::modrm_r_rm(6, p.val1));
 
-
               code_i += ByteCode::SIZE_OF::DIV_RU64S;
 
               check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
@@ -812,7 +857,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
           case ByteCode::DIV_RI64S: {
               const auto p = ByteCode::PARSE::DIV_RI64S(code_i);
 
-              assert(p.val2 == 0);
+              assert(p.val2 == RAX.REG);
 
               //Sign extend to RDX
               out_code.insert(X64::REX_W);
@@ -823,8 +868,52 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               out_code.insert(X64::MODRM_MOD_DIRECT
                               | X64::modrm_r_rm(7, p.val1));
 
-
               code_i += ByteCode::SIZE_OF::DIV_RI64S;
+
+              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+              break;
+            }
+          case ByteCode::SHIFT_L_BY_R8_R64: {
+              const auto p = ByteCode::PARSE::SHIFT_L_BY_R8_R64(code_i);
+
+              assert(p.val1 == RCX.REG);
+
+              out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
+              out_code.insert(X64::SAL_R_BY_CL);
+              out_code.insert(X64::MODRM_MOD_DIRECT
+                              | X64::modrm_r_rm(7, p.val2));
+
+              code_i += ByteCode::SIZE_OF::SHIFT_L_BY_R8_R64;
+
+              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+              break;
+            }
+          case ByteCode::SHIFT_R_BY_R8_RU64: {
+              const auto p = ByteCode::PARSE::SHIFT_R_BY_R8_RU64(code_i);
+
+              assert(p.val1 == RCX.REG);
+
+              out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
+              out_code.insert(X64::SHR_R_BY_CL);
+              out_code.insert(X64::MODRM_MOD_DIRECT
+                              | X64::modrm_r_rm(5, p.val2));
+
+              code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RU64;
+
+              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+              break;
+            }
+          case ByteCode::SHIFT_R_BY_R8_RI64: {
+              const auto p = ByteCode::PARSE::SHIFT_R_BY_R8_RI64(code_i);
+
+              assert(p.val1 == RCX.REG);
+
+              out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
+              out_code.insert(X64::SAR_R_BY_CL);
+              out_code.insert(X64::MODRM_MOD_DIRECT
+                              | X64::modrm_r_rm(7, p.val2));
+
+              code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RI64;
 
               check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
               break;
@@ -836,7 +925,6 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               out_code.insert(X64::OR_R_TO_RM);
               out_code.insert(X64::MODRM_MOD_DIRECT
                               | X64::modrm_r_rm(p.val1, p.val2));
-
 
               code_i += ByteCode::SIZE_OF::OR_R64S;
 
@@ -1612,6 +1700,31 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             }
             break;
           }
+        case 0xD3: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.rm_name = x86_64_reg_name_from_num;
+
+            const uint8_t r = (modrm & 0b0011'1000) >> 3;
+            OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+
+            if (r == 4) {
+              printf("sal %s, CL\n", rm_string.ptr);
+            }
+            else if (r == 5) {
+              printf("shr %s, CL\n", rm_string.ptr);
+            }
+            else if (r == 7) {
+              printf("sar %s, CL\n", rm_string.ptr);
+            }
+            else {
+              printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
+                     maybe_rex, op, modrm);
+
+              return;
+            }
+            break;
+          }
         default: {
             printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx\n",
                    maybe_rex, op);
@@ -1623,6 +1736,23 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
     else if ((maybe_rex & 0b1111'1000) == X64::REX) {
       uint8_t op = *bytes++;
       switch (op) {
+        case X64::MOV_8_TO_R8:
+        case (X64::MOV_8_TO_R8 + 1):
+        case (X64::MOV_8_TO_R8 + 2):
+        case (X64::MOV_8_TO_R8 + 3):
+        case (X64::MOV_8_TO_R8 + 4):
+        case (X64::MOV_8_TO_R8 + 5):
+        case (X64::MOV_8_TO_R8 + 6):
+        case (X64::MOV_8_TO_R8 + 7): {
+            const uint8_t reg = (op - X64::MOV_8_TO_R8) | ((maybe_rex & 0b0000'0001) << 3);
+            const char* r_string = b8_rex_reg_name(reg);
+
+            uint8_t imm8 = bytes[0];
+            bytes++;
+
+            printf("mov %s, 0x%hhx\n", r_string, imm8);
+            break;
+          }
         case X64::MOV_IMM32_RM: {
             uint8_t modrm = *bytes++;
 
@@ -1634,6 +1764,17 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             bytes += 4;
 
             printf("mov %s, %u\n", rm.ptr, val);
+            break;
+          }
+        case X64::MOV_R8_TO_RM8: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.rm_name = b8_rex_reg_name;
+            p_opts.r_name = b8_rex_reg_name;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+
+            printf("mov %s, %s\n", names.r.ptr, names.rm.ptr);
             break;
           }
         case 0x0F: {
@@ -1704,7 +1845,37 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
     }
     else {
       //Non-REX instruction
-      switch (maybe_rex) {
+      const uint8_t op = maybe_rex;
+
+      switch (op) {
+        case X64::MOV_R8_TO_RM8: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.rm_name = b8_no_rex_reg_name;
+            p_opts.r_name = b8_no_rex_reg_name;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+
+            printf("mov %s, %s\n", names.r.ptr, names.rm.ptr);
+            break;
+          }
+        case X64::MOV_8_TO_R8:
+        case (X64::MOV_8_TO_R8 + 1):
+        case (X64::MOV_8_TO_R8 + 2):
+        case (X64::MOV_8_TO_R8 + 3):
+        case (X64::MOV_8_TO_R8 + 4):
+        case (X64::MOV_8_TO_R8 + 5):
+        case (X64::MOV_8_TO_R8 + 6):
+        case (X64::MOV_8_TO_R8 + 7): {
+            const uint8_t reg = (op - X64::MOV_8_TO_R8);
+            const char* r_string = b8_no_rex_reg_name(reg);
+
+            uint8_t imm8 = bytes[0];
+            bytes++;
+
+            printf("mov %s, 0x%hhx\n", r_string, imm8);
+            break;
+          }
         case X64::PUSH_R:
         case (X64::PUSH_R + 1):
         case (X64::PUSH_R + 2):
@@ -1713,7 +1884,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case (X64::PUSH_R + 5):
         case (X64::PUSH_R + 6):
         case (X64::PUSH_R + 7): {
-            const char* r_string = x86_64_reg_name_from_num(maybe_rex - X64::PUSH_R);
+            const char* r_string = x86_64_reg_name_from_num(op - X64::PUSH_R);
 
             printf("push %s\n", r_string);
             break;
@@ -1726,7 +1897,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case (X64::POP_R + 5):
         case (X64::POP_R + 6):
         case (X64::POP_R + 7): {
-            const char* r_string = x86_64_reg_name_from_num(maybe_rex - X64::POP_R);
+            const char* r_string = x86_64_reg_name_from_num(op - X64::POP_R);
 
             printf("pop %s\n", r_string);
             break;

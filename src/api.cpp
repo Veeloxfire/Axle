@@ -68,9 +68,7 @@ int compile_file(const Options& options,
   StringInterner strings ={};
   Types types ={};
 
-  init_types(&types, &strings);
 
-  State working_state ={};
   VM vm = {};
 
   Compiler compiler ={};
@@ -81,30 +79,32 @@ int compile_file(const Options& options,
   compiler.strings = &strings;
   compiler.types = &types;
   compiler.entry_point = strings.intern(options.build.entry_point);
-  compiler.working_state = &working_state;
   compiler.vm = &vm;
+
+  init_types(&compiler);
 
   Parser parser ={};
   parser.lexer.strings = &strings;
 
-  const char* text_source = FILES::load_file_to_string(options.build.file_name);
+  OwnedPtr<const char> text_source = FILES::load_file_to_string(options.build.file_name);
 
-  if (text_source == nullptr) {
+  if (text_source.ptr == nullptr) {
     std::cerr << "Error opening file: " << options.build.file_name << '\n';
     return 1;
   }
 
-  init_parser(&parser, options.build.file_name, text_source);
+  const InternString* file_name = strings.intern(options.build.file_name);
+  init_parser(&parser, file_name, text_source.ptr);
 
   //Parse
   ASTFile ast_base ={};
   parse_file(&parser, &ast_base);
 
   //Should have all been copied now :)
-  free_no_destruct(text_source);
+  text_source.free_no_destruct();
 
 
-  if (parser.current.type == TokenType::Error) {
+  if (parser.current.type == AxleTokenType::Error) {
     std::cerr << "PARSE ERROR: " << parser.current.string->string << '\n'
       << "At File: " << parser.current.pos.file_name
       << ", Line: " << parser.current.pos.line

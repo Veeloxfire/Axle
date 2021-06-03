@@ -66,14 +66,16 @@ uint32_t Structure::alignment() const {
   return (uint32_t)-1;
 }
 
-bool can_literal_cast(const Structure* from, const Structure* to) {
+bool can_comptime_cast(const Structure* from, const Structure* to) {
+  if(can_implicit_cast(from, to)) return true;
+
   switch (from->type) {
     case STRUCTURE_TYPE::FIXED_ARRAY: {
         if (to->type == STRUCTURE_TYPE::FIXED_ARRAY) {
           const ArrayStructure* arr_f = (const ArrayStructure*)from;
           const ArrayStructure* arr_t = (const ArrayStructure*)to;
 
-          return can_literal_cast(arr_f->base, arr_t->base);
+          return can_comptime_cast(arr_f->base, arr_t->base);
         }
         else {
           return false;
@@ -99,150 +101,228 @@ bool can_literal_cast(const Structure* from, const Structure* to) {
         return false;
       }
 
-    default: 
+    default:
       return false;
   }
 }
 
-LiteralStructure* Types::new_literal() {
-  LiteralStructure* const type = literal_structures.allocate();
+LiteralStructure* new_literal_type(Compiler* const comp, const InternString* name) {
+  LiteralStructure* const type = comp->types->literal_structures.allocate();
   type->type = STRUCTURE_TYPE::LITERAL;
-  structures.insert(type);
+  type->name = name;
+
+  comp->types->structures.insert(type);
+
+  NamedElement el ={};
+  el.type = NameElementType::STRUCTURE;
+  el.structure = (const Structure*)type;
+
+  comp->global.names.insert(name, std::move(el));
   return type;
 }
 
-PointerStructure* Types::new_pointer() {
-  PointerStructure* const type = pointer_structures.allocate();
-  type->type = STRUCTURE_TYPE::POINTER;
-  structures.insert(type);
-  return type;
-}
-
-IntegerStructure* Types::new_int() {
-  IntegerStructure* const type = int_structures.allocate();
+IntegerStructure* new_int_type(Compiler* comp, const InternString* name) {
+  IntegerStructure* const type = comp->types->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
-  structures.insert(type);
+  type->name = name;
+
+  comp->types->structures.insert(type);
+
+  NamedElement el ={};
+  el.type = NameElementType::STRUCTURE;
+  el.structure = (const Structure*)type;
+
+  comp->global.names.insert(name, std::move(el));
   return type;
 }
 
-CompositeStructure* Types::new_composite() {
-  CompositeStructure* const type = composite_structures.allocate();
+CompositeStructure* new_composite_type(Compiler* const comp,
+                                       const InternString* name) {
+  CompositeStructure* const type = comp->types->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
-  structures.insert(type);
+  type->name = name;
+
+  comp->types->structures.insert(type);
+
+  NamedElement el ={};
+  el.type = NameElementType::STRUCTURE;
+  el.structure = (const Structure*)type;
+
+  comp->global.names.insert(name, std::move(el));
   return type;
 }
 
-EnumStructure* Types::new_enum() {
-  EnumStructure* const type = enum_structures.allocate();
+EnumStructure* new_enum_type(Compiler* const comp,
+                             const InternString* name) {
+  EnumStructure* const type = comp->types->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
-  structures.insert(type);
+  type->name = name;
+
+  comp->types->structures.insert(type);
+
+  NamedElement el ={};
+  el.type = NameElementType::STRUCTURE;
+  el.structure = (const Structure*)type;
+
+  comp->global.names.insert(name, std::move(el));
   return type;
 }
 
-ArrayStructure* Types::new_array() {
-  ArrayStructure* const type = array_structures.allocate();
+Structure* new_base_type(Compiler* const comp,
+                         const InternString* name) {
+  Structure* const type = comp->types->base_structures.allocate();
+  type->name = name;
+
+  comp->types->structures.insert(type);
+
+  NamedElement el ={};
+  el.type = NameElementType::STRUCTURE;
+  el.structure = (const Structure*)type;
+
+  comp->global.names.insert(name, std::move(el));
+  return type;
+}
+
+ArrayStructure* new_array_type(Compiler* const comp,
+                               const Structure* base,
+                               size_t length) {
+  const InternString* name = comp->strings->intern(ArrayStructure::gen_name(base, length).ptr);
+
+  ArrayStructure* const type = comp->types->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
-  structures.insert(type);
+  type->base = base;
+  type->length = length;
+  type->name = name;
+
+  comp->types->structures.insert(type);
+
+  NamedElement el ={};
+  el.type = NameElementType::STRUCTURE;
+  el.structure = (const Structure*)type;
+
+  comp->global.names.insert(name, std::move(el));
   return type;
 }
 
-OwnedPtr<char> PointerStructure::make_name(const PointerStructure* ps) {
-  return format("*{}", ps->base->name);
+PointerStructure* new_pointer_type(Compiler* const comp,
+                                   const Structure* base) {
+  const InternString* name = comp->strings->intern(PointerStructure::gen_name(base).ptr);
+
+  PointerStructure* const type = comp->types->pointer_structures.allocate();
+  type->type = STRUCTURE_TYPE::POINTER;
+  type->base = base;
+  type->name = name;
+
+  comp->types->structures.insert(type);
+
+  NamedElement el ={};
+  el.type = NameElementType::STRUCTURE;
+  el.structure = (const Structure*)type;
+
+  comp->global.names.insert(name, std::move(el));
+  return type;
 }
 
-OwnedPtr<char> ArrayStructure::make_name(const ArrayStructure* as) {
-  return format("[{}, {}]", as->base->name, as->length);
+EnumValue* new_enum_value(Compiler* const comp,
+                          EnumStructure* enum_s,
+                          const InternString* name) {
+  EnumValue* const val = comp->types->enum_values.allocate();
+  val->type = enum_s;
+  val->name = name;
+
+  enum_s->enum_values.insert(val);
+  comp->types->enums.insert(val);
+
+  NamedElement el ={};
+  el.type = NameElementType::ENUM;
+  el.structure = (const Structure*)val;
+
+  comp->global.names.insert(name, std::move(el));
+  return val;
 }
 
-void init_types(Types* types, StringInterner* strings) {
 
-  Structure* const s_void = types->base_structures.allocate();
+OwnedPtr<char> PointerStructure::gen_name(const Structure* base) {
+  return format("*{}", base->name);
+}
+
+OwnedPtr<char> ArrayStructure::gen_name(const Structure* base, size_t length) {
+  return format("[{}, {}]", base->name, length);
+}
+
+void init_types(Compiler* const comp) {
+  auto* types = comp->types;
+  auto* strings = comp->strings;
+
+  Structure* const s_void = new_base_type(comp, strings->intern("void"));
+  s_void->type = STRUCTURE_TYPE::VOID;
+
   types->s_void = s_void;
   types->structures.insert(s_void);
 
-  s_void->type = STRUCTURE_TYPE::VOID;
-  s_void->name = strings->intern("void");
 
-  Structure* const ascii = types->base_structures.allocate();
-  types->s_ascii = ascii;
-  types->structures.insert(ascii);
-
+  Structure* const ascii = new_base_type(comp, strings->intern("ascii"));
   ascii->type = STRUCTURE_TYPE::ASCII_CHAR;
-  ascii->name = strings->intern("ascii");
+  types->s_ascii = ascii;
 
-  LiteralStructure* const int_lit = types->new_literal();
+  LiteralStructure* const int_lit = new_literal_type(comp, strings->intern("literal_int"));
+  int_lit->literal_type = LITERAL_TYPE::INTEGER;
   types->s_int_lit = int_lit;
 
-  int_lit->name         = strings->intern("integer literal");
-  int_lit->literal_type = LITERAL_TYPE::INTEGER;
-
-  LiteralStructure* const sint_lit = types->new_literal();
+  LiteralStructure* const sint_lit = new_literal_type(comp, strings->intern("literal_signed_int"));
+  sint_lit->literal_type = LITERAL_TYPE::SIGNED_INTEGER;
   types->s_sint_lit = sint_lit;
 
-  sint_lit->name         = strings->intern("signed integer literal");
-  sint_lit->literal_type = LITERAL_TYPE::SIGNED_INTEGER;
 
-  LiteralStructure* const empty_arr = types->new_literal();
+  LiteralStructure* const empty_arr = new_literal_type(comp, strings->intern("literal_empty_array"));
+  empty_arr->literal_type = LITERAL_TYPE::EMPTY_ARR;
   types->s_empty_arr = empty_arr;
 
-  empty_arr->name         = strings->intern("empty array literal");
-  empty_arr->literal_type = LITERAL_TYPE::EMPTY_ARR;
 
-
-  IntegerStructure* const u8 = types->new_int();
-  types->s_u8 = u8;
-
-  u8->name      = strings->intern("u8");
+  IntegerStructure* const u8 = new_int_type(comp, strings->intern("u8"));
   u8->is_signed = false;
   u8->bytes     = 1;
 
-  IntegerStructure* const i8 = types->new_int();
-  types->s_i8 = i8;
+  types->s_u8 = u8;
 
-  u8->name      = strings->intern("i8");
+  IntegerStructure* const i8 = new_int_type(comp, strings->intern("i8"));
   u8->is_signed = true;
   u8->bytes     = 1;
 
-  IntegerStructure* const u64 = types->new_int();
-  types->s_u64 = u64;
+  types->s_i8 = i8;
 
-  u64->name      = strings->intern("u64");
+
+  IntegerStructure* const u64 = new_int_type(comp, strings->intern("u64"));
   u64->is_signed = false;
   u64->bytes      = 8;
 
-  IntegerStructure* const i64 = types->new_int();
-  types->s_i64 = i64;
+  types->s_u64 = u64;
 
-  i64->name      = strings->intern("i64");
+  IntegerStructure* const i64 = new_int_type(comp, strings->intern("i64"));
   i64->is_signed = true;
   i64->bytes     = 8;
 
-  EnumStructure* const s_bool = types->new_enum();
+  types->s_i64 = i64;
+
+
+  EnumStructure* const s_bool = new_enum_type(comp, strings->intern("bool"));
+  s_bool->base = u8;
+
   types->s_bool = s_bool;
 
-  s_bool->base = u8;
-  s_bool->name = strings->intern("bool");
+  s_bool->enum_values.reserve_extra(2);
+  {
+    EnumValue* const e_true = new_enum_value(comp, s_bool, strings->intern("true"));
+    types->e_true = e_true;
 
-  s_bool->enum_values.insert_uninit(2);
+    e_true->representation = 1;
+
+    EnumValue* const e_false = new_enum_value(comp, s_bool, strings->intern("false"));
+    types->e_false = e_false;
+
+    e_true->representation = 0;
+  }
   s_bool->enum_values.shrink();
-
-  EnumValue* const e_true = types->enum_values.allocate();
-  types->e_true = e_true;
-  types->enums.insert(e_true);
-
-  s_bool->enum_values.data[0] = e_true;
-  e_true->type = s_bool;
-  e_true->name = strings->intern("true");
-  e_true->representation = 1;
-
-  EnumValue* const e_false = types->enum_values.allocate();
-  types->e_false = e_false;
-  types->enums.insert(e_false);
-
-  s_bool->enum_values.data[1] = e_false;
-  e_false->type = s_bool;
-  e_false->name = strings->intern("false");
-  e_false->representation = 0;
 
   /////// CASTS ///////
 

@@ -123,6 +123,30 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->IP += ByteCode::SIZE_OF::AND_R64S;
           break;
         }
+      case ByteCode::SHIFT_L_BY_R8_R64 : {
+          const auto i = ByteCode::PARSE::SHIFT_L_BY_R8_R64(vm->IP);
+
+          vm->registers[i.val2].b64.reg <<= vm->registers[i.val1].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::SHIFT_L_BY_R8_R64;
+          break;
+        }
+      case ByteCode::SHIFT_R_BY_R8_RU64: {
+          const auto i = ByteCode::PARSE::SHIFT_R_BY_R8_RU64(vm->IP);
+
+          vm->registers[i.val2].b64.reg_s >>= vm->registers[i.val1].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RU64;
+          break;
+        }
+      case ByteCode::SHIFT_R_BY_R8_RI64: {
+          const auto i = ByteCode::PARSE::SHIFT_R_BY_R8_RI64(vm->IP);
+
+          vm->registers[i.val2].b64.reg >>= vm->registers[i.val1].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RI64;
+          break;
+        }
       case ByteCode::LOAD_ADDRESS: {
           const auto i = ByteCode::PARSE::LOAD_ADDRESS(vm->IP);
 
@@ -375,6 +399,10 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           break;
         }
       default: {
+          uint8_t op = vm->IP[0];
+          fprintf(stderr, "ENCOUNTERED INVALID INSTRUCTION!\n"
+                          "            Code: %d, Name: %s\n",
+                  op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
           return ErrorCode::UNDEFINED_INSTRUCTION;
         }
     }
