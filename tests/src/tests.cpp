@@ -5,6 +5,7 @@
 
 #include "api.h"
 #include "utility.h"
+#include "type.h"
 
 #ifdef COUNT_ALLOC
 void print_still_allocated() {
@@ -32,6 +33,52 @@ void print_still_allocated() {
   }
 }
 #endif
+
+bool check_types_free() {
+  bool res = true;
+
+  if (!Types::array_structures._debug_all_free()) {
+    res = false;
+    std::cout << "Some array structures were not freed\n";
+  }
+
+  if(!Types::base_structures._debug_all_free()) {
+    res = false;
+    std::cout << "Some base structures were not freed\n";
+  }
+
+  if(!Types::composite_structures._debug_all_free()) {
+    res = false;
+    std::cout << "Some composite structures were not freed\n";
+  }
+
+  if(!Types::enum_structures._debug_all_free()) {
+    res = false;
+    std::cout << "Some enum structures were not freed\n";
+  }
+
+  if(!Types::enum_values._debug_all_free()) {
+    res = false;
+    std::cout << "Some enum values were not freed\n";
+  }
+
+  if(!Types::int_structures._debug_all_free()) {
+    res = false;
+    std::cout << "Some int structures were not freed\n";
+  }
+
+  if(!Types::literal_structures._debug_all_free()) {
+    res = false;
+    std::cout << "Some literal structures were not freed\n";
+  }
+
+  if(!Types::pointer_structures._debug_all_free()) {
+    res = false;
+    std::cout << "Some pointer structures were not freed\n";
+  }
+
+  return res;
+}
 
 //Loop fibonacci algorithm - slow version wont run in constexpr
 constexpr auto constexpr_fibonacci(uint64_t a) -> uint64_t {
@@ -202,7 +249,12 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
 
     const bool passed = run_test(options, test.return_value);
 
-    if (passed) {
+    //Print memory leaks
+    //print_still_allocated();
+
+    const bool all_types_freed = check_types_free();
+
+    if (passed && all_types_freed) {
       std::cout << "Test passed!\n";
     }
     else {
@@ -210,8 +262,6 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
       failed_tests.insert(test.test_name);
     }
 
-    //Test for memory leaks
-    //print_still_allocated();
   }
 
   if (failed_tests.size == 0) {

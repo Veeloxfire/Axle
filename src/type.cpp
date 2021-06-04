@@ -86,13 +86,9 @@ bool can_comptime_cast(const Structure* from, const Structure* to) {
 
         switch (from_lit->literal_type) {
           case LITERAL_TYPE::INTEGER:
-            return to->type == STRUCTURE_TYPE::INTEGER
-              || (to->type == STRUCTURE_TYPE::LITERAL
-                  && static_cast<const LiteralStructure*>(to)->literal_type == LITERAL_TYPE::SIGNED_INTEGER);
-
           case LITERAL_TYPE::SIGNED_INTEGER:
-            return to->type == STRUCTURE_TYPE::INTEGER
-              && static_cast<const IntegerStructure*>(to)->is_signed;
+            //Signed/Size checks will be done later
+            return to->type == STRUCTURE_TYPE::INTEGER;
 
           case LITERAL_TYPE::EMPTY_ARR://cast to any array
             return to->type == STRUCTURE_TYPE::FIXED_ARRAY;
@@ -256,9 +252,7 @@ void init_types(Compiler* const comp) {
 
   Structure* const s_void = new_base_type(comp, strings->intern("void"));
   s_void->type = STRUCTURE_TYPE::VOID;
-
   types->s_void = s_void;
-  types->structures.insert(s_void);
 
 
   Structure* const ascii = new_base_type(comp, strings->intern("ascii"));
@@ -323,25 +317,6 @@ void init_types(Compiler* const comp) {
     e_true->representation = 0;
   }
   s_bool->enum_values.shrink();
-
-  /////// CASTS ///////
-
-  ascii->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
-  ascii->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::u8_to_r64 });
-
-  u8->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
-  u8->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::u8_to_r64 });
-
-  i8->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
-  i8->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::i8_to_r64 });
-
-  u64->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::no_cast });
-  u64->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
-
-  i64->casts.insert(Cast{ &TYPE_TESTS::is_64_bit_int, &CASTS::no_cast });
-  i64->casts.insert(Cast{ &TYPE_TESTS::is_8_bit_int, &CASTS::no_cast });
-
-  sint_lit->casts.insert(Cast{ &TYPE_TESTS::is_unsigned_64_bit_int, &CASTS::no_cast });
 }
 
 Types::~Types() {
@@ -353,6 +328,9 @@ Types::~Types() {
       const Structure* s = *i;
 
       switch (s->type) {
+        case STRUCTURE_TYPE::FIXED_ARRAY:
+          array_structures.free((const ArrayStructure*)s);
+          break;
         case STRUCTURE_TYPE::POINTER:
           pointer_structures.free((const PointerStructure*)s);
           break;
@@ -369,8 +347,10 @@ Types::~Types() {
           enum_structures.free((const EnumStructure*)s);
           break;
         case STRUCTURE_TYPE::VOID:
+        case STRUCTURE_TYPE::ASCII_CHAR:
           base_structures.free(s);
           break;
+        default: assert(false);
       }
     }
   }
@@ -452,7 +432,7 @@ RuntimeValue CASTS::i8_to_r64(Compiler* const comp,
   return impl_single_cast(comp, state, code, comp->types->s_i8, val, ByteCode::EMIT::CONV_RI8_TO_R64);
 }
 
-RuntimeValue CASTS::no_cast(Compiler* const comp,
+RuntimeValue CASTS::no_op(Compiler* const comp,
                             State* const state,
                             CodeBlock* const code,
                             RuntimeValue* const val) {

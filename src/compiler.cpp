@@ -440,40 +440,6 @@ void compile_type(Compiler* const comp, ASTType* type) {
   assert(type->type != nullptr);
 }
 
-//static void print_function_call(const FunctionCallExpr* const call) {
-//  printf("%s(", call->function_name->string);
-//
-//  auto i = call->arguments.begin();
-//  const auto end = call->arguments.end();
-//
-//  if (i < end) {
-//    for (; i < (end - 1); i++) {
-//      printf("%s, ", i->type->name->string);
-//    }
-//
-//    printf("%s", i->type->name->string);
-//  }
-//
-//  printf(")");
-//}
-
-//static void print_function_signature(const Function* func) {
-//  printf("(");
-//
-//  auto i = func->parameter_types.begin();
-//  const auto end = func->parameter_types.end();
-//
-//  if (i < end) {
-//    for (; i < (end - 1); i++) {
-//      printf("%s, ", (*i)->name->string);
-//    }
-//
-//    printf("%s", (*i)->name->string);
-//  }
-//
-//  printf(") -> %s", func->return_type->name->string);
-//}
-
 static Array<const Function*> generate_overload_set(const Compiler* const comp,
                                                     const CallSignature* call) {
   auto i = comp->functions.begin_const_iter();
@@ -576,7 +542,10 @@ static void compile_find_function_call(Compiler* const comp,
 }
 
 static void cast_operator_type(Compiler* const comp,
+                               State* const state,
                                ASTExpression* const expr) {
+  assert(expr->expr_type == EXPRESSION_TYPE::CAST);
+
   const Types* const types = comp->types;
 
   const Structure* const cast_to = expr->cast.type.type;
@@ -585,19 +554,134 @@ static void cast_operator_type(Compiler* const comp,
   assert(cast_to != nullptr);
   assert(cast_from != nullptr);
 
-  if (can_implicit_cast(cast_from, cast_to)) {
-    expr->cast.emit = &CASTS::no_cast;
+  const auto emit_cast_func = [&cast_to](ASTExpression* expr, CAST_FUNCTION cast) {
+    expr->cast.emit = cast;
+    expr->type = cast_to;
+  };
+
+  if (can_comptime_cast(cast_from, cast_to)) {
+    compile_implicit_cast(comp, expr->cast.expr, cast_to);
+    emit_cast_func(expr, CASTS::no_op);
     return;
   }
 
-  auto i = cast_from->casts.begin();
-  const auto end =  cast_from->casts.end();
+  switch (cast_from->type) {
+    case STRUCTURE_TYPE::ASCII_CHAR: {
+        //Can only cast ascii char to a u8
+        if (cast_to == types->s_u8) {
+          emit_cast_func(expr, CASTS::no_op);
+          return;
+        }
 
-  for (; i < end; i++) {
-    if (i->test(cast_to)) {
-      expr->cast.emit = i->cast;
-      return;
-    }
+        break;
+      }
+    case STRUCTURE_TYPE::ENUM: {
+        const EnumStructure* en = (const EnumStructure*)cast_from;
+
+        if (cast_to == en->base) {
+          emit_cast_func(expr, CASTS::no_op);
+          return;
+        }
+
+        break;
+      }
+    case STRUCTURE_TYPE::FIXED_ARRAY: {
+        const ArrayStructure* from_arr = (const ArrayStructure*)cast_from;
+
+        if (cast_to->type == STRUCTURE_TYPE::FIXED_ARRAY) {
+          const ArrayStructure* to_arr = (const ArrayStructure*)cast_to;
+
+          if (can_implicit_cast(from_arr->base, to_arr->base) && from_arr->size() == to_arr->size()) {
+            emit_cast_func(expr, CASTS::no_op);
+            return;
+          }
+        }
+        else if (cast_to->type == STRUCTURE_TYPE::POINTER) {
+          const PointerStructure* to_ptr = (const PointerStructure*)cast_to;
+
+          if (can_implicit_cast(from_arr->base, to_ptr->base) && from_arr->size() == to_ptr->size()) {
+            //Must be in memory to cast like this
+            set_valid_rvts(expr->cast.expr, state, (uint8_t)RVT::MEMORY);
+
+            emit_cast_func(expr, CASTS::no_op);
+            return;
+          }
+        }
+
+        return;
+      }
+    case STRUCTURE_TYPE::INTEGER: {
+        const IntegerStructure* from_int = (const IntegerStructure*)cast_from;
+
+        if (cast_to->type == STRUCTURE_TYPE::INTEGER) {
+          const IntegerStructure* to_int = (const IntegerStructure*)cast_to;
+
+          if (from_int->bytes >= to_int->bytes) {
+            //Can cast down ints easily
+            emit_cast_func(expr, CASTS::no_op);
+            return;
+          }
+          else {
+            //Cast up in size
+            //Need specific instructions for different sizes
+            //Can cast up to r64 and then "cast down" which is free
+
+            if (from_int->bytes == 1) {
+              if (from_int->is_signed) {
+                emit_cast_func(expr, CASTS::i8_to_r64);
+                return;
+              }
+              else {
+                emit_cast_func(expr, CASTS::u8_to_r64);
+                return;
+              }
+            }
+          }
+
+          comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+                             "Cannot cast type '{}' to type '{}'\n"
+                             "They are both integers and this should be implemented",
+                             cast_from->name, cast_to->name);
+          return;
+        }
+
+        break;
+      }
+    case STRUCTURE_TYPE::LITERAL: {
+        const LiteralStructure* from_lit = (const LiteralStructure*)cast_from;
+
+        if (cast_to->type == STRUCTURE_TYPE::LITERAL) {
+          const LiteralStructure* to_lit = (const LiteralStructure*)cast_to;
+
+          if (from_lit->literal_type == LITERAL_TYPE::SIGNED_INTEGER && to_lit->literal_type == LITERAL_TYPE::INTEGER) {
+            emit_cast_func(expr, CASTS::no_op);
+            return;
+          }
+        }
+
+        break;
+      }
+    case STRUCTURE_TYPE::POINTER: {
+        const PointerStructure* from_ptr = (const PointerStructure*)cast_from;
+
+        if (cast_to->type == STRUCTURE_TYPE::POINTER) {
+          const PointerStructure* to_ptr = (const PointerStructure*)cast_to;
+
+          if (can_implicit_cast(from_ptr->base, to_ptr->base) && from_ptr->size() == to_ptr->size()) {
+            emit_cast_func(expr, CASTS::no_op);
+            return;
+          }
+        }
+        
+        break;
+      }
+    case STRUCTURE_TYPE::VOID: {
+        comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                           "Cannot cast '{}' to any type\n"
+                           "Attempted to cast '{}' to '{}'",
+                           cast_from->name, cast_from->name, cast_to->name);
+        break;
+      }
   }
 
   comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
@@ -717,27 +801,52 @@ static void do_literal_cast(Compiler* const comp,
           case LITERAL_TYPE::SIGNED_INTEGER: {
               const IntegerStructure* to_is = (const IntegerStructure*)to_type;
               assert(to_type->type == STRUCTURE_TYPE::INTEGER);
-              assert(to_is->is_signed == true);
               assert(to_is->bytes <= 8);
 
+              //Can still be an unsigned or signed integer
+
               int64_t comptime_val = x64_from_bytes(from);
-              int64_t max_negative_val = ~bit_fill_lower<uint64_t>(to_is->bytes * 8 - 1);
-              const int64_t max_positive_val = bit_fill_lower<uint64_t>(to_is->bytes * 8 - 1);
 
-              if (comptime_val < max_negative_val) {
-                comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                   "'{}' value is too large to fit in type '{}'\n"
-                                   "The maximum negative value is: '{}'",
-                                   comptime_val, to_is->name, max_positive_val);
-                return;
+              if (to_is->is_signed) {
+                const int64_t max_negative_val = ~bit_fill_lower<int64_t>(to_is->bytes * 8 - 1);
+                const int64_t max_positive_val = bit_fill_lower<int64_t>(to_is->bytes * 8 - 1);
 
+                if (comptime_val < max_negative_val) {
+                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                                     "'{}' value is too large to fit in type '{}'\n"
+                                     "The maximum negative value is: '{}'\n"
+                                     "Try using '% {}' to make the value small enough",
+                                     comptime_val, to_is->name, max_positive_val, max_positive_val);
+                  return;
+
+                }
+                else if (comptime_val > max_positive_val) {
+                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                                     "'{}' value is too large to fit in type '{}'\n"
+                                     "The maximum positive value is: '{}'\n"
+                                     "Try using '% {}' to make the value small enough",
+                                     comptime_val, to_is->name, max_positive_val, max_positive_val);
+                  return;
+                }
               }
-              else if (comptime_val > max_positive_val) {
-                comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                   "'{}' value is too large to fit in type '{}'\n"
-                                   "The maximum positive value is: '{}'",
-                                   comptime_val, to_is->name, max_positive_val);
-                return;
+              else {
+                const uint64_t max_positive_val = bit_fill_lower<uint64_t>(to_is->bytes * 8);
+                const uint64_t abs_val = absolute(comptime_val);
+                if (comptime_val < 0) {
+                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                                     "Tried to assign negative value '{}' into unsigned type '{}'\n"
+                                     "Try casting to '{}' first as this legally converts it to an unsigned type",
+                                     comptime_val, to_is->name, comp->types->s_int_lit->name);
+                  return;
+                }
+                else if (abs_val > max_positive_val) {
+                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                                     "'{}' value is too large to fit in type '{}'\n"
+                                     "The maximum positive value is: '{}'\n"
+                                     "Try using '% {}' to make the value small enough",
+                                     abs_val, to_is->name, max_positive_val, max_positive_val);
+                  return;
+                }
               }
 
               //Should theoretically be able to just memcpy ... 
@@ -756,8 +865,9 @@ static void do_literal_cast(Compiler* const comp,
                 if (comptime_val > max_positive_val) {
                   comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
                                      "'{}' value is too large to fit in type '{}'\n"
-                                     "The maximum value is: '{}'",
-                                     comptime_val, to_is->name, max_positive_val);
+                                     "The maximum positive value is: '{}'\n"
+                                     "Try using '% {}' to make the value small enough",
+                                     comptime_val, to_is->name, max_positive_val, max_positive_val);
                   return;
                 }
               }
@@ -766,8 +876,9 @@ static void do_literal_cast(Compiler* const comp,
                 if (comptime_val > max_val) {
                   comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
                                      "'{}' value is too large to fit in type '{}'\n"
-                                     "The maximum value is: '{}'",
-                                     comptime_val, to_is->name, max_val);
+                                     "The maximum value is: '{}'"
+                                     "Try using '% {}' to make the value small enough",
+                                     comptime_val, to_is->name, max_val, max_val);
                   return;
                 }
               }
@@ -788,6 +899,8 @@ static void do_literal_cast(Compiler* const comp,
 
 void compile_implicit_cast(Compiler* const comp, ASTExpression* from_expr, const Structure* to) {
   const Structure* from = from_expr->type;
+  assert(from != nullptr);
+  assert(to != nullptr);
 
   if (can_implicit_cast(from, to)) {
     return;
@@ -1012,7 +1125,7 @@ static void compile_type_of_expression(Compiler* const comp,
           return;
         }
 
-        cast_operator_type(comp, expr);
+        cast_operator_type(comp, state, expr);
         if (comp->is_panic()) {
           return;
         }
@@ -3042,7 +3155,7 @@ bool test_is_child(const Compiler* const comp, const ValueTree& tree,
 
         //Could be special case where other is actually a child of the possible child
         if (other_val.creation.related_index.val == pos_child_index) {
-            
+
           ignore_vals.insert(pos_parent_index);
           bool res = test_is_child(comp, tree, other.val, other_val, pos_child_index, possible_child, ignore_vals);
           ignore_vals.pop();
@@ -3098,7 +3211,7 @@ void coalesce(const Compiler* const comp, State* const state) {
     ValueIndex created_by = resolve_coalesced(l1_val.creation.related_index, tree);
     auto& possible_parent = tree.values.data[created_by.val];
 
-    Array<size_t> ignore_vals = {};
+    Array<size_t> ignore_vals ={};
 
     bool is_child = test_is_child(comp, tree,
                                   l1, l1_val,

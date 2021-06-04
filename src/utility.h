@@ -48,7 +48,7 @@ template<typename T>
 constexpr T bit_fill_upper(uint8_t bits) {
   int64_t fill = ((uint64_t)1) << 63;
 
-  fill >>= (bits - (uint8_t)1 + (uint8_t)(bits == 0));
+  fill >>= ((uint64_t)bits - (uint64_t)1 + (uint64_t)(bits == 0));
 
   return static_cast<T>(fill << (uint8_t)(bits == 0));
 }
@@ -694,7 +694,62 @@ struct FreelistBlockAllocator {
     return new_t;
   }
 
+  bool _debug_valid_free_ptr(const T* const t) const {
+    BLOCK* check = top;
+
+    const uint8_t* const as_ptr = (const uint8_t*)t;
+
+    while (check != nullptr) {
+      const uint8_t* const block_ptr = (const uint8_t*)check->data;
+      if (as_ptr >= block_ptr && as_ptr < (block_ptr + (sizeof(Element) * BLOCK::BLOCK_SIZE))) {
+        //is it part of this block
+
+        const size_t diff = as_ptr - block_ptr;
+        if (diff % sizeof(Element) == 0) {
+          //Is aligned properly
+          return true;
+        }
+        else {
+          return false;
+        }
+
+      }
+
+      //Not in this one try next
+      check = check->prev;
+    }
+
+    //Not in any
+    return false;
+  }
+
+  bool _debug_all_free() const {
+    size_t alloc_list_length = 0;
+    {
+      const Element* next_alloc = alloc_list;
+
+      while (next_alloc != nullptr) {
+        alloc_list_length++;
+        next_alloc = next_alloc->header.next;
+      }
+    }
+
+    size_t expected_length = 0;
+    {
+      const BLOCK* block = top;
+      while (block != nullptr) {
+        expected_length += BLOCK::BLOCK_SIZE;
+        block = block->prev;
+      }
+    }
+
+    return alloc_list_length == expected_length;
+  }
+
+
   void free(const T* t) {
+    assert(_debug_valid_free_ptr(t));
+
     Element* new_e = (Element*)t;
     new_e->el.~T();
     new_e->header.next = alloc_list;

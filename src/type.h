@@ -16,18 +16,12 @@ enum struct STRUCTURE_TYPE : uint8_t {
   INTEGER, POINTER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY, ASCII_CHAR
 };
 
-using CAST_TEST     = FUNCTION_PTR<bool, const Structure*>;
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, RuntimeValue*>;
 
-struct Cast {
-  CAST_TEST test;
-  CAST_FUNCTION cast;
-};
 
 struct Structure {
   STRUCTURE_TYPE type = STRUCTURE_TYPE::VOID;
   const InternString* name = nullptr;
-  Array<Cast> casts ={};
 
   uint32_t size() const;
   uint32_t alignment() const;
@@ -207,7 +201,7 @@ bool can_comptime_cast(const Structure* from, const Structure* to);
 namespace CASTS {
   RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, RuntimeValue*);
   RuntimeValue i8_to_r64(Compiler*, State*, CodeBlock*, RuntimeValue*);
-  RuntimeValue no_cast(Compiler*, State*, CodeBlock*, RuntimeValue*);
+  RuntimeValue no_op(Compiler*, State*, CodeBlock*, RuntimeValue*);
 }
 
 namespace TYPE_TESTS {

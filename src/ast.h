@@ -82,7 +82,7 @@ struct BinaryOperatorExpr {
   ASTExpression* left = nullptr;
   ASTExpression* right = nullptr;
 
-  BINARY_OPERATOR_FUNCTION emit;
+  BINARY_OPERATOR_FUNCTION emit = nullptr;
 
   ~BinaryOperatorExpr() {
     free_destruct_single(left);
@@ -212,9 +212,9 @@ enum struct STATEMENT_TYPE : uint8_t {
 };
 
 struct ASTIfElse {
-  ASTExpression condition;
-  ASTStatement* if_statement;
-  ASTStatement* else_statement;
+  ASTExpression condition ={};
+  ASTStatement* if_statement = nullptr;
+  ASTStatement* else_statement = nullptr;
 
   ~ASTIfElse() {
     free_destruct_single(if_statement);
@@ -223,7 +223,7 @@ struct ASTIfElse {
 };
 
 struct ASTBlock {
-  Array<ASTStatement> block;
+  Array<ASTStatement> block ={};
 };
 
 struct ASTStatement {

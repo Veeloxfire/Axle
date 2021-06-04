@@ -249,9 +249,9 @@ struct ConstantUnit {
 };
 
 struct ErrorMessage {
-  CompileCode type;
-  Span span;
-  OwnedPtr<char> message;
+  CompileCode type = CompileCode::NO_ERRORS;
+  Span span ={};
+  OwnedPtr<char> message ={};
 };
 
 struct Errors {
@@ -260,8 +260,8 @@ struct Errors {
 };
 
 struct CallSignature {
-  const InternString* name;
-  Array<const Structure*> arguments;
+  const InternString* name = nullptr;
+  Array<const Structure*> arguments ={};
 };
 
 enum struct UnfoundDepType {
