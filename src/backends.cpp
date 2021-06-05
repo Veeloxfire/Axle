@@ -468,8 +468,8 @@ void X64::mov(Array<uint8_t>& arr,
 }
 
 void X64::mov(Array<uint8_t>& arr,
-         R8 r8,
-         const RM8& rm8) {
+              R8 r8,
+              const RM8& rm8) {
   R r = r8.r;
   const RM& rm = rm8.rm;
 
@@ -1046,6 +1046,15 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
               code_i += ByteCode::SIZE_OF::LOAD_ADDRESS;
               break;
             }
+          case ByteCode::COPY_R8_FROM_MEM: {
+              const auto p = ByteCode::PARSE::COPY_R8_FROM_MEM(code_i);
+
+              X64::RM rm = X64::rm_from_mem_complex(p.mem);
+
+              X64::mov(out_code, X64::R8{ X64::R{p.val} }, X64::RM8{ rm });
+              code_i += ByteCode::SIZE_OF::COPY_R8_FROM_MEM;
+              break;
+            }
           case ByteCode::COPY_R64_FROM_MEM: {
               const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(code_i);
 
@@ -1237,6 +1246,30 @@ const char* b8_rex_reg_name(uint8_t reg) {
   return "INVALID REGISTER";
 }
 
+const char* b16_reg_name(uint8_t reg) {
+  switch (reg) {
+    case 0: return "AX";
+    case 1: return "CX";
+    case 2: return "DX";
+    case 3: return "BX";
+    case 4: return "SP";
+    case 5: return "BP";
+    case 6: return "SI";
+    case 7: return "DI";
+    case 8: return "R8W";
+    case 9: return "R9W";
+    case 10: return "R10W";
+    case 11: return "R11W";
+    case 12: return "R12W";
+    case 13: return "R13W";
+    case 14: return "R14W";
+    case 15: return "R15W";
+  }
+
+  return "INVALID REGISTER";
+}
+
+
 const char* b32_reg_name(uint8_t reg) {
   switch (reg) {
     case 0: return "EAX";
@@ -1261,9 +1294,9 @@ const char* b32_reg_name(uint8_t reg) {
 }
 
 struct x86PrintOptions {
-  bool short_operand;
-  FUNCTION_PTR<const char*, uint8_t> r_name;
-  FUNCTION_PTR<const char*, uint8_t> rm_name;
+  FUNCTION_PTR<const char*, uint8_t> r_name = nullptr;
+  FUNCTION_PTR<const char*, uint8_t> rm_name = nullptr;
+  const char* mem_size = nullptr;
 };
 
 static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
@@ -1277,20 +1310,8 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
     return format("{}", p_opts->rm_name(rm));
   }
 
-  constexpr auto OPERAND_SIZE = [](bool short_prefix, bool rex_w) {
-    if (rex_w) {
-      return "QWORD PTR";
-    }
-    else if (short_prefix) {
-      //not 64bit and short
-      return "WORD PTR";
-    }
-    else {
-      return "DWORD PTR";
-    }
-  };
-
-  const char* const size_operand = OPERAND_SIZE(p_opts->short_operand, (rex & X64::REX_W) == X64::REX_W);
+  //from now on use x86_64_reg_name_from_num for mem
+  //Memory is always 64 bit addressed
 
   switch (rm) {
     case RSP.REG: {
@@ -1310,24 +1331,34 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
                 int32_t disp = x32_from_bytes(*rest);
                 *rest += 4;
 
-                return format("{} [{}]", size_operand, disp);
+                return format("{} [{}]", p_opts->mem_size, disp);
               }
               else if (INDEX_RSP) {
-                return format("{} [{}]", size_operand, p_opts->rm_name(base));
+                return format("{} [{}]", p_opts->mem_size, x86_64_reg_name_from_num(base));
               }
               else if (BASE_RBP) {
                 int32_t disp = x32_from_bytes(*rest);
                 *rest += 4;
 
                 char sign = disp >= 0 ? '+' : '-';
-
-                return format("{} [({} * {}) {} {}]", size_operand, p_opts->rm_name(index), scale, sign, absolute(disp));
+                if (scale == 1) {
+                  return format("{} [{} {} {}]", p_opts->mem_size, x86_64_reg_name_from_num(index), sign, absolute(disp));
+                }
+                else {
+                  return format("{} [({} * {}) {} {}]", p_opts->mem_size, x86_64_reg_name_from_num(index), scale, sign, absolute(disp));
+                }
+              }
+              else if (scale == 1) {
+                return format("{} [{} + {}]",
+                              p_opts->mem_size,
+                              x86_64_reg_name_from_num(base),
+                              x86_64_reg_name_from_num(index));
               }
               else {
                 return format("{} [{} + ({} * {})]",
-                              size_operand,
-                              p_opts->rm_name(base),
-                              p_opts->rm_name(index),
+                              p_opts->mem_size,
+                              x86_64_reg_name_from_num(base),
+                              x86_64_reg_name_from_num(index),
                               scale);
               }
             }
@@ -1338,16 +1369,25 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
               if (INDEX_RSP) {
                 return format("{} [{} {} {}]",
-                              size_operand,
-                              p_opts->rm_name(base),
+                              p_opts->mem_size,
+                              x86_64_reg_name_from_num(base),
                               sign, absolute(disp));
               }
               else {
-                return format("{} [{} {} {} + ({} * {})]",
-                              size_operand,
-                              p_opts->rm_name(base),
-                              sign, absolute(disp),
-                              p_opts->rm_name(index), scale);
+                if (scale == 1) {
+                  return format("{} [{} {} {} + {}]",
+                                p_opts->mem_size,
+                                x86_64_reg_name_from_num(base),
+                                sign, absolute(disp),
+                                x86_64_reg_name_from_num(index));
+                }
+                else {
+                  return format("{} [{} {} {} + ({} * {})]",
+                                p_opts->mem_size,
+                                x86_64_reg_name_from_num(base),
+                                sign, absolute(disp),
+                                x86_64_reg_name_from_num(index), scale);
+                }
               }
             }
           case 0b10: {
@@ -1358,16 +1398,25 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
               if (INDEX_RSP) {
                 return format("{} [{} {} {}]",
-                              size_operand,
-                              p_opts->rm_name(base),
+                              p_opts->mem_size,
+                              x86_64_reg_name_from_num(base),
                               sign, absolute(disp));
               }
               else {
-                return format("{} [{} + ({} * {}) {} {}]",
-                              size_operand,
-                              p_opts->rm_name(base),
-                              p_opts->rm_name(index), scale,
-                              sign, absolute(disp));
+                if (scale == 1) {
+                  return format("{} [{} + {} {} {}]",
+                                p_opts->mem_size,
+                                x86_64_reg_name_from_num(base),
+                                x86_64_reg_name_from_num(index),
+                                sign, absolute(disp));
+                }
+                else {
+                  return format("{} [{} + ({} * {}) {} {}]",
+                                p_opts->mem_size,
+                                x86_64_reg_name_from_num(base),
+                                x86_64_reg_name_from_num(index), scale,
+                                sign, absolute(disp));
+                }
               }
             }
         }
@@ -1381,7 +1430,7 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
           char sign = disp >= 0 ? '+' : '-';
 
-          return format("{} [RIP {} {}]", size_operand, sign, absolute(disp));
+          return format("{} [RIP {} {}]", p_opts->mem_size, sign, absolute(disp));
         }
 
         goto NORMAL_MODRM;
@@ -1392,14 +1441,14 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
         switch (address_mode) {
           case 0b00: {
-              return format("{} [{}]", size_operand, p_opts->rm_name(rm));
+              return format("{} [{}]", p_opts->mem_size, x86_64_reg_name_from_num(rm));
             }
           case 0b01: {
               int8_t disp = *(*rest)++;
 
               char sign = disp >= 0 ? '+' : '-';
 
-              return format("{} [{} {} {}]", size_operand, p_opts->rm_name(rm), sign, absolute(disp));
+              return format("{} [{} {} {}]", p_opts->mem_size, x86_64_reg_name_from_num(rm), sign, absolute(disp));
             }
           case 0b10: {
               int32_t disp = x32_from_bytes(*rest);
@@ -1407,7 +1456,7 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
               char sign = disp >= 0 ? '+' : '-';
 
-              return format("{} [{} {} {}]", size_operand, p_opts->rm_name(rm), sign, absolute(disp));
+              return format("{} [{} {} {}]", p_opts->mem_size, x86_64_reg_name_from_num(rm), sign, absolute(disp));
             }
         }
 
@@ -1432,6 +1481,30 @@ static RegisterNames register_names(x86PrintOptions* p_opts,
   return { r_reg_string(p_opts, rex, modrm), rm_reg_string(p_opts, rex, modrm, rest) };
 }
 
+static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_address, bool short_operand) {
+  if (rex_w) {
+    ops->r_name = x86_64_reg_name_from_num;
+    ops->rm_name = x86_64_reg_name_from_num;
+  }
+  else {
+    if (short_operand) {
+      ops->r_name = b16_reg_name;
+      ops->rm_name = b16_reg_name;
+    }
+    else {
+      ops->r_name = b32_reg_name;
+      ops->rm_name = b32_reg_name;
+    }
+  }
+
+  if (short_address) {
+    ops->mem_size = "DWORD PTR";
+  }
+  else {
+    ops->mem_size = "QWORD PTR";
+  }
+}
+
 void print_x86_64(const uint8_t* machine_code, size_t size) {
   const uint8_t* bytes = machine_code;
   const uint8_t* const end = machine_code + size;
@@ -1441,9 +1514,22 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
   while (bytes < end) {
     printf("0x%-4llx: ", bytes - machine_code);
 
-    p_opts.short_operand = bytes[0] == 0x66;
-    if (p_opts.short_operand) {
+    bool short_operand = bytes[0] == 0x66;
+    if (short_operand) {
       bytes++;
+    }
+
+    bool short_address = bytes[0] == 0x67;
+    if (short_address) {
+      bytes++;
+    }
+
+    //check again as it might have been second
+    if (!short_operand) {
+      short_operand = bytes[0] == 0x66;
+      if (short_operand) {
+        bytes++;
+      }
     }
 
     const uint8_t maybe_rex = *bytes++;
@@ -1454,8 +1540,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::ADD_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.r_name = x86_64_reg_name_from_num;
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1465,8 +1550,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::OR_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.r_name = x86_64_reg_name_from_num;
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1476,8 +1560,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::AND_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.r_name = x86_64_reg_name_from_num;
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1487,8 +1570,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::SUB_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.r_name = x86_64_reg_name_from_num;
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1498,8 +1580,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::CMP_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.r_name = x86_64_reg_name_from_num;
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1537,7 +1618,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case 0x81: {
             uint8_t modrm = *bytes++;
 
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1563,8 +1644,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::MOV_R_TO_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.r_name = x86_64_reg_name_from_num;
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1574,7 +1654,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::MOV_IMM32_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             OwnedPtr<char> rm = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1587,8 +1667,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::MOV_RM_TO_R: {
             uint8_t modrm = *bytes++;
 
-            p_opts.r_name = x86_64_reg_name_from_num;
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1598,8 +1677,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::LEA_RM_TO_R: {
             uint8_t modrm = *bytes++;
 
-            p_opts.r_name = x86_64_reg_name_from_num;
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1616,8 +1694,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
               case X64::IMUL_RM_TO_R: {
                   uint8_t modrm = *bytes++;
 
-                  p_opts.r_name = x86_64_reg_name_from_num;
-                  p_opts.rm_name = x86_64_reg_name_from_num;
+                  load_default_sizes(&p_opts, true, short_address, short_operand);
 
                   RegisterNames names =  register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1627,7 +1704,8 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
               case X64::MOV_ZX_RM8_TO_R: {
                   uint8_t modrm = *bytes++;
 
-                  p_opts.r_name = x86_64_reg_name_from_num;
+                  load_default_sizes(&p_opts, true, short_address, short_operand);
+                  //overide
                   p_opts.rm_name = b8_rex_reg_name;
 
                   RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
@@ -1638,8 +1716,9 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
               case X64::MOV_SX_RM8_TO_R: {
                   uint8_t modrm = *bytes++;
 
-                  p_opts.r_name = x86_64_reg_name_from_num;
-                  p_opts.rm_name = x86_64_reg_name_from_num;
+                  load_default_sizes(&p_opts, true, short_address, short_operand);
+                  //overide
+                  p_opts.rm_name = b8_rex_reg_name;
 
                   RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1664,7 +1743,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case (X64::MOV_64_TO_R + 6):
         case (X64::MOV_64_TO_R + 7): {
             const uint8_t reg = (op - X64::MOV_64_TO_R) | ((maybe_rex & 0b0000'0001) << 3);
-            const char* r_string = x86_64_reg_name_from_num(reg);
+
+            load_default_sizes(&p_opts, true, short_address, short_operand);
+
+            const char* r_string = p_opts.r_name(reg);
 
             uint64_t imm64 = x64_from_bytes(bytes);
             bytes += 8;
@@ -1675,7 +1757,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case 0xF7: {
             uint8_t modrm = *bytes++;
 
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             const uint8_t r = (modrm & 0b0011'1000) >> 3;
             OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
@@ -1703,7 +1785,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case 0xD3: {
             uint8_t modrm = *bytes++;
 
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, true, short_address, short_operand);
 
             const uint8_t r = (modrm & 0b0011'1000) >> 3;
             OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
@@ -1756,7 +1838,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::MOV_IMM32_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, false, short_address, short_operand);
 
             OwnedPtr<char> rm = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1769,8 +1851,10 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::MOV_R8_TO_RM8: {
             uint8_t modrm = *bytes++;
 
+            //Overide
             p_opts.rm_name = b8_rex_reg_name;
             p_opts.r_name = b8_rex_reg_name;
+            p_opts.mem_size = "BYTE PTR";
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1783,7 +1867,9 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
               case X64::SETE_RM8: {
                   uint8_t modrm = *bytes++;
 
-                  p_opts.rm_name = x86_64_reg_name_from_num;
+                  p_opts.rm_name = b8_rex_reg_name;
+                  p_opts.r_name = b8_rex_reg_name;
+                  p_opts.mem_size = "BYTE PTR";
 
                   OwnedPtr<char> r_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
                   printf("sete %s\n", r_string.ptr);
@@ -1828,6 +1914,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             uint8_t modrm = *bytes++;
 
             p_opts.rm_name = b8_rex_reg_name;
+            p_opts.mem_size = "BYTE PTR";
 
             OwnedPtr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &bytes);
             printf("sete %s\n", r_string.ptr);
@@ -1853,6 +1940,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
 
             p_opts.rm_name = b8_no_rex_reg_name;
             p_opts.r_name = b8_no_rex_reg_name;
+            p_opts.mem_size = "BYTE PTR";
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
@@ -1884,6 +1972,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case (X64::PUSH_R + 5):
         case (X64::PUSH_R + 6):
         case (X64::PUSH_R + 7): {
+            //Default to long mode
             const char* r_string = x86_64_reg_name_from_num(op - X64::PUSH_R);
 
             printf("push %s\n", r_string);
@@ -1897,6 +1986,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case (X64::POP_R + 5):
         case (X64::POP_R + 6):
         case (X64::POP_R + 7): {
+            //Default to long mode
             const char* r_string = x86_64_reg_name_from_num(op - X64::POP_R);
 
             printf("pop %s\n", r_string);
@@ -1923,7 +2013,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case X64::MOV_IMM32_RM: {
             uint8_t modrm = *bytes++;
 
-            p_opts.rm_name = x86_64_reg_name_from_num;
+            load_default_sizes(&p_opts, false, short_address, short_operand);
 
             OwnedPtr<char> rm = rm_reg_string(&p_opts, 0, modrm, &bytes);
 

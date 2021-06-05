@@ -259,16 +259,16 @@ void init_types(Compiler* const comp) {
   ascii->type = STRUCTURE_TYPE::ASCII_CHAR;
   types->s_ascii = ascii;
 
-  LiteralStructure* const int_lit = new_literal_type(comp, strings->intern("literal_int"));
+  LiteralStructure* const int_lit = new_literal_type(comp, strings->intern("lit_uint"));
   int_lit->literal_type = LITERAL_TYPE::INTEGER;
   types->s_int_lit = int_lit;
 
-  LiteralStructure* const sint_lit = new_literal_type(comp, strings->intern("literal_signed_int"));
+  LiteralStructure* const sint_lit = new_literal_type(comp, strings->intern("lit_sint"));
   sint_lit->literal_type = LITERAL_TYPE::SIGNED_INTEGER;
   types->s_sint_lit = sint_lit;
 
 
-  LiteralStructure* const empty_arr = new_literal_type(comp, strings->intern("literal_empty_array"));
+  LiteralStructure* const empty_arr = new_literal_type(comp, strings->intern("lit_empty_array"));
   empty_arr->literal_type = LITERAL_TYPE::EMPTY_ARR;
   types->s_empty_arr = empty_arr;
 
@@ -280,8 +280,8 @@ void init_types(Compiler* const comp) {
   types->s_u8 = u8;
 
   IntegerStructure* const i8 = new_int_type(comp, strings->intern("i8"));
-  u8->is_signed = true;
-  u8->bytes     = 1;
+  i8->is_signed = true;
+  i8->bytes     = 1;
 
   types->s_i8 = i8;
 
@@ -400,7 +400,7 @@ RuntimeValue impl_single_cast(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const Structure* type,
-                              RuntimeValue* const val,
+                              const RuntimeValue* const val,
                               CAST_BYTECODE cast) {
   RuntimeValue reg ={};
   reg.type = RVT::REGISTER;
@@ -421,22 +421,30 @@ RuntimeValue impl_single_cast(Compiler* const comp,
 RuntimeValue CASTS::u8_to_r64(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
-                              RuntimeValue* const val) {
+                              const RuntimeValue* const val) {
   return impl_single_cast(comp, state, code, comp->types->s_u8, val, ByteCode::EMIT::CONV_RU8_TO_R64);
 }
 
 RuntimeValue CASTS::i8_to_r64(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
-                              RuntimeValue* const val) {
+                              const RuntimeValue* const val) {
   return impl_single_cast(comp, state, code, comp->types->s_i8, val, ByteCode::EMIT::CONV_RI8_TO_R64);
 }
 
 RuntimeValue CASTS::no_op(Compiler* const comp,
                             State* const state,
                             CodeBlock* const code,
-                            RuntimeValue* const val) {
+                            const RuntimeValue* const val) {
   return *val;
+}
+
+bool TYPE_TESTS::is_pointer(const Structure* s) {
+  return s->type == STRUCTURE_TYPE::POINTER;
+}
+
+bool TYPE_TESTS::can_index(const Structure* s) {
+  return is_pointer(s) || is_array(s);
 }
 
 bool TYPE_TESTS::is_array(const Structure* s) {

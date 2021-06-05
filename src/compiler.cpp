@@ -603,7 +603,7 @@ static void cast_operator_type(Compiler* const comp,
             //Must be in memory to cast like this
             set_valid_rvts(expr->cast.expr, state, (uint8_t)RVT::MEMORY);
 
-            emit_cast_func(expr, CASTS::no_op);
+            emit_cast_func(expr, OP::emit_address);
             return;
           }
         }
@@ -672,7 +672,7 @@ static void cast_operator_type(Compiler* const comp,
             return;
           }
         }
-        
+
         break;
       }
     case STRUCTURE_TYPE::VOID: {
@@ -964,9 +964,9 @@ static void compile_type_of_expression(Compiler* const comp,
 
         assert(arr_expr->type != nullptr);
 
-        if (!TYPE_TESTS::is_array(arr_expr->type)) {
+        if (!TYPE_TESTS::can_index(arr_expr->type)) {
           comp->report_error(CompileCode::TYPE_CHECK_ERROR, arr_expr->span,
-                             "Cannot take index of non-array type: {}",
+                             "Cannot take index of type: {}",
                              arr_expr->type->name);
           return;
         }
@@ -2045,7 +2045,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
         const size_t base_size = expr->type->size();
 
-        assert(expr->index.expr->type->type == STRUCTURE_TYPE::FIXED_ARRAY);
+        assert(TYPE_TESTS::can_index(expr->index.expr->type));
 
         RuntimeValue arr = compile_bytecode_of_expression_new(comp,
                                                               state,
@@ -2061,6 +2061,14 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
         if (hint->is_hint) {
           load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts & NON_CONST_RVTS);
+        }
+
+        if (TYPE_TESTS::is_pointer(expr->index.expr->type)) {
+          //Dereference the pointer to an array
+          arr = OP::emit_deref(comp, state, code, &arr);
+        }
+        else {
+          assert(TYPE_TESTS::is_array(expr->index.expr->type));
         }
 
         if (arr.type == RVT::REGISTER) {
@@ -3106,6 +3114,8 @@ bool test_is_child(const Compiler* const comp, const ValueTree& tree,
     auto* vi = tree.adjacency_list.data[pos_parent_index].begin();
     const auto* end = tree.adjacency_list.data[pos_parent_index].end();
 
+    const ValueIndex parent_created_by = resolve_coalesced(possible_parent.creation.related_index, tree);
+
     for (; vi < end; vi++) {
       const ValueIndex other = resolve_coalesced(*vi, tree);
 
@@ -3115,7 +3125,7 @@ bool test_is_child(const Compiler* const comp, const ValueTree& tree,
 
       if (other_val.fixed() && other_val.reg == fixed_reg) {
         //could be special case where the last use is fixed to the same as the creating type
-        if (possible_parent.creation.related_index == other) {
+        if (parent_created_by == other) {
 
           ignore_vals.insert(pos_child_index);
           bool res = test_is_child(comp, tree, pos_parent_index, possible_parent, other.val, other_val, ignore_vals);
@@ -3153,8 +3163,10 @@ bool test_is_child(const Compiler* const comp, const ValueTree& tree,
 
       if (other_val.fixed() && other_val.reg == fixed_reg) {
 
+        const ValueIndex other_created_by = resolve_coalesced(other_val.creation.related_index, tree);
+
         //Could be special case where other is actually a child of the possible child
-        if (other_val.creation.related_index.val == pos_child_index) {
+        if (other_created_by.val == pos_child_index) {
 
           ignore_vals.insert(pos_parent_index);
           bool res = test_is_child(comp, tree, other.val, other_val, pos_child_index, possible_child, ignore_vals);
@@ -3213,10 +3225,10 @@ void coalesce(const Compiler* const comp, State* const state) {
 
     Array<size_t> ignore_vals ={};
 
-    bool is_child = test_is_child(comp, tree,
-                                  l1, l1_val,
-                                  created_by.val, possible_parent,
-                                  ignore_vals);
+    const bool is_child = test_is_child(comp, tree,
+                                        l1, l1_val,
+                                        created_by.val, possible_parent,
+                                        ignore_vals);
 
     if (is_child) {
       auto& parent_val = tree.values.data[created_by.val];

@@ -16,7 +16,7 @@ enum struct STRUCTURE_TYPE : uint8_t {
   INTEGER, POINTER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY, ASCII_CHAR
 };
 
-using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, RuntimeValue*>;
+using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;
 
 
 struct Structure {
@@ -199,13 +199,15 @@ constexpr bool can_implicit_cast(const Structure* from, const Structure* to) {
 bool can_comptime_cast(const Structure* from, const Structure* to);
 
 namespace CASTS {
-  RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, RuntimeValue*);
-  RuntimeValue i8_to_r64(Compiler*, State*, CodeBlock*, RuntimeValue*);
-  RuntimeValue no_op(Compiler*, State*, CodeBlock*, RuntimeValue*);
+  RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue i8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue no_op(Compiler*, State*, CodeBlock*, const RuntimeValue*);
 }
 
 namespace TYPE_TESTS {
   bool is_array(const Structure*);
+  bool is_pointer(const Structure*);
+  bool can_index(const Structure*);
 
   bool is_int(const Structure*);
   bool is_signed_int(const Structure*);

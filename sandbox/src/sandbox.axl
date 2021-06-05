@@ -1,9 +1,13 @@
-function func(u64 index) -> u8 {
-  [u8; 8] a = [0, 1, 2, 3, 4, 5, 6, 7];
-
-  return a[index];
+function func(*u8 arr, u64 index) -> u8 {
+  return arr[index];
 }
 
 function main() -> u64 {
-  return cast(u64, func(2));
+  [u8; 8] a = [0, 1, 2, 3, 4, 5, 6, 7];
+
+  *u8 ptr = cast(*u8, a);
+
+  u8 res = func(ptr, 2);
+
+  return cast(u64, res);
 }
