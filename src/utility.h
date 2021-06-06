@@ -326,6 +326,20 @@ struct Array {
     return false;
   }
 
+  template<typename L>
+  const T* find_if(L&& lambda) const {
+    auto i = begin();
+    const auto i_end = end();
+
+    for (; i < i_end; i++) {
+      if (lambda(i)) {
+        return i;
+      }
+    }
+
+    return nullptr;
+  }
+
   void replace_a_with_b(const T& a, const T& b) {
     for (size_t i = 0; i < size; i++) {
       if (data[i] == a) {

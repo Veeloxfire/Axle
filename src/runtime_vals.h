@@ -20,6 +20,10 @@ struct ValueIndex {
   }
 };
 
+struct NamespaceIndex {
+  size_t index;
+};
+
 struct ConstantVal {
   uint8_t* ptr;
   size_t size;
@@ -88,6 +92,7 @@ struct RuntimeValue {
   RVT type = RVT::UNKNOWN;//Type in value union - not the structure
 
   union {
+    char _dummy = '\0';
     ValueIndex reg;//index into the values array
     MemIndex mem;//index into the stack_values array
     ConstantVal constant;// a pointer to a constant - same type as the structure

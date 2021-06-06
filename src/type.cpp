@@ -110,10 +110,11 @@ LiteralStructure* new_literal_type(Compiler* const comp, const InternString* nam
   comp->types->structures.insert(type);
 
   NamedElement el ={};
-  el.type = NameElementType::STRUCTURE;
+  el.set_union(NamedElementType::STRUCTURE);
   el.structure = (const Structure*)type;
 
-  comp->global.names.insert(name, std::move(el));
+  Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
+  ns->names.insert(name, std::move(el));
   return type;
 }
 
@@ -125,10 +126,11 @@ IntegerStructure* new_int_type(Compiler* comp, const InternString* name) {
   comp->types->structures.insert(type);
 
   NamedElement el ={};
-  el.type = NameElementType::STRUCTURE;
+  el.set_union(NamedElementType::STRUCTURE);
   el.structure = (const Structure*)type;
 
-  comp->global.names.insert(name, std::move(el));
+  Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
+  ns->names.insert(name, std::move(el));
   return type;
 }
 
@@ -141,10 +143,11 @@ CompositeStructure* new_composite_type(Compiler* const comp,
   comp->types->structures.insert(type);
 
   NamedElement el ={};
-  el.type = NameElementType::STRUCTURE;
+  el.set_union(NamedElementType::STRUCTURE);
   el.structure = (const Structure*)type;
 
-  comp->global.names.insert(name, std::move(el));
+  Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
+  ns->names.insert(name, std::move(el));
   return type;
 }
 
@@ -157,10 +160,11 @@ EnumStructure* new_enum_type(Compiler* const comp,
   comp->types->structures.insert(type);
 
   NamedElement el ={};
-  el.type = NameElementType::STRUCTURE;
+  el.set_union(NamedElementType::STRUCTURE);
   el.structure = (const Structure*)type;
 
-  comp->global.names.insert(name, std::move(el));
+  Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
+  ns->names.insert(name, std::move(el));
   return type;
 }
 
@@ -172,10 +176,11 @@ Structure* new_base_type(Compiler* const comp,
   comp->types->structures.insert(type);
 
   NamedElement el ={};
-  el.type = NameElementType::STRUCTURE;
+  el.set_union(NamedElementType::STRUCTURE);
   el.structure = (const Structure*)type;
 
-  comp->global.names.insert(name, std::move(el));
+  Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
+  ns->names.insert(name, std::move(el));
   return type;
 }
 
@@ -193,10 +198,11 @@ ArrayStructure* new_array_type(Compiler* const comp,
   comp->types->structures.insert(type);
 
   NamedElement el ={};
-  el.type = NameElementType::STRUCTURE;
+  el.set_union(NamedElementType::STRUCTURE);
   el.structure = (const Structure*)type;
 
-  comp->global.names.insert(name, std::move(el));
+  Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
+  ns->names.insert(name, std::move(el));
   return type;
 }
 
@@ -212,10 +218,11 @@ PointerStructure* new_pointer_type(Compiler* const comp,
   comp->types->structures.insert(type);
 
   NamedElement el ={};
-  el.type = NameElementType::STRUCTURE;
+  el.set_union(NamedElementType::STRUCTURE);
   el.structure = (const Structure*)type;
 
-  comp->global.names.insert(name, std::move(el));
+  Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
+  ns->names.insert(name, std::move(el));
   return type;
 }
 
@@ -230,10 +237,11 @@ EnumValue* new_enum_value(Compiler* const comp,
   comp->types->enums.insert(val);
 
   NamedElement el ={};
-  el.type = NameElementType::ENUM;
+  el.set_union(NamedElementType::ENUM);
   el.structure = (const Structure*)val;
 
-  comp->global.names.insert(name, std::move(el));
+  Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
+  ns->names.insert(name, std::move(el));
   return val;
 }
 
@@ -364,34 +372,6 @@ Types::~Types() {
     }
   }
 
-}
-
-const Structure* Types::structure_by_name(const InternString* name) const {
-  auto i = structures.begin();
-  const auto end = structures.end();
-
-  for (; i < end; i++) {
-    const Structure* s = *i;
-    if (s->name == name) {
-      return s;
-    }
-  }
-
-  return nullptr;
-}
-
-const EnumValue* Types::enum_by_name(const InternString* name) const {
-  auto i = enums.begin();
-  const auto end = enums.end();
-
-  for (; i < end; i++) {
-    const EnumValue* e = *i;
-    if (e->name == name) {
-      return e;
-    }
-  }
-
-  return nullptr;
 }
 
 using CAST_BYTECODE = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;

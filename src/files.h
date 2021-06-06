@@ -38,3 +38,19 @@ namespace FILES {
     return write(file, (uint8_t*)&t, sizeof(T));
   }
 }
+
+struct InternString;
+struct StringInterner;
+
+struct FileLocation {
+  const InternString* directory;
+  const InternString* full_name;
+
+  constexpr bool operator== (const FileLocation& a) const {
+    return full_name == a.full_name;
+  }
+};
+
+FileLocation parse_file_location(const char* path,
+                                 const char* file,
+                                 StringInterner* strings);

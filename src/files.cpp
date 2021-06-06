@@ -1,4 +1,6 @@
 #include "files.h"
+#include "strings.h"
+
 namespace FILES {
 
   OpenedFile open(const char* name,
@@ -85,4 +87,113 @@ namespace FILES {
   ErrorCode write_aligned_array(FILE* file, const Array<uint8_t>& arr, const size_t align) {
     return write_aligned_array(file, arr.data, arr.size, align);
   }
+}
+
+FileLocation parse_file_location(const char* path_str, 
+                                 const char* file_str,
+                                 StringInterner* const strings) {
+  struct Range {
+    const char* start;
+    const char* end;
+  };
+
+  Array<Range> path ={};
+  
+  const char* holder = path_str;
+
+  const auto add_dir = [&](const char* start, const char* end) {
+    if (start == end) {
+      return;
+    }
+
+    Range dir = {};
+    dir.start = start;
+    dir.end = end;
+
+
+    if (dir.end - dir.start == 2 && memcmp(dir.start, "..", 2) == 0) {
+      //Is "go up a directory"
+      //Pop last dir
+
+      Range* back_r = path.back();
+      if (back_r->end - back_r->start == 2 && memcmp(back_r->start, "..", 2) == 0) {
+        //Dont pop
+        path.insert(dir);
+      }
+      else if (back_r->end - back_r->start == 1 && back_r->start[0] == '.') {
+        path.pop();
+        path.insert(dir);
+      }
+      else {
+        path.pop();
+      }
+    }
+    else if (dir.end - dir.start == 1 && dir.start[0] == '.') {
+      //Is "stay in same directory"
+      //do nothing
+    }
+    else {
+      //Directory name
+      path.insert(dir);
+    }
+  };
+
+  while (true) {
+    const char c = *path_str;
+    if (c == '/' || c == '\\') {
+      add_dir(holder, path_str);
+
+      path_str++;
+      holder = path_str;
+    }
+    else if (c == '\0') {
+      if (file_str != nullptr && file_str[0] != '\0') {
+        //Do the file path
+        add_dir(holder, path_str);
+
+        holder = file_str;
+        path_str = file_str;
+        file_str = nullptr;
+      }
+      else {
+        //end of path
+        path_str++;
+        break;
+      }
+    }
+    else {
+      path_str++;
+    }
+  }
+
+  Array<char> str ={};
+
+  FileLocation loc = {};
+  //Directory
+  {
+    auto i = path.begin();
+    const auto end = path.end();
+
+    for (; i < end; i++) {
+      const size_t len = i->end - i->start;
+      str.insert_uninit(len);
+
+      memcpy_ts(str.data + str.size - len, len, i->start, len);
+      str.insert('\\');
+    }
+
+    loc.directory = strings->intern(str.data, str.size);
+  }
+
+  //Add the file
+  {
+    const size_t len = path_str - holder;
+    str.insert_uninit(len);
+
+    memcpy_ts(str.data + str.size - len, len, holder, len);
+
+    loc.full_name = strings->intern(str.data);
+  }
+
+  return loc;
 }

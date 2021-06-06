@@ -6,8 +6,8 @@ struct OptimizationOptions {
 };
 
 struct BuildOptions {
-  const char* file_name;
-  const char* entry_point;
+  const char* file_name   = nullptr;
+  const char* entry_point = nullptr;
   const char* output_file = nullptr;
 
   const System* system;

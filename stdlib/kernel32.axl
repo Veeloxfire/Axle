@@ -1,0 +1,5 @@
+import "kernel32.dll" as kernel32;
+
+*function ExitProcess(u32 ExitCode)->void = &kernel32::ExitProcess;
+
+

@@ -1,13 +1,5 @@
-function func(*u8 arr, u64 index) -> u8 {
-  return arr[index];
-}
+import "sandbox2.axl";
 
 function main() -> u64 {
-  [u8; 8] a = [0, 1, 2, 3, 4, 5, 6, 7];
-
-  *u8 ptr = cast(*u8, a);
-
-  u8 res = func(ptr, 2);
-
-  return cast(u64, res);
+  return do_a_thing(cast(u8, 2));
 }

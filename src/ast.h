@@ -190,7 +190,7 @@ struct ASTExpression {
   ~ASTExpression();
 };
 
-struct ASTDeclaration {
+struct ASTLocal {
   ASTExpression expression ={};
   ASTType type ={};
   const InternString* name = nullptr;
@@ -200,7 +200,7 @@ struct ASTDeclaration {
 #define MOD_STATEMENTS \
 MOD(UNKNOWN) \
 MOD(EXPRESSION) \
-MOD(DECLARATION) \
+MOD(LOCAL) \
 MOD(RETURN) \
 MOD(IF_ELSE) \
 MOD(BLOCK)
@@ -233,7 +233,7 @@ struct ASTStatement {
   union {
     char _dummy ={};
     ASTExpression expression;
-    ASTDeclaration declaration;
+    ASTLocal local;
     ASTIfElse if_else;
     ASTBlock block;
   };
@@ -248,19 +248,32 @@ struct ASTStatement {
 struct ASTFunctionDeclaration {
   const InternString* name = nullptr;
   ASTType return_type;
-  Array<ASTDeclaration> parameters;
+  Array<ASTLocal> parameters;
+
+  Span signature_span ={};
 
   ASTBlock body;
 };
 
-struct ASTStructureDeclaration {
-  const InternString* name = nullptr;
-  Array<ASTDeclaration> elements;
+//struct ASTStructureDeclaration {
+//  const InternString* name = nullptr;
+//  Array<ASTDeclaration> elements;
+//
+//  Structure* structure;
+//};
 
-  Structure* structure;
+struct ASTImport {
+  const InternString* relative_path;
+  const InternString* name;
+
+  Span span;
 };
 
 struct ASTFile {
+  FileLocation file_loc ={};
+  NamespaceIndex namespace_index = {};
+
+  Array<ASTImport> imports;
   Array<ASTFunctionDeclaration> functions;
 };
 

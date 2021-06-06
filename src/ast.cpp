@@ -144,8 +144,8 @@ void ASTStatement::set_union(STATEMENT_TYPE st) noexcept {
         default_init(&expression);
         break;
       }
-    case STATEMENT_TYPE::DECLARATION: {
-        default_init(&declaration);
+    case STATEMENT_TYPE::LOCAL: {
+        default_init(&local);
         break;
       }
     case STATEMENT_TYPE::IF_ELSE: {
@@ -168,8 +168,8 @@ void ASTStatement::destruct_union() noexcept {
         expression.~ASTExpression();
         break;
       }
-    case STATEMENT_TYPE::DECLARATION: {
-        declaration.~ASTDeclaration();
+    case STATEMENT_TYPE::LOCAL: {
+        local.~ASTLocal();
         break;
       }
     case STATEMENT_TYPE::IF_ELSE: {

@@ -88,6 +88,9 @@ struct Function {
   bool return_via_ptr = false;
   const ASTFunctionDeclaration* declaration = nullptr;
 
+  size_t unit_index = 0;
+
+  bool is_called = false;
   CodeBlock code_block ={};
 };
 
@@ -144,9 +147,15 @@ struct Types {
     return s == s_bool || is_numeric_type(s);
   }
 
-  const Structure* structure_by_name(const InternString*) const;
-  const EnumValue* enum_by_name(const InternString*) const;
 };
+
+//const Structure* find_structure(Compiler* const,
+//                                const Namespace* ns,
+//                                const InternString*);
+//
+//const EnumValue* find_enum(Compiler* const,
+//                           const Namespace* ns,
+//                           const InternString*);
 
 void init_types(Compiler* comp);
 
@@ -179,8 +188,8 @@ EnumValue* new_enum_value(Compiler* const comp,
 
 //Can cast without any value modification or checks
 constexpr bool can_implicit_cast(const Structure* from, const Structure* to) {
-  if(from == to) return true;
-  else if (from->type == STRUCTURE_TYPE::LITERAL 
+  if (from == to) return true;
+  else if (from->type == STRUCTURE_TYPE::LITERAL
            && to->type == STRUCTURE_TYPE::LITERAL) {
     //both literals
     const LiteralStructure* f_ls = (const LiteralStructure*)from;

@@ -19,10 +19,10 @@ int main(int argc, const char** args) {
   
   options.build.file_name          = args[1];
   options.build.entry_point        = "main";
-  //options.build.system             = &system_vm;
-  //options.build.calling_convention = &convention_vm;
-  options.build.system             = &system_x86_64;
-  options.build.calling_convention = &convention_microsoft_x64;
+  options.build.system             = &system_vm;
+  options.build.calling_convention = &convention_vm;
+  //options.build.system             = &system_x86_64;
+  //options.build.calling_convention = &convention_microsoft_x64;
   options.build.output_file        = output_file;
   
   options.print.ast             = true;
@@ -35,25 +35,25 @@ int main(int argc, const char** args) {
 
   options.optimize.non_stack_locals = true;
   
-  //Program program ={};
-  //int out = compile_file(options, &program);
-  //
-  //if (out == 0) {
-  //  //RunOutput res = run_program(options, program);
-  //  //std::cout << "Returned: " << res.program_return;
-  //  
-  //  return 0;
-  //}
-  //else {
-  //  std::cerr << "Error!";
-  //  return out;
-  //}
+  Program program ={};
+  int out = compile_file(options, &program);
+  
+  if (out == 0) {
+    RunOutput res = run_program(options, program);
+    std::cout << "Returned: " << res.program_return;
+    
+    return 0;
+  }
+  else {
+    std::cerr << "Error!";
+    return out;
+  }
   
 
-  int ret = compile_file_and_write(options);
-  if (ret != 0) {
-    return ret;
-  }
+  //int ret = compile_file_and_write(options);
+  //if (ret != 0) {
+  //  return ret;
+  //}
 
   //std::cout << "running " << output_file << '\n';
 

@@ -190,6 +190,26 @@ void load_string(Array<char>& res, uint32_t u32) {
   load_unsigned(res, (uint64_t) u32);
 }
 
+void load_string(Array<char>& res, PrintCallSignature p_call) {
+  const FunctionCallExpr* call = p_call.call;
+
+  res.insert('(');
+
+  auto i = call->arguments.begin();
+  const auto end = call->arguments.end();
+
+  if (i < end) {
+    for (; i < (end - 1); i++) {
+      load_string(res, i->type->name);
+      load_string(res, ", ");
+    }
+
+    load_string(res, i->type->name);
+  }
+
+  load_string(res, ')');
+}
+
 void load_string(Array<char>& res, PrintFuncSignature p_func) {
   const Function* func = p_func.func;
 

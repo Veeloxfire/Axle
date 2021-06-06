@@ -64,10 +64,8 @@ int compile_file(const Options& options,
                  Program* out_program) {
 
   //Setup
-
   StringInterner strings ={};
   Types types ={};
-
 
   VM vm = {};
 
@@ -81,54 +79,42 @@ int compile_file(const Options& options,
   compiler.entry_point = strings.intern(options.build.entry_point);
   compiler.vm = &vm;
 
+  //Setup the built in namespace
+  compiler.builtin_namespace.index = compiler.all_namespaces.size;
+  compiler.all_namespaces.insert_uninit(1);
+
+  //Load the builtin types
   init_types(&compiler);
 
-  Parser parser ={};
-  parser.lexer.strings = &strings;
+  {
+    FileLocation loc = parse_file_location(options.build.file_name, nullptr, compiler.strings);
 
-  OwnedPtr<const char> text_source = FILES::load_file_to_string(options.build.file_name);
+    NamespaceIndex ns_index = NamespaceIndex{ compiler.all_namespaces.size };
+    compiler.all_namespaces.insert_uninit(1);
 
-  if (text_source.ptr == nullptr) {
-    std::cerr << "Error opening file: " << options.build.file_name << '\n';
-    return 1;
+
+    compiler.unparsed_files.insert(FileImport{ loc, ns_index, Span{} });//use null span
+
+    //Parsing/loading
+    CompileCode ret = parse_all_unparsed_files_with_imports(&compiler);
+    if (ret != CompileCode::NO_ERRORS) {
+      std::cerr << "Parsing was not completed due to an error!\nError Code '"
+        << compile_code_string(ret)
+        << "'\n";
+      return 1;
+    }
+
+    //Compilation
+    ret = compile_all(&compiler);
+    if (ret != CompileCode::NO_ERRORS) {
+      std::cerr << "Compilation was not completed due to an error!\nError Code '"
+        << compile_code_string(ret)
+        << "'\n";
+      return 1;
+    }
   }
 
-  const InternString* file_name = strings.intern(options.build.file_name);
-  init_parser(&parser, file_name, text_source.ptr);
-
-  //Parse
-  ASTFile ast_base ={};
-  parse_file(&parser, &ast_base);
-
-  //Should have all been copied now :)
-  text_source.free_no_destruct();
-
-
-  if (parser.current.type == AxleTokenType::Error) {
-    std::cerr << "PARSE ERROR: " << parser.current.string->string << '\n'
-      << "At File: " << parser.current.pos.file_name
-      << ", Line: " << parser.current.pos.line
-      << ", Character: " << parser.current.pos.character << '\n';
-    return 1;
-  }
-
-  if (options.print.ast) {
-    std::cout << "\n=== Print Parsed AST ===\n\n";
-    print_ast(&ast_base);
-    std::cout << "\n========================\n\n";
-  }
-
-  //Compilation
-  build_compilation_units(&compiler, &ast_base);
-  const CompileCode ret = compile_all(&compiler);
-  if (ret != CompileCode::NO_ERRORS) {
-    std::cerr << "Compilation was not completed due to an error!\nError Code '" 
-      << compile_code_string(ret)
-      << "'\n";
-    return 1;
-  }
-
-  //Backend - pretty sure this cant error yet
+  //Backend
   Array<uint8_t> code ={};
   const size_t entry_index = (options.build.system->backend)(code, &compiler);
   code.shrink();

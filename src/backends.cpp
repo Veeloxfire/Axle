@@ -141,6 +141,11 @@ size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
+      if (!func->is_called && func->name != comp->entry_point) {
+        //Isnt called and isnt entry point so dont need to compile
+        continue;
+      }
+
       const CodeBlock* const code = &func->code_block;
 
       auto code_i = code->code.begin();
@@ -742,6 +747,11 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
+      if (!func->is_called && func->name != comp->entry_point) {
+        //Isnt called and isnt entry point so dont need to compile
+        continue;
+      }
+
       const CodeBlock* const code = &func->code_block;
 
       auto code_i = code->code.begin();

@@ -8,6 +8,8 @@ enum struct ErrorCode : uint8_t;
 
 struct Function;
 struct CallSignature;
+struct FileLocation;
+struct FunctionCallExpr;
 
 //For printing character as it appears in code
 struct DisplayChar {
@@ -17,6 +19,11 @@ struct DisplayChar {
 struct PrintFuncSignature {
   const Function* func;
 };
+
+struct PrintCallSignature {
+  const FunctionCallExpr* call;
+};
+
 
 void load_string(Array<char>& res, char c);
 void load_string(Array<char>& res, int8_t i8);
@@ -38,6 +45,7 @@ void load_string(Array<char>& res, STATEMENT_TYPE st);
 void load_string(Array<char>& res, ErrorCode ec);
 
 void load_string(Array<char>& res, PrintFuncSignature func);
+void load_string(Array<char>& res, PrintCallSignature call);
 void load_string(Array<char>& res, const CallSignature& call_sig);
 
 
@@ -76,6 +84,7 @@ Formatter& operator<<(Formatter& f, const T& t) {
   }
 }
 
+//Doesnt null terminate!
 template<typename ... T>
 void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
   Formatter f ={ format, result };
@@ -90,7 +99,7 @@ void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
       break;
     }
     else if (f.format_string[0] == '\0') {
-      const size_t num_chars = (f.format_string + 1) - string;
+      const size_t num_chars = (f.format_string) - string;
       result.reserve_extra(num_chars);
 
       memcpy_ts(result.data + result.size,
@@ -105,12 +114,13 @@ void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
   }
 }
 
+//Does null terminate
 template<typename ... T>
 OwnedPtr<char> format(const char* format, const T& ... ts) {
   Array<char> result ={};
 
   format_to_array(result, format, ts...);
-
+  result.insert('\0');
 
   result.shrink();
   return result;

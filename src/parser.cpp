@@ -34,6 +34,8 @@ constexpr KeywordPair keywords[] ={
   {"true", AxleTokenType::True},
   {"false", AxleTokenType::False},
   {"cast", AxleTokenType::Cast},
+  {"import", AxleTokenType::Import},
+  {"as", AxleTokenType::As},
 };
 
 constexpr KeywordPair operators[] ={
@@ -290,22 +292,22 @@ static bool expect(Parser* parser, const AxleTokenType t) {
 
 }
 
-void init_parser(Parser* const parser, const InternString* file_name, const char* source) {
+void init_parser(Parser* const parser, const InternString* full_path, const char* source) {
 
   parser->lexer.top = source;
-  parser->lexer.curr_pos.file_name = file_name;
+  parser->lexer.curr_pos.full_path = full_path;
 
   parser->current = lex_token(&parser->lexer);
 }
 
 static void set_span_start(const Token& token, Span& span) {
-  span.file_name = token.pos.file_name;
+  span.full_path = token.pos.full_path;
   span.char_start = token.pos.character;
   span.line_start = token.pos.line;
 }
 
 static void set_span_end(const Token& token, Span& span) {
-  assert(span.file_name == token.pos.file_name);
+  assert(span.full_path == token.pos.full_path);
 
   span.char_end = token.pos.character;
   span.line_end = token.pos.line;
@@ -313,7 +315,7 @@ static void set_span_end(const Token& token, Span& span) {
 
 Span span_of_token(const Token& tok) {
   Span span ={};
-  span.file_name = tok.pos.file_name;
+  span.full_path = tok.pos.full_path;
 
   span.char_start = tok.pos.character;
   span.char_end = span.char_start + tok.string->len + 1;
@@ -325,7 +327,7 @@ Span span_of_token(const Token& tok) {
 }
 
 OwnedPtr<char> load_span_from_file(const Span& span, const char* source) {
-  Array<char> res = {};
+  Array<char> res ={};
 
   size_t character = 0;
   size_t line = 0;
@@ -409,6 +411,14 @@ OwnedPtr<char> load_span_from_file(const Span& span, const char* source) {
       res.insert(' ');
     }
   };
+
+  if (line == span.line_start) {
+    should_emit = true;
+
+    //Tab out first line
+    res.insert(' ');
+    res.insert(' ');
+  }
 
   while (true) {
     if (source[0] == '\0' || line == (span.line_end + 1)) {
@@ -611,9 +621,13 @@ static void parse_expression(Parser* const parser, ASTExpression* const expr) {
 
 static void parse_primary(Parser* const parser, ASTExpression* const expr) {
   //Will always be a primary so can elevate span stuff to here
-  set_span_start(parser->current, expr->span);
-  DEFER(&) { set_span_end(parser->current, expr->span); };
-  
+  Span span ={};
+  set_span_start(parser->current, span);
+  DEFER(&) { 
+    set_span_end(parser->current, span);
+    expr->span = std::move(span);
+  };
+
   const Token current = parser->current;
   advance(parser);
 
@@ -644,7 +658,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
         expr->set_union(EXPRESSION_TYPE::ASCII_STRING);
 
         expr->ascii_string = current.string;
-        
+
         advance(parser);
         break;
       }
@@ -734,7 +748,7 @@ static void parse_primary_and_suffix(Parser* const parser, ASTExpression* const 
         advance(parser);
         ASTExpression* const new_expr = allocate_default<ASTExpression>();
         ASTExpression* const index    = allocate_default<ASTExpression>();
-        
+
         //Move the expr into the suffix thing
         *new_expr = std::move(*expr);
 
@@ -742,9 +756,13 @@ static void parse_primary_and_suffix(Parser* const parser, ASTExpression* const 
         default_init(expr);
 
         //Set span
-        expr->span = new_expr->span;
-        DEFER(&) { set_span_end(parser->current, expr->span); };
-        
+        Span span = new_expr->span;
+        set_span_start(parser->current, span);
+        DEFER(&) { 
+          set_span_end(parser->current, span);
+          expr->span = std::move(span);
+        };
+
 
         expr->set_union(EXPRESSION_TYPE::INDEX);
 
@@ -765,8 +783,12 @@ static void parse_primary_and_suffix(Parser* const parser, ASTExpression* const 
 static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
   switch (parser->current.type) {
     case AxleTokenType::Sub: {
-        set_span_start(parser->current, expr->span);
-        DEFER(&) { set_span_end(parser->current, expr->span); };
+        Span span ={};
+        set_span_start(parser->current, span);
+        DEFER(&) { 
+          set_span_end(parser->current, span);
+          expr->span = std::move(span);
+        };
 
         expr->set_union(EXPRESSION_TYPE::UNARY_OPERATOR);
 
@@ -779,8 +801,12 @@ static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
         break;
       }
     case AxleTokenType::Star: {
-        set_span_start(parser->current, expr->span);
-        DEFER(&) { set_span_end(parser->current, expr->span); };
+        Span span ={};
+        set_span_start(parser->current, span);
+        DEFER(&) { 
+          set_span_end(parser->current, span);
+          expr->span = std::move(span);
+        };
 
         expr->set_union(EXPRESSION_TYPE::UNARY_OPERATOR);
 
@@ -793,8 +819,12 @@ static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
         break;
       }
     case AxleTokenType::And: {
-        set_span_start(parser->current, expr->span);
-        DEFER(&) { set_span_end(parser->current, expr->span); };
+        Span span ={};
+        set_span_start(parser->current, span);
+        DEFER(&) { 
+          set_span_end(parser->current, span);
+          expr->span = std::move(span);
+        };
 
         expr->set_union(EXPRESSION_TYPE::UNARY_OPERATOR);
 
@@ -858,7 +888,7 @@ static void parse_type(Parser* const parser, ASTType* const type) {
   }
 }
 
-static void parse_declaration(Parser* const parser, ASTDeclaration* const decl) {
+static void parse_local(Parser* const parser, ASTLocal* const decl) {
   parse_type(parser, &decl->type);
 
   if (parser->current.type != AxleTokenType::Identifier) {
@@ -873,8 +903,12 @@ static void parse_declaration(Parser* const parser, ASTDeclaration* const decl) 
 static void parse_block(Parser* const parser, ASTBlock* const block);
 
 static void parse_statement(Parser* const parser, ASTStatement* const statement) {
-  set_span_start(parser->current, statement->span);
-  DEFER(&) { set_span_end(parser->current, statement->span); };
+  Span span ={};
+  set_span_start(parser->current, span);
+  DEFER(&) { 
+    set_span_end(parser->current, span);
+    statement->span = std::move(span);
+  };
 
   switch (parser->current.type) {
     case AxleTokenType::Left_Brace: {
@@ -918,19 +952,19 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
     default: {
         //Ambiguous at this point - save the position
         Parser save = *parser;
-        
+
         //try declaration first
-        statement->set_union(STATEMENT_TYPE::DECLARATION);
-        parse_type(parser, &statement->declaration.type);
+        statement->set_union(STATEMENT_TYPE::LOCAL);
+        parse_type(parser, &statement->local.type);
 
         if (parser->current.type == AxleTokenType::Identifier) {
           //Is declaration
-          statement->declaration.name = parser->current.string;
+          statement->local.name = parser->current.string;
           advance(parser);
 
           expect(parser, AxleTokenType::Equals);
 
-          parse_expression(parser, &statement->declaration.expression);
+          parse_expression(parser, &statement->local.expression);
         }
         else {
           //Not a declaration - expression
@@ -986,7 +1020,7 @@ static void parse_function(Parser* const parser, ASTFunctionDeclaration* const f
   if (parser->current.type != AxleTokenType::Right_Bracket) {
     while (true) {
       func->parameters.insert_uninit(1);
-      parse_declaration(parser, func->parameters.back());
+      parse_local(parser, func->parameters.back());
 
       if (parser->current.type == AxleTokenType::Right_Bracket) {
         break;
@@ -1022,10 +1056,49 @@ void parse_file(Parser* const parser, ASTFile* const file) {
        current != AxleTokenType::Eof && current != AxleTokenType::Error;
        current = parser->current.type)
   {
-    file->functions.insert_uninit(1);
+    if (parser->current.type == AxleTokenType::Import) {
+      advance(parser);
 
-    ASTFunctionDeclaration* const func = file->functions.data + file->functions.size - 1;
-    parse_function(parser, func);
+      if (parser->current.type != AxleTokenType::String) {
+        parser->report_error("Expected a string!");
+        return;
+      }
+
+      file->imports.insert_uninit(1);
+
+      ASTImport* const imp = file->imports.back();
+      imp->relative_path = parser->current.string;
+
+      //Load the span
+      Span span ={};
+      set_span_start(parser->current, span);
+      DEFER(&) { 
+        set_span_end(parser->current, span);
+        imp->span = std::move(span);
+      };
+
+      advance(parser);
+
+      if (parser->current.type == AxleTokenType::As) {
+        advance(parser);
+
+        if (parser->current.type != AxleTokenType::Identifier) {
+          parser->report_error("Expected an identifier!");
+          return;
+        }
+
+        imp->name = parser->current.string;
+        advance(parser);
+      }
+
+      expect(parser, AxleTokenType::Semicolon);
+    }
+    else {
+      file->functions.insert_uninit(1);
+
+      ASTFunctionDeclaration* const func = file->functions.back();
+      parse_function(parser, func);
+    }
   }
 
   file->functions.shrink();//reduce over allocating space
@@ -1151,10 +1224,10 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
   printer->newline();
 
   switch (statement->type) {
-    case STATEMENT_TYPE::DECLARATION:
-      print_type(&statement->declaration.type);
-      printf(" %s = ", statement->declaration.name->string);
-      print_ast_expression(&statement->declaration.expression);
+    case STATEMENT_TYPE::LOCAL:
+      print_type(&statement->local.type);
+      printf(" %s = ", statement->local.name->string);
+      print_ast_expression(&statement->local.expression);
       IO::print(';');
       break;
     case STATEMENT_TYPE::RETURN:

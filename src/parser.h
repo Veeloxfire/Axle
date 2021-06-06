@@ -2,6 +2,7 @@
 #include "strings.h"
 #include "safe_lib.h"
 #include "utility.h"
+#include "files.h"
 
 struct ASTFile;
 
@@ -34,7 +35,9 @@ MODIFY(Left_Square)\
 MODIFY(Right_Square)\
 MODIFY(Comma)\
 MODIFY(Semicolon)\
-MODIFY(String)
+MODIFY(String)\
+MODIFY(Import)\
+MODIFY(As)
 
 enum class AxleTokenType : uint8_t {
 #define MODIFY(n) n,
@@ -50,7 +53,7 @@ struct TokenTypeString {
 TokenTypeString token_type_string(AxleTokenType);
 
 struct Position {
-  const InternString* file_name = nullptr;
+  const InternString* full_path ={};
   size_t line = 0;
   size_t character = 0;
 };
@@ -64,7 +67,7 @@ struct Token {
 
 struct Span {
   //is null if file_name == nullptr
-  const InternString* file_name = nullptr;
+  const InternString* full_path ={};
   size_t line_start = 0;
   size_t line_end = 0;
   size_t char_start = 0;
@@ -91,7 +94,7 @@ struct Parser {
   void report_error(const char* error_message);
 };
 
-void init_parser(Parser* const parser,  const InternString* file_name, const char* source);
+void init_parser(Parser* const parser,  const InternString* full_path, const char* source);
 void parse_file(Parser* const parser, ASTFile* const file);
 
 struct KeywordPair {

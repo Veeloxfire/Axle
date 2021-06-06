@@ -1,0 +1,16 @@
+function fib(u64 i) -> u64 {
+  if((i == 0) | (i == 1)) {
+    return 1;
+  }
+  else {
+    return fib(i - 1) + fib(i - 2);
+  }
+}
+
+function do_a_thing(u8 i) -> i8 {
+  return -1;
+}
+
+function do_a_thing(u64 i) -> u64 {
+  return fib(i);
+}

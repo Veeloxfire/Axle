@@ -162,10 +162,10 @@ struct InternHashTable {
       data = allocate_default<uint8_t>(required_alloc_bytes);
 
       const InternString**hash_arr = (const InternString**)data;
-      T* val_arr = (T*)data;
+      T* val_arr = (T*)(data + el_capacity * sizeof(const InternString*));
 
       const InternString**old_hash_arr = (const InternString**)old_data;
-      T* old_val_arr = (T*)old_data;
+      T* old_val_arr = (T*)(old_data + old_el_cap * sizeof(const InternString*));
 
       for (size_t i = 0; i < old_el_cap; i++) {
         const InternString* key = old_hash_arr[i];
@@ -178,19 +178,28 @@ struct InternHashTable {
         }
       }
 
+      //Destruct and free
       {
-        destruct_arr<const InternString*>((const InternString**)old_data, el_capacity);
+        destruct_arr(old_hash_arr, el_capacity);
+        //Dont need to free old values as they've been moved
 
-        T* vals = (T*)(old_data + el_capacity * sizeof(const InternString*));
-        destruct_arr(vals, el_capacity);
+        free_no_destruct(old_data);
       }
     }
   }
 
-  T* get_val(const InternString* const key) {
+  T* get_val(const InternString* const key) const {
     if(el_capacity == 0) return nullptr;
 
     const size_t soa_index = get_soa_index(key);
+
+    {
+      const InternString* test_key = ((const InternString**)data)[soa_index];
+
+      if (test_key == nullptr || test_key == TOMBSTONE) {
+        return nullptr;
+      }
+    }
 
     T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
     return vals + soa_index;

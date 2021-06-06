@@ -6,6 +6,7 @@
 #include "runtime_vals.h"
 #include "format.h"
 #include "parser.h"
+#include "files.h"
 
 #include "type.h"
 
@@ -16,7 +17,7 @@ struct ASTFunctionDeclaration;
 struct ASTStructureDeclaration;
 struct ASTStatement;
 struct ASTExpression;
-struct ASTDeclaration;
+struct ASTLocal;
 struct ASTFile;
 
 struct TimePoint {
@@ -205,7 +206,7 @@ struct State {
 };
 
 enum struct COMPILATION_TYPE : uint8_t {
-  FUNCTION, CONSTANT, NONE
+  NONE, FUNCTION, SIGNATURE, CONST_EXPR
 };
 
 enum struct EXPRESSION_COMPILE_STAGE : uint8_t {
@@ -213,7 +214,7 @@ enum struct EXPRESSION_COMPILE_STAGE : uint8_t {
 };
 
 enum struct FUNCTION_COMPILE_STAGE : uint8_t {
-  SIGNATURE, BODY, FINISHED,
+  SIGNATURE, BODY, FINISHED
 };
 
 struct CompilationUnitCarrier {
@@ -226,9 +227,11 @@ struct CompilationUnitCarrier {
 };
 
 struct FunctionUnit {
-  FUNCTION_COMPILE_STAGE stage = FUNCTION_COMPILE_STAGE::FINISHED;
-  Array<CompilationUnitCarrier> dependencies;
   bool unfound_dependency = false;
+  FUNCTION_COMPILE_STAGE stage = FUNCTION_COMPILE_STAGE::FINISHED;
+
+  NamespaceIndex names ={};
+  Array<CompilationUnitCarrier> dependencies;
 
   ASTFunctionDeclaration* source = nullptr;
   Function* destination = nullptr;
@@ -236,10 +239,12 @@ struct FunctionUnit {
   State state ={};
 };
 
-struct ConstantUnit {
-  EXPRESSION_COMPILE_STAGE stage = EXPRESSION_COMPILE_STAGE::FINISHED;
-  Array<CompilationUnitCarrier> dependencies ={};
+struct ConstantExprUnit {
   bool unfound_dependency = false;
+  EXPRESSION_COMPILE_STAGE stage = EXPRESSION_COMPILE_STAGE::FINISHED;
+
+  NamespaceIndex names ={};
+  Array<CompilationUnitCarrier> dependencies ={};
 
   ASTExpression* expr = nullptr;
   const Structure* cast_to = nullptr;
@@ -264,6 +269,11 @@ struct CallSignature {
   Array<const Structure*> arguments ={};
 };
 
+struct UnknownName {
+  const InternString* ident;
+  NamespaceIndex namespace_index;
+};
+
 enum struct UnfoundDepType {
   Unkown, Name, Function
 };
@@ -275,7 +285,7 @@ struct UnfoundDep {
 
   union {
     char _dummpy = {};
-    const InternString* name;
+    UnknownName name;
     CallSignature signature;
   };
 
@@ -302,21 +312,52 @@ struct UnfoundDependencies {
   Array<UnfoundDep> units ={};
 };
 
-enum struct NameElementType {
+enum struct NamedElementType {
   FUNCTION, STRUCTURE, ENUM
 };
 
 struct NamedElement {
-  NameElementType type;
+  NamedElementType type ={};
   union {
-    const Function* function;
+    char _dummy = '\0';
+    Array<Function*> overloads;
     const Structure* structure;
     const EnumValue* enum_value;
+    //NamespaceIndex other_namespace ={ 0 };
   };
+
+  void set_union(NamedElementType ty);
+  void destruct_union();
+  void move_from(NamedElement&& ne);
+
+  NamedElement() = default;
+  NamedElement(NamedElement&& ne) noexcept {
+    move_from(std::move(ne));
+  }
+
+  NamedElement& operator=(NamedElement&& ne) noexcept {
+    this->~NamedElement();
+    move_from(std::move(ne));
+    return *this;
+  }
+
+  ~NamedElement() noexcept {
+    destruct_union();
+  }
 };
 
 struct Namespace {
+  bool is_sub_namespace = false;
+  NamespaceIndex inside = {};
+
   InternHashTable<NamedElement> names ={};
+  Array<NamespaceIndex> imported = {};
+};
+
+struct FileImport {
+  FileLocation file_loc ={};
+  NamespaceIndex ns_index ={};
+  Span span ={};
 };
 
 struct Compiler {
@@ -326,14 +367,20 @@ struct Compiler {
 
   Errors errors ={};
   UnfoundDependencies unfound_deps = {};
-  Namespace global ={};
+
+  NamespaceIndex builtin_namespace = {};
+  NamespaceIndex current_namespace = {};
+  Array<Namespace> all_namespaces ={};
+
+  Array<FileImport> unparsed_files;
+  Array<ASTFile> parsed_files;
 
   PrintOptions        print_options        ={};
   BuildOptions        build_options        ={};
   OptimizationOptions optimization_options ={};
 
   Array<FunctionUnit> function_units ={};
-  Array<ConstantUnit> constant_units ={};
+  Array<ConstantExprUnit> const_expr_units ={};
 
   Array<CompilationUnitCarrier> compiling ={};
 
@@ -360,7 +407,7 @@ struct Compiler {
     errors.error_messages.insert({code, span, std::move(message)});
   }
 
-  void set_unfound_name(const InternString* name, const Span& span);
+  void set_unfound_name(const InternString* name, NamespaceIndex ns, const Span& span);
   void set_unfound_signature(CallSignature&& sig, const Span& span);
   void set_dep(CompilationUnitCarrier unit);
 };
@@ -373,7 +420,9 @@ void compile_implicit_cast(Compiler* const comp,
 
 void set_valid_rvts(ASTExpression* const expr, State* const state, uint8_t valid_rvts);
 
-void build_compilation_units(Compiler* const comp, ASTFile* const func);
+CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp);
+
+void build_compilation_units_for_file(Compiler* const comp, ASTFile* const func);
 
 void print_compiled_functions(const Compiler* comp);
 
@@ -390,3 +439,12 @@ const Structure* find_or_make_array_type(Compiler* const comp,
 
 const Structure* find_or_make_pointer_type(Compiler* const comp,
                                            const Structure* base);
+
+NamedElement* find_name(Compiler* const comp,
+                              NamespaceIndex ns_index,
+                              const InternString* name);
+Array<NamedElement*> find_all_names(Compiler* const comp,
+                                          NamespaceIndex ns_index,
+                                          const InternString* name);
+
+CompileCode print_compile_errors(const Compiler* const comp);
