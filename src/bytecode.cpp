@@ -72,6 +72,8 @@ namespace ByteCode {
 
   #define OP_64 printf(": 0x%llx\n", p.u64.val)
 
+  #define OP_64_64 printf(": 0x%llx, 0x%llx\n", p.u64_1.val, p.u64_2.val)
+
   #define OP printf("\n")
 
   #define OP_R const char* const reg_name = reg_name_from_num(p.val);\
@@ -102,12 +104,16 @@ namespace ByteCode {
     }
 
   #undef OP_R_64
+  #undef OP_R_32
+  #undef OP_R_16
+  #undef OP_R_8
   #undef OP_R_MEM
   #undef OP_8_MEM
   #undef OP_16_MEM
   #undef OP_32_MEM
   #undef OP_64_MEM
   #undef OP_64
+  #undef OP_64_64
   #undef OP
   #undef OP_R
   #undef OP_R_R

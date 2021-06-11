@@ -11,6 +11,12 @@ namespace FILES {
     STANDARD = '\0', BINARY = 'b'
   };
 
+  enum struct SEEK_MODE : int {
+    BEGIN = SEEK_SET,
+    END = SEEK_END,
+    CURRENT = SEEK_CUR,
+  };
+
   struct OpenedFile {
     FILE* file;
     errno_t error_code;
@@ -22,8 +28,21 @@ namespace FILES {
   ErrorCode close(FILE* file);
 
   ErrorCode read_as_string(FILE* file, size_t num_bytes, char** out_string);
+  ErrorCode read_to_bytes(FILE* file, uint8_t* bytes, size_t num_bytes);
+  uint8_t read_byte(FILE* file);
+
+  ErrorCode read_to_structure(FILE* file,
+                              uint8_t* ptr_to_s,
+                              size_t size_of_s, size_t num_of_s);
+
+  template<typename T>
+  ErrorCode read(FILE* file, T* ptr, size_t num) {
+    return read_to_structure(file, (uint8_t*)ptr, sizeof(T), num);
+  }
 
   size_t size_of_file(FILE* file);
+  ErrorCode seek(FILE* file, SEEK_MODE mode, int32_t location);
+  long current_pos(FILE* file);
 
   OwnedPtr<const char> load_file_to_string(const char* file_name);
 
@@ -44,6 +63,7 @@ struct StringInterner;
 
 struct FileLocation {
   const InternString* directory;
+  const InternString* extension;
   const InternString* full_name;
 
   constexpr bool operator== (const FileLocation& a) const {

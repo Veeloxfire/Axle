@@ -4,13 +4,16 @@
 #include "operators.h"
 #include "type.h"
 #include "parser.h"
+#include "comp_utilities.h"
 
+struct ASTType;
 struct ASTExpression;
 struct ASTStatement;
 
 struct Structure;
 struct Function;
 struct EnumValue;
+struct State;
 
 struct ASTName {
   const InternString* name ={};
@@ -20,8 +23,6 @@ struct ASTName {
 enum struct TYPE_TYPE {
   NORMAL, ARRAY, PTR
 };
-
-struct ASTType;
 
 struct ASTArrayType {
   ASTType* base = nullptr;
@@ -71,10 +72,8 @@ enum struct EXPRESSION_TYPE : uint8_t {
   ARRAY_EXPR,
   ASCII_STRING,
   INDEX,
+  NULLPTR,
 };
-
-struct BuildOptions;
-struct State;
 
 struct BinaryOperatorExpr {
   BINARY_OPERATOR op;
@@ -94,7 +93,7 @@ struct FunctionCallExpr {
   Array<ASTExpression> arguments ={};
 
   const InternString* function_name = nullptr;
-  const Function* function = nullptr;
+  const FunctionBase* function = nullptr;
 };
 
 struct EnumValueExpr {
@@ -104,12 +103,12 @@ struct EnumValueExpr {
 
 struct UnaryOperatorExpr {
   UNARY_OPERATOR op;
-  ASTExpression* primary = nullptr;
+  ASTExpression* expr = nullptr;
 
   UNARY_OPERATOR_FUNCTION emit = nullptr;
 
   ~UnaryOperatorExpr() {
-    free_destruct_single(primary);
+    free_destruct_single(expr);
   }
 };
 
@@ -144,6 +143,9 @@ struct ArrayExpr {
 
 struct ASTExpression {
   const Structure* type = nullptr;
+
+  ASTExpression* first = nullptr;
+  ASTExpression* next  = nullptr;
 
   uint8_t valid_rvts = ALL_RVTS;
 
@@ -190,13 +192,6 @@ struct ASTExpression {
   ~ASTExpression();
 };
 
-struct ASTLocal {
-  ASTExpression expression ={};
-  ASTType type ={};
-  const InternString* name = nullptr;
-  size_t local_index = 0;
-};
-
 #define MOD_STATEMENTS \
 MOD(UNKNOWN) \
 MOD(EXPRESSION) \
@@ -209,6 +204,13 @@ enum struct STATEMENT_TYPE : uint8_t {
 #define MOD(name) name,
   MOD_STATEMENTS
 #undef MOD
+};
+
+struct ASTLocal {
+  ASTExpression expression ={};
+  ASTType type ={};
+  const InternString* name = nullptr;
+  size_t local_index = 0;
 };
 
 struct ASTIfElse {
@@ -245,13 +247,18 @@ struct ASTStatement {
   ~ASTStatement();
 };
 
-struct ASTFunctionDeclaration {
+struct ASTFunctionSignature {
+  const InternString* convention = nullptr;
+
   const InternString* name = nullptr;
   ASTType return_type;
   Array<ASTLocal> parameters;
 
   Span signature_span ={};
+};
 
+struct ASTFunctionDeclaration {
+  ASTFunctionSignature signature ={};
   ASTBlock body;
 };
 
@@ -263,18 +270,38 @@ struct ASTFunctionDeclaration {
 //};
 
 struct ASTImport {
-  const InternString* relative_path;
-  const InternString* name;
+  const InternString* relative_path = nullptr;
+  Span span ={};
 
-  Span span;
+  FileLocation loc ={};
+};
+
+enum struct FILE_TYPE : uint8_t {
+  NONE, SOURCE, DLL_HEADER
+};
+
+struct ASTFileHeader {
+  bool is_dll_header;
+  ASTImport dll_header;
 };
 
 struct ASTFile {
   FileLocation file_loc ={};
   NamespaceIndex namespace_index = {};
 
-  Array<ASTImport> imports;
-  Array<ASTFunctionDeclaration> functions;
+  ASTFileHeader header = {};
+
+  Array<ASTImport> imports = {};
+  Array<ASTFunctionDeclaration> functions ={};
+};
+
+struct ScopeView {
+  ASTStatement* i;
+  const ASTStatement* end;
 };
 
 void print_ast(const ASTFile* file);
+void print_ast_expression(const ASTExpression* expr);
+
+void build_expression_linked_list(ASTBlock* scope);
+void build_expression_linked_list(ASTExpression* expr);

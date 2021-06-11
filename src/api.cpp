@@ -24,12 +24,12 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 void print_program(const Options& opts, const Program& prog) {
   if (opts.build.system == &system_vm) {
     std::cout << "\n=== Print Linked Bytecode ===\n\n";
-    ByteCode::print_bytecode(opts.build.system->reg_name_from_num, stdout, prog.code, prog.size);
+    ByteCode::print_bytecode(opts.build.system->reg_name_from_num, stdout, prog.code.ptr, prog.code_size);
     std::cout << "\n=============================\n\n";
   }
   else if (opts.build.system == &system_x86_64) {
     std::cout << "\n=== Print x86_64 Machine code ===\n\n";
-    print_x86_64(prog.code, prog.size);
+    print_x86_64(prog.code.ptr, prog.code_size);
     std::cout << "\n=================================\n\n";
   }
   else {
@@ -37,9 +37,9 @@ void print_program(const Options& opts, const Program& prog) {
   }
 }
 
-RunOutput run_in_vm(const Program& prog) {
+RunOutput run_in_vm(Program* prog) {
   VM vm ={};
-  ErrorCode error = vm_rum(&vm, prog.code, prog.entry);
+  ErrorCode error = vm_rum(&vm, prog);
 
   if (error != ErrorCode::OK) {
     std::cerr << error_code_string(error);
@@ -49,11 +49,17 @@ RunOutput run_in_vm(const Program& prog) {
   return { 0, vm.registers[convention_vm.return_register].b64.reg };
 }
 
-RunOutput run_as_machine_code(const Program& prog) {
-  auto exe = Windows::get_exectuable_memory<uint8_t>(prog.size);
-  memcpy_ts(exe.ptr, exe.size, prog.code, prog.size);
+RunOutput run_as_machine_code(Program* prog) {
+  //Load possible dlls
+  Array<Windows::ActiveDll> dlls = {};
+  if (prog->imports.ptr != nullptr) {
+    dlls = Windows::load_dlls(prog);
+  }
 
-  exe.entry = prog.entry;
+  auto exe = Windows::get_exectuable_memory<uint8_t>(prog->code_size);
+  memcpy_ts(exe.ptr, exe.size, prog->code.ptr, prog->code_size);
+
+  exe.entry = prog->entry_point;
   auto res = exe.call<uint64_t>();
 
   Windows::free_executable_memory(exe);
@@ -79,12 +85,8 @@ int compile_file(const Options& options,
   compiler.entry_point = strings.intern(options.build.entry_point);
   compiler.vm = &vm;
 
-  //Setup the built in namespace
-  compiler.builtin_namespace.index = compiler.all_namespaces.size;
-  compiler.all_namespaces.insert_uninit(1);
-
   //Load the builtin types
-  init_types(&compiler);
+  init_compiler(&compiler);
 
   {
     FileLocation loc = parse_file_location(options.build.file_name, nullptr, compiler.strings);
@@ -93,7 +95,7 @@ int compile_file(const Options& options,
     compiler.all_namespaces.insert_uninit(1);
 
 
-    compiler.unparsed_files.insert(FileImport{ loc, ns_index, Span{} });//use null span
+    compiler.file_loader.unparsed_files.insert(FileImport{ loc, ns_index, Span{} });//use null span
 
     //Parsing/loading
     CompileCode ret = parse_all_unparsed_files_with_imports(&compiler);
@@ -115,19 +117,23 @@ int compile_file(const Options& options,
   }
 
   //Backend
-  Array<uint8_t> code ={};
-  const size_t entry_index = (options.build.system->backend)(code, &compiler);
-  code.shrink();
+  build_data_section_for_exec(out_program, &compiler);
+  
+  (options.build.system->backend)(out_program, &compiler);
+  if (compiler.is_panic()) {
+    print_compile_errors(&compiler);
+    return 1;
+  }
 
   if (options.print.fully_compiled) {
     if (options.build.system == &system_vm) {
       std::cout << "\n=== Print Linked Bytecode ===\n\n";
-      ByteCode::print_bytecode(options.build.system->reg_name_from_num, stdout, code.data, code.size);
+      ByteCode::print_bytecode(options.build.system->reg_name_from_num, stdout, out_program->code.ptr, out_program->code_size);
       std::cout << "\n=============================\n\n";
     }
     else if (options.build.system == &system_x86_64) {
       std::cout << "\n=== Print x86_64 Machine code ===\n\n";
-      print_x86_64(code.data, code.size);
+      print_x86_64(out_program->code.ptr, out_program->code_size);
       std::cout << "\n=================================\n\n";
     }
     else {
@@ -135,22 +141,11 @@ int compile_file(const Options& options,
     }
   }
 
-  if (entry_index > code.size) {
-    std::cerr << "LINKING ERROR: Could not find entry point!\n";
-    return 1;
-  }
-
-  *out_program = Program{ code.data, code.size, entry_index };
-
-  code.data = nullptr;
-  code.size = 0;
-  code.capacity = 0;
-
   return 0;
 }
 
-RunOutput run_program(const Options& options, const Program& prog) {
-  if (options.build.system == &system_vm && options.build.calling_convention == &convention_vm) {
+RunOutput run_program(const Options& options, Program* prog) {
+  if (options.build.system == &system_vm) {
     if (options.print.run_headers) {
       std::cout << "\n=== Running in VM ===\n\n";
     }
@@ -161,7 +156,7 @@ RunOutput run_program(const Options& options, const Program& prog) {
 
     return ret;
   }
-  else if (options.build.system == &system_x86_64 && options.build.calling_convention == &convention_microsoft_x64) {
+  else if (options.build.system == &system_x86_64) {
     if (options.print.run_headers) {
       std::cout << "\n=== Running machine code (JIT) ===\n\n";
     }
@@ -187,7 +182,7 @@ RunOutput compile_file_and_run(const Options& options) {
     return { res,  0 };
   }
 
-  return run_program(options, program);
+  return run_program(options, &program);
 }
 
 int compile_file_and_write(const Options& options) {
@@ -204,22 +199,22 @@ int compile_file_and_write(const Options& options) {
     return res;
   }
 
-  if (options.build.system == &system_vm && options.build.calling_convention == &convention_vm) {
+  if (options.build.system == &system_vm) {
     std::cerr << "Cannot write bytecode to a file!";
 
     return res;
   }
-  else if (options.build.system == &system_x86_64 && options.build.calling_convention == &convention_microsoft_x64) {
+  else if (options.build.system == &system_x86_64) {
     std::cout << "Writing to file \"" << options.build.output_file << "\"\n";
 
     StringInterner strings ={};
 
-    PE_File pe_file ={};
+    PE_File_Build pe_file_build ={};
 
     CodeSection code_section ={};
-    code_section.bytes = program.code;
-    code_section.size  = program.size;
-    code_section.entry_point = program.entry;
+    code_section.bytes = program.code.ptr;
+    code_section.size  = program.code_size;
+    code_section.entry_point = program.entry_point;
 
     ImportTable imports ={};
     ConstantTable constants ={};
@@ -228,11 +223,11 @@ int compile_file_and_write(const Options& options) {
     //add_name_to_import(kernel32, strings.intern("just_a_test"), &imports);
 
 
-    pe_file.code = &code_section;
-    pe_file.constants = &constants;
-    pe_file.imports = &imports;
+    pe_file_build.code = &code_section;
+    pe_file_build.constants = &constants;
+    pe_file_build.imports = &imports;
 
-    return write_portable_executable_to_file(&pe_file, options.build.output_file) == ErrorCode::OK ? 0 : 1;
+    return write_portable_executable_to_file(&pe_file_build, options.build.output_file) == ErrorCode::OK ? 0 : 1;
   }
   else {
     std::cerr << "Could write out! Invalid convention and system conbination\n";

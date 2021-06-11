@@ -8,101 +8,115 @@
 #include "format.h"
 #include "operators.h"
 #include "files.h"
+#include "PE_file_format.h"
 
 void NamedElement::set_union(NamedElementType ty) {
   destruct_union();
   type = ty;
 
   switch (type) {
-    case NamedElementType::ENUM: break;
-    case NamedElementType::FUNCTION: default_init(&overloads); break;
-    case NamedElementType::STRUCTURE: break;
+    case NamedElementType::NONE: break;
+    case NamedElementType::OVERLOADS: default_init(&overloads); break;
+    case NamedElementType::ENUM: enum_value = nullptr; break;
+    case NamedElementType::FUNCTION_POINTER: func_pointer = nullptr; break;
+    case NamedElementType::STRUCTURE: structure = nullptr; break;
   }
 }
 void NamedElement::destruct_union() {
   switch (type) {
+    case NamedElementType::NONE: break;
+    case NamedElementType::OVERLOADS: destruct_single(&overloads); break;
     case NamedElementType::ENUM: enum_value = nullptr; break;
-    case NamedElementType::FUNCTION: destruct_single(&overloads); break;
+    case NamedElementType::FUNCTION_POINTER: func_pointer = nullptr; break;
     case NamedElementType::STRUCTURE: structure = nullptr; break;
   }
 }
 
 void NamedElement::move_from(NamedElement&& ne) {
-  type = ne.type;
+  type = std::exchange(ne.type, NamedElementType::NONE);
 
   switch (type) {
+    case NamedElementType::NONE: break;
     case NamedElementType::ENUM: enum_value = std::exchange(ne.enum_value, nullptr); break;
     case NamedElementType::STRUCTURE: structure = std::exchange(ne.structure, nullptr); break;
-    case NamedElementType::FUNCTION: overloads = std::move(ne.overloads); break;
+    case NamedElementType::FUNCTION_POINTER: func_pointer = std::exchange(ne.func_pointer, nullptr); break;
+    case NamedElementType::OVERLOADS: overloads = std::move(ne.overloads); break;
   }
 }
 
 Function* Compiler::new_function() {
-  return functions.insert();
+  Function* func =  functions.insert();
+  func->func_type = FUNCTION_TYPE::DEFAULT;
+  return func;
+}
+
+FunctionPointer* Compiler::new_function_pointer() {
+  FunctionPointer* func = function_pointers.insert();
+  func->func_type = FUNCTION_TYPE::POINTER;
+  return func;
+}
+
+ConstantExprUnit* Compiler::new_const_expr_unit(NamespaceIndex ns) {
+  ConstantExprUnit* unit =  const_expr_units.allocate();
+  unit->type  = COMPILATION_TYPE::CONST_EXPR;
+  unit->stage = EXPR_COMP_STAGE::UNTYPED;
+  unit->available_names = ns;
+
+  to_compile.insert(unit);
+  return unit;
+}
+
+FunctionUnit* Compiler::new_function_unit(NamespaceIndex ns) {
+  FunctionUnit* unit =  function_units.allocate();
+  unit->type  = COMPILATION_TYPE::FUNCTION;
+  unit->stage = FUNCTION_COMP_STAGE::UNINIT;
+  unit->available_names = ns;
+
+  to_compile.insert(unit);
+  return unit;
+}
+
+SignatureUnit* Compiler::new_signature_unit(NamespaceIndex ns) {
+  SignatureUnit* unit =  signature_units.allocate();
+  unit->type  = COMPILATION_TYPE::SIGNATURE;
+  unit->stage = SIGNATURE_COMP_STAGE::UNTYPED;
+  unit->available_names = ns;
+
+  to_compile.insert(unit);
+  return unit;
 }
 
 void Compiler::set_unfound_name(const InternString* name, NamespaceIndex ns, const Span& span) {
   assert(name != nullptr);
   unfound_deps.panic = true;
 
-  unfound_deps.units.insert_uninit(1);
-  UnfoundDep* dep = unfound_deps.units.back();
+  unfound_deps.unfound.insert_uninit(1);
+  UnfoundDep* dep = unfound_deps.unfound.back();
 
   dep->set_union(UnfoundDepType::Name);
   dep->name.ident = name;
   dep->name.namespace_index = ns;
   dep->unit_waiting = current_unit;
   dep->span = span;
-
-  switch (current_unit.type) {
-    case COMPILATION_TYPE::SIGNATURE:
-    case COMPILATION_TYPE::FUNCTION: {
-        (function_units.data + current_unit.index)->unfound_dependency = true;
-        break;
-      }
-    case COMPILATION_TYPE::CONST_EXPR: {
-        (const_expr_units.data + current_unit.index)->unfound_dependency = true;
-        break;
-      }
-  }
 }
 
 void Compiler::set_unfound_signature(CallSignature&& sig, const Span& span) {
   unfound_deps.panic = true;
 
-  unfound_deps.units.insert_uninit(1);
-  UnfoundDep* dep = unfound_deps.units.back();
+  unfound_deps.unfound.insert_uninit(1);
+  UnfoundDep* dep = unfound_deps.unfound.back();
 
   dep->set_union(UnfoundDepType::Function);
   dep->signature = std::move(sig);
   dep->unit_waiting = current_unit;
   dep->span = span;
-
-  switch (current_unit.type) {
-    case COMPILATION_TYPE::SIGNATURE:
-    case COMPILATION_TYPE::FUNCTION: {
-        (function_units.data + current_unit.index)->unfound_dependency = true;
-        break;
-      }
-    case COMPILATION_TYPE::CONST_EXPR: {
-        (const_expr_units.data + current_unit.index)->unfound_dependency = true;
-        break;
-      }
-  }
 }
 
-void Compiler::set_dep(CompilationUnitCarrier unit) {
+void Compiler::set_dep(CompilationUnit* unit) {
   unfound_deps.panic = true;
 
-  switch (current_unit.type) {
-    case COMPILATION_TYPE::SIGNATURE:
-    case COMPILATION_TYPE::FUNCTION:
-      (function_units.data + current_unit.index)->dependencies.insert(unit);
-      break;
-    case COMPILATION_TYPE::CONST_EXPR:
-      (const_expr_units.data + current_unit.index)->dependencies.insert(unit);
-      break;
-  }
+  current_unit->dependencies.insert(unit);
+  unit->dependency_of.insert(current_unit);
 }
 
 Value* State::get_val(const ValueIndex& i) {
@@ -212,14 +226,30 @@ Local* State::find_local(const InternString* i_s) {
   return nullptr;
 }
 
+
+int32_t StackState::pass_stack_local(uint64_t size, uint64_t alignment) {
+  const uint64_t mod_align = current_passed % alignment;
+
+  if (mod_align > 0) {
+    current_passed += alignment - mod_align;
+  }
+  current_passed += size;
+
+  if (current_passed > max_passed) {
+    max_passed = current_passed;
+  }
+
+  return -(int32_t)current_passed;
+}
+
 int32_t StackState::next_stack_local(uint64_t size, uint64_t alignment) {
   const uint64_t mod_align = current % alignment;
 
   if (mod_align > 0) {
     current += alignment - mod_align;
   }
-
   current += size;
+
   if (current > max) {
     max = current;
   }
@@ -403,7 +433,8 @@ void compile_type(Compiler* const comp, ASTType* type) {
             case NamedElementType::STRUCTURE:
               type->type = name->structure;
               break;
-            case NamedElementType::FUNCTION:
+            case NamedElementType::FUNCTION_POINTER:
+            case NamedElementType::OVERLOADS:
               comp->report_error(CompileCode::NAME_ERROR, type->span,
                                  "Expected a type but found the function '{}'",
                                  type->name);
@@ -427,20 +458,16 @@ void compile_type(Compiler* const comp, ASTType* type) {
         assert(type->arr.expr != nullptr);
 
         if (type->arr.expr->const_val == nullptr) {
-          //New compile time constant
-          ASTExpression* const expr = type->arr.expr;
+          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
 
-          ConstantExprUnit unit ={};
-          unit.expr   = expr;
-          unit.stage  = EXPRESSION_COMPILE_STAGE::UNTYPED;
+          unit->type = COMPILATION_TYPE::CONST_EXPR;
+          unit->stage = EXPR_COMP_STAGE::UNTYPED;
+          unit->available_names = comp->current_namespace;
+          unit->expr_base = type->arr.expr;
+          unit->next_expr = type->arr.expr->first;
+          unit->cast_to = nullptr;
 
-          comp->const_expr_units.insert(std::move(unit));
-
-          CompilationUnitCarrier carrier ={};
-          carrier.index = comp->const_expr_units.size - 1;
-          carrier.type  = COMPILATION_TYPE::CONST_EXPR;
-
-          comp->set_dep(carrier);
+          comp->set_dep(unit);
           return;
         }
         else {
@@ -492,7 +519,7 @@ void compile_type(Compiler* const comp, ASTType* type) {
 
 struct OverloadSet {
   bool complete_match = false;
-  Array<Function*> valid_overloads ={};
+  Array<FunctionBase*> valid_overloads ={};
 };
 
 static OverloadSet generate_overload_set(Compiler* const comp,
@@ -501,11 +528,55 @@ static OverloadSet generate_overload_set(Compiler* const comp,
 
   OverloadSet set ={};
 
+  const auto test_func = [&](FunctionBase* func) {
+    const FunctionSignature* signature = &func->signature;
+
+    //Correct name and number of args
+    if (sig->arguments.size == signature->parameter_types.size) {
+      auto p_call = sig->arguments.begin();
+      const auto end_call = sig->arguments.end();
+
+      auto p_func = signature->parameter_types.begin();
+
+      bool requires_cast = false;
+
+      while (p_call < end_call) {
+        if (*p_call == *p_func) {
+          //Do nothing
+        }
+        else if (!set.complete_match && can_comptime_cast(*p_call, *p_func)) {
+          requires_cast = true;
+        }
+        else {
+          //Escape out
+          return;
+        }
+
+        p_call++;
+        p_func++;
+      }
+
+      if (!set.complete_match && requires_cast) {
+        //Insert possible overload
+        set.valid_overloads.insert(func);
+      }
+      else {
+        //Complete match
+        if (!set.complete_match) {
+          set.complete_match = true;
+          set.valid_overloads.clear();
+        }
+
+        set.valid_overloads.insert(func);
+      }
+    }
+  };
+
   auto n_i = names.begin();
   const auto n_end = names.end();
   for (; n_i < n_end; n_i++) {
     const NamedElement* possible_func = *n_i;
-    if (possible_func->type == NamedElementType::FUNCTION) {
+    if (possible_func->type == NamedElementType::OVERLOADS) {
       auto f_i = possible_func->overloads.begin();
       auto f_end = possible_func->overloads.end();
 
@@ -513,59 +584,25 @@ static OverloadSet generate_overload_set(Compiler* const comp,
       for (; f_i < f_end; f_i++) {
         Function* const func = *f_i;
 
-        if (func->return_type == nullptr) {
-          CompilationUnitCarrier carrier ={};
-
-          carrier.type = COMPILATION_TYPE::SIGNATURE;
-          carrier.index = func->unit_index;
-
-          comp->set_dep(std::move(carrier));
+        //Could be valid function
+        if (func->signature.return_type == nullptr) {
+          comp->set_dep(func->compilation_unit);
           return { false, {} };
         }
 
-        //Correct name and number of args
-        if (sig->arguments.size == func->parameter_types.size) {
-          auto p_call = sig->arguments.begin();
-          const auto end_call = sig->arguments.end();
-
-          auto p_func = func->parameter_types.begin();
-
-          bool requires_cast = false;
-
-          while (p_call < end_call) {
-            if (*p_call == *p_func) {
-              //Do nothing
-            }
-            else if (!set.complete_match && can_comptime_cast(*p_call, *p_func)) {
-              requires_cast = true;
-            }
-            else {
-              //Escape out
-              goto FAIL;
-            }
-
-            p_call++;
-            p_func++;
-          }
-
-          if (!set.complete_match && requires_cast) {
-            //Insert possible overload
-            set.valid_overloads.insert(func);
-          }
-          else {
-            //Complete match
-            if (!set.complete_match) {
-              set.complete_match = true;
-              set.valid_overloads.clear();
-            }
-
-            set.valid_overloads.insert(func);
-          }
-        }
-
-      FAIL:
-        continue;
+        test_func(func);
       }
+    }
+    else if (possible_func->type == NamedElementType::FUNCTION_POINTER) {
+      FunctionPointer* const func_ptr = possible_func->func_pointer;
+
+      //Could be valid function
+      if (func_ptr->signature.return_type == nullptr) {
+        comp->set_dep(func_ptr->compilation_unit);
+        return { false, {} };
+      }
+
+      test_func(func_ptr);
     }
   }
 
@@ -604,7 +641,7 @@ static void compile_find_function_call(Compiler* const comp,
   }
   else if (set.valid_overloads.size == 1) {
     //Success!
-    Function* func = set.valid_overloads.data[0];
+    FunctionBase* func = set.valid_overloads.data[0];
     call->function = func;
     func->is_called = true;//tell it to be included in the final result
   }
@@ -618,7 +655,7 @@ static void compile_find_function_call(Compiler* const comp,
 
     //Load all the options into a string
     for (size_t i = 0; i < set.valid_overloads.size; i++) {
-      const Function* func = set.valid_overloads.data[i];
+      const FunctionBase* func = set.valid_overloads.data[i];
 
       format_to_array(options_message, "Option {}: {}\n", i + 1, PrintFuncSignature{ func });
     }
@@ -647,6 +684,8 @@ static void cast_operator_type(Compiler* const comp,
 
   assert(cast_to != nullptr);
   assert(cast_from != nullptr);
+
+  DEFER(&) { if (!comp->is_panic()) assert(expr->cast.emit != nullptr); };
 
   const auto emit_cast_func = [&cast_to](ASTExpression* expr, CAST_FUNCTION cast) {
     expr->cast.emit = cast;
@@ -693,7 +732,7 @@ static void cast_operator_type(Compiler* const comp,
         else if (cast_to->type == STRUCTURE_TYPE::POINTER) {
           const PointerStructure* to_ptr = (const PointerStructure*)cast_to;
 
-          if (can_implicit_cast(from_arr->base, to_ptr->base) && from_arr->size() == to_ptr->size()) {
+          if (can_implicit_cast(from_arr->base, to_ptr->base) && from_arr->base->size() == to_ptr->base->size()) {
             //Must be in memory to cast like this
             set_valid_rvts(expr->cast.expr, state, (uint8_t)RVT::MEMORY);
 
@@ -702,7 +741,7 @@ static void cast_operator_type(Compiler* const comp,
           }
         }
 
-        return;
+        break;
       }
     case STRUCTURE_TYPE::INTEGER: {
         const IntegerStructure* from_int = (const IntegerStructure*)cast_from;
@@ -727,6 +766,16 @@ static void cast_operator_type(Compiler* const comp,
               }
               else {
                 emit_cast_func(expr, CASTS::u8_to_r64);
+                return;
+              }
+            }
+            else if (from_int->bytes == 4) {
+              if (from_int->is_signed) {
+                emit_cast_func(expr, CASTS::i32_to_r64);
+                return;
+              }
+              else {
+                emit_cast_func(expr, CASTS::u32_to_r64);
                 return;
               }
             }
@@ -787,11 +836,12 @@ static void cast_operator_type(Compiler* const comp,
 constexpr static bool already_const_type(EXPRESSION_TYPE et) {
   return et == EXPRESSION_TYPE::ENUM
     || et == EXPRESSION_TYPE::VALUE
-    || et== EXPRESSION_TYPE::ASCII_STRING;
+    || et == EXPRESSION_TYPE::ASCII_STRING
+    || et == EXPRESSION_TYPE::NULLPTR;
 }
 
-constexpr static bool can_load_const_value(const ASTExpression* const expr) {
-  return expr->comptime_eval && expr->const_val == nullptr && !already_const_type(expr->expr_type);
+constexpr static bool can_compile_const_value(const ASTExpression* const expr) {
+  return expr->const_val == nullptr && expr->comptime_eval && !already_const_type(expr->expr_type);
 }
 
 void force_load_const_value(Compiler* const comp, ASTExpression* expr) {
@@ -831,21 +881,6 @@ void force_load_const_value(Compiler* const comp, ASTExpression* expr) {
         break;
       }
   }
-}
-
-
-void make_constant_typed_dependency(Compiler* const comp, ASTExpression* expr, const Structure* cast_to) {
-  comp->const_expr_units.insert_uninit(1);
-  ConstantExprUnit* unit = comp->const_expr_units.back();
-  unit->expr    = expr;
-  unit->stage   = EXPRESSION_COMPILE_STAGE::TYPED;
-  unit->cast_to = cast_to;
-
-  CompilationUnitCarrier carrier ={};
-  carrier.index = comp->const_expr_units.size - 1;
-  carrier.type  = COMPILATION_TYPE::CONST_EXPR;
-
-  comp->set_dep(carrier);
 }
 
 static void do_literal_cast(Compiler* const comp,
@@ -1000,18 +1035,24 @@ void compile_implicit_cast(Compiler* const comp, ASTExpression* from_expr, const
     return;
   }
   else if (can_comptime_cast(from, to) && from_expr->comptime_eval) {
-    if (can_load_const_value(from_expr)) {
-      make_constant_typed_dependency(comp, from_expr, to);
+    if (can_compile_const_value(from_expr)) {
+      ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+      unit->expr_base = from_expr;
+      unit->next_expr = from_expr->first;
+      unit->cast_to   = to;
+
+      comp->set_dep(unit);
     }
     else {
       force_load_const_value(comp, from_expr);
 
-      uint8_t* new_const = comp->constants.alloc_no_construct(from_expr->type->size());
+      uint8_t* new_const = comp->constants.alloc_no_construct(to->size());
 
       do_literal_cast(comp, from_expr, to, from_expr->const_val, new_const);
       comp->constants.free_no_destruct(from_expr->const_val);
 
       from_expr->const_val = new_const;
+      from_expr->type = to;
     }
   }
   else {
@@ -1033,8 +1074,8 @@ void set_valid_rvts(ASTExpression* const expr, State* const state, uint8_t valid
 
 //Note: Recursive
 static void compile_type_of_expression(Compiler* const comp,
-                                       ASTExpression* const expr,
-                                       State* const state) {
+                                       State* const state,
+                                       ASTExpression* const expr) {
   assert(expr->valid_rvts != 0);//shouldnt start 0
   DEFER(&) { assert(expr->valid_rvts != 0); };//shouldnt end 0
 
@@ -1048,15 +1089,15 @@ static void compile_type_of_expression(Compiler* const comp,
         auto* arr_expr = expr->index.expr;
         auto* index_expr = expr->index.index;
 
-        arr_expr->call_leaf = expr->call_leaf;
-        index_expr->call_leaf = expr->call_leaf;
-
-        compile_type_of_expression(comp, arr_expr, state);
-        if (comp->is_panic()) {
-          return;
-        }
+        //Should be already typed
 
         assert(arr_expr->type != nullptr);
+
+        auto* index_type = index_expr->type;
+        assert(index_type != nullptr);
+
+        arr_expr->call_leaf = expr->call_leaf;
+        index_expr->call_leaf = expr->call_leaf;
 
         if (!TYPE_TESTS::can_index(arr_expr->type)) {
           comp->report_error(CompileCode::TYPE_CHECK_ERROR, arr_expr->span,
@@ -1064,14 +1105,6 @@ static void compile_type_of_expression(Compiler* const comp,
                              arr_expr->type->name);
           return;
         }
-
-        compile_type_of_expression(comp, index_expr, state);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        auto* index_type = index_expr->type;
-        assert(index_type != nullptr);
 
         if (!TYPE_TESTS::is_int(index_type)) {
           comp->report_error(CompileCode::TYPE_CHECK_ERROR, index_expr->span,
@@ -1109,14 +1142,9 @@ static void compile_type_of_expression(Compiler* const comp,
 
         for (; i < end; i++) {
           i->call_leaf = expr->call_leaf;
-
-          compile_type_of_expression(comp, i, state);
-          if (comp->is_panic()) {
-            return;
-          }
+          assert(i->type != nullptr);
 
           if (base_type == nullptr) {
-            //TEMP: First element decides type for now - will have issues with literals
             base_type = i->type;
           }
           else {
@@ -1134,6 +1162,7 @@ static void compile_type_of_expression(Compiler* const comp,
         }
 
         if (base_type == nullptr) {
+          assert(expr->array_expr.elements.size == 0);
           expr->type = comp->types->s_empty_arr;
         }
         else {
@@ -1158,18 +1187,19 @@ static void compile_type_of_expression(Compiler* const comp,
         }
         else {
           switch (name->type) {
-            case NamedElementType::STRUCTURE:
+            case NamedElementType::ENUM:
               expr->type = expr->enum_value.enum_value->type;
               expr->comptime_eval = true;
               break;
-            case NamedElementType::FUNCTION:
+            case NamedElementType::OVERLOADS:
+            case NamedElementType::FUNCTION_POINTER:
               comp->report_error(CompileCode::NAME_ERROR, expr->span,
                                  "Expected an enum value but found the function '{}'",
                                  expr->enum_value.name);
               break;
-            case NamedElementType::ENUM:
+            case NamedElementType::STRUCTURE:
               comp->report_error(CompileCode::NAME_ERROR, expr->span,
-                                 "Expected a type but found the enum value '{}'",
+                                 "Expected an enum value but found the type '{}'",
                                  expr->enum_value.name);
               break;
           }
@@ -1199,7 +1229,11 @@ static void compile_type_of_expression(Compiler* const comp,
 
         break;
       }
-
+    case EXPRESSION_TYPE::NULLPTR: {
+        expr->comptime_eval = true;
+        expr->type = comp->types->s_lit_ptr;
+        break;
+      }
     case EXPRESSION_TYPE::NAME: {
         const InternString* name = expr->name;
 
@@ -1213,7 +1247,31 @@ static void compile_type_of_expression(Compiler* const comp,
           loc->valid_rvts &= expr->valid_rvts;
         }
         else {
-          comp->set_unfound_name(name, comp->current_namespace, expr->span);
+          NamedElement* non_local = find_name(comp, comp->current_namespace, name);
+          if (non_local == nullptr) {
+            comp->set_unfound_name(name, comp->current_namespace, expr->span);
+          }
+          else {
+            switch (non_local->type) {
+              case NamedElementType::STRUCTURE:
+                comp->report_error(CompileCode::NAME_ERROR, expr->span,
+                                   "Expected a local but found the type '{}'",
+                                   name);
+                break;
+              case NamedElementType::OVERLOADS:
+              case NamedElementType::FUNCTION_POINTER:
+                comp->report_error(CompileCode::NAME_ERROR, expr->span,
+                                   "Expected a local but found the function '{}'",
+                                   name);
+                break;
+              case NamedElementType::ENUM:
+                comp->report_error(CompileCode::NAME_ERROR, expr->span,
+                                   "Expected a local but found the enum value '{}'",
+                                   name);
+                break;
+            }
+          }
+
           return;
         }
 
@@ -1224,14 +1282,11 @@ static void compile_type_of_expression(Compiler* const comp,
     case EXPRESSION_TYPE::CAST: {
         expr->cast.expr->call_leaf = expr->call_leaf;
 
-        compile_type(comp, &expr->cast.type);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        compile_type_of_expression(comp, expr->cast.expr, state);
-        if (comp->is_panic()) {
-          return;
+        if (expr->cast.type.type == nullptr) {
+          compile_type(comp, &expr->cast.type);
+          if (comp->is_panic()) {
+            return;
+          }
         }
 
         cast_operator_type(comp, state, expr);
@@ -1245,15 +1300,10 @@ static void compile_type_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::UNARY_OPERATOR: {
-        expr->un_op.primary->call_leaf = expr->call_leaf;
+        expr->un_op.expr->call_leaf = expr->call_leaf;
 
-        compile_type_of_expression(comp, expr->un_op.primary, state);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        expr->comptime_eval = expr->un_op.primary->comptime_eval;
-        expr->makes_call = expr->un_op.primary->makes_call;
+        expr->comptime_eval = expr->un_op.expr->comptime_eval;
+        expr->makes_call = expr->un_op.expr->makes_call;
 
         switch (expr->un_op.op) {
           case UNARY_OPERATOR::NEG:
@@ -1288,30 +1338,26 @@ static void compile_type_of_expression(Compiler* const comp,
         bin_op->left->call_leaf = expr->call_leaf;
         bin_op->right->call_leaf = expr->call_leaf;
 
-
-        compile_type_of_expression(comp, bin_op->left, state);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        compile_type_of_expression(comp, bin_op->right, state);
-        if (comp->is_panic()) {
-          return;
-        }
-
         if (bin_op->left->comptime_eval && bin_op->right->comptime_eval) {
           expr->comptime_eval = true;
         }
-        else if (can_load_const_value(bin_op->left)) {
+        else if (can_compile_const_value(bin_op->left)) {
           expr->comptime_eval = false;
 
-          make_constant_typed_dependency(comp, bin_op->left, nullptr);
+          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+          unit->expr_base = bin_op->left;
+          unit->next_expr = bin_op->left->first;
+
+          comp->set_dep(unit);
           return;//guaranteed to have panic
         }
-        else if (can_load_const_value(bin_op->right)) {
+        else if (can_compile_const_value(bin_op->right)) {
           expr->comptime_eval = false;
 
-          make_constant_typed_dependency(comp, bin_op->right, nullptr);
+          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+          unit->expr_base = bin_op->right->first;
+
+          comp->set_dep(unit);
           return;//guaranteed to have panic
         }
         else {
@@ -1369,6 +1415,7 @@ static void compile_type_of_expression(Compiler* const comp,
         FunctionCallExpr* const call = &expr->call;
 
         expr->comptime_eval = true;
+        expr->makes_call = true;
 
         {
           auto i = call->arguments.mut_begin();
@@ -1376,11 +1423,6 @@ static void compile_type_of_expression(Compiler* const comp,
 
           for (; i < end; i++) {
             i->call_leaf = true;
-
-            compile_type_of_expression(comp, i, state);
-            if (comp->is_panic()) {
-              return;
-            }
 
             expr->comptime_eval &= i->comptime_eval;
           }
@@ -1396,7 +1438,7 @@ static void compile_type_of_expression(Compiler* const comp,
         const auto* func = call->function;
 
         {
-          const size_t size = func->parameter_types.size;
+          const size_t size = func->signature.parameter_types.size;
 
           if (call->arguments.size != size) {
             comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
@@ -1406,7 +1448,7 @@ static void compile_type_of_expression(Compiler* const comp,
           }
 
           for (size_t i = 0; i < size; i++) {
-            const Structure* param_t = func->parameter_types.data[i];
+            const Structure* param_t = func->signature.parameter_types.data[i];
             ASTExpression* arg_expr = call->arguments.data + i;
 
             compile_implicit_cast(comp, arg_expr, param_t);
@@ -1416,7 +1458,9 @@ static void compile_type_of_expression(Compiler* const comp,
           }
         }
 
-        //Cant currently call functions at compile time
+        //TODO: Allow function execution at compile time
+        //Means we need to have a way to know which functions to load
+        //Currently it just expects to find a function but doesnt and calls the start of the code (I think)
         expr->comptime_eval = false;
 
         if (!expr->comptime_eval) {
@@ -1424,19 +1468,19 @@ static void compile_type_of_expression(Compiler* const comp,
           const auto end = call->arguments.mut_end();
 
           for (; i < end; i++) {
-            if (can_load_const_value(i)) {
-              make_constant_typed_dependency(comp, i, nullptr);
-              if (comp->is_panic()) {
-                return;
-              }
+            if (can_compile_const_value(i)) {
+              ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+              unit->expr_base = i;
+              unit->next_expr = i->first;
+
+              comp->set_dep(unit);
+              return;
             }
           }
         }
 
         //Last thing to do it set return type
-        expr->type = call->function->return_type;
-        expr->makes_call = true;
-
+        expr->type = call->function->signature.return_type;
         break;
       }
     default: {
@@ -1453,53 +1497,35 @@ static void compile_type_of_expression(Compiler* const comp,
 static void compile_type_of_statement(Compiler* const comp,
                                       Function* const func,
                                       State* const state,
+                                      UntypedCode* untyped,
                                       ASTStatement* const statement) {
   switch (statement->type) {
     case STATEMENT_TYPE::IF_ELSE: {
         ASTIfElse* const if_else = &statement->if_else;
 
         if (if_else->condition.type == nullptr) {
-          compile_type_of_expression(comp, &if_else->condition, state);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          compile_implicit_cast(comp, &if_else->condition, comp->types->s_bool);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
-        compile_type_of_statement(comp, func, state, if_else->if_statement);
-        if (comp->is_panic()) {
+          untyped->current_expression = if_else->condition.first;
           return;
         }
 
-        compile_type_of_statement(comp, func, state, if_else->else_statement);
-        if (comp->is_panic()) {
-          return;
-        }
-
+        new_scope(&untyped->itr, if_else->if_statement, if_else->if_statement + 1, state);
+        new_scope(&untyped->itr, if_else->else_statement, if_else->else_statement + 1, state);
         return;
       }
     case STATEMENT_TYPE::BLOCK: {
         auto locals = state->active_locals.size;
         DEFER(&) { state->active_locals.size = locals; };
 
-        auto i = statement->block.block.mut_begin();
-        const auto end = statement->block.block.mut_end();
-
-        for (; i < end; i++) {
-          compile_type_of_statement(comp, func, state, i);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
+        new_scope(&untyped->itr, statement->block.block.mut_begin(), statement->block.block.end(), state);
         return;
       }
     case STATEMENT_TYPE::LOCAL: {
         ASTLocal* const decl = &statement->local;
+
+        if (decl->expression.type == nullptr) {
+          untyped->current_expression = decl->expression.first;
+          return;
+        }
 
         if (decl->type.type == nullptr) {
           compile_type(comp, &decl->type);
@@ -1507,72 +1533,64 @@ static void compile_type_of_statement(Compiler* const comp,
             return;
           }
         }
-        assert(decl->type.type != nullptr);
 
-        if (decl->expression.type == nullptr) {
-          compile_type_of_expression(comp, &decl->expression, state);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          assert(decl->expression.type != nullptr);
-
-          compile_implicit_cast(comp, &decl->expression, decl->type.type);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          if (can_load_const_value(&decl->expression)) {
-            make_constant_typed_dependency(comp, &decl->expression, nullptr);
-            return;
-          }
+        compile_implicit_cast(comp, &decl->expression, decl->type.type);
+        if (comp->is_panic()) {
+          return;
         }
-        assert(decl->expression.type != nullptr);
 
-        //Check for normal namespace issues
-        {
-          const NamedElement* possible_name = find_name(comp, comp->current_namespace, decl->name);
+        if (can_compile_const_value(&decl->expression)) {
+          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+          unit->expr_base = &decl->expression;
+          unit->next_expr = decl->expression.first;
 
-          if (possible_name != nullptr) {
-            //Is actually the name for something else
-
-            switch (possible_name->type) {
-              case NamedElementType::STRUCTURE:
-                comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                   "Attempted to shadow the type '{}'",
-                                   decl->name);
-                break;
-              case NamedElementType::FUNCTION:
-                comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                   "Attempted to shadow the function '{}'",
-                                   decl->name);
-                break;
-              case NamedElementType::ENUM:
-                comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                   "Attempted to shadow the enum value '{}'",
-                                   decl->name);
-                break;
-            }
-
-            return;
-          }
+          comp->set_dep(unit);
+          return;
         }
+
+        const NamedElement* possible_name = find_name(comp, comp->current_namespace, decl->name);
+
+        if (possible_name != nullptr) {
+          //Is actually the name for something else
+
+          switch (possible_name->type) {
+            case NamedElementType::STRUCTURE:
+              comp->report_error(CompileCode::NAME_ERROR, statement->span,
+                                 "Attempted to shadow the type '{}'",
+                                 decl->name);
+              break;
+            case NamedElementType::OVERLOADS:
+            case NamedElementType::FUNCTION_POINTER:
+              comp->report_error(CompileCode::NAME_ERROR, statement->span,
+                                 "Attempted to shadow the function '{}'",
+                                 decl->name);
+              break;
+            case NamedElementType::ENUM:
+              comp->report_error(CompileCode::NAME_ERROR, statement->span,
+                                 "Attempted to shadow the enum value '{}'",
+                                 decl->name);
+              break;
+            default: assert(false);
+          }
+
+          return;
+        }
+
 
         //Check for shadowing
-        {
-          const Local* shadowing = state->find_local(decl->name);
 
-          if (shadowing != nullptr) {
-            comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                               "Attempted to shadow the local variable '{}'",
-                               decl->name);
-            return;
-          }
+        const Local* shadowing = state->find_local(decl->name);
+
+        if (shadowing != nullptr) {
+          comp->report_error(CompileCode::NAME_ERROR, statement->span,
+                             "Attempted to shadow the local variable '{}'",
+                             decl->name);
+          return;
         }
+
 
         size_t loc_index = state->all_locals.size;
         decl->local_index = loc_index;
-        state->active_locals.insert(loc_index);
 
         state->all_locals.insert_uninit(1);
         auto* loc = state->all_locals.back();
@@ -1580,49 +1598,41 @@ static void compile_type_of_statement(Compiler* const comp,
         loc->name = decl->name;
         loc->type = decl->type.type;
 
+        assert(decl->expression.type != nullptr);
+
+        state->active_locals.insert(decl->local_index);
+
         return;
       }
     case STATEMENT_TYPE::EXPRESSION: {
-        ASTExpression* const expr = &statement->expression;
-        if (expr->type == nullptr) {
-          compile_type_of_expression(comp, expr, state);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          assert(expr->type != nullptr);
-
-          if (can_load_const_value(expr)) {
-            make_constant_typed_dependency(comp, expr, nullptr);
-            return;
-          }
+        if (statement->expression.type == nullptr) {
+          untyped->current_expression = statement->expression.first;
+          return;
         }
 
         return;
       }
     case STATEMENT_TYPE::RETURN: {
-        ASTExpression* const expr = &statement->expression;
-
-        if (expr->type == nullptr) {
-          compile_type_of_expression(comp, expr, state);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          assert(expr->type != nullptr);
-
-          compile_implicit_cast(comp, expr, func->return_type);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          if (can_load_const_value(expr)) {
-            make_constant_typed_dependency(comp, expr, nullptr);
-            return;
-          }
+        if (statement->expression.type == nullptr) {
+          untyped->current_expression = statement->expression.first;
+          return;
         }
 
-        assert(expr->type != nullptr);
+        ASTExpression* const expr = &statement->expression;
+
+        compile_implicit_cast(comp, expr, func->signature.return_type);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        if (can_compile_const_value(expr)) {
+          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+          unit->expr_base = expr;
+          unit->next_expr = expr->next;
+
+          comp->set_dep(unit);
+          return;
+        }
         return;
       }
   }
@@ -1630,6 +1640,131 @@ static void compile_type_of_statement(Compiler* const comp,
   comp->report_error(CompileCode::INTERNAL_ERROR, statement->span,
                      "Reached end of statement type checking without exiting\n"
                      "Statement type: {}\n", statement->type);
+}
+
+static RuntimeValue advance_runtime_arg(State* state,
+                                        CallingConvArgIterator* itr,
+                                        const Structure* type) {
+  RuntimeValue val ={};
+  if (itr->regs_used < itr->conv->num_parameter_registers) {
+    //Load into register
+    val.type = RVT::REGISTER;
+    val.reg = state->new_value();
+
+    auto* reg_val = state->get_val(val.reg);
+    reg_val->value_type = ValueType::FIXED;
+    reg_val->reg = itr->conv->parameter_registers[itr->regs_used];
+    itr->regs_used++;
+  }
+  else {
+    //Passed memory
+    assert(itr->conv->stack_direction == STACK_DIRECTION::RIGHT_TO_LEFT);
+
+    const size_t size = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : type->size();
+    const size_t align = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : type->alignment();
+
+    const int32_t offset = state->stack.pass_stack_local(size, align);
+
+
+    val.type = RVT::MEMORY;
+    val.mem = state->new_mem();
+
+    auto* val_mem = state->get_mem(val.mem);
+    val_mem->mem.base = (uint8_t)state->rsp.val;
+    val_mem->mem.disp = offset;
+    val_mem->mem.scale = 0;
+    //No index: val_mem->mem.index
+
+    val_mem->size = size;
+  }
+
+  return val;
+}
+
+static RuntimeValue advance_runtime_param(State* state,
+                                          CallingConvParamIterator* itr,
+                                          const Structure* type) {
+  RuntimeValue val ={};
+  if (itr->regs_used < itr->conv->num_parameter_registers) {
+    //Load into register
+    val.type = RVT::REGISTER;
+    val.reg = state->new_value();
+
+    auto* reg_val = state->get_val(val.reg);
+    reg_val->value_type = ValueType::FIXED;
+    reg_val->reg = itr->conv->parameter_registers[itr->regs_used];
+
+    itr->regs_used++;
+    state->set_value(val.reg);
+  }
+  else {
+    //Passed memory
+    assert(itr->conv->stack_direction == STACK_DIRECTION::RIGHT_TO_LEFT);
+
+    const int32_t size = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : type->size();
+    const int32_t align = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : type->alignment();
+
+    //Determine the stack location
+    const int32_t mod_align = itr->stack_passed % align;
+
+    if (mod_align > 0) {
+      itr->stack_passed += align - mod_align;
+    }
+
+    itr->stack_passed += size;
+
+    val.type = RVT::MEMORY;
+    val.mem = state->new_mem();
+
+    auto* val_mem = state->get_mem(val.mem);
+    val_mem->mem.base = (uint8_t)state->rbp.val;
+    val_mem->mem.disp = itr->stack_passed;
+    val_mem->mem.scale = 0;
+    //No index: val_mem->mem.index
+
+    val_mem->size = size;
+  }
+
+  return val;
+}
+
+static RuntimeValue load_to_argument_itr(Compiler* comp,
+                                         State* state,
+                                         CodeBlock* const code,
+                                         const Structure* type,
+                                         RuntimeValue* val,
+                                         CallingConvArgIterator* itr) {
+  RuntimeValue param = advance_runtime_arg(state, itr, type);
+
+  const bool reg_passed_as_ptr = register_passed_as_pointer(type);
+
+  if (param.type == RVT::REGISTER && reg_passed_as_ptr) {
+    //LEA
+    RuntimeValue address = OP::emit_address(comp, state, code, val);
+
+    //Copy
+    copy_runtime_to_runtime(comp, state, code, type, &address, &param);
+  }
+  else if (param.type == RVT::REGISTER && !reg_passed_as_ptr) {
+    copy_runtime_to_runtime(comp, state, code, type, val, &param);
+  }
+  else if (param.type == RVT::MEMORY
+           && (itr->conv->stack_pass_type == STACK_PASS_TYPE::VALUE || !reg_passed_as_ptr)) {
+    copy_runtime_to_runtime(comp, state, code, type, val, &param);
+  }
+  else if (param.type == RVT::MEMORY &&  itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER
+           && reg_passed_as_ptr) {
+    //LEA
+    RuntimeValue address = OP::emit_address(comp, state, code, val);
+
+    //Copy
+    copy_runtime_to_runtime(comp, state, code, type, &address, &param);
+  }
+  else {
+    assert(false);
+  }
+
+  return param;
 }
 
 static void load_const_to_mem(Compiler* const comp,
@@ -1690,40 +1825,45 @@ static void load_const_to_mem(Compiler* const comp,
     }
   }
 
-  const uint64_t last = *(const uint64_t*)iptr;
+  const uint8_t* ptr = (const uint8_t*)iptr;
 
   switch (s_mod_8) {
     case 0: break;//Already loaded
     case 1:
-      ByteCode::EMIT::COPY_8_TO_MEM(code->code, (uint8_t)(last & 0xFF), indexed_mem);
+      ByteCode::EMIT::COPY_8_TO_MEM(code->code, ptr[0], indexed_mem);
       break;
     case 2:
-      ByteCode::EMIT::COPY_16_TO_MEM(code->code, (uint16_t)(last & 0xFFFF), indexed_mem);
+      ByteCode::EMIT::COPY_16_TO_MEM(code->code, x16_from_bytes(ptr), indexed_mem);
       break;
     case 3:
-      ByteCode::EMIT::COPY_16_TO_MEM(code->code, (uint16_t)(last & 0xFFFF), indexed_mem);
+      ByteCode::EMIT::COPY_16_TO_MEM(code->code, x16_from_bytes(ptr), indexed_mem);
       indexed_mem.disp += 2;
-      ByteCode::EMIT::COPY_8_TO_MEM(code->code, (uint8_t)((last & 0xFF0000) >> 16), indexed_mem);
+      ptr += 2;
+      ByteCode::EMIT::COPY_8_TO_MEM(code->code, ptr[0], indexed_mem);
       break;
     case 4:
-      ByteCode::EMIT::COPY_32_TO_MEM(code->code, (uint32_t)(last & 0xFFFFFFFF), indexed_mem);
+      ByteCode::EMIT::COPY_32_TO_MEM(code->code, x32_from_bytes(ptr), indexed_mem);
       break;
     case 5:
-      ByteCode::EMIT::COPY_32_TO_MEM(code->code, (uint32_t)(last & 0xFFFFFFFF), indexed_mem);
+      ByteCode::EMIT::COPY_32_TO_MEM(code->code, x32_from_bytes(ptr), indexed_mem);
       indexed_mem.disp += 4;
-      ByteCode::EMIT::COPY_8_TO_MEM(code->code, (uint8_t)((last & 0xFF00000000) >> 32), indexed_mem);
+      ptr += 4;
+      ByteCode::EMIT::COPY_8_TO_MEM(code->code, ptr[0], indexed_mem);
       break;
     case 6:
-      ByteCode::EMIT::COPY_32_TO_MEM(code->code, (uint32_t)(last & 0xFFFFFFFF), indexed_mem);
+      ByteCode::EMIT::COPY_32_TO_MEM(code->code, x32_from_bytes(ptr), indexed_mem);
       indexed_mem.disp += 4;
-      ByteCode::EMIT::COPY_16_TO_MEM(code->code, (uint16_t)((last & 0xFFFF00000000) >> 32), indexed_mem);
+      ptr += 4;
+      ByteCode::EMIT::COPY_16_TO_MEM(code->code, x16_from_bytes(ptr), indexed_mem);
       break;
     case 7:
-      ByteCode::EMIT::COPY_32_TO_MEM(code->code, (uint32_t)(last & 0xFFFFFFFF), indexed_mem);
+      ByteCode::EMIT::COPY_32_TO_MEM(code->code, x32_from_bytes(ptr), indexed_mem);
       indexed_mem.disp += 4;
-      ByteCode::EMIT::COPY_16_TO_MEM(code->code, (uint16_t)((last & 0xFFFF00000000) >> 32), indexed_mem);
+      ptr += 4;
+      ByteCode::EMIT::COPY_16_TO_MEM(code->code, x16_from_bytes(ptr), indexed_mem);
       indexed_mem.disp += 2;
-      ByteCode::EMIT::COPY_8_TO_MEM(code->code, (uint8_t)((last & 0xFF000000000000) >> 48), indexed_mem);
+      ptr += 2;
+      ByteCode::EMIT::COPY_8_TO_MEM(code->code, ptr[0], indexed_mem);
       break;
     default:
       assert(false);//Logically should never ever be able to get here ...
@@ -2069,16 +2209,8 @@ static void load_runtime_hint(Compiler* const comp,
     size_t size = type->size();
     size_t alignment = type->alignment();
 
-    const ValueIndex rbp = state->new_value();
-    state->set_value(rbp);
-
-    auto& rbp_val = state->value_tree.values.data[rbp.val];
-
-    rbp_val.value_type = ValueType::FIXED;
-    rbp_val.reg = comp->build_options.calling_convention->base_pointer_reg;
-
     auto* stack_val = state->mem_values.back();
-    stack_val->mem.base = (uint8_t)rbp.val;
+    stack_val->mem.base = (uint8_t)state->rbp.val;
     stack_val->mem.disp = state->stack.next_stack_local(size, alignment);
     stack_val->mem.scale = 0;
     stack_val->size = size;
@@ -2149,6 +2281,136 @@ static void compile_bytecode_of_expression_existing(Compiler* const comp,
   assert(rt_hint.val == *hint);
 }
 
+static void compile_function_call(Compiler* const comp,
+                                  State* const state,
+                                  CodeBlock* const code,
+                                  const ASTExpression* const expr,
+                                  RuntimeHint* hint) {
+
+  assert(expr->expr_type == EXPRESSION_TYPE::FUNCTION_CALL);
+  const FunctionCallExpr* const call = &expr->call;
+
+  auto save_stack_params = state->stack.current_passed;
+  DEFER(&) { state->stack.current_passed = save_stack_params; };
+
+  state->made_call = true;
+
+  const CallingConvention* convention = call->function->signature.calling_convention;
+  bool return_via_pointer = register_passed_as_pointer(call->function->signature.return_type);
+
+  struct TypedVal {
+    RuntimeValue rv ={};
+    const Structure* type = nullptr;
+  };
+
+  Array<TypedVal> parameter_vals;
+  parameter_vals.reserve_total(call->arguments.size + return_via_pointer);
+
+  if (return_via_pointer) {
+    parameter_vals.insert_uninit(1);
+  }
+
+
+  //Compile expression for arguments
+  {
+    const size_t size = call->arguments.size;
+
+    for (size_t i = 0; i < size; i++) {
+      const ASTExpression* inner_expr = call->arguments.data + i;
+      const Structure* call_type = call->function->signature.parameter_types.data[i];
+
+
+      const RuntimeValue val = compile_bytecode_of_expression_new(comp, state, code, inner_expr, ALL_RVTS);
+
+      parameter_vals.insert({ val, call_type });
+    }
+  }
+
+  state->control_flow.expression_num++;
+
+  //Set argument registers and stack
+
+
+  if (return_via_pointer) {
+    //Load the return on the stack and then pass a pointer
+    load_runtime_hint(comp, state, call->function->signature.return_type, hint, (uint8_t)RVT::MEMORY);
+
+    //First element is reserved ahead of time
+    parameter_vals.data[0].rv = OP::emit_address(comp, state, code, &hint->val);
+    parameter_vals.data[0].type = comp->types->s_void_ptr;//just any pointer type
+
+    state->control_flow.expression_num++;
+  }
+
+  CallingConvArgIterator conv_iter ={
+    convention,
+    0
+  };
+
+  auto i = parameter_vals.mut_begin();
+  const auto end = parameter_vals.end();
+
+  //Load the actual arguments
+  for (; i < end; i++) {
+    RuntimeValue param_val = load_to_argument_itr(comp, state, code, i->type, &i->rv, &conv_iter);
+
+    i->rv = std::move(param_val);
+  }
+
+  state->control_flow.expression_num++;
+
+  //use all the registers
+  {
+    auto i = parameter_vals.begin();
+    const auto end = parameter_vals.end();
+
+    for (; i < end; i++) {
+      //Cant exit early as the last value might be a register
+      if (i->rv.type == RVT::REGISTER) {
+        state->use_value(i->rv.reg);
+      }
+    }
+  }
+
+  size_t stack_params = state->stack.current_passed;
+
+  if (call->function->func_type == FUNCTION_TYPE::POINTER
+      && comp->build_options.system == &system_vm
+      && static_cast<const FunctionPointer*>(call->function)->is_dll) {
+    //native call from the vm
+    ByteCode::EMIT::CALL_NATIVE_X64(code->code, call->function, stack_params);
+  }
+  else {
+    ByteCode::EMIT::CALL(code->code, call->function);
+  }
+  state->control_flow.had_call = true;
+  state->control_flow.last_call = state->control_flow.expression_num;
+
+  state->control_flow.expression_num++;
+
+  if (!return_via_pointer) {
+    //Need to reserve RAX if we didnt already pass a pointer in
+    const ValueIndex rax = state->new_value();
+    state->set_value(rax);//set by the called function
+
+    {
+      auto* rax_val = state->value_tree.values.data + rax.val;
+
+      rax_val->value_type = ValueType::FIXED;
+      rax_val->reg        = convention->return_register;
+    }
+
+    //Fake copy so dont need to insert copy later if one is needed
+    state->control_flow.expression_num++;
+
+    if (hint->is_hint) {
+      load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts & NON_CONST_RVTS);
+    }
+
+    copy_reg_to_runtime(comp, state, code, expr->type, rax, &hint->val);
+  }
+}
+
 //Note: Recursive 
 static void compile_bytecode_of_expression(Compiler* const comp,
                                            State* const state,
@@ -2160,9 +2422,8 @@ static void compile_bytecode_of_expression(Compiler* const comp,
     state->control_flow.expression_num++;
   };
 
-  if (expr->comptime_eval && !state->comptime_compilation && !already_const_type(expr->expr_type)) {
+  if (expr->const_val != nullptr) {
     //Compile time expression
-    assert(expr->const_val != nullptr);
 
     //Copy the value to a new constant
     const size_t size = expr->type->size();
@@ -2303,31 +2564,100 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
         }
 
-        assert(hint->val.type == RVT::MEMORY);
+        //TODO: Constants
 
-        RuntimeValue arr_single ={};
-        arr_single.type = RVT::MEMORY;
-        arr_single.mem  = state->new_mem();
+        if (full_size <= 8) {
+          assert(hint->val.type != RVT::CONST);
 
-        {
-          const MemValue* arr_mem = state->get_mem(hint->val.mem);
-          MemValue* index_mem = state->get_mem(arr_single.mem);
+          //Its shifting time
 
-          index_mem->mem = arr_mem->mem;
-          index_mem->size = base_size;
+          auto i = expr->array_expr.elements.begin();
+          const auto end = expr->array_expr.elements.end();
+
+          uint8_t shift_dst = 0;
+
+          assert(i < end);
+
+          //Set up mask
+          RuntimeValue mask ={};
+
+          if (full_size > base_size) {
+            mask.type = RVT::REGISTER;
+            mask.reg = state->new_value();
+            state->set_value(mask.reg);
+
+            //Fill the bottom bits as a mask
+            ByteCode::EMIT::SET_R64_TO_64(code->code,
+                                          (uint8_t)mask.reg.val, bit_fill_lower<uint64_t>((uint8_t)base_size));
+
+            state->control_flow.expression_num++;
+          }
+
+
+          //First element doesnt need shifting and works as the base value to shift into
+          RuntimeValue res = compile_bytecode_of_expression_new(comp, state, code, i, (uint8_t)RVT::REGISTER);
+          if (full_size > base_size) {
+            res = OP::emit_add_64s(comp, state, code, &res, &mask);
+          }
+
+          i++;
+
+          for (; i < end; i++) {
+            assert(full_size > base_size);
+
+            RuntimeValue el = compile_bytecode_of_expression_new(comp, state, code, i, (uint8_t)RVT::REGISTER);
+
+            //Ask out upper bits
+            el = OP::emit_add_64s(comp, state, code, &el, &mask);
+
+            RuntimeValue shift_val ={};
+            shift_val.type = RVT::REGISTER;
+            shift_val.reg = state->new_value();
+
+            state->set_value(shift_val.reg);
+            ByteCode::EMIT::SET_R8_TO_8(code->code, (uint8_t)shift_val.reg.val, shift_dst);
+
+            shift_dst += (uint8_t)base_size;
+            state->control_flow.expression_num++;
+
+            //Shift the value
+            RuntimeValue shifted = OP::emit_shift_l_64_by_8(comp, state, code, &el, &shift_val);
+
+            //Or the value
+            res = OP::emit_or_64s(comp, state, code, &res, &shifted);
+          }
+
+          copy_runtime_to_runtime(comp, state, code, expr->type, &res, &hint->val);
         }
+        else {
+          //Can only load large arrays into memory
 
-        auto i = expr->array_expr.elements.begin();
-        const auto end = expr->array_expr.elements.end();
+          assert(hint->val.type == RVT::MEMORY);
 
-        //save stack as expression stack cant be used by anything - its copied anyway
-        auto save_stack = state->stack.current;
+          RuntimeValue arr_single ={};
+          arr_single.type = RVT::MEMORY;
+          arr_single.mem  = state->new_mem();
 
-        for (; i < end; i++) {
-          compile_bytecode_of_expression_existing(comp, state, code, i, &arr_single);
+          {
+            const MemValue* arr_mem = state->get_mem(hint->val.mem);
+            MemValue* index_mem = state->get_mem(arr_single.mem);
 
-          state->stack.current = save_stack;//reset stack
-          state->get_mem(arr_single.mem)->mem.disp += (int32_t)base_size;
+            index_mem->mem = arr_mem->mem;
+            index_mem->size = base_size;
+          }
+
+          auto i = expr->array_expr.elements.begin();
+          const auto end = expr->array_expr.elements.end();
+
+          //save stack as expression stack cant be used by anything - its copied anyway
+          auto save_stack = state->stack.current;
+
+          for (; i < end; i++) {
+            compile_bytecode_of_expression_existing(comp, state, code, i, &arr_single);
+
+            state->stack.current = save_stack;//reset stack
+            state->get_mem(arr_single.mem)->mem.disp += (int32_t)base_size;
+          }
         }
         break;
       }
@@ -2377,6 +2707,19 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         load_const_to_runtime_val(comp, state, code, expr->type, constant, &hint->val);
         break;
       }
+    case EXPRESSION_TYPE::NULLPTR: {
+        uint8_t* val_c = comp->constants.alloc_no_construct(8);
+        x64_to_bytes((uint64_t)0, val_c);
+
+        const ConstantVal constant ={ val_c, 8 };
+
+        if (hint->is_hint) {
+          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+        }
+
+        load_const_to_runtime_val(comp, state, code, expr->type, constant, &hint->val);
+        break;
+      }
     case EXPRESSION_TYPE::LOCAL: {
         Local* local = state->all_locals.data + expr->local;
 
@@ -2417,7 +2760,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         RuntimeValue temp = compile_bytecode_of_expression_new(comp,
                                                                state,
                                                                code,
-                                                               un_op->primary,
+                                                               un_op->expr,
                                                                ALL_RVTS);
 
         RuntimeValue rt = un_op->emit(comp, state, code, &temp);
@@ -2447,148 +2790,9 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         copy_runtime_to_runtime_hint(comp, state, code, expr->type, &res, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
-    case EXPRESSION_TYPE::FUNCTION_CALL: {
-        const FunctionCallExpr* const call = &expr->call;
-
-        auto save_stack_params = state->stack.current_parameters;
-        DEFER(&) { state->stack.current_parameters = save_stack_params; };
-
-        state->made_call = true;
-
-        Array<RuntimeValue> to_use_values;
-        to_use_values.reserve_total(call->arguments.size);
-
-        //Compile expression for arguments
-        {
-          const size_t size = call->arguments.size;
-
-          for (size_t i = 0; i < size; i++) {
-            const ASTExpression* inner_expr = call->arguments.data + i;
-            const Structure* call_type = call->function->parameter_types.data[i];
-
-
-            const RuntimeValue val = compile_bytecode_of_expression_new(comp, state, code, inner_expr, ALL_RVTS);
-
-            to_use_values.insert(val);
-          }
-        }
-
-        state->control_flow.expression_num++;
-
-        //Set argument registers and stack
-        {
-          const auto* parameter_regs = comp->build_options.calling_convention->parameter_registers;
-          const size_t max_reg_params = comp->build_options.calling_convention->num_parameter_registers;
-          const size_t num_reg_params = smaller(to_use_values.size, max_reg_params - call->function->return_via_ptr);
-          const size_t num_stack_params = to_use_values.size - num_reg_params;
-
-          //Load stack stuff first
-          state->stack.push_stack_params(num_stack_params);
-
-          for (size_t index = num_reg_params; index < to_use_values.size; index++) {
-            auto i = to_use_values.data + index;
-            const Structure* call_type = call->function->parameter_types.data[index];
-
-            RuntimeValue val ={};
-            val.type = RVT::MEMORY;
-            val.mem  = state->new_mem();
-            const ValueIndex rbp = state->new_value();
-            state->set_value(rbp);
-
-            {
-              auto& rbp_val = state->value_tree.values.data[rbp.val];
-
-              rbp_val.value_type = ValueType::FIXED;
-              rbp_val.reg = comp->build_options.calling_convention->base_pointer_reg;
-            }
-
-            auto* stack_val = state->get_mem(val.mem);
-
-            stack_val->mem.base = (uint8_t)rbp.val;
-            stack_val->mem.disp = (int32_t)index - (int32_t)max_reg_params + (int32_t)state->stack.current_parameters;
-
-            copy_runtime_to_runtime(comp, state, code, call_type, i, &val);
-          }
-
-          //The Load registers
-
-          if (call->function->return_via_ptr) {
-            //Load the return on the stack and then pass a pointer
-            load_runtime_hint(comp, state, call->function->return_type, hint, (uint8_t)RVT::MEMORY);
-
-            RuntimeValue val = OP::emit_address(comp, state, code, &hint->val);
-            state->control_flow.expression_num++;
-
-            auto* arg_val = state->value_tree.values.data + val.reg.val;
-
-            arg_val->value_type = ValueType::FIXED;
-            arg_val->reg        = parameter_regs[0];
-            parameter_regs++;//so that index = 0 will access element at [1]
-
-            to_use_values.insert(val);//make sure it gets used at the call
-          }
-
-          for (size_t index = 0; index < num_reg_params; index++) {
-            auto i = to_use_values.data + index;
-            const Structure* arg_type = call->function->parameter_types.data[index];
-
-            RuntimeValue val ={};
-            val.type = RVT::REGISTER;
-            val.reg = state->new_value();
-
-            auto* arg_val = state->value_tree.values.data + val.reg.val;
-
-            arg_val->value_type = ValueType::FIXED;
-            arg_val->reg        = comp->build_options.calling_convention->parameter_registers[index];
-
-            copy_runtime_to_runtime(comp, state, code, arg_type, i, &val);
-
-            *i = val;
-          }
-        }
-
-        //use all the registers
-        {
-          auto i = to_use_values.begin();
-          const auto end = to_use_values.end();
-
-          for (; i < end; i++) {
-            //Cant exit early as the last value might be a register
-            if (i->type == RVT::REGISTER) {
-              state->use_value(i->reg);
-            }
-          }
-        }
-
-        ByteCode::EMIT::CALL(code->code, call->function->code_block.label);
-        state->control_flow.had_call = true;
-        state->control_flow.last_call = state->control_flow.expression_num;
-
-        state->control_flow.expression_num++;
-
-        if (!call->function->return_via_ptr) {
-          //Need to reserve RAX if we didnt already pass a pointer in
-          const ValueIndex rax = state->new_value();
-          state->set_value(rax);//set by the called function
-
-          {
-            auto* rax_val = state->value_tree.values.data + rax.val;
-
-            rax_val->value_type = ValueType::FIXED;
-            rax_val->reg        = comp->build_options.calling_convention->return_register;
-          }
-
-          //Fake copy so dont need to insert copy later if one is needed
-          state->control_flow.expression_num++;
-
-          if (hint->is_hint) {
-            load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts & NON_CONST_RVTS);
-          }
-
-          copy_reg_to_runtime(comp, state, code, expr->type, rax, &hint->val);
-        }
-        break;
-      }
+    case EXPRESSION_TYPE::FUNCTION_CALL:
+      compile_function_call(comp, state, code, expr, hint);
+      break;
   }
 }
 
@@ -2613,24 +2817,15 @@ void compile_bytecode_of_statement(Compiler* const comp,
     case STATEMENT_TYPE::RETURN: {
         const ASTExpression* expr = &statement->expression;
 
-        RuntimeValue rax_v ={};
-        rax_v.type = RVT::REGISTER;
-        rax_v.reg = state->new_value();
-
-        {
-          auto& rax_val = state->value_tree.values.data[rax_v.reg.val];
-
-          rax_val.value_type = ValueType::FIXED;
-          rax_val.reg        = comp->build_options.calling_convention->return_register;
-        }
-
         compile_bytecode_of_expression_existing(comp,
                                                 state,
                                                 code,
                                                 expr,
-                                                &rax_v);
+                                                &state->return_val);
 
-        state->use_value(rax_v.reg);
+        if (state->return_val.type == RVT::REGISTER) {
+          state->use_value(state->return_val.reg);
+        }
 
         ByteCode::EMIT::JUMP_TO_FIXED(code->code, state->return_label);
         return;
@@ -2728,10 +2923,13 @@ void compile_bytecode_of_statement(Compiler* const comp,
 }
 
 
-static void map_values(const BuildOptions* const options,
-                       CodeBlock* const code, const State* const state, uint64_t regs) {
+static void map_values(const System* sys,
+                       const CallingConvention* const conv,
+                       CodeBlock* const code,
+                       const State* const state,
+                       uint64_t regs) {
   //Only non volatiles
-  regs &= options->calling_convention->non_volatiles_bit_mask;
+  regs &= conv->non_volatiles_bit_mask;
 
   Array<uint8_t> temp ={};
 
@@ -2748,20 +2946,20 @@ static void map_values(const BuildOptions* const options,
 
     offset_to_prev_frame += 8;//pushed rbp
 
-    const uint8_t num_regs = options->system->num_registers;
+    const uint8_t num_regs = sys->num_registers;
     uint8_t non_v_regs = 0;
     for (; non_v_regs < num_regs; non_v_regs++) {
       if (regs & ((uint64_t)1 << non_v_regs)) {
         base_pointer_offset -= 8;
-        ByteCode::EMIT::PUSH_R64(temp, options->system->all_registers[non_v_regs].REG);
+        ByteCode::EMIT::PUSH_R64(temp, sys->all_registers[non_v_regs].REG);
       }
     }
   }
 
   //Finally allocate the stack
   const uint64_t stack_needed = state->stack.max
-    + ((uint64_t)state->made_call * options->calling_convention->shadow_space_size)
-    + (state->stack.max_parameters * 8)
+    + ((uint64_t)state->made_call * conv->shadow_space_size)
+    + state->stack.max_passed
     + (-base_pointer_offset);
 
   if (stack_needed > 0) {
@@ -2787,10 +2985,10 @@ static void map_values(const BuildOptions* const options,
     out_mem.base = b->reg;
     out_mem.disp = mem.disp;
 
-    if (b->reg == options->calling_convention->base_pointer_reg) {
+    if (b->reg == conv->base_pointer_reg) {
       if (!state->needs_new_frame()) {
         //No new frame, use stack pointer instead
-        out_mem.base = options->calling_convention->stack_pointer_reg;
+        out_mem.base = conv->stack_pointer_reg;
       }
 
       if (out_mem.disp >= 0) {
@@ -2862,6 +3060,10 @@ static void map_values(const BuildOptions* const options,
     ByteCode::OP_64::emit(temp, p.op, p.u64);
   };
 
+  const auto OP_64_64 = [&](ByteCode::OP_64_64&& p) {
+    ByteCode::OP_64_64::emit(temp, p.op, std::move(p.u64_1), std::move(p.u64_2));
+  };
+
   const auto OP = [&](ByteCode::OP&& p) {
     ByteCode::OP::emit(temp, p.op);
   };
@@ -2924,17 +3126,17 @@ static void map_values(const BuildOptions* const options,
     ByteCode::EMIT::LABEL(temp, state->return_label);
 
     //Load the non volatile regs
-    uint8_t non_v_regs = options->system->num_registers + 1;
+    uint8_t non_v_regs = sys->num_registers + 1;
     const uint8_t num_regs = 0;
     for (; non_v_regs > num_regs; non_v_regs--) {
       if (regs & ((uint64_t)1 << (non_v_regs - 1))) {
         MemComplex mem ={};
-        mem.base = options->calling_convention->base_pointer_reg;
+        mem.base = conv->base_pointer_reg;
         mem.disp = (int32_t)base_pointer_offset;
         mem.scale = 0;
 
         ByteCode::EMIT::COPY_R64_FROM_MEM(temp,
-                                          options->system->all_registers[(non_v_regs - 1)].REG,
+                                          sys->all_registers[(non_v_regs - 1)].REG,
                                           mem);
 
         base_pointer_offset += 8;
@@ -3011,7 +3213,7 @@ static void compute_value_intersections(ValueTree& tree, const ControlFlow& flow
   }
 }
 
-static uint64_t select(const BuildOptions* const options, State* const state) noexcept {
+static uint64_t select(const CallingConvention* conv, State* const state) noexcept {
   const ValueTree& tree = state->value_tree;
 
   struct UnindexedAdjacency {
@@ -3150,18 +3352,18 @@ static uint64_t select(const BuildOptions* const options, State* const state) no
     uint8_t colour = 0;
     if (i_val->crosses_call) {
       //requires non volatile reg
-      colour += options->calling_convention->num_volatile_registers;
+      colour += conv->num_volatile_registers;
     }
 
     //Find first index that is 0 (i.e. a free colour/reg)
     //Search in order of options->calling_convention->all_regs_unordered because this will do
     //volatile registers first and then non volatile registers if required
-    while ((regs & ((uint64_t)1 << options->calling_convention->all_regs_unordered[colour])) != 0) {
+    while ((regs & ((uint64_t)1 << conv->all_regs_unordered[colour])) != 0) {
       colour++;
     }
 
     i_val->value_type = ValueType::FIXED;
-    i_val->reg        = options->calling_convention->all_regs_unordered[colour];
+    i_val->reg        = conv->all_regs_unordered[colour];
   }
 
   free_no_destruct(stack);
@@ -3180,8 +3382,8 @@ static uint64_t select(const BuildOptions* const options, State* const state) no
     }
 
     //Managed separately
-    auto bp = options->calling_convention->base_pointer_reg;
-    auto sp = options->calling_convention->stack_pointer_reg;
+    auto bp = conv->base_pointer_reg;
+    auto sp = conv->stack_pointer_reg;
 
     used_regs &= ~(bp | sp);
   }
@@ -3221,7 +3423,7 @@ static void combine_last_uses(Array<ValueUse>& arr1, const Array<ValueUse>& arr2
   arr1.concat(std::move(temp));
 }
 
-bool test_is_child(const Compiler* const comp, const ValueTree& tree,
+bool test_is_child(const CallingConvention* convention, const ValueTree& tree,
                    size_t pos_child_index, const Value& possible_child,
                    size_t pos_parent_index, const Value& possible_parent,
                    Array<size_t>& ignore_vals) {
@@ -3240,11 +3442,11 @@ bool test_is_child(const Compiler* const comp, const ValueTree& tree,
 
   if ((possible_child.crosses_call
       && possible_parent.value_type == ValueType::FIXED
-      && comp->build_options.calling_convention->is_volatile(possible_parent.reg))
+      && convention->is_volatile(possible_parent.reg))
       ||
       (possible_parent.crosses_call
       && possible_child.value_type == ValueType::FIXED
-      && comp->build_options.calling_convention->is_volatile(possible_child.reg))) {
+      && convention->is_volatile(possible_child.reg))) {
     return false;
   }
 
@@ -3270,7 +3472,7 @@ bool test_is_child(const Compiler* const comp, const ValueTree& tree,
         if (parent_created_by == other) {
 
           ignore_vals.insert(pos_child_index);
-          bool res = test_is_child(comp, tree, pos_parent_index, possible_parent, other.val, other_val, ignore_vals);
+          bool res = test_is_child(convention, tree, pos_parent_index, possible_parent, other.val, other_val, ignore_vals);
           ignore_vals.pop();
 
           if (res) {
@@ -3311,7 +3513,7 @@ bool test_is_child(const Compiler* const comp, const ValueTree& tree,
         if (other_created_by.val == pos_child_index) {
 
           ignore_vals.insert(pos_parent_index);
-          bool res = test_is_child(comp, tree, other.val, other_val, pos_child_index, possible_child, ignore_vals);
+          bool res = test_is_child(convention, tree, other.val, other_val, pos_child_index, possible_child, ignore_vals);
           ignore_vals.pop();
 
           if (res) {
@@ -3354,7 +3556,7 @@ bool test_is_child(const Compiler* const comp, const ValueTree& tree,
 }
 
 
-void coalesce(const Compiler* const comp, State* const state) {
+void coalesce(const Compiler* const comp, const CallingConvention* conv, State* const state) {
   ValueTree& tree = state->value_tree;
   const ControlFlow& c_flow = state->control_flow;
 
@@ -3367,7 +3569,7 @@ void coalesce(const Compiler* const comp, State* const state) {
 
     Array<size_t> ignore_vals ={};
 
-    const bool is_child = test_is_child(comp, tree,
+    const bool is_child = test_is_child(conv, tree,
                                         l1, l1_val,
                                         created_by.val, possible_parent,
                                         ignore_vals);
@@ -3404,7 +3606,7 @@ void coalesce(const Compiler* const comp, State* const state) {
 // Build -> Coalesce -> Select -> Map
 //
 // Also emits a function prolog and function epilog
-void graph_colour_algo(Compiler* const comp, CodeBlock* const code, State* const state) {
+void graph_colour_algo(Compiler* const comp, const CallingConvention* const conv, CodeBlock* const code, State* const state) {
   if (comp->print_options.pre_reg_alloc) {
     IO::print("\n=== Pre Register Allocation Bytecode ===\n\n");
     ByteCode::print_bytecode(&reg_num_as_string, stdout, code->code.data, code->code.size);
@@ -3414,11 +3616,11 @@ void graph_colour_algo(Compiler* const comp, CodeBlock* const code, State* const
   //Computers all the intersections in the value tree based on control flow
   //Build section
   compute_value_intersections(state->value_tree, state->control_flow);
-  coalesce(comp, state);
-  const uint64_t regs = select(&comp->build_options, state);
+  coalesce(comp, conv, state);
+  const uint64_t regs = select(conv, state);
 
   //map values and function prolog and epilog
-  map_values(&comp->build_options, code, state, regs);
+  map_values(comp->build_options.system, conv, code, state, regs);
 
   code->code.shrink();
 
@@ -3429,79 +3631,318 @@ void graph_colour_algo(Compiler* const comp, CodeBlock* const code, State* const
   }
 }
 
-void compile_function_body_unit(Compiler* const comp,
-                                ASTFunctionDeclaration* const ast_func,
-                                Function* const func,
-                                State* const state) {
-  const BuildOptions* const build_options = &comp->build_options;
+void new_scope(UntypedIterator* itr,
+               ASTStatement* begin, const ASTStatement* end,
+               State* state) {
+  itr->scopes.insert_uninit(1);
 
-  {
-    const auto locals = state->active_locals.size;
-    DEFER(&) { state->active_locals.size = locals; };
+  auto* sc = itr->scopes.back();
 
-    Array<ASTStatement>& statements = ast_func->body.block;
+  sc->num_outer_locals = state->active_locals.size;
 
-    auto i = statements.mut_begin();
-    const auto end = statements.mut_end();
-    for (; i < end; i++) {
-      compile_type_of_statement(comp, func, state, i);
+  sc->scope.i = begin;
+  sc->scope.end = end;
+}
+
+ASTStatement* advance_scopes(UntypedIterator* itr, State* state) {
+  if (itr->scopes.size == 0) {
+    return nullptr;
+  }
+
+  auto* current_scope = itr->scopes.back();
+
+  while (current_scope->scope.i >= current_scope->scope.end) {
+    // Pop Locals
+    state->active_locals.size = current_scope->num_outer_locals;
+
+    // Pop scope
+    itr->scopes.pop();
+
+    //Finished?
+    if (itr->scopes.size == 0) {
+      return nullptr;
+    }
+
+    //Old scope
+    current_scope = itr->scopes.back();
+  }
+
+  //return the statement
+  return current_scope->scope.i++;
+}
+
+void compile_function_body_types(Compiler* const comp,
+                                 ASTFunctionDeclaration* const ast_func,
+                                 Function* const func,
+                                 UntypedCode* const untyped,
+                                 State* const state) {
+
+  while (untyped->current_statement != nullptr) {
+    //Load expressions
+    while (untyped->current_expression != nullptr) {
+      compile_type_of_expression(comp, state, untyped->current_expression);
       if (comp->is_panic()) {
         return;
       }
+
+      untyped->current_expression = untyped->current_expression->next;
+    }
+
+
+    //Finally load the statement
+    compile_type_of_statement(comp, func, state, untyped, untyped->current_statement);
+    if (comp->is_panic()) {
+      return;
+    }
+
+    //Found required expression
+    if (untyped->current_expression != nullptr) {
+      continue;
+    }
+
+    //Next statement!
+    untyped->current_statement = advance_scopes(&untyped->itr, state);
+  }
+}
+
+void compile_function_body_init(Compiler* const comp,
+                                ASTFunctionDeclaration* const ast_func,
+                                Function* const func,
+                                UntypedCode* const untyped,
+                                State* const state) {
+  ASTFunctionSignature* ast_sig = &ast_func->signature;
+
+  //Enter the body
+  state->control_flow.new_flow();
+
+  //Load parameters as locals
+
+  state->all_locals.insert_uninit(ast_sig->parameters.size);
+
+  size_t index = 0;
+  const size_t size = ast_sig->parameters.size;
+
+  for (; index < size; index++) {
+    auto i = ast_sig->parameters.data + index;
+    auto l_i = state->all_locals.data + index;
+    state->active_locals.insert(index);
+
+    l_i->name = i->name;
+    l_i->type = i->type.type;
+    l_i->valid_rvts &= NON_CONST_RVTS;//Cant have const parameters
+    l_i->val = RuntimeValue();
+  }
+
+  //Set up the scopes
+  new_scope(&untyped->itr, ast_func->body.block.mut_begin(), ast_func->body.block.end(), state);
+  untyped->current_statement = advance_scopes(&untyped->itr, state);
+}
+
+void init_state_regs(const CallingConvention* convention, State* state) {
+  //Set up rbp that can be used at any time
+  state->rbp = state->new_value();
+  state->set_value(state->rbp);
+
+  auto& rbp_val = state->value_tree.values.data[state->rbp.val];
+
+  rbp_val.value_type = ValueType::FIXED;
+  rbp_val.reg = convention->base_pointer_reg;
+
+  //Set up rsp that can be used at any time
+  state->rsp = state->new_value();
+  state->set_value(state->rsp);
+
+  auto& rsp_val = state->value_tree.values.data[state->rsp.val];
+
+  rsp_val.value_type = ValueType::FIXED;
+  rsp_val.reg = convention->stack_pointer_reg;
+}
+
+//Cant error???
+void compile_function_body_code(Compiler* const comp,
+                                ASTFunctionDeclaration* const ast_func,
+                                Function* const func,
+                                State* const state) {
+  //Should never be called twice on the same function
+  assert(func->code_block.code.size == 0);
+
+  //Enter the body - setup
+  func->code_block.label = comp->labels++;
+  state->return_label = comp->labels++;
+  state->control_flow.new_flow();
+
+  //Useful values
+  init_state_regs(func->signature.calling_convention, state);
+
+  bool return_as_ptr = func->signature.return_via_addres;
+
+  const Structure* actual_return_type = return_as_ptr
+    ? func->signature.actual_parameter_types.data[0]
+    : func->signature.return_type;
+
+  const CallingConvention* convention = func->signature.calling_convention;
+
+  //Parameter set values
+  {
+    CallingConvParamIterator param_itr ={
+      convention,
+      0,
+      convention->shadow_space_size
+    };
+
+    if (return_as_ptr) {
+      state->return_val = advance_runtime_param(state, &param_itr, actual_return_type);
+    }
+    else {
+      state->return_val.type = RVT::REGISTER;
+      state->return_val.reg = state->new_value();
+
+      auto* ret_val = state->get_val(state->return_val.reg);
+      ret_val->value_type = ValueType::FIXED;
+      ret_val->reg = convention->return_register;
+    }
+
+    //The actual types
+    auto i_param = func->signature.actual_parameter_types.begin();
+    auto end_param = func->signature.actual_parameter_types.end();
+
+    if (return_as_ptr) { i_param++; }
+
+    auto* i_loc = state->all_locals.mut_begin();
+    const auto end_loc = i_loc + func->signature.parameter_types.size;
+
+    for (; i_param < end_param; (i_param++, i_loc++)) {
+      assert(i_loc < end_loc);
+
+      i_loc->val = advance_runtime_param(state, &param_itr, *i_param);
     }
   }
 
-  //Cant error now???
+  state->control_flow.expression_num++;
 
-  //Values for the parameters - allows them to be different from parameter registers
+  //Actual values for the parameters - allows them to be different from parameter registers
   {
-    const size_t size = smaller(state->active_locals.size,
-                                (size_t)comp->build_options.calling_convention->num_parameter_registers);
+    int32_t used_shadow_space = 0;
 
-    for (size_t itr = 0; itr < size; itr++) {
-      auto* i = state->all_locals.data + *(state->active_locals.data + itr);
-      assert(i->val.type == RVT::REGISTER);
+    if (return_as_ptr) {
+      //Should fix any issues later on
+      state->return_val = OP::emit_deref(comp, state, &func->code_block, &state->return_val);
+    }
 
-      RuntimeValue rt_p ={};
+    if (return_as_ptr && state->return_val.type == RVT::REGISTER) {
 
-      const ValueIndex rbp = state->new_value();
-      auto& rbp_val = state->value_tree.values.data[rbp.val];
-
-      rbp_val.value_type = ValueType::FIXED;
-      rbp_val.reg = comp->build_options.calling_convention->base_pointer_reg;
 
       if (comp->optimization_options.non_stack_locals) {
         RuntimeHint load_hint ={};
-        load_hint.hint_types = i->valid_rvts;
+        load_hint.hint_types = NON_CONST_RVTS;
 
-        load_runtime_hint(comp, state, i->type, &load_hint, NON_CONST_RVTS);
+        load_runtime_hint(comp, state, actual_return_type, &load_hint, NON_CONST_RVTS);
 
-        copy_runtime_to_runtime(comp, state, &func->code_block, i->type, &i->val, &load_hint.val);
+        copy_runtime_to_runtime(comp, state, &func->code_block, actual_return_type, &state->return_val, &load_hint.val);
 
-        rt_p = std::move(load_hint.val);
+        state->return_val = std::move(load_hint.val);
       }
       else {
-        assert((i->valid_rvts & RVT::MEMORY) > 0);
-        rt_p.type = RVT::MEMORY;
-        rt_p.mem  = state->new_mem();
+        RuntimeValue rt_v ={};
 
-        auto* stack_v = state->get_mem(rt_p.mem);
-        stack_v->mem.base = (uint8_t)rbp.val;
+        rt_v.type = RVT::MEMORY;
+        rt_v.mem  = state->new_mem();
 
-        if (comp->build_options.calling_convention->shadow_space_size >= ((itr + 1) * 8)) {
-          stack_v->mem.disp = (int32_t)(8 * itr);
+        auto* stack_v = state->get_mem(rt_v.mem);
+        stack_v->mem.base = (uint8_t)state->rbp.val;
+
+        if (convention->shadow_space_size >= used_shadow_space + 8) {
+          stack_v->mem.disp = used_shadow_space;
+          used_shadow_space += 8;
         }
         else {
           stack_v->mem.disp = state->stack.next_stack_local(8, 8);
         }
 
         stack_v->mem.scale = 0;
-        stack_v->size = i->type->size();
+        stack_v->size = 8;
 
-        copy_reg_to_runtime(comp, state, &func->code_block, i->type, i->val.reg, &rt_p);
+        copy_reg_to_runtime(comp, state, &func->code_block, actual_return_type, state->return_val.reg, &rt_v);
+
+        state->return_val = std::move(rt_v);
+      }
+    }
+
+    auto i_act_param = func->signature.actual_parameter_types.begin();
+    const auto end_act_param = func->signature.actual_parameter_types.end();
+
+    if (return_as_ptr) { i_act_param++; }
+
+    auto i_param = func->signature.parameter_types.begin();
+    const auto end_param = func->signature.parameter_types.end();
+
+    auto i_loc = state->all_locals.mut_begin();
+    const auto end_loc = state->all_locals.end();
+
+    for (; i_param < end_param; (i_loc++, i_param++, i_act_param++)) {
+      assert(i_loc < end_loc);
+      assert(i_act_param < end_act_param);
+
+      const Structure* param_t = *i_param;
+      const Structure* act_param_t = *i_act_param;
+
+      assert(i_loc->type == param_t);
+
+      RuntimeValue rt_p ={};
+
+      if (param_t == act_param_t) {
+        if (i_loc->val.type != RVT::REGISTER) {
+          //Dont need to save somehere else
+          continue;
+        }
+
+
+        //Not passed by pointer
+        if (comp->optimization_options.non_stack_locals) {
+          RuntimeHint load_hint ={};
+          load_hint.hint_types = i_loc->valid_rvts;
+
+          load_runtime_hint(comp, state, param_t, &load_hint, NON_CONST_RVTS);
+
+          copy_runtime_to_runtime(comp, state, &func->code_block, param_t, &i_loc->val, &load_hint.val);
+
+          rt_p = std::move(load_hint.val);
+        }
+        else {
+          assert((i_loc->valid_rvts & RVT::MEMORY) > 0);
+          rt_p.type = RVT::MEMORY;
+          rt_p.mem  = state->new_mem();
+
+          auto* stack_v = state->get_mem(rt_p.mem);
+          stack_v->mem.base = (uint8_t)state->rbp.val;
+
+          if (convention->shadow_space_size >= used_shadow_space + 8) {
+            stack_v->mem.disp = (int32_t)used_shadow_space;
+            used_shadow_space += 8;
+          }
+          else {
+            stack_v->mem.disp = state->stack.next_stack_local(8, 8);
+          }
+
+          stack_v->mem.scale = 0;
+          stack_v->size = param_t->size();
+
+          copy_reg_to_runtime(comp, state, &func->code_block, param_t, i_loc->val.reg, &rt_p);
+        }
+      }
+      else if (act_param_t->type == STRUCTURE_TYPE::POINTER
+               && static_cast<const PointerStructure*>(act_param_t)->base == param_t) {
+        //passed as pointer
+        //Just do a simple deref
+        //This should actually solves all issues with lifetimes later in the system
+        rt_p = OP::emit_deref(comp, state, &func->code_block, &i_loc->val);
+      }
+      else {
+        //Should never be here
+        assert(false);
       }
 
-      i->val = std::move(rt_p);
+      i_loc->val = std::move(rt_p);
     }
   }
 
@@ -3519,26 +3960,18 @@ void compile_function_body_unit(Compiler* const comp,
     }
   }
 
-  graph_colour_algo(comp, &func->code_block, state);
-
-  //No longer needed
-  state->all_locals.free();
-  state->active_locals.free();
-  state->value_tree.free();
-  state->control_flow.free();
+  graph_colour_algo(comp, convention, &func->code_block, state);
 }
 
-static void compile_function_signature(Compiler* const comp,
-                                       ASTFunctionDeclaration* const ast_func,
-                                       Function* const func,
-                                       State* const state) {
-  DO_NOTHING;//helps with formatting
+static void compile_function_signature_type(Compiler* const comp,
+                                            ASTFunctionSignature* const ast_sig,
+                                            FunctionSignature* const sig) {
+  DO_NOTHING;
 
-  //Parameters
   {
-    auto i_ast = ast_func->parameters.mut_begin();
-    auto i = func->parameter_types.mut_begin();
-    const auto end = func->parameter_types.end();
+    auto i_ast = ast_sig->parameters.mut_begin();
+    auto i = sig->parameter_types.mut_begin();
+    auto end = sig->parameter_types.end();
 
     while (i < end) {
       if (*i == nullptr) {
@@ -3555,255 +3988,398 @@ static void compile_function_signature(Compiler* const comp,
     }
   }
 
-  //Enter the body
-  state->control_flow.new_flow();
-
-  //Load signature locals
-  {
-    state->all_locals.insert_uninit(ast_func->parameters.size);
-
-    size_t index = 0;
-    const size_t size = ast_func->parameters.size;
-
-    const ValueIndex rbp = state->new_value();
-    state->set_value(rbp);
-
-    auto& rbp_val = state->value_tree.values.data[rbp.val];
-
-    rbp_val.value_type = ValueType::FIXED;
-    rbp_val.reg = comp->build_options.calling_convention->base_pointer_reg;
-
-    for (; index < size; index++) {
-      auto i = ast_func->parameters.data + index;
-      auto l_i = state->all_locals.data + index;
-      state->active_locals.insert(index);
-
-      l_i->name = i->name;
-      l_i->type = i->type.type;
-      l_i->valid_rvts &= NON_CONST_RVTS;//Cant have const parameters
-      l_i->val = RuntimeValue();
-
-      if ((size_t)comp->build_options.calling_convention->num_parameter_registers < index) {
-        const size_t param_num = index - comp->build_options.calling_convention->num_parameter_registers;
-
-        l_i->val.type = RVT::MEMORY;
-        l_i->val.mem = state->new_mem();
-
-        auto* stack_v = state->get_mem(l_i->val.mem);
-
-        stack_v->mem.base = (uint8_t)rbp.val;
-        stack_v->mem.disp = 8 * (int32_t)index + (int32_t)comp->build_options.calling_convention->shadow_space_size;
-        stack_v->mem.scale = 0;
-        stack_v->size = l_i->type->size();
-
-        state->stack.push_stack_params(param_num);
-      }
-      else {
-        l_i->val.type = RVT::REGISTER;
-        l_i->val.reg = state->new_value();
-        state->set_value(l_i->val.reg);//Set in function call
-
-        auto* l_val = state->value_tree.values.data + l_i->val.reg.val;
-
-        l_val->value_type = ValueType::FIXED;
-        l_val->reg = comp->build_options.calling_convention->parameter_registers[index];
-      }
-    }
-  }
-
-  func->code_block.label = comp->labels++;
-  state->control_flow.expression_num++;
-
-  compile_type(comp, &ast_func->return_type);
+  compile_type(comp, &ast_sig->return_type);
   if (comp->is_panic()) {
     return;
   }
 
-  func->return_type = ast_func->return_type.type;
+  //Success
+  sig->return_type = ast_sig->return_type.type;
+
+  sig->return_via_addres = register_passed_as_pointer(sig->return_type);
+  if (sig->return_via_addres) {
+    sig->actual_parameter_types.insert(find_or_make_pointer_type(comp, sig->return_type));
+  }
+
+  {
+    auto i = sig->parameter_types.begin();
+    const auto end = sig->parameter_types.end();
+
+    size_t num_params = sig->actual_parameter_types.size;
+    const CallingConvention* convention = sig->calling_convention;
+
+    for (; i < end; i++) {
+      const Structure* s = *i;
+
+      const bool too_big = register_passed_as_pointer(s);
+      const bool as_ptr = (num_params < convention->num_parameter_registers
+                           || convention->stack_pass_type == STACK_PASS_TYPE::POINTER)
+        && too_big;
+
+      if (as_ptr) {
+        //Load as pointer
+        sig->actual_parameter_types.insert(find_or_make_pointer_type(comp, s));
+      }
+      else {
+        sig->actual_parameter_types.insert(s);
+      }
+
+      num_params++;
+    }
+  }
 }
 
 CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
-  while (comp->unparsed_files.size > 0) {
+  while (comp->file_loader.unparsed_files.size > 0) {
     //still have files to parse
 
     //parse the last file
-    const FileImport* file_import = comp->unparsed_files.back();
+    const FileImport* file_import = comp->file_loader.unparsed_files.back();
 
     const InternString* full_path = file_import->file_loc.full_name;
-    OwnedPtr<const char> text_source = FILES::load_file_to_string(full_path->string);
 
-    if (text_source.ptr == nullptr) {
-      comp->report_error(CompileCode::UNFOUND_DEPENDENCY, comp->unparsed_files.back()->span,
-                         "File '{}' could not be opened, perhaps it does not exist",
-                         full_path);
-      return print_compile_errors(comp);
+    //Just a sanity check - should alread have been set
+    if (file_import->file_loc.extension == comp->file_loader.axl
+        || file_import->file_loc.extension == nullptr) {
+      //Load a source file
+
+      OwnedPtr<const char> text_source = FILES::load_file_to_string(full_path->string);
+
+      if (text_source.ptr == nullptr) {
+        comp->report_error(CompileCode::FILE_ERROR, comp->file_loader.unparsed_files.back()->span,
+                           "File '{}' could not be opened, perhaps it does not exist",
+                           full_path);
+        return print_compile_errors(comp);
+      }
+
+      //Loaded file can pop of the file stack thing
+      //It will shortly be loaded into the parsed files
+      comp->file_loader.unparsed_files.pop();
+
+      //Set up the parser
+      Parser parser ={};
+      parser.lexer.strings = comp->strings;
+      init_parser(&parser, full_path, text_source.ptr);
+
+      //Parse
+      comp->parsed_files.insert_uninit(1);
+      ASTFile* ast_file = comp->parsed_files.back();
+      ast_file->file_loc = file_import->file_loc;
+      ast_file->namespace_index = file_import->ns_index;
+
+      parse_file(&parser, ast_file);
+
+      //Should have all been copied now :) - can free the file
+      text_source.free_no_destruct();
+
+      if (parser.current.type == AxleTokenType::Error) {
+        //Reporting parse errors
+
+        Span span ={};
+        span.full_path = parser.current.pos.full_path;
+
+        span.char_start = parser.current.pos.character;
+        span.char_end = span.char_start + 1;
+
+        span.line_start = parser.current.pos.line;
+        span.line_end = span.line_start;
+
+        comp->report_error(CompileCode::SYNTAX_ERROR, span,
+                           "Parse Error: \"{}\"",
+                           parser.current.string->string);
+        return print_compile_errors(comp);
+      }
+
+      if (comp->print_options.ast) {
+        IO::print("\n=== Print Parsed AST ===\n\n");
+        print_ast(ast_file);
+        IO::print("\n========================\n\n");
+      }
+
+      //This may load new files onto the unparsed files stack
+      build_compilation_units_for_file(comp, ast_file);
+      if (comp->is_panic()) {
+        return print_compile_errors(comp);
+      }
     }
-
-    //Loaded file can pop of the file stack thing
-    //It will shortly be loaded into the parsed files
-    comp->unparsed_files.pop();
-
-    //Set up the parser
-    Parser parser ={};
-    parser.lexer.strings = comp->strings;
-    init_parser(&parser, full_path, text_source.ptr);
-
-    //Parse
-    comp->parsed_files.insert_uninit(1);
-    ASTFile* ast_file = comp->parsed_files.back();
-    ast_file->file_loc = file_import->file_loc;
-    ast_file->namespace_index = file_import->ns_index;
-
-    parse_file(&parser, ast_file);
-
-    //Should have all been copied now :) - can free the file
-    text_source.free_no_destruct();
-
-    if (parser.current.type == AxleTokenType::Error) {
-      //Reporting parse errors
-
-      Span span ={};
-      span.full_path = parser.current.pos.full_path;
-
-      span.char_start = parser.current.pos.character;
-      span.char_end = span.char_start + 1;
-
-      span.line_start = parser.current.pos.line;
-      span.line_end = span.line_start;
-
-      comp->report_error(CompileCode::UNFOUND_DEPENDENCY, span,
-                         "Parse Error: \"{}\"",
-                         parser.current.string->string);
-      return print_compile_errors(comp);
-    }
-
-    if (comp->print_options.ast) {
-      IO::print("\n=== Print Parsed AST ===\n\n");
-      print_ast(ast_file);
-      IO::print("\n========================\n\n");
-    }
-
-    //This may load new files onto the unparsed files stack
-    build_compilation_units_for_file(comp, ast_file);
-    if (comp->is_panic()) {
+    else {
+      comp->report_error(CompileCode::FILE_ERROR, file_import->span,
+                         "'{}' is not a loadable file extension",
+                         file_import->file_loc.extension);
       return print_compile_errors(comp);
     }
   }
 
   //Should have no new files
-  comp->unparsed_files.free();
-
-  //Should be all loaded??
-  comp->function_units.shrink();
+  comp->file_loader.unparsed_files.free();
 
   return CompileCode::NO_ERRORS;
 }
 
+void compile_valid_convention_combo(Compiler* comp,
+                                    const Span& span,
+                                    const CallingConvention* conv,
+                                    const CallingConvention** fill) {
+  bool x86_64 = conv == &convention_microsoft_x64
+    && comp->build_options.system == &system_x86_64;
+
+  //bool stdcall = conv == &convention_stdcall
+  //  && comp->build_options.system == &system_x86_64;
+
+  bool vm = conv == &convention_vm
+    && comp->build_options.system == &system_vm;
+
+  if (true) {
+    *fill = conv;
+  }
+  else {
+    //comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+    //                   "Calling convention '{}' is not valid with system '{}'",
+    //                   conv->name, comp->build_options.system->name);
+  }
+}
+
+void compile_calling_convention_for_function(Compiler* const comp,
+                                             const Span& span,
+                                             const InternString* conv_name,
+                                             const CallingConvention** fill) {
+
+
+  if (conv_name == comp->calling_conventions.x64) {
+    compile_valid_convention_combo(comp, span, &convention_microsoft_x64, fill);
+  }
+  else if (conv_name == comp->calling_conventions.stdcall) {
+    compile_valid_convention_combo(comp, span, &convention_stdcall, fill);
+  }
+  else if (conv_name == comp->calling_conventions.vm) {
+    compile_valid_convention_combo(comp, span, &convention_vm, fill);
+  }
+  else {
+    comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+                       "Calling convention '{}' does not exist",
+                       conv_name);
+  }
+}
+
 void build_compilation_units_for_file(Compiler* const comp, ASTFile* const file) {
-  //Load the imports
+
+  Namespace* ns = comp->all_namespaces.data + file->namespace_index.index;
+
+  ASTFileHeader& header = file->header;
+
+  if (header.is_dll_header) {
+    header.dll_header.loc = parse_file_location(file->file_loc.directory->string,
+                                                header.dll_header.relative_path->string,
+                                                comp->strings);
+
+    if (header.dll_header.loc.extension != comp->file_loader.dll) {
+    //.dll is the only valid extension
+      comp->report_error(CompileCode::FILE_ERROR, header.dll_header.span,
+                         "#dll_header extension was invalid\n"
+                         "Expected: '.{}'\n"
+                         "Found:    '.{}'",
+                         comp->file_loader.dll, header.dll_header.loc.extension);
+      return;
+    }
+
+    comp->dlls_import.insert_uninit(1);
+    ImportedDll* dll_file = comp->dlls_import.back();
+
+    dll_file->name = header.dll_header.loc.full_name;
+  }
+
+
   {
-    auto i = file->imports.begin();
-    const auto end = file->imports.end();
+    auto i = file->imports.mut_begin();
+    const auto end = file->imports.mut_end();
 
     for (; i < end; i++) {
-      FileLocation loc = parse_file_location(file->file_loc.directory->string,
-                                             i->relative_path->string,
-                                             comp->strings);
+      i->loc = parse_file_location(file->file_loc.directory->string,
+                                   i->relative_path->string,
+                                   comp->strings);
 
-      const auto is_file =[&loc](const ASTFile* f) {
-        return f->file_loc == loc;
+      //Check file extensions
+      if (i->loc.extension != comp->file_loader.axl
+          && i->loc.extension != nullptr) {
+        comp->report_error(CompileCode::FILE_ERROR, i->span,
+                           "Import extension was invalid\n"
+                           "Expected no extension or '.{}'\n"
+                           "Found '.{}'",
+                           comp->file_loader.axl, i->loc.extension);
+        return;
+      }
+
+
+      const auto is_file =[loc = &i->loc](const ASTFile* f) {
+        return f->file_loc == *loc;
       };
 
       const ASTFile* import_file = comp->parsed_files.find_if(is_file);
 
       //Do we need to make a new file?
       if (import_file == nullptr) {
-        comp->unparsed_files.insert_uninit(1);
-        FileImport* new_file = comp->unparsed_files.back();
+        comp->file_loader.unparsed_files.insert_uninit(1);
+        FileImport* new_file = comp->file_loader.unparsed_files.back();
 
         //Set the namespace
         NamespaceIndex new_index = NamespaceIndex{ comp->all_namespaces.size };
         comp->all_namespaces.insert_uninit(1);
+        //Reset the namespace because it get invalidated
+        ns = comp->all_namespaces.data + file->namespace_index.index;
 
-        new_file->file_loc = loc;
+        new_file->file_loc = i->loc;
         new_file->span = i->span;
 
         new_file->ns_index = new_index;
 
-        //Set up the namesapce imports from the file before it is parsed
-        Namespace* ns = comp->all_namespaces.data + file->namespace_index.index;
         ns->imported.insert(new_file->ns_index);
       }
       else {
-        //Set up the namesapce imports
-        Namespace* ns = comp->all_namespaces.data + file->namespace_index.index;
+        //Import name
         ns->imported.insert(import_file->namespace_index);
       }
-
     }
   }
 
-  //Might as well shrink it
-  Namespace* ns = comp->all_namespaces.data + file->namespace_index.index;
+  //Might as well try and save some memory
   ns->imported.shrink();
 
   //Load all the functions
-  auto i = file->functions.mut_begin();
-  const auto end = file->functions.mut_end();
+  {
+    auto i = file->functions.mut_begin();
+    const auto end = file->functions.mut_end();
 
-  for (; i < end; i++) {
-    comp->function_units.insert_uninit(1);
-    FunctionUnit* const unit = comp->function_units.back();
+    for (; i < end; i++) {
+      ASTFunctionDeclaration* func_decl = i;
 
-    comp->compiling.insert_uninit(1);
-    CompilationUnitCarrier* const carrier = comp->compiling.back();
+      ASTFunctionSignature* sig = &func_decl->signature;
 
-    //Set up the unit an carrier
-    unit->stage = FUNCTION_COMPILE_STAGE::SIGNATURE;
-    unit->names = file->namespace_index;
+      //Must first compile the signature
+      SignatureUnit* const unit = comp->new_signature_unit(file->namespace_index);
 
-    carrier->index = comp->function_units.size - 1;
-    carrier->type = COMPILATION_TYPE::SIGNATURE;
+      if (header.is_dll_header) {
+        if (func_decl->body.block.size > 0) {
+          comp->report_error(CompileCode::FILE_ERROR, i->signature.signature_span,
+                             "DLL Header functions cannot have bodies");
+          return;
+        }
 
-    //Make  new function
-    Function* const func = comp->new_function();
+        FunctionPointer* dll_func = comp->new_function_pointer();
+        dll_func->is_dll = true;
 
-    //Add to the namespace
-    NamedElement* overloads = ns->names.get_val(i->name);
-    if (overloads == nullptr) {
-      NamedElement new_overloads ={};
-      new_overloads.set_union(NamedElementType::FUNCTION);
-      new_overloads.overloads.insert(func);
+        //Pick the calling convention
+        if (sig->convention == nullptr) {
+          compile_valid_convention_combo(comp, sig->signature_span,
+                                         comp->build_options.default_calling_convention,
+                                         &dll_func->signature.calling_convention);
+        }
+        else {
+          compile_calling_convention_for_function(comp, sig->signature_span,
+                                                  sig->convention, &dll_func->signature.calling_convention);
+        }
 
-      ns->names.insert(i->name, std::move(new_overloads));
-    }
-    else {
-      if (overloads->type != NamedElementType::FUNCTION) {
-        comp->report_error(CompileCode::NAME_ERROR, i->signature_span,
-                           "Name '{}' already exists and is not a function",
-                           i->name);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        //Test doesnt exist already in the namespace
+        {
+          NamedElement* func = ns->names.get_val(sig->name);
+          if (func != nullptr) {
+            comp->report_error(CompileCode::NAME_ERROR, sig->signature_span,
+                               "Name '{}' already exists\n"
+                               "Cannot overload in the dll header",
+                               sig->name);
+          }
+        }
+
+        ImportedDll* dll_file = comp->dlls_import.back();
+
+        //Import dll
+        dll_file->imports.insert_uninit(1);
+        SingleDllImport* single = dll_file->imports.back();
+        single->name = sig->name;
+        single->ptr = dll_func;
+
+        //New name
+        NamedElement new_func ={};
+        new_func.set_union(NamedElementType::FUNCTION_POINTER);
+        new_func.func_pointer = dll_func;
+
+        ns->names.insert(sig->name, std::move(new_func));
+
+        //Link up the ast and function
+        unit->source = func_decl;
+        unit->sig = &dll_func->signature;
+        unit->func = nullptr;//no next function
+        dll_func->signature.name = sig->name;
+
+        //Setup parameters
+        sig->parameters.shrink();
+        dll_func->signature.parameter_types.insert_uninit(sig->parameters.size);
+        dll_func->signature.parameter_types.shrink();
       }
       else {
-        overloads->overloads.insert(func);
+        //Make  new function
+        Function* const func = comp->new_function();
+
+        //Pick the calling convention
+        //Pick the calling convention
+        if (sig->convention == nullptr) {
+          compile_valid_convention_combo(comp, sig->signature_span,
+                                         comp->build_options.default_calling_convention,
+                                         &func->signature.calling_convention);
+        }
+        else {
+          compile_calling_convention_for_function(comp, sig->signature_span,
+                                                  sig->convention, &func->signature.calling_convention);
+        }
+
+        if (comp->is_panic()) {
+          return;
+        }
+
+
+        //Add to the namespace
+        NamedElement* overloads = ns->names.get_val(sig->name);
+        if (overloads == nullptr) {
+          NamedElement new_overloads ={};
+          new_overloads.set_union(NamedElementType::OVERLOADS);
+          new_overloads.overloads.insert(func);
+
+          ns->names.insert(sig->name, std::move(new_overloads));
+        }
+        else {
+          if (overloads->type != NamedElementType::OVERLOADS) {
+            comp->report_error(CompileCode::NAME_ERROR, sig->signature_span,
+                               "Name '{}' already exists and cannot be overloaded",
+                               sig->name);
+            return;
+          }
+          else {
+            overloads->overloads.insert(func);
+          }
+        }
+
+        //Link up the ast and function
+        unit->source = func_decl;
+        unit->sig = &func->signature;
+        unit->func = func;
+        func->signature.name = sig->name;
+
+        //Setup parameters
+        sig->parameters.shrink();
+        func->signature.parameter_types.insert_uninit(sig->parameters.size);
+        func->signature.parameter_types.shrink();
       }
     }
-
-    //Link up the ast and function
-    unit->source = i;
-    unit->destination = func;
-    func->name = i->name;
-    func->unit_index = carrier->index;
-
-    //Setup parameters
-    func->parameter_types.insert_uninit(i->parameters.size);
-    func->parameter_types.shrink();
   }
 }
 
 //Same as 'find_name' but returns all of the possible options - useful for overload sets
 Array<NamedElement*> find_all_names(Compiler* const comp,
-                                          NamespaceIndex ns_index,
-                                          const InternString* name) {
+                                    NamespaceIndex ns_index,
+                                    const InternString* name) {
 
   Array<NamedElement*> all_names ={};
 
@@ -3853,10 +4429,10 @@ Array<NamedElement*> find_all_names(Compiler* const comp,
 }
 
 NamedElement* find_name(Compiler* const comp,
-                              NamespaceIndex ns_index,
-                              const InternString* name) {
+                        NamespaceIndex ns_index,
+                        const InternString* name) {
 
-  //first try the builtin namespace for primitive and stuff
+//first try the builtin namespace for primitive and stuff
   const Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
   NamedElement* el = ns->names.get_val(name);
 
@@ -3950,29 +4526,119 @@ CompileCode print_compile_errors(const Compiler* const comp) {
   return ret;
 }
 
+void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
+
+  //Remove as dependency
+  auto i = unit->dependency_of.begin();
+  const auto end = unit->dependency_of.end();
+
+  for (; i < end; i++) {
+    CompilationUnit* dep_of = *i;
+
+    const auto is_unit = [unit](const CompilationUnit* dep) -> bool { return dep == unit; };
+    dep_of->dependencies.remove_if(is_unit);
+
+    if (dep_of->dependencies.size == 0) {
+      //No more dependencies - can add back to the compiling
+      comp->to_compile.insert(dep_of);
+    }
+  }
+
+  switch (unit->type) {
+    case COMPILATION_TYPE::FUNCTION:
+      comp->function_units.free((const FunctionUnit*)unit);
+      break;
+    case COMPILATION_TYPE::SIGNATURE:
+      comp->signature_units.free((const SignatureUnit*)unit);
+      break;
+    case COMPILATION_TYPE::CONST_EXPR:
+      comp->const_expr_units.free((const ConstantExprUnit*)unit);
+      break;
+  }
+}
+
 CompileCode compile_all(Compiler* const comp) {
-  while (comp->compiling.size > 0) {
+  while (comp->to_compile.size > 0) {
     //Compile waiting
     {
-      auto i = comp->compiling.mut_begin();
-      const auto end = comp->compiling.mut_end();
+      Array<CompilationUnit*> to_compile = std::move(comp->to_compile);
+
+      auto i = to_compile.mut_begin();
+      const auto end = to_compile.mut_end();
 
       for (; i < end; i++) {
-        comp->current_unit = *i;
+        CompilationUnit* comp_u = *i;
+        comp->current_unit = comp_u;
+        comp->current_namespace = comp_u->available_names;
 
-        switch (i->type) {
-          case COMPILATION_TYPE::SIGNATURE:
+        switch (comp_u->type) {
+          case COMPILATION_TYPE::SIGNATURE: {
+              SignatureUnit* const unit = (SignatureUnit*)comp_u;
+
+              if (unit->stage != SIGNATURE_COMP_STAGE::UNTYPED) {
+                comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+                                   "A compilation unit was created for a completed signature");
+                return print_compile_errors(comp);
+              }
+
+              compile_function_signature_type(comp, &unit->source->signature, unit->sig);
+              //Error handling
+              if (comp->is_panic()) {
+                if (comp->is_fatal()) {
+                  return print_compile_errors(comp);
+                }
+                else {
+                  comp->reset_panic();
+                }
+              }
+              else if (unit->func != nullptr) {
+                //Set up new compilation unit for the body
+                FunctionUnit* func_unit = comp->new_function_unit(unit->available_names);
+                func_unit->source = unit->source;
+                func_unit->func = unit->func;
+                default_init(&func_unit->state);
+
+                //Finished
+                close_compilation_unit(comp, unit);
+              }
+              else {
+                //DLL functions should have no body
+                close_compilation_unit(comp, unit);
+              }
+              break;
+            }
+
           case COMPILATION_TYPE::FUNCTION: {
-              FunctionUnit* const unit = comp->function_units.data + i->index;
-
-              comp->current_namespace = unit->names;
+              FunctionUnit* const unit = (FunctionUnit*)comp_u;
 
               switch (unit->stage) {
-                case FUNCTION_COMPILE_STAGE::SIGNATURE: {
-                    compile_function_signature(comp,
+                case FUNCTION_COMP_STAGE::UNINIT: {
+                    compile_function_body_init(comp,
                                                unit->source,
-                                               unit->destination,
+                                               unit->func,
+                                               &unit->untyped,
                                                &unit->state);
+                    if (comp->is_panic()) {
+                      if (comp->is_fatal()) {
+                        return print_compile_errors(comp);
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
+                    }
+                    else {
+                      unit->stage = FUNCTION_COMP_STAGE::UNTYPED_BODY;
+                      i--;//Try it again straight away
+                    }
+
+                    break;
+                  }
+                case FUNCTION_COMP_STAGE::UNTYPED_BODY: {
+                    compile_function_body_types(comp,
+                                                unit->source,
+                                                unit->func,
+                                                &unit->untyped,
+                                                &unit->state);
 
                     if (comp->is_panic()) {
                       if (comp->is_fatal()) {
@@ -3983,16 +4649,15 @@ CompileCode compile_all(Compiler* const comp) {
                       }
                     }
                     else {
-                      unit->stage = FUNCTION_COMPILE_STAGE::BODY;
-                      unit->state.return_label = comp->labels++;
-                      i--;//Do it again straight away
+                      unit->stage = FUNCTION_COMP_STAGE::TYPED_BODY;
+                      i--;//Try it again straight away
                     }
                     break;
                   }
-                case FUNCTION_COMPILE_STAGE::BODY: {
-                    compile_function_body_unit(comp,
+                case FUNCTION_COMP_STAGE::TYPED_BODY: {
+                    compile_function_body_code(comp,
                                                unit->source,
-                                               unit->destination,
+                                               unit->func,
                                                &unit->state);
 
                     if (comp->is_panic()) {
@@ -4004,7 +4669,8 @@ CompileCode compile_all(Compiler* const comp) {
                       }
                     }
                     else {
-                      unit->stage = FUNCTION_COMPILE_STAGE::FINISHED;
+                      //Finished
+                      close_compilation_unit(comp, unit);
                     }
                     break;
                   }
@@ -4012,13 +4678,18 @@ CompileCode compile_all(Compiler* const comp) {
               break;
             }
           case COMPILATION_TYPE::CONST_EXPR: {
-              ConstantExprUnit* const unit = comp->const_expr_units.data + i->index;
-
-              comp->current_namespace = unit->names;
+              ConstantExprUnit* const unit = (ConstantExprUnit*)comp_u;
 
               switch (unit->stage) {
-                case EXPRESSION_COMPILE_STAGE::UNTYPED: {
-                    compile_type_of_expression(comp, unit->expr, &unit->state);
+                case EXPR_COMP_STAGE::UNTYPED: {
+                    while (unit->next_expr != nullptr) {
+                      compile_type_of_expression(comp, &unit->state, unit->next_expr);
+                      if (comp->is_panic()) {
+                        break;
+                      }
+
+                      unit->next_expr = unit->next_expr->next;
+                    }
 
                     if (comp->is_panic()) {
                       if (comp->is_fatal()) {
@@ -4029,20 +4700,15 @@ CompileCode compile_all(Compiler* const comp) {
                       }
                     }
                     else {
-                      unit->stage = EXPRESSION_COMPILE_STAGE::TYPED;
+                      unit->stage = EXPR_COMP_STAGE::TYPED;
                       i--;
                     }
                     break;
                   }
-                case EXPRESSION_COMPILE_STAGE::TYPED: {
+                case EXPR_COMP_STAGE::TYPED: {
                     if (unit->cast_to != nullptr) {
-                      bool implicit_cast = can_implicit_cast(unit->expr->type, unit->cast_to);
-                      bool comptime_cast = can_comptime_cast(unit->expr->type, unit->cast_to);
-
-                      assert(implicit_cast || comptime_cast);
+                      assert(can_comptime_cast(unit->expr_base->type, unit->cast_to));
                     }
-
-                    State* state = &unit->state;
 
                     //maybe need??
                     //unit->constants = std::move(comp->working_state->constants);
@@ -4050,9 +4716,10 @@ CompileCode compile_all(Compiler* const comp) {
                     CodeBlock block ={};
                     block.label = comp->labels++;
 
+
                     //Have to compile to vm
                     BuildOptions options;
-                    options.calling_convention = &convention_vm;
+                    options.default_calling_convention = &convention_vm;
                     options.system             = &system_vm;
                     options.entry_point = comp->build_options.entry_point;
                     options.output_file = comp->build_options.output_file;
@@ -4061,6 +4728,12 @@ CompileCode compile_all(Compiler* const comp) {
                     //Swap forward
                     std::swap(options, comp->build_options);
 
+                    const CallingConvention* convention = comp->build_options.default_calling_convention;
+
+                    State* state = &unit->state;
+                    init_state_regs(convention, state);
+                    state->return_label = comp->labels++;
+
                     //Set up new flow
                     size_t new_flow = state->control_flow.new_flow();
                     state->control_flow.current_flow = new_flow;
@@ -4068,86 +4741,84 @@ CompileCode compile_all(Compiler* const comp) {
                     //Compile bytecode
                     state->comptime_compilation = true;
 
-                    const Structure* type = unit->expr->type;
-                    const bool pass_ptr = type->size() > 8;
+                    const Structure* type = unit->expr_base->type;
 
-                    uint8_t* const_val = comp->constants.alloc_no_construct(unit->expr->type->size());
+                    //Do we need to pass as a parameter
+                    const bool return_as_ptr = register_passed_as_pointer(type);
 
-                    if (!pass_ptr) {
-                      //Load to rax
-                      RuntimeValue ret_v ={};
 
-                      ret_v.type = RVT::REGISTER;
-                      ret_v.reg = state->new_value();
+                    const Structure* actual_return_type = find_or_make_pointer_type(comp, type);
 
-                      auto& rax_val = state->value_tree.values.data[ret_v.reg.val];
+                    uint8_t* const_val = comp->constants.alloc_no_construct(type->size());
 
-                      rax_val.value_type = ValueType::FIXED;
-                      rax_val.reg        = comp->build_options.calling_convention->return_register;
+                    {
+                      CallingConvParamIterator param_itr ={
+                        convention,
+                        0,
+                        convention->shadow_space_size
+                      };
 
-                      compile_bytecode_of_expression_existing(comp, state, &block, unit->expr, &ret_v);
+                      if (return_as_ptr) {
+                        state->return_val = advance_runtime_param(state, &param_itr, actual_return_type);
 
-                      state->use_value(ret_v.reg);
+
+                        //Should fix any issues later on
+                        state->return_val = OP::emit_deref(comp, state, &block, &state->return_val);
+
+                      }
+                      else {
+                        state->return_val.type = RVT::REGISTER;
+                        state->return_val.reg = state->new_value();
+
+                        auto* ret_val = state->get_val(state->return_val.reg);
+                        ret_val->value_type = ValueType::FIXED;
+                        ret_val->reg = convention->return_register;
+                      }
                     }
-                    else {
-                      ValueIndex reg = state->new_value();
 
-                      state->set_value(reg);
+                    compile_bytecode_of_expression_existing(comp, state, &block, unit->expr_base, &state->return_val);
 
-                      //Load RCX as a memory location
-                      auto& rcx_val = state->value_tree.values.data[reg.val];
-
-                      rcx_val.value_type = ValueType::FIXED;
-                      rcx_val.reg        = comp->build_options.calling_convention->parameter_registers[0];
-
-                      RuntimeValue ret_v ={};
-
-                      ret_v.type = RVT::MEMORY;
-                      ret_v.mem  = state->new_mem();
-
-                      auto* passed_mem = state->get_mem(ret_v.mem);
-                      passed_mem->mem.base = (uint8_t)reg.val;
-                      passed_mem->mem.disp = 0;
-                      passed_mem->mem.scale = 0;
-
-                      passed_mem->size = type->size();
-
-                      compile_bytecode_of_expression_existing(comp, state, &block, unit->expr, &ret_v);
-
-                      state->use_value(reg);
+                    if (state->return_val.type == RVT::REGISTER) {
+                      state->use_value(state->return_val.reg);
                     }
 
                     ByteCode::EMIT::JUMP_TO_FIXED(block.code, state->return_label);
 
                     //Graph colour
-                    graph_colour_algo(comp, &block, state);
+                    graph_colour_algo(comp, convention, &block, state);
 
                     //Backend
-                    Array<uint8_t> code ={};
-                    const size_t entry = vm_backend_single_func(code, &block, comp->labels);
+                    Program prog ={};
+                    vm_backend_single_func(&prog, &block, comp);
+
+                    if (comp->is_panic()) {
+                      return print_compile_errors(comp);
+                    }
 
                     if (comp->print_options.comptime_exec) {
-                      IO::print("About to execute Compile Time Code:\n");
-                      ByteCode::print_bytecode(&vm_regs_name_from_num, stdout, code.data, code.size);
+                      IO::print("\nAbout to execute Compile Time Code:\n");
+                      print_ast_expression(unit->expr_base);
+                      IO::print("\n\nWhich produced this bytecode:\n");
+                      ByteCode::print_bytecode(&vm_regs_name_from_num, stdout, prog.code.ptr, prog.code_size);
                     }
 
                     //Run the VM
-                    if (pass_ptr) {
-                      X64_UNION pass_rcx = const_val;
-                      vm_set_parameters(&comp->build_options, comp->vm, pass_rcx);
+                    if (return_as_ptr) {
+                      X64_UNION pass_param = const_val;
+                      vm_set_parameters(convention, comp->vm, pass_param);
                     }
 
-                    ErrorCode err = vm_rum(comp->vm, code.data, entry);
+                    ErrorCode err = vm_rum(comp->vm, &prog);
                     if (err != ErrorCode::OK) {
-                      comp->report_error(CompileCode::INTERNAL_ERROR, unit->expr->span,
+                      comp->report_error(CompileCode::INTERNAL_ERROR, unit->expr_base->span,
                                          "VM returned error code '{}' in compile time execution",
                                          err);
                       return print_compile_errors(comp);
                     }
 
                     //Get the value back
-                    if (pass_ptr) {
-                      if (comp->print_options.comptime_exec) {
+                    if (return_as_ptr) {
+                      if (comp->print_options.comptime_res) {
                         IO::print("\nComptime Res In Bytes: ");
                         print_as_bytes(const_val, type->size());
                         putc('\n', stdout);
@@ -4158,14 +4829,14 @@ CompileCode compile_all(Compiler* const comp) {
                       uint64_t val = comp->vm->registers[convention_vm.return_register].b64.reg;
                       x64_to_bytes(val, const_val);
 
-                      if (comp->print_options.comptime_exec) {
+                      if (comp->print_options.comptime_res) {
                         printf("\nComptime Res: %llu\n", val);
                       }
                     }
 
                     if (unit->cast_to != nullptr) {
                       uint8_t* res = comp->constants.alloc_no_construct(unit->cast_to->size());
-                      do_literal_cast(comp, unit->expr, unit->cast_to, const_val, res);
+                      do_literal_cast(comp, unit->expr_base, unit->cast_to, const_val, res);
                       if (comp->is_panic()) {
                         return print_compile_errors(comp);
                       }
@@ -4173,15 +4844,16 @@ CompileCode compile_all(Compiler* const comp) {
                       comp->constants.free_no_destruct(const_val);
                       const_val = res;
 
-                      unit->expr->type = unit->cast_to;
+                      unit->expr_base->type = unit->cast_to;
                     }
 
-                    unit->expr->const_val = const_val;
+                    unit->expr_base->const_val = const_val;
 
                     //Swap back
                     std::swap(options, comp->build_options);
 
-                    unit->stage = EXPRESSION_COMPILE_STAGE::FINISHED;
+                    //Finished
+                    close_compilation_unit(comp, unit);
                     break;
                   }
               }
@@ -4191,68 +4863,16 @@ CompileCode compile_all(Compiler* const comp) {
       }
     }
 
-    //Reset compiling
-    comp->compiling.size = 0;
-
-    struct DependencyFinished {
-      const Compiler* comp;
-
-      bool operator() (const CompilationUnitCarrier& unit) {
-        switch (unit.type) {
-          case COMPILATION_TYPE::SIGNATURE: {
-              FUNCTION_COMPILE_STAGE stage =  (comp->function_units.data + unit.index)->stage;
-              return stage == FUNCTION_COMPILE_STAGE::BODY || stage == FUNCTION_COMPILE_STAGE::FINISHED;
-            }
-          case COMPILATION_TYPE::FUNCTION:
-            return (comp->function_units.data + unit.index)->stage == FUNCTION_COMPILE_STAGE::FINISHED;
-          case COMPILATION_TYPE::CONST_EXPR:
-            return (comp->const_expr_units.data + unit.index)->stage == EXPRESSION_COMPILE_STAGE::FINISHED;
-        }
-
-        return false;
-      }
-    };
-
-    {
-      auto i = comp->function_units.mut_begin();
-      const auto end = comp->function_units.mut_end();
-
-      for (; i < end; i++) {
-        i->dependencies.remove_if(DependencyFinished{ comp });
-
-        if (i->stage != FUNCTION_COMPILE_STAGE::FINISHED && i->dependencies.size == 0 && !i->unfound_dependency) {
-          comp->compiling.insert_uninit(1);
-          CompilationUnitCarrier* const carrier = comp->compiling.back();
-
-          carrier->type = COMPILATION_TYPE::FUNCTION;
-          carrier->index = i - comp->function_units.data;
-        }
-      }
-    }
-
-    {
-      auto i = comp->const_expr_units.mut_begin();
-      const auto end = comp->const_expr_units.mut_end();
-
-      for (; i < end; i++) {
-        i->dependencies.remove_if(DependencyFinished{ comp });
-
-        if (i->stage != EXPRESSION_COMPILE_STAGE::FINISHED && i->dependencies.size == 0 && !i->unfound_dependency) {
-          comp->compiling.insert_uninit(1);
-          CompilationUnitCarrier* const carrier = comp->compiling.back();
-
-          carrier->type = COMPILATION_TYPE::CONST_EXPR;
-          carrier->index = i - comp->const_expr_units.data;
-        }
-      }
-    }
 
 
-    if (comp->compiling.size == 0) {
-      if (comp->unfound_deps.units.size > 0) {
-        const size_t num_deps = comp->unfound_deps.units.size;
+
+    if (comp->to_compile.size == 0) {
+      //Wait for there to be no compiling to check unfound deps - best chance they exist
+
+      if (comp->unfound_deps.unfound.size > 0) {
+        const size_t num_deps = comp->unfound_deps.unfound.size;
         //Remove units if dependency has been found
-        comp->unfound_deps.units.remove_if([comp](const UnfoundDep& dep) {
+        comp->unfound_deps.unfound.remove_if([comp](const UnfoundDep& dep) {
           switch (dep.type) {
             case UnfoundDepType::Name: {
                 if (find_name(comp, dep.name.namespace_index, dep.name.ident) == nullptr) {
@@ -4273,22 +4893,15 @@ CompileCode compile_all(Compiler* const comp) {
           }
 
           //Success!
-          switch (dep.unit_waiting.type) {
-            case COMPILATION_TYPE::SIGNATURE:
-            case COMPILATION_TYPE::FUNCTION:
-              (comp->function_units.data + dep.unit_waiting.index)->unfound_dependency = false;
-              break;
-            case COMPILATION_TYPE::CONST_EXPR:
-              (comp->const_expr_units.data + dep.unit_waiting.index)->unfound_dependency = false;
-              break;
-          }
-
+          comp->to_compile.insert(dep.unit_waiting);
           return true;
         });
 
-        if (num_deps == comp->unfound_deps.units.size) {
-          auto i = comp->unfound_deps.units.begin();
-          auto end = comp->unfound_deps.units.end();
+        if (num_deps == comp->unfound_deps.unfound.size) {
+          //All dependencies are still unfound
+          auto i = comp->unfound_deps.unfound.begin();
+          auto end = comp->unfound_deps.unfound.end();
+
           for (; i < end; i++) {
             switch (i->type) {
               case UnfoundDepType::Name: {
@@ -4321,8 +4934,225 @@ void print_compiled_functions(const Compiler* const comp) {
   for (; i != end; i.next()) {
     const Function* func = i.get();
 
-    printf("FUNCTION %s:\n", func->name->string);
+    printf("FUNCTION %s:\n", func->signature.name->string);
     ByteCode::print_bytecode(comp->build_options.system->reg_name_from_num, stdout, func->code_block.code.data, func->code_block.code.size);
     IO::print('\n');
   }
+}
+
+void init_compiler(Compiler* comp) {
+  //Setup the built in namespace
+  comp->builtin_namespace.index = comp->all_namespaces.size;
+  comp->all_namespaces.insert_uninit(1);
+
+  //Init the types
+  auto* types = comp->types;
+  auto* strings = comp->strings;
+
+  Structure* const s_void = new_base_type(comp, strings->intern("void"));
+  s_void->type = STRUCTURE_TYPE::VOID;
+  types->s_void = s_void;
+
+  types->s_void_ptr = new_pointer_type(comp, s_void);
+
+  Structure* const ascii = new_base_type(comp, strings->intern("ascii"));
+  ascii->type = STRUCTURE_TYPE::ASCII_CHAR;
+  types->s_ascii = ascii;
+
+  LiteralStructure* const int_lit = new_literal_type(comp, strings->intern("lit_uint"));
+  int_lit->literal_type = LITERAL_TYPE::INTEGER;
+  types->s_int_lit = int_lit;
+
+  LiteralStructure* const sint_lit = new_literal_type(comp, strings->intern("lit_sint"));
+  sint_lit->literal_type = LITERAL_TYPE::SIGNED_INTEGER;
+  types->s_sint_lit = sint_lit;
+
+
+  LiteralStructure* const empty_arr = new_literal_type(comp, strings->intern("lit_empty_array"));
+  empty_arr->literal_type = LITERAL_TYPE::EMPTY_ARR;
+  types->s_empty_arr = empty_arr;
+
+  LiteralStructure* const s_lit_ptr = new_literal_type(comp, strings->intern("lit_ptr"));
+  s_lit_ptr->literal_type = LITERAL_TYPE::POINTER;
+  types->s_lit_ptr = s_lit_ptr;
+
+
+  IntegerStructure* const u8 = new_int_type(comp, strings->intern("u8"));
+  u8->is_signed = false;
+  u8->bytes     = 1;
+
+  types->s_u8 = u8;
+
+  IntegerStructure* const i8 = new_int_type(comp, strings->intern("i8"));
+  i8->is_signed = true;
+  i8->bytes     = 1;
+
+  types->s_i8 = i8;
+
+  IntegerStructure* const u32 = new_int_type(comp, strings->intern("u32"));
+  u32->is_signed = false;
+  u32->bytes     = 4;
+
+  types->s_u32 = u32;
+
+  IntegerStructure* const i32 = new_int_type(comp, strings->intern("i32"));
+  i32->is_signed = true;
+  i32->bytes     = 4;
+
+  types->s_i32 = i32;
+
+
+  IntegerStructure* const u64 = new_int_type(comp, strings->intern("u64"));
+  u64->is_signed = false;
+  u64->bytes     = 8;
+
+  types->s_u64 = u64;
+
+  IntegerStructure* const i64 = new_int_type(comp, strings->intern("i64"));
+  i64->is_signed = true;
+  i64->bytes     = 8;
+
+  types->s_i64 = i64;
+
+
+  EnumStructure* const s_bool = new_enum_type(comp, strings->intern("bool"));
+  s_bool->base = u8;
+
+  types->s_bool = s_bool;
+
+  s_bool->enum_values.reserve_extra(2);
+  {
+    EnumValue* const e_true = new_enum_value(comp, s_bool, strings->intern("true"));
+    types->e_true = e_true;
+
+    e_true->representation = 1;
+
+    EnumValue* const e_false = new_enum_value(comp, s_bool, strings->intern("false"));
+    types->e_false = e_false;
+
+    e_true->representation = 0;
+  }
+  s_bool->enum_values.shrink();
+
+
+  //File extensions
+  comp->file_loader.axl = strings->intern("axl");
+  comp->file_loader.dll = strings->intern("dll");
+
+  //Calling Conventionss
+  comp->calling_conventions.vm = strings->intern(convention_vm.name);
+  comp->calling_conventions.x64 = strings->intern(convention_microsoft_x64.name);
+  comp->calling_conventions.stdcall = strings->intern(convention_stdcall.name);
+}
+
+void build_data_section_for_exec(Program* prog, Compiler* const comp) {
+  InternHashTable<size_t> loaded_strings ={};
+
+  Array<uint8_t> data ={};
+
+  //Writes a string if its not alread written
+  const auto write_string = [&](Array<uint8_t>& bytes, const InternString* s) -> size_t {
+    if (!loaded_strings.contains(s)) {
+      //doesnt contain this string
+      //have to write it to data
+
+      bytes.reserve_extra(s->len + 1);
+
+      size_t position = bytes.size;
+
+      memcpy_ts(bytes.data + bytes.size, bytes.capacity - bytes.size, (const uint8_t*)s->string, s->len + 1);
+      bytes.size += s->len + 1;
+
+
+      size_t ret_position = position;
+
+      loaded_strings.insert(s, std::move(position));
+      return ret_position;
+    }
+    else {
+      //Already written
+      return *loaded_strings.get_val(s);
+    }
+  };
+
+  //Write a 64 bit number aligned to a 64 bit boundary
+  const auto write_num = [](Array<uint8_t>& bytes, uint64_t a)->size_t {
+    //Align
+    const auto align_to = ceil_to_8(bytes.size);
+    bytes.insert_uninit(bytes.size - align_to);
+
+    size_t position = bytes.size;
+    serialise_to_array(bytes, a);
+
+    return position;
+  };
+
+  //0 is an invalid position
+  write_num(data, 0);
+
+  //Function pointers
+  {
+    auto i = comp->function_pointers.begin_iter();
+    auto end = comp->function_pointers.end_iter();
+
+    for (; i != end; i.next()) {
+      FunctionPointer* func = i.get();
+
+      if (func->is_called) {
+        //Reserve the location
+        func->data_index = write_num(data, 0);
+      }
+    }
+  }
+
+  Array<uint8_t> imports ={};
+
+  //Dll imports
+  {
+    auto i_dll = comp->dlls_import.begin();
+    auto end_dll = comp->dlls_import.end();
+
+    for (; i_dll < end_dll; i_dll++) {
+      //Dont need to write the header unless a function is used
+      bool written_header = false;
+
+      auto i_func = i_dll->imports.begin();
+      const auto end_func = i_dll->imports.end();
+
+      for (; i_func < end_func; i_func++) {
+        FunctionPointer* func = i_func->ptr;
+        const InternString* name = i_func->name;
+
+        if (func->is_called) {
+          //Function is used in this dll
+          if (!written_header) {
+            //Need to put in the name of the dll before any functions
+            //Dont know we need it until this point (might not use any of the functions)
+            written_header = true;
+            size_t name_position = write_string(data, i_dll->name);
+
+            //write header
+            write_num(imports, name_position);
+          }
+
+          //Write the function name
+          size_t name_position = write_string(data, name);
+          write_num(imports, name_position);
+
+          //The write the data index
+          write_num(imports, func->data_index);
+        }
+      }
+
+      //Null terminate for functions in a dll
+      write_num(imports, 0);
+    }
+
+    //2nd null terminate for dlls in import
+    write_num(imports, 0);
+  }
+
+  prog->data_size = data.size;
+  prog->data = std::move(data);
+  prog->imports = std::move(imports);
 }

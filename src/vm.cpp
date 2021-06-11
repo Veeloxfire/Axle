@@ -1,5 +1,6 @@
 #include "vm.h"
 #include "type.h"
+#include "windows_specifics.h"
 
 static_assert(sizeof(Reg64_8BL) == 8, "Must be 8 bytes");
 static_assert(sizeof(Reg64_8BH) == 8, "Must be 8 bytes");
@@ -50,12 +51,33 @@ uint8_t* VM::load_mem(const MemComplex& mem) {
   return ptr_base;
 }
 
+//Written in assembly to directly deal with the stack
+extern "C" uint64_t call_native_x64(const void* func, uint64_t* param_registers, uint8_t* stack_top, uint64_t stack_required);
 
-ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_point) noexcept {
+void vm_call_native_x64(VM* const vm, const void* func_ptr, uint64_t stack_required) {
+  uint64_t param_registers[4] ={};
+
+  //Load the parameters
+  param_registers[0] = vm->registers[1].b64.reg;
+  param_registers[1] = vm->registers[2].b64.reg;
+  param_registers[2] = vm->registers[3].b64.reg;
+  param_registers[3] = vm->registers[4].b64.reg;
+
+  vm->registers[0].b64.reg = call_native_x64(func_ptr, param_registers, vm->SP, stack_required);
+}
+
+ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
+  //Load dlls
+  Array<Windows::ActiveDll> actives = {};
+
+  if (prog->imports.ptr != nullptr) {
+    actives = Windows::load_dlls(prog);
+  }
+
 
   //Pre entry function - if we ever return to nullptr then we finish execution
   vm->push((uint8_t*)nullptr);
-  vm->IP = code + entry_point;
+  vm->IP = prog->code.ptr + prog->entry_point;
 
   while (true) {
     switch (vm->IP[0]) {
@@ -169,6 +191,14 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->registers[i.val].b64.reg = i.u64;
 
           vm->IP += ByteCode::SIZE_OF::SET_R64_TO_64;
+          break;
+        }
+      case ByteCode::SET_R32_TO_32: {
+          const auto i = ByteCode::PARSE::SET_R32_TO_32(vm->IP);
+
+          vm->registers[i.val].b32.reg = i.u32;
+
+          vm->IP += ByteCode::SIZE_OF::SET_R32_TO_32;
           break;
         }
       case ByteCode::COPY_R64_TO_R64: {
@@ -340,9 +370,25 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           vm->IP += ByteCode::SIZE_OF::CONV_RI8_TO_R64;
           break;
         }
+      case ByteCode::CONV_RU32_TO_R64: {
+          const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(vm->IP);
+
+          vm->registers[i.val].b64.reg = (uint64_t)vm->registers[i.val].b32.reg;
+
+          vm->IP += ByteCode::SIZE_OF::CONV_RU8_TO_R64;
+          break;
+        }
+      case ByteCode::CONV_RI32_TO_R64: {
+          const auto i = ByteCode::PARSE::CONV_RI8_TO_R64(vm->IP);
+
+          vm->registers[i.val].b64.reg = (uint64_t)vm->registers[i.val].b32.reg_s;
+
+          vm->IP += ByteCode::SIZE_OF::CONV_RI8_TO_R64;
+          break;
+        }
       case ByteCode::JUMP_TO_FIXED: {
           const auto i = ByteCode::PARSE::JUMP_TO_FIXED(vm->IP);
-          vm->IP = code + i.u64.val;
+          vm->IP = prog->code.ptr + i.u64.val;
           break;
         }
       case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
@@ -350,7 +396,7 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
 
           //Ugly - dont want an 'if' in the vm to do an if
           if (vm->registers[i.val].b64.reg == 0) {
-            vm->IP = code + i.u64.val;
+            vm->IP = prog->code.ptr + i.u64.val;
           }
           else {
             vm->IP += ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_ZERO;
@@ -362,7 +408,7 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
 
           //Ugly - dont want an 'if' in the vm to do an if
           if (vm->registers[i.val].b64.reg != 0) {
-            vm->IP = code + i.u64.val;
+            vm->IP = prog->code.ptr + i.u64.val;
           }
           else {
             vm->IP += ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_ZERO;
@@ -385,7 +431,15 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
           const auto i = ByteCode::PARSE::CALL(vm->IP);
 
           vm->push(vm->IP + ByteCode::SIZE_OF::CALL);
-          vm->IP = code + i.u64.val;
+          vm->IP = prog->code.ptr + i.u64.val;
+          break;
+        }
+      case ByteCode::CALL_NATIVE_X64: {
+          const auto i = ByteCode::PARSE::CALL_NATIVE_X64(vm->IP);
+
+          vm_call_native_x64(vm, *(const void**)i.u64_1, i.u64_2);
+
+          vm->IP += ByteCode::SIZE_OF::CALL_NATIVE_X64;
           break;
         }
       case ByteCode::RETURN: {
@@ -405,6 +459,6 @@ ErrorCode vm_rum(VM* const vm, const uint8_t* const code, const size_t entry_poi
                   op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
           return ErrorCode::UNDEFINED_INSTRUCTION;
         }
-    }
+    } 
   }
 }

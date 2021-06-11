@@ -9,11 +9,22 @@ inline constexpr size_t VM_SP_R = 17;
 //Forward decls
 struct REGISTER_CONSTANT;
 struct Compiler;
+struct Program;
+struct Structure;
+struct State;
 
 //header
 
 enum struct STACK_DIRECTION : uint8_t {
   LEFT_TO_RIGHT, RIGHT_TO_LEFT
+};
+
+enum struct STACK_PASS_TYPE : uint8_t {
+  VALUE, POINTER
+};
+
+enum struct CLEANUP : uint8_t {
+  calleE, calleR
 };
 
 struct ForcedColours {
@@ -22,7 +33,7 @@ struct ForcedColours {
 };
 
 using REG_NAME_FROM_NUM_PTR = FUNCTION_PTR<const char*, uint8_t>;
-using BACKEND_PTR = FUNCTION_PTR<size_t, Array<uint8_t>&, const Compiler*>;
+using BACKEND_PTR = FUNCTION_PTR<void, Program*, Compiler*>;
 
 struct System {
 #define CONST_NAME(n) static constexpr char n ## _name[] = #n
@@ -39,14 +50,16 @@ struct System {
   BACKEND_PTR backend;
 };
 
-const char* x86_64_reg_name_from_num(uint8_t) noexcept;
-const char* vm_regs_name_from_num(uint8_t reg) noexcept;
-
-extern const System system_x86_64;
-extern const System system_vm;
-
 struct CallingConvention {
   static constexpr size_t OFFSET_TO_SHADOW = 8ull + 8ull;
+
+#define CONST_NAME(n) static constexpr char n ## _name[] = #n
+  CONST_NAME(x64);
+  CONST_NAME(vm);
+  CONST_NAME(stdcall);
+#undef CONST_NAME
+
+  const char* name;
 
   uint8_t return_register = 0;//Usually RAX or 0
   uint8_t stack_pointer_reg = 0;
@@ -55,6 +68,9 @@ struct CallingConvention {
   uint8_t num_parameter_registers = 0;
   uint8_t num_volatile_registers = 0;
   uint8_t num_non_volatile_registers = 0;
+
+  CLEANUP cleanup = CLEANUP::calleE;
+  STACK_PASS_TYPE stack_pass_type = STACK_PASS_TYPE::POINTER;
   STACK_DIRECTION stack_direction = STACK_DIRECTION::RIGHT_TO_LEFT;
 
   uint8_t shadow_space_size = 0;//bytes
@@ -66,9 +82,29 @@ struct CallingConvention {
 
   bool is_non_volatile(uint8_t) const;
   bool is_volatile(uint8_t) const;
+  size_t num_reg_parameters(size_t total_parameters) const;
 };
+
+const char* x86_64_reg_name_from_num(uint8_t reg) noexcept;
+const char* vm_regs_name_from_num(uint8_t reg) noexcept;
+const char* reg_num_as_string(uint8_t reg) noexcept;
+
+extern const System system_x86_64;
+extern const System system_vm;
 
 extern const CallingConvention convention_vm;
 extern const CallingConvention convention_microsoft_x64;
+extern const CallingConvention convention_stdcall;
 
-const char* reg_num_as_string(uint8_t reg) noexcept;
+bool register_passed_as_pointer(const Structure* type);
+
+struct CallingConvArgIterator {
+  const CallingConvention* conv;
+  size_t regs_used;
+};
+
+struct CallingConvParamIterator {
+  const CallingConvention* conv;
+  size_t regs_used;
+  int32_t stack_passed;
+};

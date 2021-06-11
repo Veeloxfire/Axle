@@ -211,12 +211,12 @@ void load_string(Array<char>& res, PrintCallSignature p_call) {
 }
 
 void load_string(Array<char>& res, PrintFuncSignature p_func) {
-  const Function* func = p_func.func;
+  const FunctionBase* func = p_func.func;
 
   res.insert('(');
 
-  auto i = func->parameter_types.begin();
-  const auto end = func->parameter_types.end();
+  auto i = func->signature.parameter_types.begin();
+  const auto end = func->signature.parameter_types.end();
 
   if (i < end) {
     for (; i < (end - 1); i++) {
@@ -228,7 +228,7 @@ void load_string(Array<char>& res, PrintFuncSignature p_func) {
   }
 
   load_string(res, ") -> ");
-  load_string(res, func->return_type->name);
+  load_string(res, func->signature.return_type->name);
 }
 
 void load_string(Array<char>& res, const CallSignature& call_sig) {

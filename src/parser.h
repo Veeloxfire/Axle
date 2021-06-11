@@ -6,41 +6,56 @@
 
 struct ASTFile;
 
+#define AXLE_TOKEN_KEYWORDS \
+MODIFY(Return, "return") \
+MODIFY(Function, "function") \
+MODIFY(If, "if") \
+MODIFY(Else, "else") \
+MODIFY(True, "true") \
+MODIFY(False, "false") \
+MODIFY(Nullptr, "nullptr") \
+MODIFY(Cast, "cast")
+
+#define AXLE_TOKEN_OPERATORS \
+MODIFY(Add, "+") \
+MODIFY(Sub, "-") \
+MODIFY(Star, "*") \
+MODIFY(BackSlash, "/") \
+MODIFY(Lesser, "<") \
+MODIFY(Greater, ">") \
+MODIFY(Or, "|") \
+MODIFY(And, "&") \
+MODIFY(Equals, "=")
+
+#define AXLE_TOKEN_STRUCTURAL \
+MODIFY(Left_Bracket, "(") \
+MODIFY(Right_Bracket, ")") \
+MODIFY(Left_Brace, "{") \
+MODIFY(Right_Brace, "}") \
+MODIFY(Left_Square, "[") \
+MODIFY(Right_Square, "]") \
+MODIFY(Comma, ",") \
+MODIFY(Semicolon, ";")
+
+#define AXLE_TOKEN_INTRINSICS \
+MODIFY(Import, "#import") \
+MODIFY(DLLHeader, "#dll_header") \
+MODIFY(Convention, "#conv") \
+
 #define AXLE_TOKEN_MODIFY \
-MODIFY(Error)\
-MODIFY(Eof)\
-MODIFY(Identifier)\
-MODIFY(Number)\
-MODIFY(Return)\
-MODIFY(Function)\
-MODIFY(If)\
-MODIFY(Else)\
-MODIFY(True)\
-MODIFY(False)\
-MODIFY(Cast)\
-MODIFY(Add)\
-MODIFY(Sub)\
-MODIFY(Star)\
-MODIFY(BackSlash)\
-MODIFY(Lesser)\
-MODIFY(Greater)\
-MODIFY(Or)\
-MODIFY(And)\
-MODIFY(Equals)\
-MODIFY(Left_Bracket)\
-MODIFY(Right_Bracket)\
-MODIFY(Left_Brace)\
-MODIFY(Right_Brace)\
-MODIFY(Left_Square)\
-MODIFY(Right_Square)\
-MODIFY(Comma)\
-MODIFY(Semicolon)\
-MODIFY(String)\
-MODIFY(Import)\
-MODIFY(As)
+MODIFY(Error, "") \
+MODIFY(Eof, "") \
+MODIFY(Identifier, "") \
+MODIFY(Number, "") \
+MODIFY(String, "") \
+AXLE_TOKEN_KEYWORDS \
+AXLE_TOKEN_OPERATORS \
+AXLE_TOKEN_STRUCTURAL \
+AXLE_TOKEN_INTRINSICS
+
 
 enum class AxleTokenType : uint8_t {
-#define MODIFY(n) n,
+#define MODIFY(n, str) n,
   AXLE_TOKEN_MODIFY
 #undef MODIFY
 };
@@ -89,6 +104,7 @@ struct Lexer {
 struct Parser {
   Lexer lexer ={};
 
+  Token prev = {};
   Token current ={};
 
   void report_error(const char* error_message);

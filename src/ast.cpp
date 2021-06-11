@@ -9,7 +9,7 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
 
   const_val = std::exchange(a.const_val, nullptr);
   span = std::exchange(a.span, {});
-  
+
   expr_type = std::exchange(a.expr_type, EXPRESSION_TYPE::UNKNOWN);
 
 
@@ -17,6 +17,7 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
   switch (expr_type)
   {
     case EXPRESSION_TYPE::UNKNOWN:
+    case EXPRESSION_TYPE::NULLPTR:
       break;
     case EXPRESSION_TYPE::ARRAY_EXPR:
       array_expr = std::move(a.array_expr);
@@ -82,6 +83,7 @@ void ASTExpression::set_union(EXPRESSION_TYPE et) noexcept {
         break;
       }
 
+    case EXPRESSION_TYPE::NULLPTR:
     case EXPRESSION_TYPE::LOCAL:
     case EXPRESSION_TYPE::NAME:
     case EXPRESSION_TYPE::VALUE:
@@ -122,6 +124,7 @@ void ASTExpression::destruct_union() noexcept {
         break;
       }
 
+    case EXPRESSION_TYPE::NULLPTR:
     case EXPRESSION_TYPE::LOCAL:
     case EXPRESSION_TYPE::NAME:
     case EXPRESSION_TYPE::VALUE:
@@ -139,6 +142,7 @@ void ASTStatement::set_union(STATEMENT_TYPE st) noexcept {
   type = st;
   switch (type) {
     case STATEMENT_TYPE::UNKNOWN: break;
+
     case STATEMENT_TYPE::RETURN:
     case STATEMENT_TYPE::EXPRESSION: {
         default_init(&expression);
@@ -165,7 +169,7 @@ void ASTStatement::destruct_union() noexcept {
 
     case STATEMENT_TYPE::RETURN:
     case STATEMENT_TYPE::EXPRESSION: {
-        expression.~ASTExpression();
+        destruct_single(&expression);
         break;
       }
     case STATEMENT_TYPE::LOCAL: {
@@ -221,4 +225,184 @@ void ASTType::destruct_union() {
 
 ASTType::~ASTType() {
   destruct_union();
+}
+
+static void build_expression_linked_list(ASTExpression* expr);
+
+static void build_expression_linked_list(ASTType* type) {
+  switch (type->type_type) {
+    case TYPE_TYPE::NORMAL: break;
+    case TYPE_TYPE::ARRAY:
+      build_expression_linked_list(type->arr.base);
+      build_expression_linked_list(type->arr.expr);
+      break;
+    case TYPE_TYPE::PTR:
+      build_expression_linked_list(type->ptr.base);
+      break;
+    default: assert(false); break;
+  }
+}
+
+//Returns the first element
+static void build_expression_linked_list(ASTExpression* expr) {
+  assert(expr->next == nullptr);
+  assert(expr->first == nullptr);
+
+  DEFER(&) {
+    assert(expr->next == nullptr);
+    assert(expr->first != nullptr);
+  };
+
+  switch (expr->expr_type) {
+    case EXPRESSION_TYPE::UNKNOWN: assert(false); break;
+    case EXPRESSION_TYPE::CAST: {
+        build_expression_linked_list(&expr->cast.type);
+        build_expression_linked_list(expr->cast.expr);
+        expr->first = expr->cast.expr->first;
+        expr->cast.expr->next = expr;
+        break;
+      }
+    case EXPRESSION_TYPE::UNARY_OPERATOR: {
+        build_expression_linked_list(expr->un_op.expr);
+        expr->first = expr->un_op.expr->first;
+        expr->un_op.expr->next = expr;
+        break;
+      }
+    case EXPRESSION_TYPE::BINARY_OPERATOR: {
+        build_expression_linked_list(expr->bin_op.left);
+        build_expression_linked_list(expr->bin_op.right);
+
+        expr->first = expr->bin_op.left->first;
+        expr->bin_op.left->next = expr->bin_op.right->first;
+        expr->bin_op.right->next = expr;
+        break;
+      }
+    case EXPRESSION_TYPE::INDEX: {
+        build_expression_linked_list(expr->index.expr);
+        build_expression_linked_list(expr->index.index);
+
+        expr->first = expr->index.expr->first;
+        expr->index.expr->next = expr->index.index->first;
+        expr->index.index->next = expr;
+        break;
+      }
+    case EXPRESSION_TYPE::NULLPTR:
+    case EXPRESSION_TYPE::ASCII_STRING:
+    case EXPRESSION_TYPE::VALUE:
+    case EXPRESSION_TYPE::ENUM:
+    case EXPRESSION_TYPE::LOCAL:
+    case EXPRESSION_TYPE::NAME: {
+        expr->first = expr;
+        break;
+      }
+    case EXPRESSION_TYPE::FUNCTION_CALL: {
+        auto i = expr->call.arguments.mut_begin();
+        auto end = expr->call.arguments.mut_end();
+
+        if (i < end) {
+          build_expression_linked_list(i);
+          expr->first = i->first;
+
+          ASTExpression* prev = i;
+
+          i++;//load next
+
+          for (; i < end; i++) {
+            build_expression_linked_list(i);
+
+            prev->next = i->first;
+            prev = i;
+          }
+
+          prev->next = expr;
+        }
+        else {
+          expr->first = expr;
+        }
+        break;
+      }
+    case EXPRESSION_TYPE::ARRAY_EXPR: {
+        auto i = expr->array_expr.elements.mut_begin();
+        auto end = expr->array_expr.elements.mut_end();
+
+        if (i < end) {
+          build_expression_linked_list(i);
+          expr->first = i->first;
+
+          ASTExpression* prev = i;
+
+          i++;//load next
+
+          for (; i < end; i++) {
+            build_expression_linked_list(i);
+
+            prev->next = i->first;
+            prev = i;
+          }
+
+          prev->next = expr;
+        }
+        else {
+          expr->first = expr;
+        }
+        break;
+      }
+  }
+}
+
+void build_expression_linked_list(ASTBlock* block) {
+  Array<ScopeView> scopes ={};
+  scopes.insert({
+    block->block.mut_begin(),
+    block->block.end()
+                });
+
+  while (scopes.size > 0) {
+    auto* this_scope = scopes.back();
+
+    while (this_scope->i < this_scope->end) {
+      ASTStatement* stmt = this_scope->i++;
+
+      switch (stmt->type) {
+        case STATEMENT_TYPE::UNKNOWN: assert(false); break;
+        case STATEMENT_TYPE::EXPRESSION:
+        case STATEMENT_TYPE::RETURN:
+          build_expression_linked_list(&stmt->expression);
+          break;
+        case STATEMENT_TYPE::BLOCK:
+          scopes.insert({
+              stmt->block.block.mut_begin(),
+              stmt->block.block.end()
+                        });
+
+          this_scope = scopes.back();
+          goto NEW_SCOPE;
+        case STATEMENT_TYPE::IF_ELSE:
+          build_expression_linked_list(&stmt->if_else.condition);
+
+          scopes.insert({
+              stmt->if_else.if_statement,
+              stmt->if_else.if_statement + 1
+                        });
+
+          scopes.insert({
+              stmt->if_else.else_statement,
+              stmt->if_else.else_statement + 1
+                        });
+
+          this_scope = scopes.back();
+          goto NEW_SCOPE;
+        case STATEMENT_TYPE::LOCAL:
+          build_expression_linked_list(&stmt->local.type);
+          build_expression_linked_list(&stmt->local.expression);
+          break;
+      }
+    }
+
+  NEW_SCOPE:
+    while (this_scope->i >= this_scope->end) {
+      scopes.pop();
+      this_scope = scopes.back();
+    }
+  }
 }

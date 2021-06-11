@@ -1,16 +1,10 @@
-function fib(u64 i) -> u64 {
-  if((i == 0) | (i == 1)) {
-    return 1;
-  }
-  else {
-    return fib(i - 1) + fib(i - 2);
-  }
-}
+#dll_header "C:\\Windows\\System32\\kernel32.dll";
 
-function do_a_thing(u8 i) -> i8 {
-  return -1;
-}
+function GetStdHandle(i32 nStdHandle) -> u64;
 
-function do_a_thing(u64 i) -> u64 {
-  return fib(i);
-}
+function WriteConsoleA(u64   hConsoleOutput,
+                       *void lpBuffer,
+                       u32   nNumberOfCharsToWrite,
+                       *u32 lpNumberOfCharsWritten,
+                       *void lpReserved)
+                       -> i32;

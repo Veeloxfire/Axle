@@ -165,7 +165,7 @@ bool run_test(const Options& opts, const uint64_t res) {
     out.return_code = compile_file(opts, &prog);
 
     if (out.return_code == 0) {
-      out = run_program(opts, prog);
+      out = run_program(opts, &prog);
     }
 
     const auto end = std::chrono::high_resolution_clock::now();
@@ -235,13 +235,14 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
     options.optimize = optimize;
 
     options.build.system             = env.system;
-    options.build.calling_convention = env.convention;
+    options.build.default_calling_convention = env.convention;
     options.build.entry_point        = "main";
     options.build.file_name          = test.file_name;
 
     //options.print.ast = true;
     //options.print.fully_compiled = true;
-    //options.print.comptime_exec = true;
+    //options.print.comptime_exec  = true;
+    //options.print.comptime_res   = true;
     //options.print.pre_reg_alloc = true;
     //options.print.coalesce_values = true;
 

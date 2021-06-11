@@ -1,5 +1,6 @@
 #pragma once
 #include "utility.h"
+#include "Program.h"
 
 struct MemComplex;
 
@@ -209,9 +210,12 @@ namespace X64 {
 struct Compiler;
 struct CodeBlock;
 
-size_t vm_backend(Array<uint8_t>& out_code, const Compiler*);
-size_t vm_backend_single_func(Array<uint8_t>& out_code, const CodeBlock* code, uint64_t labels);
+void vm_backend(Program* prog, Compiler* comp);
 
-size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* comp);
+void vm_backend_single_func(Program* prog,
+                            const CodeBlock* code,
+                            Compiler* const comp);
+
+void x86_64_machine_code_backend(Program* prog, Compiler* comp);
 
 void print_x86_64(const uint8_t* bytes, size_t size);

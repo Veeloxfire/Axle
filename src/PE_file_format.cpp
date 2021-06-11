@@ -1,5 +1,6 @@
 #include "PE_file_format.h"
 #include "files.h"
+#include "compiler.h"
 #include <stdio.h>
 #include <time.h>
 
@@ -58,7 +59,7 @@ Import* new_import(const InternString* dll_name, ImportTable* imports, ConstantT
   return new_i;
 }
 
-void add_name_to_import(Import* import_ptr, const InternString* name_to_import, ImportTable* table) {
+void add_name_to_import(Import* import_ptr, const InternString* name_to_import, VA estimated_va, ImportTable* table) {
   {
     auto i = import_ptr->imported_names.begin();
     const auto end = import_ptr->imported_names.end();
@@ -72,7 +73,7 @@ void add_name_to_import(Import* import_ptr, const InternString* name_to_import, 
       }
     }
   }
-  
+
   {
     size_t i = 0;
     const size_t end = table->import_names.size;
@@ -89,7 +90,9 @@ void add_name_to_import(Import* import_ptr, const InternString* name_to_import, 
   }
 
   table->import_names.insert_uninit(1);
-  table->import_names.back()->name = name_to_import;
+  auto* name = table->import_names.back();
+  name->name = name_to_import;
+  name->va = estimated_va;
 
   import_ptr->imported_names.insert(table->import_names.size - 1);
 }
@@ -197,7 +200,7 @@ static void import_names_to_bytes(VA va, Array<ImportNameEntry>& import_names, A
   }
 }
 
-ErrorCode write_portable_executable_to_file(const PE_File* pe_file, const char* file_name) {
+ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const char* file_name) {
 
   if (pe_file->imports != nullptr) {
     assert(pe_file->constants != nullptr);
@@ -558,4 +561,304 @@ ErrorCode write_portable_executable_to_file(const PE_File* pe_file, const char* 
   }
 
   return FILES::close(out);
+}
+
+struct RVA_Resolver {
+  int32_t ptr_base = 0;
+  size_t va_base = 0;
+
+  int32_t load_rva_ptr(RVA rva) const {
+    return (int32_t)(rva - va_base) + ptr_base;
+  }
+};
+
+static RVA_Resolver get_rva_section_resolver(PEFile* pe_file, RVA rva) {
+  auto i = pe_file->section_headers.begin();
+  auto end = pe_file->section_headers.end();
+  for (; i < end; i++) {
+    size_t end_of_section = i->virtual_address + (uint64_t)i->virtual_size;
+    if (i->virtual_address <= rva && rva < end_of_section) {
+      RVA_Resolver res ={};
+      res.ptr_base = i->pointer_to_raw_data;
+      res.va_base = i->virtual_address;
+      return res;
+    }
+  }
+
+  return {};
+}
+
+void load_portable_executable_from_file(Compiler* const comp,
+                                        const Span& span,
+                                        PEFile* pe_file,
+                                        const char* file_name) {
+
+  FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::READ, FILES::DATA_MODE::BINARY);
+
+  if (file.error_code != 0) {
+    comp->report_error(CompileCode::FILE_ERROR, span,
+                       "Could not open file '{}'\n"
+                       "Perhaps it does not exist",
+                       file_name);
+    return;
+  }
+
+  //Close file if it was opened
+  DEFER(&) { FILES::close(file.file); };
+
+  FILES::read(file.file, &pe_file->header.ms_dos, 1);
+
+  if (pe_file->header.ms_dos.magic != MAGIC_NUMBER::MZ) {
+    comp->report_error(CompileCode::FILE_ERROR, span,
+                       "File '{}' did not have correct type\n"
+                       "Magic numbers did not match\n"
+                       "Expected '{}'. Found '{}'",
+                       file_name, (uint16_t)MAGIC_NUMBER::MZ,
+                       (uint16_t)pe_file->header.ms_dos.magic);
+    return;
+  }
+
+  FILES::seek(file.file, FILES::SEEK_MODE::BEGIN, pe_file->header.ms_dos.actual_start_of_header);
+  FILES::read(file.file, (uint8_t*)pe_file->header.signature, SIGNATURE_SIZE);
+
+  {
+    char expected_sig[SIGNATURE_SIZE] = PE_SIGNATURE;
+    static_assert(SIGNATURE_SIZE == 4, "Must be 4");
+    char* sig = (char*)pe_file->header.signature;
+
+    if (memcmp_ts(expected_sig, sig, 4) != 0) {
+      comp->report_error(CompileCode::FILE_ERROR, span,
+                         "File '{}' did not have correct signature\n"
+                         "Expected: {} {} {} {}. Found: {} {} {} {}",
+                         file_name,
+                         DisplayChar{ expected_sig[0] }, DisplayChar{ expected_sig[1] },
+                         DisplayChar{ expected_sig[2] }, DisplayChar{ expected_sig[3] },
+                         DisplayChar{ sig[0] }, DisplayChar{ sig[1] },
+                         DisplayChar{ sig[2] }, DisplayChar{ sig[3] });
+      return;
+    }
+  }
+
+  FILES::read(file.file, &pe_file->header.coff, 1);
+  const size_t opt_header_pos = FILES::current_pos(file.file);
+  FILES::read(file.file, &pe_file->header.pe32, 1);
+
+  if (pe_file->header.pe32.magic_number != MAGIC_NUMBER::PE32_PLUS) {
+    comp->report_error(CompileCode::FILE_ERROR, span,
+                       "File '{}' did not have correct type\n"
+                       "2nd magic numbers did not match\n"
+                       "Expected '{}'. Found '{}'",
+                       file_name, (uint16_t)MAGIC_NUMBER::PE32_PLUS,
+                       (uint16_t)pe_file->header.pe32.magic_number);
+    return;
+  }
+
+  FILES::read(file.file, &pe_file->header.pe32_windows, 1);
+
+  {
+    const PE32Plus_windows_specific& win = pe_file->header.pe32_windows;
+
+    if (win.win32_version != 0 || win.loader_flags != 0) {
+      comp->report_error(CompileCode::FILE_ERROR, span,
+                         "Parts of file '{}' that are reserved as 0 were not 0\n"
+                         "This is probably an internal reading error",
+                         file_name);
+      return;
+    }
+  }
+
+  const size_t num_dirs = pe_file->header.pe32_windows.number_of_rva_and_sizes;
+  FILES::read<Data_directory>(file.file, (Data_directory*)&pe_file->header.directories,
+                              num_dirs);
+
+  {
+    size_t currpos = FILES::current_pos(file.file);
+    size_t expected = pe_file->header.coff.size_of_optional_header + opt_header_pos;
+
+    if (currpos != expected) {
+      comp->report_error(CompileCode::FILE_ERROR, span,
+                         "Size mismatch in header\n"
+                         "Expected optional header position '{}'. Found '{}'",
+                         expected, currpos);
+      return;
+    }
+  }
+
+  //Load Sections
+  {
+    const size_t num_sections = pe_file->header.coff.number_of_sections;
+
+    pe_file->section_headers.insert_uninit(num_sections);
+    Section_Header* headers = pe_file->section_headers.data;
+
+    FILES::read(file.file, headers, num_sections);
+  }
+
+  //Load exports
+  if (num_dirs > 1 && pe_file->header.directories.export_table.virtual_address > 0) {
+    //There is an export table
+    const Data_directory& export_table = pe_file->header.directories.export_table;
+    RVA_Resolver resolver = get_rva_section_resolver(pe_file, export_table.virtual_address);
+
+
+    //Seek to export table
+    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN, resolver.load_rva_ptr(export_table.virtual_address));
+
+    //Load directory table
+    FILES::read(file.file, &pe_file->export_table.directory_table, 1);
+
+    const ExportDirectoryTable& directory_table = pe_file->export_table.directory_table;
+    if (directory_table.export_flags != 0) {
+      comp->report_error(CompileCode::FILE_ERROR, span,
+                         "Export table export flags should be '0'. Found '{}'\n"
+                         "This is probably an internal error",
+                         directory_table.export_flags);
+      return;
+    }
+
+
+    //Load all exports
+    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN, resolver.load_rva_ptr(directory_table.export_table_address));
+
+    const size_t num_exports = directory_table.num_export_entries;
+    pe_file->export_table.address_table.insert_uninit(num_exports);
+
+    FILES::read(file.file, pe_file->export_table.address_table.data, num_exports);
+
+    //Load name pointers
+    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN,
+                resolver.load_rva_ptr(directory_table.name_pointer_table_address));
+
+
+    const size_t num_ordinals = directory_table.num_name_pointers;
+
+    //Load name rvas
+    Array<RVA> name_rvas ={};
+    name_rvas.insert_uninit(num_ordinals);
+    //Seek to names
+    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN,
+                resolver.load_rva_ptr(directory_table.name_pointer_table_address));
+    //Read names
+    FILES::read(file.file, name_rvas.data, num_ordinals);
+
+    //Load ordinals
+    Array<uint16_t> ordinals ={};
+    ordinals.insert_uninit(num_ordinals);
+    //Seek to ordinals
+    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN,
+                resolver.load_rva_ptr(directory_table.ordinal_table_address));
+    //Read ordinals
+    FILES::read(file.file, ordinals.data, num_ordinals);
+
+    //Load the names and ordinals together
+    {
+      pe_file->export_table.element_table.reserve_extra(num_ordinals);
+
+      Array<char> name_holder ={};
+
+      for (size_t i = 0; i < num_ordinals; i++) {
+        pe_file->export_table.element_table.insert_uninit(1);
+        ExportElement* ptr = pe_file->export_table.element_table.back();
+
+        RVA name = name_rvas.data[i];
+        uint16_t ordinal = ordinals.data[i];
+
+        ptr->ordinal = ordinal;
+        if (name == 0) {
+          //No name
+          ptr->str = nullptr;
+          continue;
+        }
+
+        //These is a name we can load!
+
+        //Start of the string
+        FILES::seek(file.file, FILES::SEEK_MODE::BEGIN, resolver.load_rva_ptr(name));
+
+        //load each character
+        char c = FILES::read_byte(file.file);
+        while (c != '\0') {
+          name_holder.insert(c);
+          c = FILES::read_byte(file.file);
+        }
+
+        name_holder.insert('\0');
+
+        ptr->str = comp->strings->intern(name_holder.data);
+        name_holder.clear();
+      }
+
+    }
+  }
+}
+
+void load_portable_executable_exports(Compiler* const comp,
+                                      ImportedDll* dll,
+                                      const Span& span,
+                                      const char* file_name) {
+  OwnedPtr<const uint8_t> bytes = cast_ptr<const uint8_t>(FILES::load_file_to_string(file_name));
+  if (bytes.ptr == nullptr) {
+    comp->report_error(CompileCode::UNFOUND_DEPENDENCY, span,
+                       "Could not find the file '{}'",
+                       file_name);
+    return;
+  }
+
+  const uint8_t* ptr = bytes.ptr;
+
+  const MS_DOS_Header* dos = (const MS_DOS_Header*)ptr;
+
+  ptr += dos->actual_start_of_header;
+  const uint8_t* signature = ptr;
+  ptr += SIGNATURE_SIZE;
+
+  const COFF_file_header* coff = (const COFF_file_header*)ptr;
+  ptr += sizeof(COFF_file_header);
+
+  const PE32Plus_optional_header* plus = (const PE32Plus_optional_header*)ptr;
+  ptr += sizeof(PE32Plus_optional_header);
+
+  const PE32Plus_windows_specific* plus_win = (const PE32Plus_windows_specific*)ptr;
+  ptr += sizeof(PE32Plus_windows_specific);
+
+  const size_t num_dirs = plus_win->number_of_rva_and_sizes;
+
+  Image_header_directories directories ={};
+  {
+    size_t size_needed = num_dirs * sizeof(Data_directory);
+    memcpy_ts((uint8_t*)&directories, size_needed,
+              ptr, size_needed);
+    ptr += size_needed;
+  }
+
+  if (num_dirs > 0) {
+    const ExportDirectoryTable* const export_directory_table
+      = (const ExportDirectoryTable*)(bytes.ptr + directories.export_table.virtual_address);
+
+    const ExportAddress* export_address_table
+      = (const ExportAddress*)(bytes.ptr + export_directory_table->export_table_address);
+    const size_t num_exports = export_directory_table->num_export_entries;
+
+    const RVA* name_pointers = (const RVA*)(bytes.ptr + export_directory_table->name_pointer_table_address);
+    const uint16_t* ordinal_table = (const uint16_t*)(bytes.ptr + export_directory_table->ordinal_table_address);
+
+    assert(export_directory_table->num_export_entries == export_directory_table->num_name_pointers);
+
+    const InternString* file_name = comp->strings->intern((const char*)(bytes.ptr + export_directory_table->name_rva));
+
+    for (size_t i = 0; i < num_exports; i++) {
+      RVA name_pointer = name_pointers[i];
+      uint16_t ordinal = ordinal_table[i];
+
+      const ExportAddress* entry = export_address_table + ordinal;
+      const char* string = (const char*)(bytes.ptr + name_pointer);
+
+      const InternString* name = comp->strings->intern(string);
+
+      dll->imports.insert_uninit(1);
+      SingleDllImport* single_export = dll->imports.back();
+      single_export->rva_hint = entry->export_rva;
+      single_export->name = name;
+    }
+  }
 }

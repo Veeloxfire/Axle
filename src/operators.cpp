@@ -509,7 +509,7 @@ void impl_compile_unary_op(Compiler* comp, ASTExpression* expr, const UnaryOpOpt
 
   const Types* const types = comp->types;
 
-  ASTExpression* const prim = expr->un_op.primary;
+  ASTExpression* const prim = expr->un_op.expr;
 
   if (op.i64_emit != nullptr) {
     if (prim->type == types->s_i64 || prim->type == types->s_sint_lit) {
@@ -637,14 +637,14 @@ void compile_take_address(Compiler* comp,
   //Cant actually fail
   assert(expr->expr_type == EXPRESSION_TYPE::UNARY_OPERATOR);
 
-  const Structure* base = expr->un_op.primary->type;
+  const Structure* base = expr->un_op.expr->type;
 
   const Structure* ptr = find_or_make_pointer_type(comp, base);
   expr->type = ptr;
   expr->un_op.emit = &OP::emit_address;
 
   //Can only load the address of somewhere in memory
-  set_valid_rvts(expr->un_op.primary, state, (uint8_t)RVT::MEMORY);
+  set_valid_rvts(expr->un_op.expr, state, (uint8_t)RVT::MEMORY);
 }
 
 //Overload for dereferencing
@@ -652,7 +652,7 @@ void compile_deref(Compiler* comp,
                    ASTExpression* expr) {
   assert(expr->expr_type == EXPRESSION_TYPE::UNARY_OPERATOR);
 
-  ASTExpression* prim = expr->un_op.primary;
+  ASTExpression* prim = expr->un_op.expr;
 
   if (prim->type->type == STRUCTURE_TYPE::POINTER) {
     const PointerStructure* ptr = (const PointerStructure*)prim->type;

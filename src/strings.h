@@ -33,6 +33,7 @@ struct Table {
   ~Table();
 
   void try_resize();
+
   const InternString** find(const char* str, size_t len, uint64_t hash) const;
   const InternString** find_empty(uint64_t hash) const;
 };
@@ -61,6 +62,25 @@ struct TempUTF8String {
   }
 };
 
+struct InternStringSet {
+  constexpr static float LOAD_FACTOR = 0.75;
+
+  const InternString** data = nullptr;// ptr to data in the array
+  size_t el_capacity        = 0;
+  size_t used               = 0;
+
+  constexpr bool needs_resize(size_t extra) const {
+    return (el_capacity * LOAD_FACTOR) <= (used + extra);
+  }
+
+  ~InternStringSet();
+
+  bool contains(const InternString* key) const;
+  const InternString** get(const InternString* key) const;
+  void try_extend(size_t num);
+  void insert(const InternString* const key);
+};
+
 template<typename T>
 struct InternHashTable {
   constexpr static float LOAD_FACTOR = 0.75;
@@ -73,11 +93,18 @@ struct InternHashTable {
     return (el_capacity * LOAD_FACTOR) <= (used + extra);
   }
 
+  constexpr const InternString** key_arr() const {
+    return (const InternString**)data;
+  }
+
+  constexpr T* val_arr() const {
+    return (T*)(data + (el_capacity * sizeof(const InternString*)));
+  }
+
   ~InternHashTable() {
     {
-      const InternString** keys = (const InternString**)data;
-
-      T* vals = (T*)(data + el_capacity * sizeof(const InternString*));
+      const InternString** keys = key_arr();
+      T* vals = val_arr();
 
       for (size_t i = 0; i < el_capacity; i++) {
         const InternString* key = keys[i];
@@ -98,22 +125,23 @@ struct InternHashTable {
   bool contains(const InternString* key) const {
     if(el_capacity == 0) return false;
 
-    const InternString** hash_arr = (const InternString**)data;
+    const InternString** keys = key_arr();
 
     size_t index = key->hash % el_capacity;
 
-    const InternString* test_key = hash_arr[index];
-    while (test_key != nullptr) {
-      if (key == test_key) {
+    const InternString* test_key = keys[index];
+    while (true) {
+      if (test_key == key) {
         return true;
+      }
+      else if (test_key == nullptr || test_key == TOMBSTONE) {
+        return false;
       }
 
       index++;
       index %= el_capacity;
-      test_key = hash_arr[index];
+      test_key = keys[index];
     }
-
-    return false;
   }
 
   size_t get_soa_index(const InternString* key) const {
@@ -240,8 +268,6 @@ struct InternHashTable {
       used++;
       keys[soa_index] = key;
       vals[soa_index] = std::move(val);     
-    }
-
-     
+    }     
   }
 };

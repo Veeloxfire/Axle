@@ -29,6 +29,7 @@ uint32_t Structure::size() const {
           case LITERAL_TYPE::INTEGER:
           case LITERAL_TYPE::SIGNED_INTEGER: return 8;
           case LITERAL_TYPE::EMPTY_ARR: return 0;
+          case LITERAL_TYPE::POINTER: return 8;
         }
 
         break;
@@ -55,6 +56,7 @@ uint32_t Structure::alignment() const {
           case LITERAL_TYPE::INTEGER:
           case LITERAL_TYPE::SIGNED_INTEGER: return 8;
           case LITERAL_TYPE::EMPTY_ARR: return 0;
+          case LITERAL_TYPE::POINTER: return 8;
         }
 
         break;
@@ -75,7 +77,7 @@ bool can_comptime_cast(const Structure* from, const Structure* to) {
           const ArrayStructure* arr_f = (const ArrayStructure*)from;
           const ArrayStructure* arr_t = (const ArrayStructure*)to;
 
-          return can_comptime_cast(arr_f->base, arr_t->base);
+          return arr_f->length == arr_t->length && can_comptime_cast(arr_f->base, arr_t->base);
         }
         else {
           return false;
@@ -254,79 +256,6 @@ OwnedPtr<char> ArrayStructure::gen_name(const Structure* base, size_t length) {
   return format("[{}, {}]", base->name, length);
 }
 
-void init_types(Compiler* const comp) {
-  auto* types = comp->types;
-  auto* strings = comp->strings;
-
-  Structure* const s_void = new_base_type(comp, strings->intern("void"));
-  s_void->type = STRUCTURE_TYPE::VOID;
-  types->s_void = s_void;
-
-
-  Structure* const ascii = new_base_type(comp, strings->intern("ascii"));
-  ascii->type = STRUCTURE_TYPE::ASCII_CHAR;
-  types->s_ascii = ascii;
-
-  LiteralStructure* const int_lit = new_literal_type(comp, strings->intern("lit_uint"));
-  int_lit->literal_type = LITERAL_TYPE::INTEGER;
-  types->s_int_lit = int_lit;
-
-  LiteralStructure* const sint_lit = new_literal_type(comp, strings->intern("lit_sint"));
-  sint_lit->literal_type = LITERAL_TYPE::SIGNED_INTEGER;
-  types->s_sint_lit = sint_lit;
-
-
-  LiteralStructure* const empty_arr = new_literal_type(comp, strings->intern("lit_empty_array"));
-  empty_arr->literal_type = LITERAL_TYPE::EMPTY_ARR;
-  types->s_empty_arr = empty_arr;
-
-
-  IntegerStructure* const u8 = new_int_type(comp, strings->intern("u8"));
-  u8->is_signed = false;
-  u8->bytes     = 1;
-
-  types->s_u8 = u8;
-
-  IntegerStructure* const i8 = new_int_type(comp, strings->intern("i8"));
-  i8->is_signed = true;
-  i8->bytes     = 1;
-
-  types->s_i8 = i8;
-
-
-  IntegerStructure* const u64 = new_int_type(comp, strings->intern("u64"));
-  u64->is_signed = false;
-  u64->bytes      = 8;
-
-  types->s_u64 = u64;
-
-  IntegerStructure* const i64 = new_int_type(comp, strings->intern("i64"));
-  i64->is_signed = true;
-  i64->bytes     = 8;
-
-  types->s_i64 = i64;
-
-
-  EnumStructure* const s_bool = new_enum_type(comp, strings->intern("bool"));
-  s_bool->base = u8;
-
-  types->s_bool = s_bool;
-
-  s_bool->enum_values.reserve_extra(2);
-  {
-    EnumValue* const e_true = new_enum_value(comp, s_bool, strings->intern("true"));
-    types->e_true = e_true;
-
-    e_true->representation = 1;
-
-    EnumValue* const e_false = new_enum_value(comp, s_bool, strings->intern("false"));
-    types->e_false = e_false;
-
-    e_true->representation = 0;
-  }
-  s_bool->enum_values.shrink();
-}
-
 Types::~Types() {
   {
     auto i = structures.begin();
@@ -410,6 +339,20 @@ RuntimeValue CASTS::i8_to_r64(Compiler* const comp,
                               CodeBlock* const code,
                               const RuntimeValue* const val) {
   return impl_single_cast(comp, state, code, comp->types->s_i8, val, ByteCode::EMIT::CONV_RI8_TO_R64);
+}
+
+RuntimeValue CASTS::u32_to_r64(Compiler* const comp,
+                              State* const state,
+                              CodeBlock* const code,
+                              const RuntimeValue* const val) {
+  return impl_single_cast(comp, state, code, comp->types->s_u8, val, ByteCode::EMIT::CONV_RU32_TO_R64);
+}
+
+RuntimeValue CASTS::i32_to_r64(Compiler* const comp,
+                              State* const state,
+                              CodeBlock* const code,
+                              const RuntimeValue* const val) {
+  return impl_single_cast(comp, state, code, comp->types->s_i8, val, ByteCode::EMIT::CONV_RI32_TO_R64);
 }
 
 RuntimeValue CASTS::no_op(Compiler* const comp,

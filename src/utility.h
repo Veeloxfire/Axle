@@ -189,6 +189,14 @@ constexpr inline uint64_t small_log_2_ceil(uint64_t v) {
   return min + found1;
 }
 
+constexpr uint64_t ceil_to_8(uint64_t val) {
+  const uint64_t is_zero = val == 0;
+  const uint64_t val2 = val - 1 + is_zero;
+  const uint64_t cond8 = is_zero << 3;
+
+  return val2 + 8 - (val2 % 8) - cond8;
+}
+
 constexpr inline uint8_t absolute(int8_t i) {
   if (i == INT32_MIN) {
     return static_cast<uint16_t>(INT8_MAX) + 1u;
@@ -267,7 +275,7 @@ struct Array {
   }
 
   void free() {
-    ::free_destruct_n<T>(data, capacity);
+    ::free_destruct_n<T>(data, size);
     data = nullptr;
     size = 0;
     capacity = 0;
@@ -293,6 +301,17 @@ struct Array {
     }
     size--;
     return t;
+  }
+
+  void insert_at(const size_t index, T&& t) {
+    reserve_extra(1);
+
+    size++;
+    for (size_t i = size + 1; i > index; i--) {
+      data[i - 1] = std::move(data[i - 1]);
+    }
+
+    data[index] = std::move(t);
   }
 
   template<typename L>
@@ -356,10 +375,12 @@ struct Array {
   }
 
   void insert_uninit(const size_t num) noexcept {
-    reserve_extra(num);
+    if (num > 0) {
+      reserve_extra(num);
 
-    default_init<T>(data + size, num);
-    size += num;
+      default_init<T>(data + size, num);
+      size += num;
+    }
   }
 
   //Test for extra space after the size (not capacity)
@@ -414,6 +435,9 @@ struct Array {
     for (; i < end; i++) {
       i->~T();
     }
+
+    //Zero the memory just to be safe
+    zero_init(data, capacity);
 
     size = 0;
   }
@@ -838,6 +862,14 @@ struct OwnedPtr {
   }
 };
 
+template<typename U, typename T>
+OwnedPtr<U> cast_ptr(OwnedPtr<T>&& ptr) {
+  OwnedPtr<U> u = {};
+  u.ptr = (U*)ptr.ptr;
+  ptr.ptr = nullptr;
+  return u;
+}
+
 template<typename T>
 void copy_array(const Array<T>& from, Array<T>& to) noexcept {
   to.clear();
@@ -919,9 +951,11 @@ constexpr const char* error_code_string(const ErrorCode code) {
 
 
 template<typename T>
-void load_to_bytes(Array<uint8_t>& bytes, size_t offset, const T& t) {
-  bytes.reserve_total(offset + sizeof(T));
-  memcpy_ts((T*)bytes.data + offset, bytes.size - offset, &t, 1);
+void serialise_to_array(Array<uint8_t>& bytes, const T& t) {
+  bytes.reserve_extra(sizeof(T));
+  memcpy_ts<uint8_t>(bytes.data + bytes.size, bytes.capacity - bytes.size,
+                     (const uint8_t*)&t, sizeof(T));
+  bytes.size += sizeof(T);
 }
 
 template<typename T>
@@ -1137,3 +1171,17 @@ namespace IO {
 }
 
 #define DO_NOTHING ((void)0)
+
+template<typename T, typename U>
+struct IS_SAME_TYPE_IMPL {
+  constexpr static bool test = false;
+};
+
+template<typename T>
+struct IS_SAME_TYPE_IMPL<T, T> {
+  constexpr static bool test = true;
+};
+
+template<typename T, typename U>
+inline constexpr bool IS_SAME_TYPE = IS_SAME_TYPE_IMPL<T, U>::test;
+

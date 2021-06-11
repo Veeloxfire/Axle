@@ -6,10 +6,10 @@
 #include <iostream>
 #include <chrono>
 
-
 constexpr char output_file[] = "output.exe";
 
 int main(int argc, const char** args) {
+
   if (argc != 2) {
     std::cerr << "Invalid number of arguments!";
     return 1;
@@ -19,18 +19,18 @@ int main(int argc, const char** args) {
   
   options.build.file_name          = args[1];
   options.build.entry_point        = "main";
-  options.build.system             = &system_vm;
-  options.build.calling_convention = &convention_vm;
+  options.build.system                     = &system_vm;
+  options.build.default_calling_convention = &convention_vm;
   //options.build.system             = &system_x86_64;
-  //options.build.calling_convention = &convention_microsoft_x64;
+  //options.build.default_calling_convention = &convention_microsoft_x64;
   options.build.output_file        = output_file;
   
-  options.print.ast             = true;
-  options.print.pre_reg_alloc   = true;
-  options.print.normal_bytecode = true;
-  options.print.comptime_exec   = false;
-  options.print.coalesce_values = true;
-  options.print.fully_compiled  = true;
+  options.print.ast             = false;
+  options.print.pre_reg_alloc   = false;
+  options.print.normal_bytecode = false;
+  options.print.comptime_res    = false;
+  options.print.coalesce_values = false;
+  options.print.fully_compiled  = false;
   options.print.run_headers     = false;
 
   options.optimize.non_stack_locals = true;
@@ -39,13 +39,13 @@ int main(int argc, const char** args) {
   int out = compile_file(options, &program);
   
   if (out == 0) {
-    RunOutput res = run_program(options, program);
-    std::cout << "Returned: " << res.program_return;
+    RunOutput res = run_program(options, &program);
+    //std::cout << "Returned: " << res.program_return;
     
-    return 0;
+    return res.program_return;
   }
   else {
-    std::cerr << "Error!";
+    //std::cerr << "Error!";
     return out;
   }
   

@@ -5,8 +5,12 @@
 
 #include <stdio.h>
 
-size_t vm_backend_single_func(Array<uint8_t>& out_code, const CodeBlock* code, uint64_t labels) {
-  size_t* const label_indexes = allocate_default<size_t>(labels);
+void vm_backend_single_func(Program* prog, const CodeBlock* code, Compiler* const comp) {
+  Array<uint8_t> out_code ={};
+
+  size_t* const label_indexes = allocate_default<size_t>(comp->labels);
+  DEFER(&) { free_no_destruct(label_indexes); };
+
   Array<size_t> instruction_offsets ={};
 
   size_t entry_point_label = code->label;
@@ -67,16 +71,40 @@ size_t vm_backend_single_func(Array<uint8_t>& out_code, const CodeBlock* code, u
           SKIP_JUMP:
             break;
           }
+        case ByteCode::CALL_NATIVE_X64: {
+            const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
+            const FunctionPointer* ptr = p_c.u64_1;
+
+            ByteCode::EMIT::CALL_NATIVE_X64(out_code, prog->data.ptr + ptr->data_index, p_c.u64_2);
+            code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
+            break;
+          }
+        case ByteCode::CALL: {
+            const auto p_c = ByteCode::PARSE::CALL(code_i);
+            const FunctionBase* func_base = p_c.u64;
+            if (func_base->func_type == FUNCTION_TYPE::POINTER) {
+              //Is known at this time
+              assert(false);
+            }
+            else {
+              const Function* func = (const Function*)func_base;
+              instruction_offsets.insert(out_code.size);
+              //Switch to a code label rather than func ptr
+              ByteCode::EMIT::CALL(out_code, func->code_block.label);
+            }
+            
+            code_i += ByteCode::SIZE_OF::CALL;
+            break;
+          }
         case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO:
         case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO:
           //Could try removing these jumps maybe
           //but they shouldnt ever jump to the next instruction anyway
           //Would be checking for something that never happens
-        case ByteCode::CALL:
           instruction_offsets.insert(out_code.size);
-          goto NEXT_INSTRUCTION;//Remove warning about fallthrough
+          goto EMIT_INSTRUCTION;
         default: {
-          NEXT_INSTRUCTION:
+            EMIT_INSTRUCTION:
             const size_t i_size = ByteCode::instruction_size(*code_i);
             out_code.insert_uninit(i_size);
             memcpy_ts(out_code.data + out_code.size - i_size, i_size, code_i, i_size);
@@ -120,17 +148,24 @@ size_t vm_backend_single_func(Array<uint8_t>& out_code, const CodeBlock* code, u
     }
   }
 
-  size_t entry_point_index = -1;
-  if (entry_point_label <= labels) {
-    entry_point_index = label_indexes[entry_point_label];
+  if (entry_point_label <= comp->labels) {
+    prog->entry_point = label_indexes[entry_point_label];
+  }
+  else {
+    comp->report_error(CompileCode::LINK_ERROR, Span{},
+                       "Could not find entry point");
   }
 
-  free_no_destruct(label_indexes);
-  return entry_point_index;
+  prog->code_size = out_code.size;
+  prog->code = std::move(out_code);
 }
 
-size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
+void vm_backend(Program* prog, Compiler* comp) {
+  Array<uint8_t> out_code = {};
+
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
+  DEFER(&) { free_no_destruct(label_indexes); };
+
   Array<size_t> instruction_offsets ={};
 
   size_t entry_point_label = -1;
@@ -141,7 +176,7 @@ size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
-      if (!func->is_called && func->name != comp->entry_point) {
+      if (!func->is_called && func->signature.name != comp->entry_point) {
         //Isnt called and isnt entry point so dont need to compile
         continue;
       }
@@ -158,8 +193,8 @@ size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
         label_indexes[p.u64.val] = out_code.size;
 
         //Find entry point
-        if (func->name == comp->entry_point
-            && func->parameter_types.size == 0) {
+        if (func->signature.name == comp->entry_point
+            && func->signature.parameter_types.size == 0) {
           entry_point_label = p.u64.val;
         }
 
@@ -208,17 +243,41 @@ size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
               ByteCode::EMIT::JUMP_TO_FIXED(out_code, p_j.u64);
             SKIP_JUMP:
               break;
+            }           
+          case ByteCode::CALL_NATIVE_X64: {
+              const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
+              const FunctionPointer* ptr = p_c.u64_1;
+
+              ByteCode::EMIT::CALL_NATIVE_X64(out_code, prog->data.ptr + ptr->data_index, p_c.u64_2);
+              code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
+              break;
+            }
+          case ByteCode::CALL: {
+              const auto p_c = ByteCode::PARSE::CALL(code_i);
+              const FunctionBase* func_base = p_c.u64;
+              if (func_base->func_type == FUNCTION_TYPE::POINTER) {
+                //Is known at this time
+                assert(false);
+              }
+              else {
+                const Function* func = (const Function*)func_base;
+                instruction_offsets.insert(out_code.size);
+                //Switch to a code label rather than func ptr
+                ByteCode::EMIT::CALL(out_code, func->code_block.label);
+              }
+              
+              code_i += ByteCode::SIZE_OF::CALL;
+              break;
             }
           case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO:
           case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO:
             //Could try removing these jumps maybe
             //but they shouldnt ever jump to the next instruction anyway
             //Would be checking for something that never happens
-          case ByteCode::CALL:
             instruction_offsets.insert(out_code.size);
-            goto NEXT_INSTRUCTION;//Remove warning about fallthrough
+            goto EMIT_INSTRUCTION;
           default: {
-            NEXT_INSTRUCTION:
+              EMIT_INSTRUCTION:
               const size_t i_size = ByteCode::instruction_size(*code_i);
               out_code.insert_uninit(i_size);
               memcpy_ts(out_code.data + out_code.size - i_size, i_size, code_i, i_size);
@@ -263,13 +322,16 @@ size_t vm_backend(Array<uint8_t>& out_code, const Compiler* comp) {
     }
   }
 
-  size_t entry_point_index = -1;
   if (entry_point_label <= comp->labels) {
-    entry_point_index = label_indexes[entry_point_label];
+    prog->entry_point = label_indexes[entry_point_label];
+  }
+  else {
+    comp->report_error(CompileCode::LINK_ERROR, Span{},
+                       "Could not find entry point");
   }
 
-  free_no_destruct(label_indexes);
-  return entry_point_index;
+  prog->code_size = out_code.size;
+  prog->code = std::move(out_code);
 }
 
 void X64::mov(Array<uint8_t>& arr,
@@ -735,8 +797,12 @@ static void check_for_jumps(Array<size_t>& instruction_offsets, Array<uint8_t>& 
   }
 }
 
-size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* comp) {
+void x86_64_machine_code_backend(Program* prog, Compiler* comp) {
+  Array<uint8_t> out_code ={};
+
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
+  DEFER(&) { free_no_destruct(label_indexes); };
+
   Array<size_t> instruction_offsets ={};
 
   size_t entry_point_label = -1;
@@ -747,7 +813,7 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
-      if (!func->is_called && func->name != comp->entry_point) {
+      if (!func->is_called && func->signature.name != comp->entry_point) {
         //Isnt called and isnt entry point so dont need to compile
         continue;
       }
@@ -764,8 +830,8 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
         label_indexes[p.u64.val] = out_code.size;
 
         //Find entry point
-        if (func->name == comp->entry_point
-            && func->parameter_types.size == 0) {
+        if (func->signature.name == comp->entry_point
+            && func->signature.parameter_types.size == 0) {
           entry_point_label = p.u64.val;
         }
 
@@ -1112,9 +1178,17 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
             }
           case ByteCode::CALL: {
               const auto p = ByteCode::PARSE::CALL(code_i);
-
-              instruction_offsets.insert(out_code.size);
-              call_near(out_code, (int32_t)p.u64.val);
+              const FunctionBase* func_base = p.u64;
+              if (func_base->func_type == FUNCTION_TYPE::POINTER) {
+                //Is known at this time
+                assert(false);
+              }
+              else {
+                const Function* func = (const Function*)func_base;
+                instruction_offsets.insert(out_code.size);
+                //Switch to a code label rather than func ptr
+                call_near(out_code, (int32_t)func->code_block.label);
+              }
 
               code_i += ByteCode::SIZE_OF::CALL;
               break;
@@ -1175,10 +1249,11 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
             }
           default: {
               uint8_t op = *code_i;
-              printf("INTERNAL ERROR: Backend found unsupported bytecode instruction\n"
-                     "                Code: %d, Name: %s\n",
-                     (int)op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
-              return -1;
+              comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+                                 "Backend found unsupported bytecode instruction\n"
+                                 "Code: {}, Name: {}",
+                                  op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
+              return;
             }
         }
       }
@@ -1204,13 +1279,16 @@ size_t x86_64_machine_code_backend(Array<uint8_t>& out_code, const Compiler* com
     }
   }
 
-  size_t entry_point_index = -1;
   if (entry_point_label <= comp->labels) {
-    entry_point_index = label_indexes[entry_point_label];
+    prog->entry_point = label_indexes[entry_point_label];
+  }
+  else {
+    comp->report_error(CompileCode::LINK_ERROR, Span{},
+                       "Could not find entry point");
   }
 
-  free_no_destruct(label_indexes);
-  return entry_point_index;
+  prog->code_size = out_code.size;
+  prog->code = std::move(out_code);
 }
 
 struct RegisterNames {

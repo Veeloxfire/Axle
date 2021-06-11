@@ -3,44 +3,44 @@
 #include "bytecode.h"
 #include "options.h"
 #include "calling_conventions.h"
+#include "Program.h"
 
 struct Reg64_8BL {
-  uint8_t padding[7];
-
   union {
     uint8_t reg;
     int8_t reg_s;
   };
+
+  uint8_t padding[7];
 };
 
 struct Reg64_8BH {
-  uint8_t padding[6];
+  uint8_t padding1;
 
   union {
     uint8_t reg;
     int8_t reg_s;
   };
 
-  uint8_t padding2;
+  uint8_t padding2[6];
 };
 
 struct Reg64_16B {
-  uint8_t padding[6];
   union {
     uint16_t reg;
     int16_t reg_s;
   };
+  uint8_t padding[6];
 };
 
 struct Reg64_32B {
-  uint32_t padding;
 
   union {
     int32_t reg_s;
     uint32_t reg;
   };
 
-  void zero_padding() noexcept;
+  uint32_t padding;
 };
 
 struct Reg64_64B {
@@ -111,12 +111,12 @@ struct VM_LOADER {
 };
 
 template<typename ... T>
-void vm_set_parameters(const BuildOptions* opts, VM* vm, T&& ... t) {
-  const size_t num_param_regs = opts->calling_convention->num_parameter_registers;
+void vm_set_parameters(const CallingConvention* conv, VM* vm, T&& ... t) {
+  const size_t num_param_regs = conv->num_parameter_registers;
   
   VM_LOADER loader ={};
   loader.vm = vm;
-  loader.param_regs = opts->calling_convention->parameter_registers;
+  loader.param_regs = conv->parameter_registers;
   loader.num_param_regs  = num_param_regs;
 
   if (sizeof...(T) > num_param_regs) {
@@ -126,4 +126,5 @@ void vm_set_parameters(const BuildOptions* opts, VM* vm, T&& ... t) {
   (loader << ... << std::forward<T>(t));
 }
 
-ErrorCode vm_rum(VM* vm, const uint8_t* code, size_t entry_point) noexcept;
+void vm_call_native_x64(VM* const vm, const void* func_ptr, uint64_t num_params);
+ErrorCode vm_rum(VM* vm, Program* prog) noexcept;

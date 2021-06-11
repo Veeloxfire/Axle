@@ -6,7 +6,7 @@ enum struct AxleTokenType : uint8_t;
 enum struct STATEMENT_TYPE : uint8_t;
 enum struct ErrorCode : uint8_t;
 
-struct Function;
+struct FunctionBase;
 struct CallSignature;
 struct FileLocation;
 struct FunctionCallExpr;
@@ -17,7 +17,7 @@ struct DisplayChar {
 };
 
 struct PrintFuncSignature {
-  const Function* func;
+  const FunctionBase* func;
 };
 
 struct PrintCallSignature {
@@ -87,19 +87,28 @@ Formatter& operator<<(Formatter& f, const T& t) {
 //Doesnt null terminate!
 template<typename ... T>
 void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
-  Formatter f ={ format, result };
+  //Account for no formatting
+  format = ([](Array<char>& result, const char* format, const auto& ... ts) {
+    if constexpr (sizeof...(T) == 0) {
+      return format;
+    }
+    else {
+      Formatter f ={ format, result };
 
-  (f << ... << ts);
+      (f << ... << ts);
+      return f.format_string;
+    }
+  })(result, format, ts...);
 
-  const char* const string = f.format_string;
+  const char* const string = format;
 
   while (true) {
-    if (f.format_string[0] == '{' && f.format_string[1] == '}') {
+    if (format[0] == '{' && format[1] == '}') {
       throw std::exception("Invalid format");
       break;
     }
-    else if (f.format_string[0] == '\0') {
-      const size_t num_chars = (f.format_string) - string;
+    else if (format[0] == '\0') {
+      const size_t num_chars = format - string;
       result.reserve_extra(num_chars);
 
       memcpy_ts(result.data + result.size,
@@ -110,7 +119,7 @@ void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
       return;
     }
 
-    f.format_string++;
+    format++;
   }
 }
 

@@ -71,6 +71,7 @@ struct MemComplex {
 #define BYTECODES_X \
 X(RETURN, OP)\
 X(CALL, OP_64)\
+X(CALL_NATIVE_X64, OP_64_64)\
 X(LABEL, OP_64)\
 X(PUSH_R64, OP_R)\
 X(POP_TO_R64, OP_R)\
@@ -111,6 +112,8 @@ X(SHIFT_R_BY_R8_RU64, OP_R_R)\
 X(SHIFT_R_BY_R8_RI64, OP_R_R)\
 X(CONV_RU8_TO_R64, OP_R)\
 X(CONV_RI8_TO_R64, OP_R)\
+X(CONV_RU32_TO_R64, OP_R)\
+X(CONV_RI32_TO_R64, OP_R)\
 X(RESERVE, OP_R)\
 X(NEG_R64, OP_R)\
 X(JUMP_TO_FIXED, OP_64)\
@@ -283,6 +286,38 @@ namespace ByteCode {
       arr.reserve_extra(INSTRUCTION_SIZE);
 
       write(arr.data + arr.size, opcode, std::move(x64));
+
+      arr.size += INSTRUCTION_SIZE;
+    }
+  };
+
+  struct OP_64_64 {
+    uint8_t op;
+    X64_UNION u64_1;
+    X64_UNION u64_2;
+
+    static constexpr OP_64_64 parse(const uint8_t* bytecode) {
+      OP_64_64 ret ={};
+
+      ret.op = bytecode[0];
+      ret.u64_1 = x64_from_bytes(bytecode + 1);
+      ret.u64_2 = x64_from_bytes(bytecode + 1 + 8);
+
+      return ret;
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1 + 8 + 8;
+
+    constexpr static void write(uint8_t* ptr, uint8_t op, X64_UNION x64_1, X64_UNION x64_2) {
+      ptr[0] = op;
+      x64_to_bytes(x64_1, ptr + 1);
+      x64_to_bytes(x64_2, ptr + 1 + 8);
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, X64_UNION x64_1, X64_UNION x64_2) {
+      arr.reserve_extra(INSTRUCTION_SIZE);
+
+      write(arr.data + arr.size, opcode, std::move(x64_1), std::move(x64_2));
 
       arr.size += INSTRUCTION_SIZE;
     }
@@ -531,7 +566,7 @@ namespace ByteCode {
 
     constexpr static void write(uint8_t* ptr, uint8_t op, uint32_t u32, const MemComplex& mem) {
       ptr[0] = op;
-      x16_to_bytes(u32, ptr + 1);
+      x32_to_bytes(u32, ptr + 1);
       MemComplex::write(ptr + 1 + 4, mem);
     }
 
@@ -620,6 +655,11 @@ namespace ByteCode {
     template<ByteCodeOp op>
     void OP_64(Array<uint8_t>& arr, X64_UNION x64) {
       ByteCode::OP_64::emit(arr, op, x64);
+    }
+
+    template<ByteCodeOp op>
+    void OP_64_64(Array<uint8_t>& arr, X64_UNION x64_1, X64_UNION x64_2) {
+      ByteCode::OP_64_64::emit(arr, op, std::move(x64_1), std::move(x64_2));
     }
 
     template<ByteCodeOp op>
@@ -713,6 +753,11 @@ namespace ByteCode {
     template<ByteCodeOp op>
     void OP_64(uint8_t* arr, X64_UNION x64) {
       ByteCode::OP_64::write(arr, op, x64);
+    }
+
+    template<ByteCodeOp op>
+    void OP_64_64(uint8_t* arr, X64_UNION x64_1, X64_UNION x64_2) {
+      ByteCode::OP_64_64::write(arr, op, std::move(x64_1), std::move(x64_2));
     }
 
     template<ByteCodeOp op>

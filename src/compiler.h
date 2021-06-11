@@ -3,22 +3,17 @@
 #include "strings.h"
 #include "calling_conventions.h"
 #include "options.h"
-#include "runtime_vals.h"
+#include "comp_utilities.h"
 #include "format.h"
 #include "parser.h"
 #include "files.h"
+#include "ast.h"
 
 #include "type.h"
 
 
 struct VM;
-struct ASTType;
-struct ASTFunctionDeclaration;
-struct ASTStructureDeclaration;
-struct ASTStatement;
-struct ASTExpression;
-struct ASTLocal;
-struct ASTFile;
+struct Program;
 
 struct TimePoint {
   size_t flow = 0;
@@ -145,17 +140,10 @@ struct StackState {
   uint64_t current = 0;
   uint64_t max = 0;
 
-  uint64_t current_parameters = 0;
-  uint64_t max_parameters = 0;
+  uint64_t current_passed = 0;
+  uint64_t max_passed = 0;
 
-  //Just for counting parameters/use of stack
-  void push_stack_params(uint64_t p) {
-    current_parameters += p;
-    if (current_parameters > max_parameters) {
-      max_parameters = current_parameters;
-    }
-  }
-  
+  int32_t pass_stack_local(uint64_t size, uint64_t alignment);
   int32_t next_stack_local(uint64_t size, uint64_t alignment);
 };
 
@@ -180,6 +168,11 @@ struct State {
   Array<MemValue> mem_values ={};
   ControlFlow control_flow ={};
 
+  ValueIndex rbp ={};
+  ValueIndex rsp ={};
+
+  RuntimeValue return_val ={};
+
   uint64_t return_label = 0;
 
   bool made_call = false;
@@ -188,7 +181,7 @@ struct State {
   bool comptime_compilation = false;
 
   constexpr bool needs_new_frame() const {
-    return made_call || stack.max_parameters > 0 || stack.max > 0;
+    return made_call || stack.max_passed > 0 || stack.max > 0;
   }
 
   MemIndex new_mem();
@@ -205,50 +198,81 @@ struct State {
   Local* find_local(const InternString* i_s);
 };
 
+void init_state_regs(const CallingConvention* convention, State* state);
+
+struct UntypedIterator {
+  struct Scope {
+    size_t num_outer_locals = 0;
+    ScopeView scope ={};
+  };
+
+  Array<Scope> scopes;
+};
+
+struct UntypedCode {
+  UntypedIterator itr;
+
+  ASTStatement* current_statement = nullptr;
+  ASTExpression* current_expression = nullptr;
+};
+
+void new_scope(UntypedIterator*,
+               ASTStatement* begin, const ASTStatement* end,
+               State* state);
+ASTStatement* advance_scopes(UntypedIterator* itr, State* state);
+
 enum struct COMPILATION_TYPE : uint8_t {
   NONE, FUNCTION, SIGNATURE, CONST_EXPR
 };
 
-enum struct EXPRESSION_COMPILE_STAGE : uint8_t {
-  UNTYPED, TYPED, FINISHED,
+enum struct SIGNATURE_COMP_STAGE : uint8_t {
+  UNTYPED, FINISHED
 };
 
-enum struct FUNCTION_COMPILE_STAGE : uint8_t {
-  SIGNATURE, BODY, FINISHED
+enum struct EXPR_COMP_STAGE : uint8_t {
+  UNTYPED, TYPED, FINISHED
 };
 
-struct CompilationUnitCarrier {
+enum struct FUNCTION_COMP_STAGE : uint8_t {
+  UNINIT, UNTYPED_BODY, TYPED_BODY, FINISHED
+};
+
+struct CompilationUnit {
   COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
-  size_t index = 0;
 
-  constexpr bool operator == (const CompilationUnitCarrier& c) const {
-    return type == c.type && index == c.index;
-  }
+  //units that we need to finish
+  Array<const CompilationUnit*> dependencies ={};
+
+  //units that are waiting for us to finish
+  Array<CompilationUnit*> dependency_of ={};
+
+  NamespaceIndex available_names ={};
 };
 
-struct FunctionUnit {
-  bool unfound_dependency = false;
-  FUNCTION_COMPILE_STAGE stage = FUNCTION_COMPILE_STAGE::FINISHED;
-
-  NamespaceIndex names ={};
-  Array<CompilationUnitCarrier> dependencies;
+struct SignatureUnit : public CompilationUnit {
+  SIGNATURE_COMP_STAGE stage = SIGNATURE_COMP_STAGE::UNTYPED;
 
   ASTFunctionDeclaration* source = nullptr;
-  Function* destination = nullptr;
+  FunctionSignature* sig = nullptr;
+  Function* func = nullptr;
+};
 
+struct FunctionUnit : public CompilationUnit {
+  FUNCTION_COMP_STAGE stage = FUNCTION_COMP_STAGE::UNINIT;
+
+  ASTFunctionDeclaration* source = nullptr;
+  Function* func = nullptr;
+
+  UntypedCode untyped ={};
   State state ={};
 };
 
-struct ConstantExprUnit {
-  bool unfound_dependency = false;
-  EXPRESSION_COMPILE_STAGE stage = EXPRESSION_COMPILE_STAGE::FINISHED;
+struct ConstantExprUnit : public CompilationUnit {
+  EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::UNTYPED;
 
-  NamespaceIndex names ={};
-  Array<CompilationUnitCarrier> dependencies ={};
-
-  ASTExpression* expr = nullptr;
+  ASTExpression* expr_base = nullptr;
+  ASTExpression* next_expr = nullptr;
   const Structure* cast_to = nullptr;
-
 
   State state ={};
 };
@@ -279,12 +303,12 @@ enum struct UnfoundDepType {
 };
 
 struct UnfoundDep {
-  CompilationUnitCarrier unit_waiting ={};
+  CompilationUnit* unit_waiting ={};
   UnfoundDepType type = UnfoundDepType::Unkown;
   Span span ={};
 
   union {
-    char _dummpy = {};
+    char _dummpy ={};
     UnknownName name;
     CallSignature signature;
   };
@@ -309,28 +333,31 @@ struct UnfoundDep {
 
 struct UnfoundDependencies {
   bool panic = false;
-  Array<UnfoundDep> units ={};
+  Array<UnfoundDep> unfound ={};
 };
 
 enum struct NamedElementType {
-  FUNCTION, STRUCTURE, ENUM
+  NONE, OVERLOADS, FUNCTION_POINTER, STRUCTURE, ENUM
 };
 
 struct NamedElement {
-  NamedElementType type ={};
+  NamedElementType type;
   union {
-    char _dummy = '\0';
+    char _dummy;
     Array<Function*> overloads;
+    FunctionPointer* func_pointer;
     const Structure* structure;
     const EnumValue* enum_value;
-    //NamespaceIndex other_namespace ={ 0 };
+    //NamespaceIndex other_namespace;
   };
 
   void set_union(NamedElementType ty);
   void destruct_union();
   void move_from(NamedElement&& ne);
 
-  NamedElement() = default;
+  //This is not '= default' because intellisense complains and that annoys me
+  NamedElement() : type(NamedElementType::NONE), _dummy('\0') {}
+
   NamedElement(NamedElement&& ne) noexcept {
     move_from(std::move(ne));
   }
@@ -348,10 +375,10 @@ struct NamedElement {
 
 struct Namespace {
   bool is_sub_namespace = false;
-  NamespaceIndex inside = {};
+  NamespaceIndex inside ={};
 
   InternHashTable<NamedElement> names ={};
-  Array<NamespaceIndex> imported = {};
+  Array<NamespaceIndex> imported ={};
 };
 
 struct FileImport {
@@ -360,31 +387,61 @@ struct FileImport {
   Span span ={};
 };
 
+struct FileLoader {
+  const InternString* dll = nullptr;
+  const InternString* axl = nullptr;
+
+  Array<FileImport> unparsed_files ={};
+};
+
+struct SingleDllImport {
+  FunctionPointer* ptr;
+  uint32_t rva_hint;
+  const InternString* name;
+};
+
+struct ImportedDll {
+  const InternString* name = nullptr;
+  Array<SingleDllImport> imports ={};
+};
+
+struct CallingConventionNames {
+  const InternString* vm      = nullptr;
+  const InternString* x64  = nullptr;
+  const InternString* stdcall = nullptr;
+};
+
 struct Compiler {
-  VM* vm = nullptr;
-
-  CompilationUnitCarrier current_unit ={};
-
-  Errors errors ={};
-  UnfoundDependencies unfound_deps = {};
-
-  NamespaceIndex builtin_namespace = {};
-  NamespaceIndex current_namespace = {};
-  Array<Namespace> all_namespaces ={};
-
-  Array<FileImport> unparsed_files;
-  Array<ASTFile> parsed_files;
-
   PrintOptions        print_options        ={};
   BuildOptions        build_options        ={};
   OptimizationOptions optimization_options ={};
 
-  Array<FunctionUnit> function_units ={};
-  Array<ConstantExprUnit> const_expr_units ={};
+  CallingConventionNames calling_conventions ={};
+  VM* vm = nullptr;
 
-  Array<CompilationUnitCarrier> compiling ={};
+  CompilationUnit* current_unit ={};
+
+  Errors errors ={};
+  UnfoundDependencies unfound_deps ={};
+
+  NamespaceIndex builtin_namespace ={};
+  NamespaceIndex current_namespace ={};
+  Array<Namespace> all_namespaces ={};
+
+  FileLoader file_loader ={};
+
+  Array<ImportedDll> dlls_import ={};
+  Array<ASTFile> parsed_files ={};
+
+  FreelistBlockAllocator<SignatureUnit> signature_units ={};
+  FreelistBlockAllocator<FunctionUnit> function_units ={};
+  FreelistBlockAllocator<ConstantExprUnit> const_expr_units ={};
+
+  Array<CompilationUnit*> to_compile ={};
 
   BucketArray<Function> functions ={};
+  BucketArray<FunctionPointer> function_pointers ={};
+
   ArenaAllocator constants ={};
 
   Types* types = nullptr;
@@ -394,6 +451,12 @@ struct Compiler {
   uint64_t labels = 0;
 
   Function* new_function();
+  FunctionPointer* new_function_pointer();
+
+  ConstantExprUnit* new_const_expr_unit(NamespaceIndex ns);
+  FunctionUnit* new_function_unit(NamespaceIndex ns);
+  SignatureUnit* new_signature_unit(NamespaceIndex ns);
+
 
   constexpr bool is_panic() const { return errors.panic || unfound_deps.panic; }
   constexpr bool is_fatal() const { return errors.panic; }
@@ -404,13 +467,15 @@ struct Compiler {
     errors.panic = true;
 
     OwnedPtr<char> message = format(f_message, std::forward<T>(ts)...);
-    errors.error_messages.insert({code, span, std::move(message)});
+    errors.error_messages.insert({ code, span, std::move(message) });
   }
 
   void set_unfound_name(const InternString* name, NamespaceIndex ns, const Span& span);
   void set_unfound_signature(CallSignature&& sig, const Span& span);
-  void set_dep(CompilationUnitCarrier unit);
+  void set_dep(CompilationUnit* unit);
 };
+
+void init_compiler(Compiler* comp);
 
 CompileCode compile_all(Compiler* const comp);
 
@@ -441,10 +506,13 @@ const Structure* find_or_make_pointer_type(Compiler* const comp,
                                            const Structure* base);
 
 NamedElement* find_name(Compiler* const comp,
-                              NamespaceIndex ns_index,
-                              const InternString* name);
+                        NamespaceIndex ns_index,
+                        const InternString* name);
+
 Array<NamedElement*> find_all_names(Compiler* const comp,
-                                          NamespaceIndex ns_index,
-                                          const InternString* name);
+                                    NamespaceIndex ns_index,
+                                    const InternString* name);
 
 CompileCode print_compile_errors(const Compiler* const comp);
+
+void build_data_section_for_exec(Program* prog, Compiler* const comp);

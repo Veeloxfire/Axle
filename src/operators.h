@@ -1,6 +1,6 @@
 #pragma once
 #include "utility.h"
-#include "runtime_vals.h"
+#include "comp_utilities.h"
 
 using BINARY_OPERATOR_FUNCTION = FUNCTION_PTR<
   RuntimeValue,

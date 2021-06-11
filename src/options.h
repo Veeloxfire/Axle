@@ -10,13 +10,14 @@ struct BuildOptions {
   const char* entry_point = nullptr;
   const char* output_file = nullptr;
 
-  const System* system;
-  const CallingConvention* calling_convention;
+  const System* system = nullptr;
+  const CallingConvention* default_calling_convention = nullptr;
 };
 
 struct PrintOptions {
   bool ast             = false;
   bool pre_reg_alloc   = false;
+  bool comptime_res    = false;
   bool comptime_exec   = false;
   bool normal_bytecode = false;
   bool fully_compiled  = false;

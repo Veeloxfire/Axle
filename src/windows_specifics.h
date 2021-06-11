@@ -4,6 +4,7 @@
 #include <memoryapi.h>
 
 #include "utility.h"
+#include "Program.h"
 
 namespace Windows {
   template<typename T> 
@@ -38,5 +39,17 @@ namespace Windows {
   }
 
   uint32_t run_exe(const char* name);
-}
 
+  struct ActiveDll {
+    HMODULE lib = 0;
+
+    ~ActiveDll() {
+      if (lib != 0) {
+        FreeLibrary(lib);
+        lib = 0;
+      }
+    }
+  };
+
+  Array<ActiveDll> load_dlls(Program* prog);
+}

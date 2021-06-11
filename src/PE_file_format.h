@@ -66,7 +66,7 @@ namespace COFF_Characteristics {
 
 enum struct MACHINE_TYPE : uint16_t {
   UNKNOWN = 0x0000,
-  AMD64   = 0x8664, 
+  AMD64   = 0x8664,
 };
 
 struct COFF_file_header {
@@ -154,7 +154,7 @@ struct MS_DOS_Header {
   uint16_t oem_identifier = 0x0000;
   uint16_t oem_info = 0x0000;
   uint16_t reserved_2_electric_boogaloo[10] ={ 0,0,0,0,0,0,0,0,0,0 };
-  PE_Address actual_start_of_header ;
+  PE_Address actual_start_of_header;
 };
 
 struct MS_DOS_Stub {
@@ -168,7 +168,7 @@ struct MS_DOS {
 };
 
 struct Data_directory {
-  PE_Address virtual_address = 0x00000000;
+  RVA virtual_address = 0x00000000;
   uint32_t size = 0x00000000;
 };
 
@@ -194,7 +194,7 @@ struct Image_header_directories {
 };
 
 struct PE_File_Header {
-  MS_DOS ms_dos;// required by windows. Some programs even require it to be a specific length
+  MS_DOS_Header ms_dos;//does not include the stub
   uint8_t signature[SIGNATURE_SIZE] = PE_SIGNATURE;
   COFF_file_header coff;
   PE32Plus_optional_header pe32;
@@ -223,6 +223,43 @@ struct Section_Header {
   uint16_t number_of_relocations = 0x0;
   uint16_t number_of_line_numbers = 0x0;
   uint32_t characteristics;
+};
+
+struct ExportDirectoryTable {
+  uint32_t export_flags = 0;
+  uint32_t time_and_date;
+  uint16_t major_version;
+  uint16_t minor_version;
+  RVA name_rva;
+  uint32_t ordinal_base;
+  uint32_t num_export_entries;
+  uint32_t num_name_pointers;
+  RVA export_table_address;
+  RVA name_pointer_table_address;
+  RVA ordinal_table_address;
+};
+
+union ExportAddress {
+  RVA export_rva;
+  const InternString* forwarder_rva;
+};
+
+struct ExportElement {
+  const InternString* str;
+  uint16_t ordinal;
+};
+
+struct ExportTable {
+  ExportDirectoryTable directory_table ={};
+  Array<ExportAddress> address_table ={};
+  Array<ExportElement> element_table ={};
+};
+
+struct PEFile {
+  PE_File_Header header;
+  Array<Section_Header> section_headers;
+
+  ExportTable export_table ={};
 };
 
 struct ImportDataDirectory {
@@ -289,10 +326,10 @@ struct ImportTable {
 };
 
 Import* new_import(const InternString* dll_name, ImportTable* imports, ConstantTable* constants);
-void add_name_to_import(Import* import_ptr, const InternString* name_to_import, ImportTable* table);
+void add_name_to_import(Import* import_ptr, const InternString* name_to_import, VA estimated_va, ImportTable* table);
 
 
-struct PE_File {
+struct PE_File_Build {
   CodeSection* code = nullptr;
   ConstantTable* constants = nullptr;
   ImportTable* imports = nullptr;
@@ -320,4 +357,18 @@ struct ImportantValues {
   uint32_t imports_raw_size;
 };
 
-ErrorCode write_portable_executable_to_file(const PE_File* pe_file, const char* file_name);
+struct Compiler;
+struct ImportedDll;
+struct Span;
+
+ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const char* file_name);
+
+void load_portable_executable_from_file(Compiler* const comp,
+                                        const Span& span,
+                                        PEFile* pe_file,
+                                        const char* file_name);
+
+void load_portable_executable_exports(Compiler* const comp,
+                                      ImportedDll* dll,
+                                      const Span& span,
+                                      const char* file_name);

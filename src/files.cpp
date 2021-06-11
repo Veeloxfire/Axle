@@ -28,6 +28,35 @@ namespace FILES {
     return ErrorCode::OK;
   }
 
+  ErrorCode read_to_bytes(FILE* file, uint8_t* bytes, size_t num_bytes) {
+    size_t i = fread(bytes, sizeof(uint8_t), num_bytes, file);
+
+    return ErrorCode::OK;
+  }
+
+  ErrorCode read_to_structure(FILE* file,
+                              uint8_t* ptr_to_s,
+                              size_t size_of_s, size_t num_of_s) {
+    size_t i = fread(ptr_to_s, size_of_s, num_of_s, file);
+
+    return ErrorCode::OK;
+  }
+
+  uint8_t read_byte(FILE* file) {
+    return (uint8_t)fgetc(file);
+  }
+
+  ErrorCode seek(FILE* file, SEEK_MODE mode, int32_t location) {
+    static_assert(sizeof(int32_t) == sizeof(long), "Must be same");
+    int err = fseek(file, static_cast<long>(location), static_cast<int>(mode));
+
+    return ErrorCode::OK;
+  }
+
+  long current_pos(FILE* file) {
+    return ftell(file);
+  }
+
   size_t size_of_file(FILE* file) {
     const long cur = ftell(file);
 
@@ -89,16 +118,42 @@ namespace FILES {
   }
 }
 
-FileLocation parse_file_location(const char* path_str, 
+FileLocation parse_file_location(const char* path_str,
                                  const char* file_str,
                                  StringInterner* const strings) {
+
+  //check if file is absolute path
+  if (file_str != nullptr) {
+    const char* str_ptr = file_str;
+    while (true) {
+      const char c = *str_ptr;
+      if (c == '\0') {
+        //Relative path
+        break;
+      }
+      else if (c == ':') {
+        //Absolute path
+        path_str = file_str;
+        file_str = nullptr;
+        break;
+      }
+      else if (c == '\\' || c == '/') {
+        //Also Relative path
+        break;
+      }
+
+      str_ptr++;
+    }
+  }
+
+
   struct Range {
     const char* start;
     const char* end;
   };
 
   Array<Range> path ={};
-  
+
   const char* holder = path_str;
 
   const auto add_dir = [&](const char* start, const char* end) {
@@ -106,7 +161,7 @@ FileLocation parse_file_location(const char* path_str,
       return;
     }
 
-    Range dir = {};
+    Range dir ={};
     dir.start = start;
     dir.end = end;
 
@@ -168,7 +223,7 @@ FileLocation parse_file_location(const char* path_str,
 
   Array<char> str ={};
 
-  FileLocation loc = {};
+  FileLocation loc ={};
   //Directory
   {
     auto i = path.begin();
@@ -187,6 +242,31 @@ FileLocation parse_file_location(const char* path_str,
 
   //Add the file
   {
+    //Try find the extension
+    const char* extension = holder;
+    while (*extension != '.' && *extension != '\0') {
+      extension++;
+    }
+
+    //The '.'
+    if (*extension == '.') {
+      extension++;
+      if (*extension == '\0') {
+        //Should probably be an error
+        loc.extension = nullptr;
+      }
+
+      loc.extension = strings->intern(extension);
+    }
+    else if (*extension == '\0') {
+      loc.extension = nullptr;
+    }
+    else {
+      loc.extension = nullptr;
+    }
+
+
+    //Load the file
     const size_t len = path_str - holder;
     str.insert_uninit(len);
 

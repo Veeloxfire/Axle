@@ -123,3 +123,111 @@ const InternString* StringInterner::intern(const char* string, const size_t leng
     return el;
   }
 }
+
+InternStringSet::~InternStringSet() {
+  free_no_destruct(data);
+
+  data = nullptr;
+  el_capacity = 0;
+  used = 0;
+}
+
+bool InternStringSet::contains(const InternString* key) const {
+  if(el_capacity == 0) return false;
+
+  size_t index = key->hash % el_capacity;
+
+  const InternString* test_key = data[index];
+  while (true) {
+    if (test_key == key) {
+      return true;
+    }
+    else if (test_key == nullptr || test_key == TOMBSTONE) {
+      return false;
+    }
+
+    index++;
+    index %= el_capacity;
+    test_key = data[index];
+  }
+}
+
+const InternString** InternStringSet::get(const InternString* key) const {
+  bool found_tombstone = false;
+  size_t tombstone_index = 0;
+
+  size_t index = key->hash % el_capacity;
+
+  const InternString* test_key = data[index];
+  while (test_key != nullptr) {
+    if (key == test_key) {
+      return data + index;
+    }
+    else if (test_key == TOMBSTONE && !found_tombstone) {
+      found_tombstone = true;
+      tombstone_index = index;
+    }
+
+    index++;
+    index %= el_capacity;
+    test_key = data[index];
+  }
+
+  if (found_tombstone) {
+    return data + tombstone_index;
+  }
+  else {
+    return data + index;
+  }
+}
+
+void InternStringSet::try_extend(size_t num) {
+  if (needs_resize(num)) {
+    const InternString** old_data = data;
+    const size_t old_el_cap = el_capacity;
+
+    do {
+      el_capacity <<= 1;
+    } while (needs_resize(num));
+
+    data = allocate_default<const InternString*>(el_capacity);
+
+    for (size_t i = 0; i < old_el_cap; i++) {
+      const InternString* key = old_data[i];
+
+      if (key != nullptr && key != TOMBSTONE) {
+        const InternString** loc = get(key);
+        *loc = key;
+      }
+    }
+
+    free_no_destruct(old_data);
+  }
+}
+
+void InternStringSet::insert(const InternString* const key) {
+  if (el_capacity == 0) {
+    el_capacity = 8;
+    data = allocate_default<const InternString*>(el_capacity);
+
+    const InternString** loc = get(key);
+    *loc = key;
+  }
+  else {
+    const InternString** loc = get(key);
+
+    {
+      const InternString* test_key = *loc;
+
+      if ((test_key == nullptr || test_key == TOMBSTONE) &&
+          needs_resize(1)) {
+        //need to resize
+        try_extend(1);
+        //need to reset the key
+        loc = get(key);
+      }
+    }
+
+    *loc = key;     
+  }
+}

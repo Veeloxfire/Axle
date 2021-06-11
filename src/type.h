@@ -2,14 +2,17 @@
 #include "utility.h"
 #include "bytecode.h"
 #include "strings.h"
-#include "runtime_vals.h"
+#include "comp_utilities.h"
 
 struct ASTFunctionDeclaration;
+struct ASTFunctionSignature;
 struct ASTStructureDeclaration;
 
 struct Structure;
 struct State;
 struct Function;
+struct CompilationUnit;
+struct CallingConvention;
 
 
 enum struct STRUCTURE_TYPE : uint8_t {
@@ -59,7 +62,7 @@ struct EnumStructure : public Structure {
 };
 
 enum struct LITERAL_TYPE {
-  INTEGER, SIGNED_INTEGER, EMPTY_ARR
+  INTEGER, SIGNED_INTEGER, EMPTY_ARR, POINTER
 };
 
 struct LiteralStructure : public Structure {
@@ -80,18 +83,41 @@ struct CompositeStructure : public Structure {
   Array<StructElement> elements ={};
 };
 
-struct Function {
+struct FunctionSignature {
+  const ASTFunctionSignature* declaration = nullptr;
+
+  const CallingConvention* calling_convention = nullptr;
+
   const InternString* name ={};
+
   Array<const Structure*> parameter_types ={};
   const Structure* return_type = nullptr;
 
-  bool return_via_ptr = false;
+  bool return_via_addres = false;
+  Array<const Structure*> actual_parameter_types ={};
+};
+
+enum struct FUNCTION_TYPE {
+  DEFAULT, POINTER
+};
+
+struct FunctionBase {
+  FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
+  bool is_called = false;
+
   const ASTFunctionDeclaration* declaration = nullptr;
 
-  size_t unit_index = 0;
+  FunctionSignature signature ={};
+  CompilationUnit* compilation_unit = nullptr;
+};
 
-  bool is_called = false;
-  CodeBlock code_block ={};
+struct FunctionPointer : public FunctionBase {
+  bool is_dll = false;
+  size_t data_index = 0;
+};
+
+struct Function : public FunctionBase {
+  CodeBlock code_block;
 };
 
 constexpr bool is_negatable(const Structure* s) {
@@ -125,14 +151,18 @@ struct Types {
 
   const Structure* s_u8   = nullptr;
   const Structure* s_i8   = nullptr;
+  const Structure* s_u32  = nullptr;
+  const Structure* s_i32  = nullptr;
   const Structure* s_u64  = nullptr;
   const Structure* s_i64  = nullptr;
 
   const Structure* s_int_lit = nullptr;
   const Structure* s_sint_lit = nullptr;
   const Structure* s_empty_arr = nullptr;
+  const Structure* s_lit_ptr = nullptr;
 
   const Structure* s_void = nullptr;
+  const Structure* s_void_ptr = nullptr;
   const Structure* s_ascii = nullptr;
 
   const EnumValue* e_false = nullptr;
@@ -148,16 +178,6 @@ struct Types {
   }
 
 };
-
-//const Structure* find_structure(Compiler* const,
-//                                const Namespace* ns,
-//                                const InternString*);
-//
-//const EnumValue* find_enum(Compiler* const,
-//                           const Namespace* ns,
-//                           const InternString*);
-
-void init_types(Compiler* comp);
 
 LiteralStructure* new_literal_type(Compiler* const comp,
                                    const InternString* name);
@@ -189,19 +209,31 @@ EnumValue* new_enum_value(Compiler* const comp,
 //Can cast without any value modification or checks
 constexpr bool can_implicit_cast(const Structure* from, const Structure* to) {
   if (from == to) return true;
-  else if (from->type == STRUCTURE_TYPE::LITERAL
-           && to->type == STRUCTURE_TYPE::LITERAL) {
+  else if (from->type == STRUCTURE_TYPE::LITERAL) {
     //both literals
     const LiteralStructure* f_ls = (const LiteralStructure*)from;
-    const LiteralStructure* t_ls = (const LiteralStructure*)to;
 
-    //can cast unsigned literal to signed literal
-    return f_ls->literal_type == LITERAL_TYPE::INTEGER
-      && t_ls->literal_type == LITERAL_TYPE::SIGNED_INTEGER;
+    if (to->type == STRUCTURE_TYPE::LITERAL) {
+      const LiteralStructure* t_ls = (const LiteralStructure*)to;
+
+      //can cast unsigned literal to signed literal
+      return f_ls->literal_type == LITERAL_TYPE::INTEGER
+        && t_ls->literal_type == LITERAL_TYPE::SIGNED_INTEGER;
+    }
+    else if (to->type == STRUCTURE_TYPE::POINTER) {
+      //Can cast a pointer literal (e.g. nullptr) to any pointer type
+      return f_ls->literal_type == LITERAL_TYPE::POINTER;
+    }
   }
-  else {
-    return false;
+  else if (from->type == STRUCTURE_TYPE::POINTER
+           && (to->type == STRUCTURE_TYPE::POINTER
+           && static_cast<const PointerStructure*>(to)->base->type == STRUCTURE_TYPE::VOID)) {
+    //Can cast any pointer to void pointer
+    return true;
   }
+  
+
+  return false;
 }
 
 //Can cast with modification that can only be done at compile time
@@ -210,6 +242,8 @@ bool can_comptime_cast(const Structure* from, const Structure* to);
 namespace CASTS {
   RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
   RuntimeValue i8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue u32_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue i32_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
   RuntimeValue no_op(Compiler*, State*, CodeBlock*, const RuntimeValue*);
 }
 
