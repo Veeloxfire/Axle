@@ -15,15 +15,16 @@ int main(int argc, const char** args) {
     return 1;
   }
 
-  Options options = {};
+  APIOptions options = {};
   
-  options.build.file_name          = args[1];
-  options.build.entry_point        = "main";
-  options.build.system                     = &system_vm;
-  options.build.default_calling_convention = &convention_vm;
-  //options.build.system             = &system_x86_64;
-  //options.build.default_calling_convention = &convention_microsoft_x64;
+  options.build.file_name       = args[1];
+  options.build.entry_point     = "main";
+  options.build.system_name     = "vm";
+  options.build.default_calling_convention = "vm";
+  //options.build.system             = "x86_64";
+  //options.build.default_calling_convention = "x64";
   options.build.output_file        = output_file;
+  options.build.std_lib_folder = "D:\\GitHub\\Compiler\\stdlib";
   
   options.print.ast             = false;
   options.print.pre_reg_alloc   = false;
@@ -40,12 +41,12 @@ int main(int argc, const char** args) {
   
   if (out == 0) {
     RunOutput res = run_program(options, &program);
-    //std::cout << "Returned: " << res.program_return;
+    std::cout << "Returned: " << res.program_return;
     
-    return res.program_return;
+    return out;
   }
   else {
-    //std::cerr << "Error!";
+    std::cerr << "Error!";
     return out;
   }
   

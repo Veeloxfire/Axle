@@ -2,18 +2,18 @@
 #include "utility.h"
 #include "strings.h"
 #include "calling_conventions.h"
-#include "options.h"
 #include "comp_utilities.h"
 #include "format.h"
 #include "parser.h"
 #include "files.h"
 #include "ast.h"
 
+#include "api.h"
+
 #include "type.h"
 
 
 struct VM;
-struct Program;
 
 struct TimePoint {
   size_t flow = 0;
@@ -153,6 +153,7 @@ struct MemValue {
 };
 
 struct Local {
+  bool comptime_eval = false;
   const InternString* name ={};
   const Structure* type = nullptr;
 
@@ -187,18 +188,33 @@ struct State {
   MemIndex new_mem();
   MemValue* get_mem(const MemIndex&);
   ValueIndex new_value();
+  Value* get_val(const ValueIndex& i);
+
   void value_copy(ValueIndex a, ValueIndex b);
   void set_value(ValueIndex index);
 
-  Value* get_val(const ValueIndex& i);
-
   void use_value(ValueIndex index);
   void use_value(ValueIndex index, ValueIndex related);
+
+  void use_mem(MemIndex index);
 
   Local* find_local(const InternString* i_s);
 };
 
 void init_state_regs(const CallingConvention* convention, State* state);
+
+//Type hint type
+enum struct THT : uint8_t {
+  EXACT, BASE, BASE_HINT
+};
+
+struct TypeHint {
+  THT tht = THT::EXACT;
+  union {
+    const Structure* type = nullptr;
+    const TypeHint* other_hint;
+  };
+};
 
 struct UntypedIterator {
   struct Scope {
@@ -213,7 +229,6 @@ struct UntypedCode {
   UntypedIterator itr;
 
   ASTStatement* current_statement = nullptr;
-  ASTExpression* current_expression = nullptr;
 };
 
 void new_scope(UntypedIterator*,
@@ -221,12 +236,35 @@ void new_scope(UntypedIterator*,
                State* state);
 ASTStatement* advance_scopes(UntypedIterator* itr, State* state);
 
+struct UntypedStructureElements {
+  ASTTypedName* i = nullptr;
+  const ASTTypedName* end = nullptr;
+};
+
+struct Global {
+  ASTGlobalDeclaration* source = nullptr;
+  CompilationUnit* compilation_unit = nullptr;
+
+  const Structure* type = nullptr;
+  const InternString* name = nullptr;
+  size_t data_index = 0;
+  CodeBlock init ={};
+};
+
 enum struct COMPILATION_TYPE : uint8_t {
-  NONE, FUNCTION, SIGNATURE, CONST_EXPR
+  NONE, STRUCTURE, FUNCTION, SIGNATURE, CONST_EXPR, GLOBAL
+};
+
+enum struct STRUCTURE_COMP_STAGE : uint8_t {
+  UNTYPED, TYPED, FINISHED
 };
 
 enum struct SIGNATURE_COMP_STAGE : uint8_t {
   UNTYPED, FINISHED
+};
+
+enum struct GLOBAL_COMP_STAGE : uint8_t {
+  UNTYPED, TYPED, FINISHED
 };
 
 enum struct EXPR_COMP_STAGE : uint8_t {
@@ -257,6 +295,22 @@ struct SignatureUnit : public CompilationUnit {
   Function* func = nullptr;
 };
 
+struct StructureUnit : public CompilationUnit {
+  STRUCTURE_COMP_STAGE stage = STRUCTURE_COMP_STAGE::UNTYPED;
+
+  ASTStructureDeclaration* source = nullptr;
+  UntypedStructureElements untyped ={};
+};
+
+struct GlobalUnit : public CompilationUnit {
+  GLOBAL_COMP_STAGE stage = GLOBAL_COMP_STAGE::UNTYPED;
+
+  ASTGlobalDeclaration* source = nullptr;
+  Global* global = nullptr;
+
+  State state ={};
+};
+
 struct FunctionUnit : public CompilationUnit {
   FUNCTION_COMP_STAGE stage = FUNCTION_COMP_STAGE::UNINIT;
 
@@ -270,8 +324,7 @@ struct FunctionUnit : public CompilationUnit {
 struct ConstantExprUnit : public CompilationUnit {
   EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::UNTYPED;
 
-  ASTExpression* expr_base = nullptr;
-  ASTExpression* next_expr = nullptr;
+  ASTExpression* expr = nullptr;
   const Structure* cast_to = nullptr;
 
   State state ={};
@@ -336,8 +389,18 @@ struct UnfoundDependencies {
   Array<UnfoundDep> unfound ={};
 };
 
-enum struct NamedElementType {
-  NONE, OVERLOADS, FUNCTION_POINTER, STRUCTURE, ENUM
+#define N_E_T_MODS \
+MODIFY(NONE, "unknown", _dummy) \
+MODIFY(OVERLOADS, "funciton", overloads) \
+MODIFY(FUNCTION_POINTER, "funciton", func_pointer) \
+MODIFY(STRUCTURE, "structure", structure) \
+MODIFY(ENUM, "enum", enum_value) \
+MODIFY(GLOBAL, "global", global)
+
+enum struct NamedElementType : uint8_t {
+#define MODIFY(name, str, expr_name) name,
+  N_E_T_MODS
+#undef MODIFY
 };
 
 struct NamedElement {
@@ -348,6 +411,7 @@ struct NamedElement {
     FunctionPointer* func_pointer;
     const Structure* structure;
     const EnumValue* enum_value;
+    const Global* global;
     //NamespaceIndex other_namespace;
   };
 
@@ -402,21 +466,36 @@ struct SingleDllImport {
 
 struct ImportedDll {
   const InternString* name = nullptr;
+  Span span ={};
   Array<SingleDllImport> imports ={};
 };
 
-struct CallingConventionNames {
-  const InternString* vm      = nullptr;
-  const InternString* x64  = nullptr;
-  const InternString* stdcall = nullptr;
+struct SystemsAndConcentionNames {
+  const InternString* sys_vm      = nullptr;
+  const InternString* sys_x86_64  = nullptr;
+
+  const InternString* conv_vm      = nullptr;
+  const InternString* conv_x64     = nullptr;
+  const InternString* conv_stdcall = nullptr;
+};
+
+struct BuildOptions {
+  const InternString* file_name   = nullptr;
+  const InternString* entry_point = nullptr;
+  const InternString* output_file = nullptr;
+
+  const InternString* std_lib_folder = nullptr;
+
+  const System* system = nullptr;
+  const CallingConvention* default_calling_convention = nullptr;
 };
 
 struct Compiler {
-  PrintOptions        print_options        ={};
-  BuildOptions        build_options        ={};
-  OptimizationOptions optimization_options ={};
+  APIPrintOptions        print_options        ={};
+  BuildOptions           build_options        ={};
+  APIOptimizationOptions optimization_options ={};
 
-  CallingConventionNames calling_conventions ={};
+  SystemsAndConcentionNames system_names ={};
   VM* vm = nullptr;
 
   CompilationUnit* current_unit ={};
@@ -434,11 +513,14 @@ struct Compiler {
   Array<ASTFile> parsed_files ={};
 
   FreelistBlockAllocator<SignatureUnit> signature_units ={};
+  FreelistBlockAllocator<StructureUnit> structure_units ={};
   FreelistBlockAllocator<FunctionUnit> function_units ={};
   FreelistBlockAllocator<ConstantExprUnit> const_expr_units ={};
+  FreelistBlockAllocator<GlobalUnit> global_units ={};
 
   Array<CompilationUnit*> to_compile ={};
 
+  BucketArray<Global> globals ={};
   BucketArray<Function> functions ={};
   BucketArray<FunctionPointer> function_pointers ={};
 
@@ -447,7 +529,6 @@ struct Compiler {
   Types* types = nullptr;
   StringInterner* strings = nullptr;
 
-  const InternString* entry_point ={};
   uint64_t labels = 0;
 
   Function* new_function();
@@ -456,6 +537,8 @@ struct Compiler {
   ConstantExprUnit* new_const_expr_unit(NamespaceIndex ns);
   FunctionUnit* new_function_unit(NamespaceIndex ns);
   SignatureUnit* new_signature_unit(NamespaceIndex ns);
+  StructureUnit* new_structure_unit(NamespaceIndex ns);
+  GlobalUnit* new_global_unit(NamespaceIndex ns);
 
 
   constexpr bool is_panic() const { return errors.panic || unfound_deps.panic; }
@@ -475,21 +558,29 @@ struct Compiler {
   void set_dep(CompilationUnit* unit);
 };
 
-void init_compiler(Compiler* comp);
+void init_compiler(const APIOptions& options, Compiler* comp);
 
 CompileCode compile_all(Compiler* const comp);
 
-void compile_implicit_cast(Compiler* const comp,
-                           ASTExpression* from_expr,
-                           const Structure* to);
+void set_runtime_flags(ASTExpression* const expr, State* const state,
+                       bool modified, uint8_t valid_rvts);
 
-void set_valid_rvts(ASTExpression* const expr, State* const state, uint8_t valid_rvts);
+void compile_type_of_expression(Compiler* const comp,
+                                State* const state,
+                                ASTExpression* const expr,
+                                const TypeHint* const hint);
 
 CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp);
 
 void build_compilation_units_for_file(Compiler* const comp, ASTFile* const func);
 
 void print_compiled_functions(const Compiler* comp);
+
+RuntimeValue new_const_in_reg(Compiler* const comp,
+                              State* const state,
+                              CodeBlock* const code,
+                              const uint8_t* data,
+                              size_t);
 
 void copy_runtime_to_runtime(Compiler* const comp,
                              State* const state,
@@ -499,15 +590,25 @@ void copy_runtime_to_runtime(Compiler* const comp,
                              RuntimeValue* to);
 
 const Structure* find_or_make_array_type(Compiler* const comp,
+                                         const Span& span,
                                          const Structure* base,
                                          size_t length);
 
 const Structure* find_or_make_pointer_type(Compiler* const comp,
+                                           const Span& span,
                                            const Structure* base);
+
+const Structure* find_or_make_tuple_literal(Compiler* const comp,
+                                            const Span& span,
+                                            Array<const Structure*>&& elements);
 
 NamedElement* find_name(Compiler* const comp,
                         NamespaceIndex ns_index,
                         const InternString* name);
+
+NamedElement* find_empty_name(Compiler* const comp,
+                              NamespaceIndex ns_index,
+                              const InternString* name);
 
 Array<NamedElement*> find_all_names(Compiler* const comp,
                                     NamespaceIndex ns_index,

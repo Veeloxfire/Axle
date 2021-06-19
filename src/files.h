@@ -74,3 +74,6 @@ struct FileLocation {
 FileLocation parse_file_location(const char* path,
                                  const char* file,
                                  StringInterner* strings);
+
+const InternString* get_extension(const char* path,
+                                  StringInterner* strings);

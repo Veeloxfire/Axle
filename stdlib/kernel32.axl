@@ -1,6 +1,14 @@
-#dll_header "kernel32.dll";
-#conv "stdcall";
+#dll_header "C:\\Windows\\System32\\kernel32.dll";
 
-function ExitProcess(u32 ExitCode)->void;
+function GetStdHandle(i32 nStdHandle) -> u64;
+function GetProcessHeap() -> u64;
 
+function HeapAlloc(u64 handle, u32 flags, u64 bytes) -> *void;
+function HeapFree(u64 hHeap, u32 dwFlags, *void lpMem) -> u64;
 
+function WriteConsoleA(u64   hConsoleOutput,
+                       *void lpBuffer,
+                       u32   nNumberOfCharsToWrite,
+                       *u32  lpNumberOfCharsWritten,
+                       *void lpReserved)
+                       -> i32;

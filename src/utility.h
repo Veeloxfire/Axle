@@ -189,10 +189,23 @@ constexpr inline uint64_t small_log_2_ceil(uint64_t v) {
   return min + found1;
 }
 
-constexpr uint64_t ceil_to_8(uint64_t val) {
-  const uint64_t is_zero = val == 0;
-  const uint64_t val2 = val - 1 + is_zero;
-  const uint64_t cond8 = is_zero << 3;
+template<typename T>
+constexpr T ceil_to_n(T val, T n) {
+  T mod_n = val % n;
+
+  if (mod_n == 0) {
+    return val;
+  }
+  else {
+    return val + n - mod_n;
+  }
+}
+
+template<typename T>
+constexpr T ceil_to_8(T val) {
+  const T is_zero = val == 0;
+  const T val2 = val - 1 + is_zero;
+  const T cond8 = is_zero << 3;
 
   return val2 + 8 - (val2 % 8) - cond8;
 }
@@ -563,7 +576,12 @@ struct BucketArray {
   };
 
   Iter begin_iter() {
-    return Iter{ 0, first };
+    if (first->filled == 0) {
+      return Iter();
+    }
+    else {
+      return Iter{ 0, first };
+    }
   }
 
   Iter end_iter() {
@@ -571,7 +589,12 @@ struct BucketArray {
   }
 
   ConstIter begin_const_iter() const {
-    return ConstIter{ 0, first };
+    if (first->filled == 0) {
+      return ConstIter();
+    }
+    else {
+      return ConstIter{ 0, first };
+    }
   }
 
   ConstIter end_const_iter() const {
@@ -864,7 +887,7 @@ struct OwnedPtr {
 
 template<typename U, typename T>
 OwnedPtr<U> cast_ptr(OwnedPtr<T>&& ptr) {
-  OwnedPtr<U> u = {};
+  OwnedPtr<U> u ={};
   u.ptr = (U*)ptr.ptr;
   ptr.ptr = nullptr;
   return u;
@@ -1129,6 +1152,25 @@ struct FUNCTION_PTR_IMPL {
 template<typename RET, typename ... PARAMS>
 using FUNCTION_PTR = typename FUNCTION_PTR_IMPL<RET, PARAMS...>::TYPE;
 
+
+
+template<typename T>
+struct MEMBER {
+  MEMBER() = delete;
+
+  template<typename RET, typename ... PARAMS>
+  struct FUNCTION_PTR_IMPL {
+    FUNCTION_PTR_IMPL() = delete;
+
+    using TYPE = RET(T::*)(PARAMS...);
+  };
+
+  template<typename RET, typename ... PARAMS>
+  using FUNCTION_PTR = typename FUNCTION_PTR_IMPL<RET, PARAMS...>::TYPE;
+};
+
+
+
 template<typename T>
 constexpr inline T square(T t) { return t * t; }
 
@@ -1156,7 +1198,7 @@ struct EXECUTE_AT_END {
 };
 
 template<typename T>
-EXECUTE_AT_END(T&& t) -> EXECUTE_AT_END<T>;
+EXECUTE_AT_END(T&& t)->EXECUTE_AT_END<T>;
 
 #define DEFER(...) EXECUTE_AT_END JOIN(defer, __LINE__) = [__VA_ARGS__]() mutable ->void 
 
@@ -1185,3 +1227,13 @@ struct IS_SAME_TYPE_IMPL<T, T> {
 template<typename T, typename U>
 inline constexpr bool IS_SAME_TYPE = IS_SAME_TYPE_IMPL<T, U>::test;
 
+constexpr bool slow_string_eq(const char* str1, const char* str2) {
+  while (str1[0] != '\0' && str2[0] != '\0') {
+    if (str1[0] != str2[0]) { return false; }
+
+    str1++;
+    str2++;
+  }
+
+  return str1[0] == str2[0];//both are '\0'
+}

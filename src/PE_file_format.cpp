@@ -785,80 +785,11 @@ void load_portable_executable_from_file(Compiler* const comp,
         name_holder.insert('\0');
 
         ptr->str = comp->strings->intern(name_holder.data);
+        pe_file->export_table.names.insert(ptr->str);
+
         name_holder.clear();
       }
 
-    }
-  }
-}
-
-void load_portable_executable_exports(Compiler* const comp,
-                                      ImportedDll* dll,
-                                      const Span& span,
-                                      const char* file_name) {
-  OwnedPtr<const uint8_t> bytes = cast_ptr<const uint8_t>(FILES::load_file_to_string(file_name));
-  if (bytes.ptr == nullptr) {
-    comp->report_error(CompileCode::UNFOUND_DEPENDENCY, span,
-                       "Could not find the file '{}'",
-                       file_name);
-    return;
-  }
-
-  const uint8_t* ptr = bytes.ptr;
-
-  const MS_DOS_Header* dos = (const MS_DOS_Header*)ptr;
-
-  ptr += dos->actual_start_of_header;
-  const uint8_t* signature = ptr;
-  ptr += SIGNATURE_SIZE;
-
-  const COFF_file_header* coff = (const COFF_file_header*)ptr;
-  ptr += sizeof(COFF_file_header);
-
-  const PE32Plus_optional_header* plus = (const PE32Plus_optional_header*)ptr;
-  ptr += sizeof(PE32Plus_optional_header);
-
-  const PE32Plus_windows_specific* plus_win = (const PE32Plus_windows_specific*)ptr;
-  ptr += sizeof(PE32Plus_windows_specific);
-
-  const size_t num_dirs = plus_win->number_of_rva_and_sizes;
-
-  Image_header_directories directories ={};
-  {
-    size_t size_needed = num_dirs * sizeof(Data_directory);
-    memcpy_ts((uint8_t*)&directories, size_needed,
-              ptr, size_needed);
-    ptr += size_needed;
-  }
-
-  if (num_dirs > 0) {
-    const ExportDirectoryTable* const export_directory_table
-      = (const ExportDirectoryTable*)(bytes.ptr + directories.export_table.virtual_address);
-
-    const ExportAddress* export_address_table
-      = (const ExportAddress*)(bytes.ptr + export_directory_table->export_table_address);
-    const size_t num_exports = export_directory_table->num_export_entries;
-
-    const RVA* name_pointers = (const RVA*)(bytes.ptr + export_directory_table->name_pointer_table_address);
-    const uint16_t* ordinal_table = (const uint16_t*)(bytes.ptr + export_directory_table->ordinal_table_address);
-
-    assert(export_directory_table->num_export_entries == export_directory_table->num_name_pointers);
-
-    const InternString* file_name = comp->strings->intern((const char*)(bytes.ptr + export_directory_table->name_rva));
-
-    for (size_t i = 0; i < num_exports; i++) {
-      RVA name_pointer = name_pointers[i];
-      uint16_t ordinal = ordinal_table[i];
-
-      const ExportAddress* entry = export_address_table + ordinal;
-      const char* string = (const char*)(bytes.ptr + name_pointer);
-
-      const InternString* name = comp->strings->intern(string);
-
-      dll->imports.insert_uninit(1);
-      SingleDllImport* single_export = dll->imports.back();
-      single_export->rva_hint = entry->export_rva;
-      single_export->name = name;
     }
   }
 }

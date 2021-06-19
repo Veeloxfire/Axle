@@ -92,10 +92,26 @@ void load_string(Array<char>& res, const AxleTokenType tt) {
   load_string(res, str);
 }
 
+void load_string(Array<char>& res, NamedElementType nt) {
+  switch (nt) {
+    #define MODIFY(name, str, expr_name) case NamedElementType:: ## name: load_string(res, str); break;
+      N_E_T_MODS
+      #undef MODIFY
+
+    default:
+      load_string(res, "unknown_name(");
+      load_string(res, (uint8_t)nt);
+      load_string(res, ')');
+      break;
+  }
+}
+
 void load_string(Array<char>& res, STATEMENT_TYPE st) {
 
   switch (st) {
-  #define MOD(name) case STATEMENT_TYPE:: ## name: load_string(res, #name); break;
+    case STATEMENT_TYPE::UNKNOWN: load_string(res, "UNKNOWN"); break;
+
+  #define MOD(name, expr_name) case STATEMENT_TYPE:: ## name: load_string(res, #name); break;
     MOD_STATEMENTS
     #undef MOD
 

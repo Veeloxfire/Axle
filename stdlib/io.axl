@@ -1,0 +1,11 @@
+#stdlib "kernel32.axl";
+#stdlib "strings.axl";
+
+global u64 stdout_handle = GetStdHandle(cast(i32, -11i64));
+
+function print(*ascii string) -> void {
+  u32 num_chars = cast(u32, strlen(string));
+  u32 num_chars_written = 0;
+
+  WriteConsoleA(stdout_handle, cast(*void, string), num_chars, &num_chars_written, nullptr);
+}

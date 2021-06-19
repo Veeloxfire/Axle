@@ -13,10 +13,18 @@ struct State;
 struct Function;
 struct CompilationUnit;
 struct CallingConvention;
-
+struct Span;
 
 enum struct STRUCTURE_TYPE : uint8_t {
-  INTEGER, POINTER, LITERAL, COMPOSITE, VOID, ENUM, FIXED_ARRAY, ASCII_CHAR
+  INTEGER,
+  POINTER,
+  SIMPLE_LITERAL,
+  COMPOSITE,
+  VOID,
+  ENUM,
+  FIXED_ARRAY,
+  ASCII_CHAR,
+  TUPLE_LITERAL,
 };
 
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;
@@ -61,25 +69,37 @@ struct EnumStructure : public Structure {
   Array<const EnumValue*> enum_values ={};
 };
 
-enum struct LITERAL_TYPE {
-  INTEGER, SIGNED_INTEGER, EMPTY_ARR, POINTER
+enum struct SIMPLE_LITERAL_TYPE {
+  INTEGER, SIGNED_INTEGER, EMPTY_ARR, POINTER, STRUCT_INIT
 };
 
-struct LiteralStructure : public Structure {
-  LITERAL_TYPE literal_type = LITERAL_TYPE::INTEGER;
-  size_t str_length = 0;
+struct SimpleLiteralStructure : public Structure {
+  SIMPLE_LITERAL_TYPE literal_type = SIMPLE_LITERAL_TYPE::INTEGER;
+};
+
+struct TupleElement {
+  uint32_t offset = 0;
+  const Structure* type = nullptr;
+};
+
+struct TupleLiteralStructure : public Structure {
+  uint32_t cached_size = 0;
+  uint32_t cached_alignment = 0;
+
+  Array<TupleElement> elements ={};
 };
 
 struct StructElement {
   const InternString* name ={};
-  const Structure* element = nullptr;
+  uint32_t offset = 0;
+  const Structure* type = nullptr;
 };
 
 struct CompositeStructure : public Structure {
-  const ASTStructureDeclaration* raw = nullptr;
+  const ASTStructureDeclaration* declaration = nullptr;
 
-  uint32_t total_size = 0;
-  uint32_t total_alignment = 0;
+  uint32_t cached_size = 0;
+  uint32_t cached_alignment = 0;
   Array<StructElement> elements ={};
 };
 
@@ -123,22 +143,23 @@ struct Function : public FunctionBase {
 constexpr bool is_negatable(const Structure* s) {
   const bool signed_int = s->type == STRUCTURE_TYPE::INTEGER &&
     static_cast<const IntegerStructure*>(s)->is_signed;
-  const bool int_lit = s->type == STRUCTURE_TYPE::LITERAL &&
-    static_cast<const LiteralStructure*>(s)->literal_type == LITERAL_TYPE::INTEGER;
+  const bool int_lit = s->type == STRUCTURE_TYPE::SIMPLE_LITERAL &&
+    static_cast<const SimpleLiteralStructure*>(s)->literal_type == SIMPLE_LITERAL_TYPE::INTEGER;
 
   return signed_int || int_lit;
 }
 
 constexpr bool is_numeric_type(const Structure* s) {
-  const bool int_lit = s->type == STRUCTURE_TYPE::LITERAL &&
-    static_cast<const LiteralStructure*>(s)->literal_type == LITERAL_TYPE::INTEGER;
+  const bool int_lit = s->type == STRUCTURE_TYPE::SIMPLE_LITERAL &&
+    static_cast<const SimpleLiteralStructure*>(s)->literal_type == SIMPLE_LITERAL_TYPE::INTEGER;
 
 
   return s->type == STRUCTURE_TYPE::INTEGER || int_lit;
 }
 
 struct Types {
-  static FreelistBlockAllocator<LiteralStructure> literal_structures;
+  static FreelistBlockAllocator<SimpleLiteralStructure> simple_literal_structures;
+  static FreelistBlockAllocator<TupleLiteralStructure> tuple_literal_structures;
   static FreelistBlockAllocator<IntegerStructure> int_structures;
   static FreelistBlockAllocator<CompositeStructure> composite_structures;
   static FreelistBlockAllocator<EnumStructure> enum_structures;
@@ -176,32 +197,43 @@ struct Types {
   constexpr bool is_logical_type(const Structure* s) const {
     return s == s_bool || is_numeric_type(s);
   }
-
 };
 
-LiteralStructure* new_literal_type(Compiler* const comp,
-                                   const InternString* name);
+SimpleLiteralStructure* new_simple_literal_type(Compiler* const comp,
+                                                const Span& span,
+                                                const InternString* name);
+
+TupleLiteralStructure* new_tuple_literal_type(Compiler* const comp,
+                                              const Span& span,
+                                              Array<const Structure*>&& types);
 
 IntegerStructure* new_int_type(Compiler* const comp,
+                               const Span& span,
                                const InternString* name);
 
 CompositeStructure* new_composite_type(Compiler* const comp,
+                                       const Span& span,
                                        const InternString* name);
 
 EnumStructure* new_enum_type(Compiler* const comp,
+                             const Span& span,
                              const InternString* name);
 
 Structure* new_base_type(Compiler* const comp,
+                         const Span& span,
                          const InternString* name);
 
 ArrayStructure* new_array_type(Compiler* const comp,
+                               const Span& span,
                                const Structure* base,
                                size_t length);
 
 PointerStructure* new_pointer_type(Compiler* const comp,
+                                   const Span& span,
                                    const Structure* base);
 
 EnumValue* new_enum_value(Compiler* const comp,
+                          const Span& span,
                           EnumStructure* enum_s,
                           const InternString* name);
 
@@ -209,35 +241,53 @@ EnumValue* new_enum_value(Compiler* const comp,
 //Can cast without any value modification or checks
 constexpr bool can_implicit_cast(const Structure* from, const Structure* to) {
   if (from == to) return true;
-  else if (from->type == STRUCTURE_TYPE::LITERAL) {
+  else if (from->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
     //both literals
-    const LiteralStructure* f_ls = (const LiteralStructure*)from;
+    const SimpleLiteralStructure* f_ls = (const SimpleLiteralStructure*)from;
 
-    if (to->type == STRUCTURE_TYPE::LITERAL) {
-      const LiteralStructure* t_ls = (const LiteralStructure*)to;
+    if (to->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
+      const SimpleLiteralStructure* t_ls = (const SimpleLiteralStructure*)to;
 
       //can cast unsigned literal to signed literal
-      return f_ls->literal_type == LITERAL_TYPE::INTEGER
-        && t_ls->literal_type == LITERAL_TYPE::SIGNED_INTEGER;
+      return f_ls->literal_type == SIMPLE_LITERAL_TYPE::INTEGER
+        && t_ls->literal_type == SIMPLE_LITERAL_TYPE::SIGNED_INTEGER;
     }
     else if (to->type == STRUCTURE_TYPE::POINTER) {
       //Can cast a pointer literal (e.g. nullptr) to any pointer type
-      return f_ls->literal_type == LITERAL_TYPE::POINTER;
+      return f_ls->literal_type == SIMPLE_LITERAL_TYPE::POINTER;
     }
   }
-  else if (from->type == STRUCTURE_TYPE::POINTER
-           && (to->type == STRUCTURE_TYPE::POINTER
-           && static_cast<const PointerStructure*>(to)->base->type == STRUCTURE_TYPE::VOID)) {
-    //Can cast any pointer to void pointer
+  else if (from->type == STRUCTURE_TYPE::TUPLE_LITERAL
+           && to->type == STRUCTURE_TYPE::COMPOSITE) {
+    const TupleLiteralStructure* f_ts = (const TupleLiteralStructure*)from;
+    const CompositeStructure* t_cs = (const CompositeStructure*)to;
+
+    //Size same?
+    if(f_ts->elements.size != t_cs->elements.size) { return false;}
+
+    auto f_i = f_ts->elements.begin();
+    auto t_i = t_cs->elements.begin();
+    const auto f_end = f_ts->elements.end();
+
+    for (; f_i < f_end; f_i++, t_i++) {
+      //Must be implicit type and offset
+      if(f_i->offset != t_i->offset || !can_implicit_cast(f_i->type, t_i->type)) { 
+        return false;
+      }
+    }
+
     return true;
   }
-  
+
 
   return false;
 }
 
 //Can cast with modification that can only be done at compile time
 bool can_comptime_cast(const Structure* from, const Structure* to);
+
+//Returns nullptr for types that dont have a signed version or are already signed
+const Structure* get_signed_type_of(const Types* types, const Structure* s);
 
 namespace CASTS {
   RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
@@ -248,6 +298,7 @@ namespace CASTS {
 }
 
 namespace TYPE_TESTS {
+  bool is_literal(const Structure*);
   bool is_array(const Structure*);
   bool is_pointer(const Structure*);
   bool can_index(const Structure*);

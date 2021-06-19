@@ -92,7 +92,7 @@ void vm_backend_single_func(Program* prog, const CodeBlock* code, Compiler* cons
               //Switch to a code label rather than func ptr
               ByteCode::EMIT::CALL(out_code, func->code_block.label);
             }
-            
+
             code_i += ByteCode::SIZE_OF::CALL;
             break;
           }
@@ -104,7 +104,7 @@ void vm_backend_single_func(Program* prog, const CodeBlock* code, Compiler* cons
           instruction_offsets.insert(out_code.size);
           goto EMIT_INSTRUCTION;
         default: {
-            EMIT_INSTRUCTION:
+          EMIT_INSTRUCTION:
             const size_t i_size = ByteCode::instruction_size(*code_i);
             out_code.insert_uninit(i_size);
             memcpy_ts(out_code.data + out_code.size - i_size, i_size, code_i, i_size);
@@ -160,133 +160,215 @@ void vm_backend_single_func(Program* prog, const CodeBlock* code, Compiler* cons
   prog->code = std::move(out_code);
 }
 
+void vm_backend_code_block(Program* prog,
+                           Array<uint8_t>& out_code,
+                           const CodeBlock* code,
+                           size_t* label_indexes,
+                           Array<size_t>& instruction_offsets) {
+
+  auto code_i = code->code.begin();
+  const auto code_end = code->code.end();
+
+  //First is guaranteed to be label
+  {
+    const auto p = ByteCode::PARSE::LABEL(code_i);
+    assert(p.op == ByteCode::LABEL);
+
+    label_indexes[p.u64.val] = out_code.size;
+
+    code_i += ByteCode::SIZE_OF::LABEL;
+  }
+
+  while (code_i < code_end) {
+    switch (*code_i) {
+      case ByteCode::LOAD_GLOBAL_MEM: {
+          //Load the global as an index into the data
+          const auto p_g = ByteCode::PARSE::LOAD_GLOBAL_MEM(code_i);
+
+          const Global* glob = p_g.u64;
+          ByteCode::EMIT::LOAD_GLOBAL_MEM(out_code, p_g.val, prog->data.ptr + glob->data_index);
+
+          code_i += ByteCode::SIZE_OF::LOAD_GLOBAL_MEM;
+          break;
+        }
+      case ByteCode::RESERVE: {
+          code_i += ByteCode::SIZE_OF::RESERVE;
+          break;
+        }
+      case ByteCode::LABEL: {
+          const auto p = ByteCode::PARSE::LABEL(code_i);
+
+          label_indexes[p.u64.val] = out_code.size;
+
+          code_i += ByteCode::SIZE_OF::LABEL;
+          break;
+        }
+      case ByteCode::JUMP_TO_FIXED: {
+          const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED(code_i);
+          code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED;
+
+          //Can ignore anything between a fixed jump and a label - it wont every be reached
+          while (code_i < code_end && code_i[0] != ByteCode::LABEL) {
+            code_i += ByteCode::instruction_size(code_i[0]);
+          }
+
+          size_t next = 0;
+
+          //Could be series of labels so needs to while loop
+          while (code_i + next < code_end && code_i[next] == ByteCode::LABEL) {
+            const auto p_l = ByteCode::PARSE::LABEL(code_i + next);
+
+            if (p_l.u64.val == p_j.u64.val) {
+              //About to jump to next instruction - can ignore jump
+              goto SKIP_JUMP;
+            }
+
+            //Next might also be a label
+            next += ByteCode::SIZE_OF::LABEL;
+          }
+
+          instruction_offsets.insert(out_code.size);
+          ByteCode::EMIT::JUMP_TO_FIXED(out_code, p_j.u64);
+        SKIP_JUMP:
+          break;
+        }
+      case ByteCode::CALL_NATIVE_X64: {
+          const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
+          const FunctionPointer* ptr = p_c.u64_1;
+
+          ByteCode::EMIT::CALL_NATIVE_X64(out_code, prog->data.ptr + ptr->data_index, p_c.u64_2);
+          code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
+          break;
+        }
+      case ByteCode::CALL: {
+          const auto p_c = ByteCode::PARSE::CALL(code_i);
+          const FunctionBase* func_base = p_c.u64;
+          if (func_base->func_type == FUNCTION_TYPE::POINTER) {
+            //Is known at this time
+            assert(false);
+          }
+          else {
+            const Function* func = (const Function*)func_base;
+            instruction_offsets.insert(out_code.size);
+            //Switch to a code label rather than func ptr
+            ByteCode::EMIT::CALL(out_code, func->code_block.label);
+          }
+
+          code_i += ByteCode::SIZE_OF::CALL;
+          break;
+        }
+      case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO:
+      case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO:
+        //Could try removing these jumps maybe
+        //but they shouldnt ever jump to the next instruction anyway
+        //Would be checking for something that never happens
+        instruction_offsets.insert(out_code.size);
+        goto EMIT_INSTRUCTION;
+      default: {
+        EMIT_INSTRUCTION:
+          const size_t i_size = ByteCode::instruction_size(*code_i);
+          out_code.insert_uninit(i_size);
+          memcpy_ts(out_code.data + out_code.size - i_size, i_size, code_i, i_size);
+
+          code_i += i_size;
+          break;
+        }
+    }
+  }
+}
+
+void vm_backend_fix_jump(uint8_t* instruction,
+                         size_t* label_indexes) {
+  switch (*instruction) {
+    case ByteCode::CALL: {
+        const auto p = ByteCode::PARSE::CALL(instruction);
+        ByteCode::WRITE::CALL(instruction, label_indexes[p.u64.val]);
+        break;
+      }
+    case ByteCode::JUMP_TO_FIXED: {
+        const auto p = ByteCode::PARSE::JUMP_TO_FIXED(instruction);
+        ByteCode::WRITE::JUMP_TO_FIXED(instruction, label_indexes[p.u64.val]);
+        break;
+      }
+    case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
+        const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_ZERO(instruction);
+        ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_ZERO(instruction, p.val, label_indexes[p.u64.val]);
+        break;
+      }
+    case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
+        const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(instruction);
+        ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(instruction, p.val, label_indexes[p.u64.val]);
+        break;
+      }
+  }
+}
+
 void vm_backend(Program* prog, Compiler* comp) {
-  Array<uint8_t> out_code = {};
+  Array<uint8_t> out_code ={};
 
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
   DEFER(&) { free_no_destruct(label_indexes); };
 
   Array<size_t> instruction_offsets ={};
 
-  size_t entry_point_label = -1;
-
   {
+    bool found_entry = false;
+    size_t entry_point_label = 0;
+
     auto func_i = comp->functions.begin_const_iter();
     const auto func_end = comp->functions.end_const_iter();
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
-      if (!func->is_called && func->signature.name != comp->entry_point) {
+      if (!func->is_called && func->signature.name != comp->build_options.entry_point) {
         //Isnt called and isnt entry point so dont need to compile
         continue;
       }
 
+      //Find entry point
+      if (func->signature.name == comp->build_options.entry_point
+          && func->signature.parameter_types.size == 0) {
+        found_entry = true;
+        entry_point_label = func->code_block.label;
+      }
+
       const CodeBlock* const code = &func->code_block;
 
-      auto code_i = code->code.begin();
-      const auto code_end = code->code.end();
+      vm_backend_code_block(prog, out_code, code, label_indexes, instruction_offsets);
+    }
 
-      //First is guaranteed to be label
-      {
-        const auto p = ByteCode::PARSE::LABEL(code_i);
+    if (!found_entry) {
+      comp->report_error(CompileCode::LINK_ERROR, Span{},
+                         "Could not find entry point");
+      return;
+    }
 
-        label_indexes[p.u64.val] = out_code.size;
+    //Init all the globals - then call the main function
+    {
+      auto i = comp->globals.begin_iter();
+      auto end = comp->globals.end_iter();
 
-        //Find entry point
-        if (func->signature.name == comp->entry_point
-            && func->signature.parameter_types.size == 0) {
-          entry_point_label = p.u64.val;
-        }
+      for (; i != end; i.next()) {
+        Global* glob = i.get();
 
-        code_i += ByteCode::SIZE_OF::LABEL;
+        vm_backend_code_block(prog, out_code, &glob->init, label_indexes, instruction_offsets);
       }
 
-      while (code_i < code_end) {
-        switch (*code_i) {
-          case ByteCode::RESERVE: {
-              code_i += ByteCode::SIZE_OF::RESERVE;
-              break;
-            }
-          case ByteCode::LABEL: {
-              const auto p = ByteCode::PARSE::LABEL(code_i);
+      //Entry before emitting possible inits
+      prog->entry_point = out_code.size;
 
-              label_indexes[p.u64.val] = out_code.size;
+      //Just init calls
+      i = comp->globals.begin_iter();
+      for (; i != end; i.next()) {
+        Global* glob = i.get();
 
-              code_i += ByteCode::SIZE_OF::LABEL;
-              break;
-            }
-          case ByteCode::JUMP_TO_FIXED: {
-              const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED(code_i);
-              code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED;
-
-              //Can ignore anything between a fixed jump and a label - it wont every be reached
-              while (code_i < code_end && code_i[0] != ByteCode::LABEL) {
-                code_i += ByteCode::instruction_size(code_i[0]);
-              }
-
-              size_t next = 0;
-
-              //Could be series of labels so needs to while loop
-              while (code_i + next < code_end && code_i[next] == ByteCode::LABEL) {
-                const auto p_l = ByteCode::PARSE::LABEL(code_i + next);
-
-                if (p_l.u64.val == p_j.u64.val) {
-                  //About to jump to next instruction - can ignore jump
-                  goto SKIP_JUMP;
-                }
-
-                //Next might also be a label
-                next += ByteCode::SIZE_OF::LABEL;
-              }
-
-              instruction_offsets.insert(out_code.size);
-              ByteCode::EMIT::JUMP_TO_FIXED(out_code, p_j.u64);
-            SKIP_JUMP:
-              break;
-            }           
-          case ByteCode::CALL_NATIVE_X64: {
-              const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
-              const FunctionPointer* ptr = p_c.u64_1;
-
-              ByteCode::EMIT::CALL_NATIVE_X64(out_code, prog->data.ptr + ptr->data_index, p_c.u64_2);
-              code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
-              break;
-            }
-          case ByteCode::CALL: {
-              const auto p_c = ByteCode::PARSE::CALL(code_i);
-              const FunctionBase* func_base = p_c.u64;
-              if (func_base->func_type == FUNCTION_TYPE::POINTER) {
-                //Is known at this time
-                assert(false);
-              }
-              else {
-                const Function* func = (const Function*)func_base;
-                instruction_offsets.insert(out_code.size);
-                //Switch to a code label rather than func ptr
-                ByteCode::EMIT::CALL(out_code, func->code_block.label);
-              }
-              
-              code_i += ByteCode::SIZE_OF::CALL;
-              break;
-            }
-          case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO:
-          case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO:
-            //Could try removing these jumps maybe
-            //but they shouldnt ever jump to the next instruction anyway
-            //Would be checking for something that never happens
-            instruction_offsets.insert(out_code.size);
-            goto EMIT_INSTRUCTION;
-          default: {
-              EMIT_INSTRUCTION:
-              const size_t i_size = ByteCode::instruction_size(*code_i);
-              out_code.insert_uninit(i_size);
-              memcpy_ts(out_code.data + out_code.size - i_size, i_size, code_i, i_size);
-
-              code_i += i_size;
-              break;
-            }
-        }
+        instruction_offsets.insert(out_code.size);
+        ByteCode::EMIT::CALL(out_code, glob->init.label);
       }
+
+      instruction_offsets.insert(out_code.size);
+      ByteCode::EMIT::CALL(out_code, entry_point_label);
+      ByteCode::EMIT::RETURN(out_code);
     }
   }
 
@@ -297,38 +379,10 @@ void vm_backend(Program* prog, Compiler* comp) {
     for (; jumps_i < jumps_end; jumps_i++) {
       const size_t index = *jumps_i;
 
-      switch (out_code.data[index]) {
-        case ByteCode::CALL: {
-            const auto p = ByteCode::PARSE::CALL(out_code.data + index);
-            ByteCode::WRITE::CALL(out_code.data + index, label_indexes[p.u64.val]);
-            break;
-          }
-        case ByteCode::JUMP_TO_FIXED: {
-            const auto p = ByteCode::PARSE::JUMP_TO_FIXED(out_code.data + index);
-            ByteCode::WRITE::JUMP_TO_FIXED(out_code.data + index, label_indexes[p.u64.val]);
-            break;
-          }
-        case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
-            const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_ZERO(out_code.data + index);
-            ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_ZERO(out_code.data + index, p.val, label_indexes[p.u64.val]);
-            break;
-          }
-        case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
-            const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(out_code.data + index);
-            ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(out_code.data + index, p.val, label_indexes[p.u64.val]);
-            break;
-          }
-      }
+      vm_backend_fix_jump(out_code.data + index, label_indexes);
     }
   }
 
-  if (entry_point_label <= comp->labels) {
-    prog->entry_point = label_indexes[entry_point_label];
-  }
-  else {
-    comp->report_error(CompileCode::LINK_ERROR, Span{},
-                       "Could not find entry point");
-  }
 
   prog->code_size = out_code.size;
   prog->code = std::move(out_code);
@@ -813,7 +867,7 @@ void x86_64_machine_code_backend(Program* prog, Compiler* comp) {
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
-      if (!func->is_called && func->signature.name != comp->entry_point) {
+      if (!func->is_called && func->signature.name != comp->build_options.entry_point) {
         //Isnt called and isnt entry point so dont need to compile
         continue;
       }
@@ -830,7 +884,7 @@ void x86_64_machine_code_backend(Program* prog, Compiler* comp) {
         label_indexes[p.u64.val] = out_code.size;
 
         //Find entry point
-        if (func->signature.name == comp->entry_point
+        if (func->signature.name == comp->build_options.entry_point
             && func->signature.parameter_types.size == 0) {
           entry_point_label = p.u64.val;
         }
@@ -1252,7 +1306,7 @@ void x86_64_machine_code_backend(Program* prog, Compiler* comp) {
               comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
                                  "Backend found unsupported bytecode instruction\n"
                                  "Code: {}, Name: {}",
-                                  op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
+                                 op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
               return;
             }
         }

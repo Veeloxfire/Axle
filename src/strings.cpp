@@ -228,6 +228,8 @@ void InternStringSet::insert(const InternString* const key) {
       }
     }
 
-    *loc = key;     
+    *loc = key;
   }
+
+  used++;
 }

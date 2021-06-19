@@ -1,0 +1,11 @@
+#stdlib "kernel32.axl";
+
+global u64 heap_handle = GetProcessHeap();
+
+function allocate(u64 bytes) -> *void {
+  return HeapAlloc(heap_handle, 0, bytes);
+}
+
+function free(*void ptr) -> void {
+  HeapFree(heap_handle, 0, ptr);
+}

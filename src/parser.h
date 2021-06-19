@@ -9,12 +9,15 @@ struct ASTFile;
 #define AXLE_TOKEN_KEYWORDS \
 MODIFY(Return, "return") \
 MODIFY(Function, "function") \
+MODIFY(Global, "global") \
 MODIFY(If, "if") \
+MODIFY(While, "while") \
 MODIFY(Else, "else") \
 MODIFY(True, "true") \
 MODIFY(False, "false") \
 MODIFY(Nullptr, "nullptr") \
-MODIFY(Cast, "cast")
+MODIFY(Cast, "cast") \
+MODIFY(Struct, "struct")
 
 #define AXLE_TOKEN_OPERATORS \
 MODIFY(Add, "+") \
@@ -25,7 +28,8 @@ MODIFY(Lesser, "<") \
 MODIFY(Greater, ">") \
 MODIFY(Or, "|") \
 MODIFY(And, "&") \
-MODIFY(Equals, "=")
+MODIFY(Equals, "=") \
+MODIFY(Bang, "!") \
 
 #define AXLE_TOKEN_STRUCTURAL \
 MODIFY(Left_Bracket, "(") \
@@ -35,10 +39,12 @@ MODIFY(Right_Brace, "}") \
 MODIFY(Left_Square, "[") \
 MODIFY(Right_Square, "]") \
 MODIFY(Comma, ",") \
-MODIFY(Semicolon, ";")
+MODIFY(Semicolon, ";") \
+MODIFY(Full_Stop, ".")
 
 #define AXLE_TOKEN_INTRINSICS \
 MODIFY(Import, "#import") \
+MODIFY(Stdlib, "#stdlib") \
 MODIFY(DLLHeader, "#dll_header") \
 MODIFY(Convention, "#conv") \
 
@@ -48,6 +54,7 @@ MODIFY(Eof, "") \
 MODIFY(Identifier, "") \
 MODIFY(Number, "") \
 MODIFY(String, "") \
+MODIFY(Character, "") \
 AXLE_TOKEN_KEYWORDS \
 AXLE_TOKEN_OPERATORS \
 AXLE_TOKEN_STRUCTURAL \
@@ -75,6 +82,8 @@ struct Position {
 
 struct Token {
   AxleTokenType type = AxleTokenType::Error;
+  bool consumed_whitespace = false;
+
   const InternString* string = nullptr;
 
   Position pos ={};
@@ -106,6 +115,7 @@ struct Parser {
 
   Token prev = {};
   Token current ={};
+  Token next ={};
 
   void report_error(const char* error_message);
 };

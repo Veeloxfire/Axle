@@ -1,12 +1,26 @@
-#import "sandbox2.axl";
+#stdlib "io.axl";
+#stdlib "memory.axl";
 
 function main() -> u64 {
-  u64 handle = GetStdHandle(-11);
+  *ascii var = cast(*ascii, allocate(14));
 
-  [ascii; 14] hello_world = "Hello World!\n";
-  u32 res = 0;
+  var[0] = 'H';
+  var[1] = 'e';
+  var[2] = 'l';
+  var[3] = 'l';
+  var[4] = 'o';
+  var[5] = ' ';
+  var[6] = 'W';
+  var[7] = 'o';
+  var[8] = 'r';
+  var[9] = 'l';
+  var[10] = 'd';
+  var[11] = '!';
+  var[12] = '\n';
+  var[13] = '\0';
 
-  WriteConsoleA(handle, cast(*ascii, hello_world), 14, &res, nullptr);
+  print(var);
 
-  return cast(u64, res);
+  free(cast(*void, var));
+  return 0;
 }

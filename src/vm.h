@@ -1,7 +1,6 @@
 #pragma once
 #include "utility.h"
 #include "bytecode.h"
-#include "options.h"
 #include "calling_conventions.h"
 #include "Program.h"
 

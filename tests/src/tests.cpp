@@ -67,9 +67,14 @@ bool check_types_free() {
     std::cout << "Some int structures were not freed\n";
   }
 
-  if(!Types::literal_structures._debug_all_free()) {
+  if(!Types::simple_literal_structures._debug_all_free()) {
     res = false;
-    std::cout << "Some literal structures were not freed\n";
+    std::cout << "Some simple literal structures were not freed\n";
+  }
+
+  if(!Types::tuple_literal_structures._debug_all_free()) {
+    res = false;
+    std::cout << "Some tuple literal structures were not freed\n";
   }
 
   if(!Types::pointer_structures._debug_all_free()) {
@@ -128,8 +133,8 @@ constexpr auto operations_signed_cpp() -> uint64_t {
 }
 
 struct Environment {
-  const System* system;
-  const CallingConvention* convention;
+  const char* system_name;
+  const char* convention;
 };
 
 struct Test {
@@ -152,7 +157,7 @@ static constexpr Test tests[] ={
 
 static constexpr size_t num_tests = sizeof(tests)/sizeof(Test);
 
-bool run_test(const Options& opts, const uint64_t res) {
+bool run_test(const APIOptions& opts, const uint64_t res) {
   try {
     //Time all the tests
     const auto now = std::chrono::high_resolution_clock::now();
@@ -205,7 +210,7 @@ bool run_test(const Options& opts, const uint64_t res) {
 
 }
 
-bool run_all_tests_in_env_and_optimization(const Environment& env, const OptimizationOptions& optimize) {
+bool run_all_tests_in_env_and_optimization(const Environment& env, const APIOptimizationOptions& optimize) {
 
   {
     size_t num_optimizations = (size_t)optimize.non_stack_locals;
@@ -230,21 +235,23 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
   for (size_t i = 0; i < num_tests; i++) {
     const auto& test = tests[i];
 
-    Options options ={};
+    APIOptions options ={};
 
     options.optimize = optimize;
 
-    options.build.system             = env.system;
+    options.build.system_name             = env.system_name;
     options.build.default_calling_convention = env.convention;
     options.build.entry_point        = "main";
     options.build.file_name          = test.file_name;
+    options.build.std_lib_folder     = "D:\\Github\\Compiler\\stdlib";
 
-    //options.print.ast = true;
-    //options.print.fully_compiled = true;
-    //options.print.comptime_exec  = true;
-    //options.print.comptime_res   = true;
-    //options.print.pre_reg_alloc = true;
+    //options.print.ast             = true;
+    //options.print.fully_compiled  = true;
+    //options.print.comptime_exec   = true;
+    //options.print.comptime_res    = true;
+    //options.print.pre_reg_alloc   = true;
     //options.print.coalesce_values = true;
+    //options.print.file_loads      = true;
 
     std::cout << "\nStarting Test: " << test.test_name << "\n";
 
@@ -266,12 +273,12 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
   }
 
   if (failed_tests.size == 0) {
-    std::cout << "\nAll "<< env.system->name << " Tests Passed!" << std::endl;
+    std::cout << "\nAll "<< env.system_name << " Tests Passed!" << std::endl;
   }
   else {
     //Show which tests failed
 
-    std::cerr << "\nSome " << env.system->name << " Tests Failed!\nFailed Tests:";
+    std::cerr << "\nSome " << env.system_name << " Tests Failed!\nFailed Tests:";
 
     auto i = failed_tests.begin();
     const auto end = failed_tests.end();
@@ -292,11 +299,11 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const Optimiz
 //Runs all the test with a specific calling convention and system
 bool run_all_tests_in_env(const Environment& env) {
 
-  std::cout << "=== Running tests in: " << env.system->name << " === \n";
+  std::cout << "=== Running tests in: " << env.system_name << " === \n";
 
   bool any_failed = false;
 
-  OptimizationOptions opts ={};
+  APIOptimizationOptions opts ={};
 
   //no optimizations
   any_failed |= run_all_tests_in_env_and_optimization(env, opts);
@@ -304,15 +311,15 @@ bool run_all_tests_in_env(const Environment& env) {
   opts.non_stack_locals = true;
   any_failed |= run_all_tests_in_env_and_optimization(env, opts);
 
-  std::cout << "\n=== Finished tests in: " << env.system->name << " === \n\n";
+  std::cout << "\n=== Finished tests in: " << env.system_name << " === \n\n";
   return any_failed;
 }
 
 int main() {
   std::cout << "Current Working Directory: " << std::filesystem::current_path() << '\n';
 
-  const Environment env_x86_64 ={ &system_x86_64, &convention_microsoft_x64 };
-  const Environment env_vm ={ &system_vm, &convention_vm };
+  const Environment env_x86_64 ={ "x86_64", "x64" };
+  const Environment env_vm ={ "vm", "vm" };
 
   bool any_failed = false;
 

@@ -1,0 +1,33 @@
+
+//Imports
+#import "other_file";
+
+//Struct
+A : struct = {
+ el_1: u64;
+ el_2: i64;
+}
+
+//Function
+B : (arg1: u32, arg2: *A)->void = {
+
+}
+
+//Generic Struct
+C: struct(T: type, U: type) = {
+  t: T;
+  u: U;
+}
+
+//Generic Function
+last:  (arr: [*ascii; #auto])->*ascii = {
+  comptime len := arr.len;
+  
+  if (len == 0) {
+    return nullptr;
+  }
+  else {
+    return arr[len - 1];
+  }
+}
+

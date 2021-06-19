@@ -92,8 +92,24 @@ constexpr static bool is_new_line(Lexer* const lex) {
 }
 
 constexpr static void skip_whitespace(Lexer* const lex) {
+  constexpr auto n_newline = [](Lexer* const lex) {
+    lex->curr_pos.line++;
+    lex->curr_pos.character = 0;
+    if ((++lex->top)[0] == '\r') {
+      ++lex->top;
+    }
+  };
+
+  constexpr auto r_newline = [](Lexer* const lex) {
+    lex->curr_pos.line++;
+    lex->curr_pos.character = 0;
+    if ((++lex->top)[0] == '\n') {
+      ++lex->top;
+    }
+  };
+
   while (true) {
-    const char c = lex->top[0];
+    char c = lex->top[0];
 
     switch (c) {
       case ' ':
@@ -102,22 +118,46 @@ constexpr static void skip_whitespace(Lexer* const lex) {
         lex->top++;
         lex->curr_pos.character++;
         break;
-      case '\n': {
-          lex->curr_pos.line++;
-          lex->curr_pos.character = 0;
-          const char c2 = (++lex->top)[0];
-          if (c2 == '\r') {
-            ++lex->top;
+      case '/': {
+          if (lex->top[1] == '/') {
+            //Is a comment
+            lex->top += 2;
+            lex->curr_pos.character += 2;
+
+            c = lex->top[0];
+
+            //Loop till end of line
+            while (c != '\n' && c != '\r' && c != '\0') {
+              lex->top++;
+              lex->curr_pos.character++;
+
+              c = lex->top[0];
+            }
+
+            if (c == '\n') {
+              n_newline(lex);
+            }
+            else if (c == '\r') {
+              r_newline(lex);
+            }
+            else if (c == '\0') {
+              //end of file
+              return;
+            }
+
+            break;
           }
+          else {
+            //Not a comment
+            return;
+          }
+        }
+      case '\n': {
+          n_newline(lex);
           break;
         }
       case '\r': {
-          lex->curr_pos.line++;
-          lex->curr_pos.character = 0;
-          const char c2 = (++lex->top)[0];
-          if (c2 == '\n') {
-            ++lex->top;
-          }
+          r_newline(lex);
           break;
         }
       default:
@@ -230,11 +270,50 @@ static Token make_single_char_token(Lexer* lex) {
   return error_token(lex, error.ptr);
 }
 
+static Token lex_char(Lexer* const lex) {
+  lex->top++;
+  lex->curr_pos.character++;
+
+  char out[2] ={ lex->top[0], '\0' };
+
+  lex->top++;
+  lex->curr_pos.character++;
+
+  if (out[0] == '\\') {
+    switch (lex->top[0]) {
+      case '0': out[0] = '\0'; break;
+      case '\\': out[0] = '\\'; break;
+      case 'n': out[0] = '\n'; break;
+      case 'r': out[0] = '\r'; break;
+      case 't': out[0] = '\t'; break;
+      case '\'': out[0] = '\''; break;
+      default: return error_token(lex, "Invalid escaped character");
+    }
+
+    lex->top++;
+    lex->curr_pos.character++;
+  }
+
+  if (lex->top[0] == '\'') {
+    lex->top++;
+    lex->curr_pos.character++;
+
+    Token tok;
+    tok.type = AxleTokenType::Character;
+    tok.string = lex->strings->intern(out, 2);
+
+    return tok;
+  }
+  else {
+    return error_token(lex, "Characte literal was not closed!");
+  }
+}
+
 static Token lex_string(Lexer* const lex) {
   lex->top++;
   lex->curr_pos.character++;
 
-  Array<char> out_str = {};
+  Array<char> out_str ={};
 
   while (!is_new_line(lex) && lex->top[0] != '\0' && lex->top[0] != '"') {
     out_str.insert(lex->top[0]);
@@ -291,6 +370,9 @@ static Token lex_unpositioned_token(Lexer* const lex) {
   else if (c == '"') {
     return lex_string(lex);
   }
+  else if (c == '\'') {
+    return lex_char(lex);
+  }
   else if (c == '\0') {
     // \0 is the end of file
     Token eof ={};
@@ -304,21 +386,30 @@ static Token lex_unpositioned_token(Lexer* const lex) {
 }
 
 static Token lex_token(Lexer* const lex) {
+  const auto* save_top = lex->top;
   skip_whitespace(lex);
+
+  const bool consumed_whitespace = save_top != lex->top;
   Position curr_pos = lex->curr_pos;
 
   Token tok = lex_unpositioned_token(lex);
   tok.pos = std::move(curr_pos);
+  tok.consumed_whitespace = consumed_whitespace;
 
   return tok;
 }
 
 static void advance(Parser* parser) {
+  if (parser->prev.type != AxleTokenType::Error) {
+    parser->prev = parser->current;
+  }
+
   if (parser->current.type != AxleTokenType::Error) {
-    if (parser->prev.type != AxleTokenType::Error) {
-      parser->prev = parser->current;
-    }
-    parser->current = lex_token(&parser->lexer);
+    parser->current = parser->next;
+  }
+
+  if (parser->next.type != AxleTokenType::Error) {
+    parser->next = lex_token(&parser->lexer);
   }
 }
 
@@ -339,13 +430,20 @@ static bool expect(Parser* parser, const AxleTokenType t) {
 
 }
 
+static bool is_ok(Parser* parser) {
+  return parser->current.type != AxleTokenType::Error && parser->current.type != AxleTokenType::Eof;
+}
+
 void init_parser(Parser* const parser, const InternString* full_path, const char* source) {
 
   parser->lexer.top = source;
   parser->lexer.curr_pos.full_path = full_path;
 
-  parser->prev    = lex_token(&parser->lexer);
-  parser->current = parser->prev;
+  parser->current = lex_token(&parser->lexer);
+  parser->next    = lex_token(&parser->lexer);
+
+  //Dummy value for the first value
+  parser->prev.type = AxleTokenType::Eof;
 }
 
 static void set_span_start(const Token& token, Span& span) {
@@ -504,6 +602,16 @@ OwnedPtr<char> load_span_from_file(const Span& span, const char* source) {
   return res;
 }
 
+static void parse_name(Parser* const parser, const InternString** name) {
+  if (parser->current.type != AxleTokenType::Identifier) {
+    parser->report_error("Expected and identifier");
+    return;
+  }
+
+  *name = parser->current.string;
+  advance(parser);
+}
+
 
 static void parse_type(Parser* const parser, ASTType* const type);
 static void parse_unary_op(Parser* const parser, ASTExpression* const expr);
@@ -514,8 +622,22 @@ static constexpr uint8_t precidence_table[] ={
 #undef MODIFY
 };
 
-static bool is_binary_operator(const AxleTokenType t) {
-  return AxleTokenType::Add <= t && t < AxleTokenType::Left_Bracket;
+static bool is_binary_operator(const Parser* const parser) {
+  switch (parser->current.type) {
+    case AxleTokenType::Add: return true;
+    case AxleTokenType::Sub: return true;
+    case AxleTokenType::Star: return true;
+    case AxleTokenType::BackSlash: return true;
+    case AxleTokenType::Lesser: return true;
+    case AxleTokenType::Greater: return true;
+    case AxleTokenType::Or: return true;
+    case AxleTokenType::And: return true;
+    case AxleTokenType::Equals:
+      return parser->next.type == AxleTokenType::Equals && !parser->next.consumed_whitespace;
+    case AxleTokenType::Bang:
+      return parser->next.type == AxleTokenType::Equals && !parser->next.consumed_whitespace;
+    default: return false;
+  }
 }
 
 static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
@@ -527,7 +649,7 @@ static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
     case AxleTokenType::Lesser: {
         advance(parser);
 
-        if (parser->current.type == AxleTokenType::Lesser) {
+        if (parser->current.type == AxleTokenType::Lesser && !parser->current.consumed_whitespace) {
           advance(parser);
           return BINARY_OPERATOR::RIGHT_SHIFT;
         }
@@ -537,7 +659,7 @@ static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
     case AxleTokenType::Greater: {
         advance(parser);
 
-        if (parser->current.type == AxleTokenType::Greater) {
+        if (parser->current.type == AxleTokenType::Greater && !parser->current.consumed_whitespace) {
           advance(parser);
           return BINARY_OPERATOR::LEFT_SHIFT;
         }
@@ -546,12 +668,21 @@ static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
       }
     case AxleTokenType::Equals: {
         advance(parser);
-        if (parser->current.type == AxleTokenType::Equals) {
+        if (parser->current.type == AxleTokenType::Equals && !parser->current.consumed_whitespace) {
           advance(parser);
           return BINARY_OPERATOR::EQUIVALENT;
         }
         parser->report_error("'=' is not a valid binary operator");
         return BINARY_OPERATOR::EQUIVALENT;
+      }
+    case AxleTokenType::Bang: {
+        advance(parser);
+        if (parser->current.type == AxleTokenType::Equals && !parser->current.consumed_whitespace) {
+          advance(parser);
+          return BINARY_OPERATOR::NOT_EQ;
+        }
+        parser->report_error("'!' is not a valid binary operator");
+        return BINARY_OPERATOR::NOT_EQ;
       }
     case AxleTokenType::Or: advance(parser); return BINARY_OPERATOR::OR;
     case AxleTokenType::And: advance(parser); return BINARY_OPERATOR::AND;
@@ -563,11 +694,21 @@ static BINARY_OPERATOR parse_binary_operator(Parser* const parser) {
   return BINARY_OPERATOR::ADD;//just return whatever and hope everything errors out
 }
 
+static void reset_bin_op_span(ASTExpression* expr) {
+  assert(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
+
+  expr->span.full_path = expr->bin_op.left->span.full_path;
+  expr->span.char_start = expr->bin_op.left->span.char_start;
+  expr->span.char_end = expr->bin_op.right->span.char_end;
+  expr->span.line_start = expr->bin_op.left->span.line_start;
+  expr->span.line_end = expr->bin_op.right->span.line_end;
+}
+
 static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_t prev_prec, ASTExpression** base) {
   //precidence for this level
   uint8_t this_prec = precidence_table[(size_t)(*base)->bin_op.op];
 
-  while (is_binary_operator(parser->current.type)) {
+  while (is_ok(parser) && is_binary_operator(parser)) {
     const BINARY_OPERATOR new_op = parse_binary_operator(parser);
     uint8_t new_prec = precidence_table[(size_t)new_op];
 
@@ -583,6 +724,8 @@ static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_
 
         (*base)->bin_op.right = new_right;
         parse_unary_op(parser, new_right->bin_op.right);
+
+        reset_bin_op_span(*base);
       }
 
       ASTExpression* new_base = parse_binary_precidence(parser, this_prec, &(*base)->bin_op.right);
@@ -605,6 +748,8 @@ static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_
 
       new_base->bin_op.right = allocate_default<ASTExpression>();
       parse_unary_op(parser, new_base->bin_op.right);
+
+      //Set next
     }
     else if (new_prec <= prev_prec)
     {
@@ -627,6 +772,8 @@ static ASTExpression* parse_binary_precidence(Parser* const parser, const uint8_
 
       new_base->bin_op.right = allocate_default<ASTExpression>();
       parse_unary_op(parser, new_base->bin_op.right);
+
+      reset_bin_op_span(new_base);
     }
   }
 
@@ -647,24 +794,31 @@ static void parse_binary_operators(Parser* const parser, BINARY_OPERATOR op, AST
 
   parse_unary_op(parser, temp_base->bin_op.right);
 
-  if (is_binary_operator(parser->current.type)) {
+  if (is_binary_operator(parser)) {
     auto temp = parse_binary_precidence(parser, 0 /* <- will always be lowest precidence*/, &temp_base);
 
     //Should always return nullptr
     assert(temp == nullptr);
   }
 
+  reset_bin_op_span(temp_base);
   *base = std::move(*temp_base);
 }
 
-static void parse_expression(Parser* const parser, ASTExpression* const expr) {
+static void parse_inner_expression(Parser* const parser, ASTExpression* const expr) {
   parse_unary_op(parser, expr);
 
-  if (is_binary_operator(parser->current.type)) {
+  if (is_binary_operator(parser)) {
     const BINARY_OPERATOR op = parse_binary_operator(parser);
 
     parse_binary_operators(parser, op, expr);
   }
+}
+
+static void parse_expression(Parser* const parser, ASTExpression* const expr) {
+  //May at some point be important to do this
+  //I did it once for part of an experiment and im keeping it just because why not
+  parse_inner_expression(parser, expr);
 }
 
 static void parse_primary(Parser* const parser, ASTExpression* const expr) {
@@ -680,14 +834,40 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
   advance(parser);
 
   switch (current.type) {
+    case AxleTokenType::Left_Brace: {
+        // { ... }
+
+        expr->set_union(EXPRESSION_TYPE::TUPLE_LIT);
+
+        while (is_ok(parser)) {
+          expr->tuple_lit.elements.insert_uninit(1);
+          auto* new_expr = expr->tuple_lit.elements.back();
+
+          parse_inner_expression(parser, new_expr);
+
+          if (parser->current.type == AxleTokenType::Comma) {
+            advance(parser);
+          }
+          else {
+            break;
+          }
+        }
+
+        expr->tuple_lit.elements.shrink();
+
+        expect(parser, AxleTokenType::Right_Brace);
+        break;
+      }
     case AxleTokenType::Left_Square: {
+        // [ ... ] 
+
         expr->set_union(EXPRESSION_TYPE::ARRAY_EXPR);
 
-        while (true) {
+        while (is_ok(parser)) {
           expr->array_expr.elements.insert_uninit(1);
           auto* new_expr = expr->array_expr.elements.back();
 
-          parse_expression(parser, new_expr);
+          parse_inner_expression(parser, new_expr);
 
           if (parser->current.type == AxleTokenType::Comma) {
             advance(parser);
@@ -703,14 +883,18 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
         break;
       }
     case AxleTokenType::String: {
+        // "..."
         expr->set_union(EXPRESSION_TYPE::ASCII_STRING);
-
         expr->ascii_string = current.string;
-
-        advance(parser);
+        break;
+      }
+    case AxleTokenType::Character: {
+        expr->set_union(EXPRESSION_TYPE::ASCII_CHAR);
+        expr->ascii_char = current.string->string[0];
         break;
       }
     case AxleTokenType::Cast: {
+        // cast(... , ...)
         expect(parser, AxleTokenType::Left_Bracket);
         expr->set_union(EXPRESSION_TYPE::CAST);
 
@@ -719,7 +903,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
         expect(parser, AxleTokenType::Comma);
 
         expr->cast.expr = allocate_default<ASTExpression>();
-        parse_expression(parser, expr->cast.expr);
+        parse_inner_expression(parser, expr->cast.expr);
 
         expect(parser, AxleTokenType::Right_Bracket);
         break;
@@ -727,12 +911,17 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
     case AxleTokenType::Number: {
         expr->set_union(EXPRESSION_TYPE::VALUE);
         expr->value.value = string_to_uint(current.string->string);
+        if (!parser->current.consumed_whitespace && parser->current.type == AxleTokenType::Identifier) {
+          expr->value.suffix = parser->current.string;
+          advance(parser);
+        }
         break;
       }
     case AxleTokenType::Identifier: {
         //Name or function call
 
         if (parser->current.type == AxleTokenType::Left_Bracket) {
+          //Is function call
           expr->set_union(EXPRESSION_TYPE::FUNCTION_CALL);
           FunctionCallExpr& call = expr->call;
 
@@ -743,9 +932,11 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
 
           //Arguments
           if (parser->current.type != AxleTokenType::Right_Bracket) {
-            while (true) {
+            while (is_ok(parser)) {
               call.arguments.insert_uninit(1);
-              parse_expression(parser, call.arguments.back());
+              ASTExpression* arg = call.arguments.back();
+              parse_inner_expression(parser, arg);
+
 
               if (parser->current.type == AxleTokenType::Right_Bracket) {
                 break;
@@ -784,7 +975,7 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
         break;
       }
     case AxleTokenType::Left_Bracket: {
-        parse_expression(parser, expr);
+        parse_inner_expression(parser, expr);
         expect(parser, AxleTokenType::Right_Bracket);
         break;
     default: parser->report_error("Unexpected Token");
@@ -792,45 +983,77 @@ static void parse_primary(Parser* const parser, ASTExpression* const expr) {
   }
 }
 
+static void parse_suffix(Parser* const parser, ASTExpression* const expr) {
+  while (is_ok(parser)) {
+    switch (parser->current.type) {
+      case AxleTokenType::Left_Square: {
+
+          advance(parser);
+          ASTExpression* const new_expr = allocate_default<ASTExpression>();
+          ASTExpression* const index    = allocate_default<ASTExpression>();
+
+          //Move the expr into the suffix thing
+          *new_expr = std::move(*expr);
+
+          //Reset expr
+          default_init(expr);
+
+          //Set span
+          Span span = new_expr->span;
+          set_span_start(parser->current, span);
+          DEFER(&) {
+            set_span_end(parser->prev, span);
+            expr->span = std::move(span);
+          };
+
+
+          expr->set_union(EXPRESSION_TYPE::INDEX);
+
+          expr->index.expr = new_expr;
+          expr->index.index = index;
+
+          parse_inner_expression(parser, index);
+
+          expect(parser, AxleTokenType::Right_Square);
+          break;
+        }
+      case AxleTokenType::Full_Stop: {
+          //Member time
+          advance(parser);
+          ASTExpression* const new_expr = allocate_default<ASTExpression>();
+
+          //Move the expr into the suffix thing
+          *new_expr = std::move(*expr);
+
+          //Reset expr
+          default_init(expr);
+
+          //Set span
+          Span span = new_expr->span;
+          set_span_start(parser->current, span);
+          DEFER(&) {
+            set_span_end(parser->prev, span);
+            expr->span = std::move(span);
+          };
+
+
+          expr->set_union(EXPRESSION_TYPE::MEMBER);
+
+          expr->member.expr = new_expr;
+
+          parse_name(parser, &expr->member.name);
+          break;
+        }
+      default:
+        //No more suffixes suffix
+        return;
+    }
+  }
+}
+
 static void parse_primary_and_suffix(Parser* const parser, ASTExpression* const expr) {
   parse_primary(parser, expr);
-
-  switch (parser->current.type) {
-    case AxleTokenType::Left_Square: {
-
-        advance(parser);
-        ASTExpression* const new_expr = allocate_default<ASTExpression>();
-        ASTExpression* const index    = allocate_default<ASTExpression>();
-
-        //Move the expr into the suffix thing
-        *new_expr = std::move(*expr);
-
-        //Reset expr
-        default_init(expr);
-
-        //Set span
-        Span span = new_expr->span;
-        set_span_start(parser->current, span);
-        DEFER(&) {
-          set_span_end(parser->prev, span);
-          expr->span = std::move(span);
-        };
-
-
-        expr->set_union(EXPRESSION_TYPE::INDEX);
-
-        expr->index.expr = new_expr;
-        expr->index.index = index;
-
-        parse_expression(parser, index);
-
-        expect(parser, AxleTokenType::Right_Square);
-        break;
-      }
-    default:
-      //No suffix
-      break;
-  }
+  parse_suffix(parser, expr);
 }
 
 static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
@@ -850,7 +1073,7 @@ static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
 
         expr->un_op.expr = allocate_default<ASTExpression>();
 
-        parse_expression(parser, expr->un_op.expr);
+        parse_unary_op(parser, expr->un_op.expr);
         break;
       }
     case AxleTokenType::Star: {
@@ -868,7 +1091,7 @@ static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
 
         expr->un_op.expr = allocate_default<ASTExpression>();
 
-        parse_expression(parser, expr->un_op.expr);
+        parse_unary_op(parser, expr->un_op.expr);
         break;
       }
     case AxleTokenType::And: {
@@ -886,7 +1109,7 @@ static void parse_unary_op(Parser* const parser, ASTExpression* const expr) {
 
         expr->un_op.expr = allocate_default<ASTExpression>();
 
-        parse_expression(parser, expr->un_op.expr);
+        parse_unary_op(parser, expr->un_op.expr);
         break;
       }
 
@@ -941,16 +1164,9 @@ static void parse_type(Parser* const parser, ASTType* const type) {
   }
 }
 
-static void parse_local(Parser* const parser, ASTLocal* const decl) {
-  parse_type(parser, &decl->type);
-
-  if (parser->current.type != AxleTokenType::Identifier) {
-    parser->report_error("Expected Identifier!");
-    return;
-  }
-
-  decl->name = parser->current.string;
-  advance(parser);
+static void parse_typed_name(Parser* const parser, ASTType* const type, const InternString** name) {
+  parse_type(parser, type);
+  parse_name(parser, name);
 }
 
 static void parse_block(Parser* const parser, ASTBlock* const block);
@@ -974,7 +1190,9 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
         statement->set_union(STATEMENT_TYPE::RETURN);
 
         advance(parser);
-        parse_expression(parser, &statement->expression);
+
+        statement->expression = allocate_default<ASTExpression>();
+        parse_expression(parser, statement->expression);
 
         expect(parser, AxleTokenType::Semicolon);
         break;
@@ -984,7 +1202,9 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
         statement->set_union(STATEMENT_TYPE::IF_ELSE);
 
         expect(parser, AxleTokenType::Left_Bracket);
-        parse_expression(parser, &statement->if_else.condition);
+
+        statement->if_else.condition = allocate_default<ASTExpression>();
+        parse_expression(parser, statement->if_else.condition);
         expect(parser, AxleTokenType::Right_Bracket);
 
 
@@ -996,10 +1216,23 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
           statement->if_else.else_statement = allocate_default<ASTStatement>();
           parse_statement(parser, statement->if_else.else_statement);
         }
-
         else {
           statement->if_else.else_statement = nullptr;
         }
+        break;
+      }
+    case AxleTokenType::While: {
+        advance(parser);
+        statement->set_union(STATEMENT_TYPE::WHILE);
+        expect(parser, AxleTokenType::Left_Bracket);
+
+        statement->while_loop.condition = allocate_default<ASTExpression>();
+        parse_expression(parser, statement->while_loop.condition);
+
+        expect(parser, AxleTokenType::Right_Bracket);
+
+        statement->while_loop.statement = allocate_default<ASTStatement>();
+        parse_statement(parser, statement->while_loop.statement);
         break;
       }
     default: {
@@ -1010,21 +1243,42 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
         statement->set_union(STATEMENT_TYPE::LOCAL);
         parse_type(parser, &statement->local.type);
 
-        if (parser->current.type == AxleTokenType::Identifier) {
+        if (is_ok(parser) && parser->current.type == AxleTokenType::Identifier) {
           //Is declaration
-          statement->local.name = parser->current.string;
-          advance(parser);
+          parse_name(parser, &statement->local.name);
 
           expect(parser, AxleTokenType::Equals);
 
-          parse_expression(parser, &statement->local.expression);
+          statement->local.expression = allocate_default<ASTExpression>();
+          parse_expression(parser, statement->local.expression);
         }
         else {
-          //Not a declaration - expression
+          //Not a declaration - expression or assignment
           *parser = std::move(save);
-          statement->set_union(STATEMENT_TYPE::EXPRESSION);
 
-          parse_expression(parser, &statement->expression);
+          ASTExpression* expr = allocate_default<ASTExpression>();
+          parse_expression(parser, expr);
+
+          if (!is_ok(parser)) {
+            return;
+          }
+
+          if (parser->current.type == AxleTokenType::Equals) {
+            //Is Assign
+            statement->set_union(STATEMENT_TYPE::ASSIGN);
+            statement->assign.assign_to = expr;
+
+            advance(parser);
+
+            //Load the value expression
+            statement->assign.value = allocate_default<ASTExpression>();
+            parse_expression(parser, statement->assign.value);
+          }
+          else {
+            //Is expression
+            statement->set_union(STATEMENT_TYPE::EXPRESSION);
+            statement->expression = expr;
+          }
         }
         break;
       }
@@ -1035,14 +1289,11 @@ static void parse_statement(Parser* const parser, ASTStatement* const statement)
 static void parse_block(Parser* const parser, ASTBlock* const block) {
   expect(parser, AxleTokenType::Left_Brace);
 
-  while (parser->current.type != AxleTokenType::Right_Brace) {
+  while (is_ok(parser) && parser->current.type != AxleTokenType::Right_Brace) {
     if (parser->current.type == AxleTokenType::Semicolon) {
       //Empty statement
       advance(parser);
       continue;
-    }
-    else if (parser->current.type == AxleTokenType::Error) {
-      return;
     }
 
     block->block.insert_uninit(1);
@@ -1059,34 +1310,21 @@ static void parse_function_signature(Parser* const parser, ASTFunctionSignature*
     advance(parser);
     expect(parser, AxleTokenType::Left_Bracket);
 
-    if (parser->current.type != AxleTokenType::Identifier) {
-      parser->report_error("Expected Identifier!");
-      return;
-    }
+    parse_name(parser, &sig->convention);
 
-    sig->convention = parser->current.string;
-
-    advance(parser);
     expect(parser, AxleTokenType::Right_Bracket);
   }
 
-  //Name
-  if (parser->current.type != AxleTokenType::Identifier) {
-    parser->report_error("Expected Identifier!");
-    return;
-  }
-
-  sig->name = parser->current.string;
-  advance(parser);
-
+  parse_name(parser, &sig->name);
 
   expect(parser, AxleTokenType::Left_Bracket);
 
   //Parameters
   if (parser->current.type != AxleTokenType::Right_Bracket) {
-    while (true) {
+    while (is_ok(parser)) {
       sig->parameters.insert_uninit(1);
-      parse_local(parser, sig->parameters.back());
+      ASTLocal* loc = sig->parameters.back();
+      parse_typed_name(parser, &loc->type, &loc->name);
 
       if (parser->current.type == AxleTokenType::Right_Bracket) {
         break;
@@ -1120,8 +1358,6 @@ static void parse_function(Parser* const parser, ASTFunctionDeclaration* const f
 
   if (parser->current.type == AxleTokenType::Left_Brace) {
     parse_block(parser, &func->body);
-
-    build_expression_linked_list(&func->body);
   }
   else if (parser->current.type == AxleTokenType::Semicolon) {
     advance(parser);
@@ -1133,6 +1369,25 @@ static void parse_function(Parser* const parser, ASTFunctionDeclaration* const f
 
     parser->report_error(err.ptr);
   }
+}
+
+static void parse_structure(Parser* const parser, ASTStructureDeclaration* const struct_decl) {
+  expect(parser, AxleTokenType::Struct);
+  parse_name(parser, &struct_decl->name);
+
+  expect(parser, AxleTokenType::Left_Brace);
+
+  while (is_ok(parser) && parser->current.type != AxleTokenType::Right_Brace) {
+    struct_decl->elements.insert_uninit(1);
+    ASTTypedName* tn = struct_decl->elements.back();
+
+    parse_typed_name(parser, &tn->type, &tn->name);
+    expect(parser, AxleTokenType::Semicolon);
+  }
+
+  struct_decl->elements.shrink();
+
+  expect(parser, AxleTokenType::Right_Brace);
 }
 
 void parse_file(Parser* const parser, ASTFile* const file) {
@@ -1165,10 +1420,12 @@ void parse_file(Parser* const parser, ASTFile* const file) {
        current != AxleTokenType::Eof && current != AxleTokenType::Error;
        current = parser->current.type)
   {
-    if (current == AxleTokenType::Import) {
+    if (current == AxleTokenType::Import || current == AxleTokenType::Stdlib) {
       //Import
       file->imports.insert_uninit(1);
       ASTImport* imp = file->imports.back();
+
+      imp->std = (current == AxleTokenType::Stdlib);
 
       advance(parser);
 
@@ -1180,11 +1437,9 @@ void parse_file(Parser* const parser, ASTFile* const file) {
       imp->relative_path = parser->current.string;
 
       //Load the span
-      Span span ={};
-      set_span_start(parser->current, span);
+      set_span_start(parser->current, imp->span);
       DEFER(&) {
-        set_span_end(parser->prev, span);
-        imp->span = std::move(span);
+        set_span_end(parser->prev, imp->span);
       };
 
       advance(parser);
@@ -1195,11 +1450,41 @@ void parse_file(Parser* const parser, ASTFile* const file) {
       ASTFunctionDeclaration* func = file->functions.back();
       parse_function(parser, func);
     }
+    else if (current == AxleTokenType::Struct) {
+      file->structs.insert_uninit(1);
+      ASTStructureDeclaration* structure = file->structs.back();
+      parse_structure(parser, structure);
+    }
+    else if (current == AxleTokenType::Global) {
+      file->globals.insert_uninit(1);
+      ASTGlobalDeclaration* global = file->globals.back();
+
+      set_span_start(parser->current, global->span);
+      DEFER(&) {
+        set_span_end(parser->prev, global->span);
+      };
+
+      advance(parser);//global
+
+      parse_type(parser, &global->type);
+      parse_name(parser, &global->name);
+
+      expect(parser, AxleTokenType::Equals);
+
+      parse_expression(parser, &global->init_expr);
+
+      expect(parser, AxleTokenType::Semicolon);      
+    }
+    else {
+      parser->report_error("Unexpected token");
+    }
   }
 
   //reduce over allocating space
   file->imports.shrink();
   file->functions.shrink();
+  file->globals.shrink();
+  file->structs.shrink();
 }
 
 struct Printer {
@@ -1235,11 +1520,34 @@ static void print_type(const ASTType* type) {
 
 void print_ast_expression(const ASTExpression* expr) {
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::MEMBER: {
+        print_ast_expression(expr->member.expr);
+        printf(".%s", expr->member.name->string);
+        break;
+      }
     case EXPRESSION_TYPE::INDEX: {
         print_ast_expression(expr->index.expr);
         IO::print('[');
         print_ast_expression(expr->index.index);
         IO::print(']');
+        break;
+      }
+    case EXPRESSION_TYPE::TUPLE_LIT: {
+        IO::print("{ ");
+        auto i = expr->array_expr.elements.begin();
+        const auto end = expr->array_expr.elements.end();
+
+        if (i < end) {
+          print_ast_expression(i);
+          i++;
+
+          for (; i < end; i++) {
+            IO::print(", ");
+            print_ast_expression(i);
+          }
+        }
+
+        IO::print(" }");
         break;
       }
     case EXPRESSION_TYPE::ARRAY_EXPR: {
@@ -1248,18 +1556,16 @@ void print_ast_expression(const ASTExpression* expr) {
         const auto end = expr->array_expr.elements.end();
 
         if (i < end) {
-          for (; i < (end - 1); i++) {
-            print_ast_expression(i);
-            IO::print(", ");
-          }
-
           print_ast_expression(i);
-          IO::print(']');
-        }
-        else {
-          IO::print(']');
+          i++;
+
+          for (; i < end; i++) {
+            IO::print(", ");
+            print_ast_expression(i);
+          }
         }
 
+        IO::print(']');
         break;
       }
     case EXPRESSION_TYPE::ASCII_STRING: {
@@ -1323,24 +1629,44 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
   printer->newline();
 
   switch (statement->type) {
+    case STATEMENT_TYPE::ASSIGN:
+      print_ast_expression(statement->assign.assign_to);
+      IO::print(" = ");
+      print_ast_expression(statement->assign.value);
+      break;
     case STATEMENT_TYPE::LOCAL:
       print_type(&statement->local.type);
       printf(" %s = ", statement->local.name->string);
-      print_ast_expression(&statement->local.expression);
+      print_ast_expression(statement->local.expression);
       IO::print(';');
       break;
     case STATEMENT_TYPE::RETURN:
       IO::print("return ");
-      print_ast_expression(&statement->expression);
+      print_ast_expression(statement->expression);
       IO::print(';');
       break;
     case STATEMENT_TYPE::EXPRESSION:
-      print_ast_expression(&statement->expression);
+      print_ast_expression(statement->expression);
       IO::print(';');
+      break;
+    case STATEMENT_TYPE::WHILE:
+      IO::print("while(");
+      print_ast_expression(statement->while_loop.condition);
+      IO::print(") ");
+
+      if (statement->while_loop.statement->type != STATEMENT_TYPE::BLOCK) {
+        printer->tabs++;
+      }
+
+      print_ast_statement(printer, statement->while_loop.statement);
+
+      if (statement->while_loop.statement->type != STATEMENT_TYPE::BLOCK) {
+        printer->tabs--;
+      }
       break;
     case STATEMENT_TYPE::IF_ELSE:
       IO::print("if(");
-      print_ast_expression(&statement->if_else.condition);
+      print_ast_expression(statement->if_else.condition);
       IO::print(") ");
 
       if (statement->if_else.if_statement->type != STATEMENT_TYPE::BLOCK) {
@@ -1392,7 +1718,7 @@ static void print_function_sig(Printer* const printer, const ASTFunctionSignatur
   else {
     printf("#conv(%s) %s(", sig->convention->string, sig->name->string);
   }
-  
+
 
   //Parameters
   {
@@ -1428,7 +1754,12 @@ void print_ast(const ASTFile* file) {
     const auto end = file->imports.end();
 
     for (; i < end; i++) {
-      printf("#import \"%s\";\n", i->relative_path->string);
+      if (i->std) {
+        printf("#stdlib \"%s\";\n", i->relative_path->string);
+      }
+      else {
+        printf("#import \"%s\";\n", i->relative_path->string);
+      }
     }
 
     if (file->imports.size > 0) {
@@ -1436,6 +1767,38 @@ void print_ast(const ASTFile* file) {
     }
   }
 
+  //Structures
+  {
+    auto i = file->structs.begin();
+    const auto end = file->structs.end();
+
+    for (; i < end; i++) {
+      const ASTStructureDeclaration* str = i;
+
+      printf("struct %s {", str->name->string);
+
+      printer.tabs++;
+
+
+      auto el_i = str->elements.begin();
+      auto el_end = str->elements.end();
+
+      for (; el_i < el_end; el_i++) {
+        printer.newline();
+
+        print_type(&el_i->type);
+
+        printf(" %s;", el_i->name->string);
+      }
+
+      printer.tabs--;
+      printer.newline();
+      IO::print('}');
+
+      printer.newline();
+      printer.newline();
+    }
+  }
 
 
   //Functions

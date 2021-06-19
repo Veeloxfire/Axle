@@ -268,6 +268,44 @@ struct InternHashTable {
       used++;
       keys[soa_index] = key;
       vals[soa_index] = std::move(val);     
-    }     
+    }
+  }
+
+  T* insert(const InternString* const key) {
+    if (el_capacity == 0) {
+      el_capacity = 8;
+      data = allocate_default<uint8_t>(8 * (sizeof(const InternString*) + sizeof(T)));
+
+      size_t soa_index = get_soa_index(key);
+
+      const InternString** const keys = (const InternString**)data;
+      T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
+
+      used++;
+      keys[soa_index] = key;
+      return vals + soa_index;   
+    }
+    else {
+      size_t soa_index = get_soa_index(key);
+
+      {
+        const InternString* test_key = ((const InternString**)data)[soa_index];
+
+        if ((test_key == nullptr || test_key == TOMBSTONE) &&
+            needs_resize(1)) {
+          //need to resize
+          try_extend(1);
+          //need to reset the key
+          soa_index = get_soa_index(key);
+        }
+      }
+
+      const InternString** const keys = (const InternString**)data;
+      T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
+
+      used++;
+      keys[soa_index] = key;
+      return vals + soa_index;     
+    }
   }
 };

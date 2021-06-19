@@ -14,6 +14,7 @@ struct Structure;
 struct Function;
 struct EnumValue;
 struct State;
+struct Global;
 
 struct ASTName {
   const InternString* name ={};
@@ -59,34 +60,23 @@ struct ASTType {
   ~ASTType();
 };
 
-enum struct EXPRESSION_TYPE : uint8_t {
-  UNKNOWN = 0,
-  CAST,
-  UNARY_OPERATOR,
-  BINARY_OPERATOR,
-  NAME /* = only in type check phase (converted to local or maybe others)*/,
-  LOCAL /* = not in type check phase (converted from name) */,
-  ENUM,
-  VALUE,
-  FUNCTION_CALL,
-  ARRAY_EXPR,
-  ASCII_STRING,
-  INDEX,
-  NULLPTR,
-};
-
 struct BinaryOperatorExpr {
   BINARY_OPERATOR op;
 
   ASTExpression* left = nullptr;
   ASTExpression* right = nullptr;
 
+  BinOpEmitInfo info = {};
   BINARY_OPERATOR_FUNCTION emit = nullptr;
 
   ~BinaryOperatorExpr() {
     free_destruct_single(left);
     free_destruct_single(right);
   }
+};
+
+struct TupleLitExpr {
+  Array<ASTExpression> elements = {};
 };
 
 struct FunctionCallExpr {
@@ -141,14 +131,48 @@ struct ArrayExpr {
   Array<ASTExpression> elements;
 };
 
+struct MemberAccessExpr {
+  ASTExpression* expr = nullptr;
+
+  uint32_t offset = 0;
+  const InternString* name = nullptr;
+
+  ~MemberAccessExpr() {
+    free_destruct_single(expr);
+  }
+};
+
+#define EXPRESSION_TYPE_MODIFY \
+MODIFY(CAST, cast) \
+MODIFY(UNARY_OPERATOR, un_op) \
+MODIFY(BINARY_OPERATOR, bin_op) \
+MODIFY(NAME, name) \
+MODIFY(LOCAL, local) \
+MODIFY(GLOBAL, global) \
+MODIFY(ENUM, enum_value) \
+MODIFY(VALUE, value) \
+MODIFY(FUNCTION_CALL, call) \
+MODIFY(TUPLE_LIT, tuple_lit) \
+MODIFY(ARRAY_EXPR, array_expr) \
+MODIFY(ASCII_STRING, ascii_string) \
+MODIFY(ASCII_CHAR, ascii_char) \
+MODIFY(INDEX, index) \
+MODIFY(NULLPTR, _dummy) \
+MODIFY(MEMBER, member) \
+
+enum struct EXPRESSION_TYPE : uint8_t {
+  UNKNOWN = 0,
+#define MODIFY(name, expr_name) name, 
+  EXPRESSION_TYPE_MODIFY
+#undef MODIFY
+};
+
 struct ASTExpression {
   const Structure* type = nullptr;
 
-  ASTExpression* first = nullptr;
-  ASTExpression* next  = nullptr;
-
   uint8_t valid_rvts = ALL_RVTS;
 
+  bool assignable = false;
   bool makes_call = false;
   bool call_leaf = false;
   bool comptime_eval = false;
@@ -164,27 +188,32 @@ struct ASTExpression {
     UnaryOperatorExpr un_op;
     BinaryOperatorExpr bin_op;
     FunctionCallExpr call;
+    TupleLitExpr tuple_lit;
     EnumValueExpr enum_value;
     const InternString* name;
     size_t local;
+    const Global* global;
     ValueExpr value;
+    char ascii_char;
     ArrayExpr array_expr;
     const InternString* ascii_string;
     IndexExpr index;
+    MemberAccessExpr member;
   };
 
   ASTExpression() = default;
 
-
   ASTExpression(ASTExpression&& a) noexcept {
     move_from(std::move(a));
   }
+
   ASTExpression& operator=(ASTExpression&& a) noexcept {
     this->~ASTExpression();
     move_from(std::move(a));
     return *this;
   }
 
+  void reset_linked_list() noexcept;
   void move_from(ASTExpression&&) noexcept;
 
   void set_union(EXPRESSION_TYPE et) noexcept;
@@ -193,32 +222,50 @@ struct ASTExpression {
 };
 
 #define MOD_STATEMENTS \
-MOD(UNKNOWN) \
-MOD(EXPRESSION) \
-MOD(LOCAL) \
-MOD(RETURN) \
-MOD(IF_ELSE) \
-MOD(BLOCK)
+MOD(EXPRESSION, expression) \
+MOD(LOCAL, local) \
+MOD(RETURN, expression) \
+MOD(IF_ELSE, if_else) \
+MOD(WHILE, while_loop) \
+MOD(BLOCK, block) \
+MOD(ASSIGN, assign) \
 
 enum struct STATEMENT_TYPE : uint8_t {
-#define MOD(name) name,
+  UNKNOWN = 0,
+
+#define MOD(name, expr_name) name,
   MOD_STATEMENTS
 #undef MOD
 };
 
 struct ASTLocal {
-  ASTExpression expression ={};
+  ASTExpression* expression ={};
   ASTType type ={};
   const InternString* name = nullptr;
   size_t local_index = 0;
+
+  ~ASTLocal() {
+    free_destruct_single(expression);
+  }
+};
+
+struct ASTWhile {
+  ASTExpression* condition ={};
+  ASTStatement* statement = nullptr;
+
+  ~ASTWhile() {
+    free_destruct_single(condition);
+    free_destruct_single(statement);
+  }
 };
 
 struct ASTIfElse {
-  ASTExpression condition ={};
+  ASTExpression* condition ={};
   ASTStatement* if_statement = nullptr;
   ASTStatement* else_statement = nullptr;
 
   ~ASTIfElse() {
+    free_destruct_single(condition);
     free_destruct_single(if_statement);
     free_destruct_single(else_statement);
   }
@@ -228,16 +275,28 @@ struct ASTBlock {
   Array<ASTStatement> block ={};
 };
 
+struct ASTAssign {
+  ASTExpression* assign_to ={};
+  ASTExpression* value ={};
+
+  ~ASTAssign() {
+    free_destruct_single(assign_to);
+    free_destruct_single(value);
+  }
+};
+
 struct ASTStatement {
   STATEMENT_TYPE type = STATEMENT_TYPE::UNKNOWN;
   Span span;
 
   union {
     char _dummy ={};
-    ASTExpression expression;
+    ASTExpression* expression;
     ASTLocal local;
+    ASTWhile while_loop;
     ASTIfElse if_else;
     ASTBlock block;
+    ASTAssign assign;
   };
 
   void set_union(STATEMENT_TYPE st) noexcept;
@@ -245,6 +304,20 @@ struct ASTStatement {
 
   ASTStatement() = default;
   ~ASTStatement();
+};
+
+struct ASTTypedName {
+  ASTType type ={};
+  const InternString* name = nullptr;
+};
+
+struct ASTStructureDeclaration {
+  const InternString* name = nullptr;
+  Span name_span = {};
+
+  Array<ASTTypedName> elements = {};
+
+  const Structure* structure = nullptr;
 };
 
 struct ASTFunctionSignature {
@@ -262,15 +335,18 @@ struct ASTFunctionDeclaration {
   ASTBlock body;
 };
 
-//struct ASTStructureDeclaration {
-//  const InternString* name = nullptr;
-//  Array<ASTDeclaration> elements;
-//
-//  Structure* structure;
-//};
+struct ASTGlobalDeclaration {
+  ASTType type ={};
+  const InternString* name = nullptr;
+  ASTExpression init_expr ={};
+
+  Span span ={};
+};
 
 struct ASTImport {
+  bool std = false;
   const InternString* relative_path = nullptr;
+
   Span span ={};
 
   FileLocation loc ={};
@@ -292,7 +368,9 @@ struct ASTFile {
   ASTFileHeader header = {};
 
   Array<ASTImport> imports = {};
+  Array<ASTGlobalDeclaration> globals = {};
   Array<ASTFunctionDeclaration> functions ={};
+  Array<ASTStructureDeclaration> structs ={};
 };
 
 struct ScopeView {
@@ -302,6 +380,3 @@ struct ScopeView {
 
 void print_ast(const ASTFile* file);
 void print_ast_expression(const ASTExpression* expr);
-
-void build_expression_linked_list(ASTBlock* scope);
-void build_expression_linked_list(ASTExpression* expr);

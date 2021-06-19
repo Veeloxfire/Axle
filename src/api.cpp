@@ -10,6 +10,7 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 #include "parser.h"
 
 #include "compiler.h"
+#include "strings.h"
 #include "ast.h"
 
 #include "windows_specifics.h"
@@ -21,14 +22,22 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 
 #include <chrono>
 
-void print_program(const Options& opts, const Program& prog) {
-  if (opts.build.system == &system_vm) {
+void print_program(const APIOptions& opts, const Program& prog) {
+  if (slow_string_eq(opts.build.system_name, system_vm.name)) {
     std::cout << "\n=== Print Linked Bytecode ===\n\n";
-    ByteCode::print_bytecode(opts.build.system->reg_name_from_num, stdout, prog.code.ptr, prog.code_size);
+    std::cout << "Data:\n";
+    print_as_bytes(prog.data.ptr, prog.data_size);
+
+    std::cout << "\n\nProgram:\n";
+    ByteCode::print_bytecode(system_vm.reg_name_from_num, stdout, prog.code.ptr, prog.code_size);
     std::cout << "\n=============================\n\n";
   }
-  else if (opts.build.system == &system_x86_64) {
+  else if (slow_string_eq(opts.build.system_name, system_x86_64.name)) {
     std::cout << "\n=== Print x86_64 Machine code ===\n\n";
+    std::cout << "Data:\n";
+    print_as_bytes(prog.data.ptr, prog.data_size);
+
+    std::cout << "\n\nProgram:\n";
     print_x86_64(prog.code.ptr, prog.code_size);
     std::cout << "\n=================================\n\n";
   }
@@ -66,7 +75,7 @@ RunOutput run_as_machine_code(Program* prog) {
   return { 0, res };
 }
 
-int compile_file(const Options& options,
+int compile_file(const APIOptions& options,
                  Program* out_program) {
 
   //Setup
@@ -76,20 +85,20 @@ int compile_file(const Options& options,
   VM vm = {};
 
   Compiler compiler ={};
-  compiler.build_options = options.build;
-  compiler.print_options = options.print;
-  compiler.optimization_options = options.optimize;
 
   compiler.strings = &strings;
   compiler.types = &types;
-  compiler.entry_point = strings.intern(options.build.entry_point);
   compiler.vm = &vm;
 
   //Load the builtin types
-  init_compiler(&compiler);
+  init_compiler(options, &compiler);
+  if (compiler.is_panic()) {
+    print_compile_errors(&compiler);
+    return 1;
+  }
 
   {
-    FileLocation loc = parse_file_location(options.build.file_name, nullptr, compiler.strings);
+    FileLocation loc = parse_file_location(compiler.build_options.file_name->string, nullptr, compiler.strings);
 
     NamespaceIndex ns_index = NamespaceIndex{ compiler.all_namespaces.size };
     compiler.all_namespaces.insert_uninit(1);
@@ -119,33 +128,21 @@ int compile_file(const Options& options,
   //Backend
   build_data_section_for_exec(out_program, &compiler);
   
-  (options.build.system->backend)(out_program, &compiler);
+  (compiler.build_options.system->backend)(out_program, &compiler);
   if (compiler.is_panic()) {
     print_compile_errors(&compiler);
     return 1;
   }
 
-  if (options.print.fully_compiled) {
-    if (options.build.system == &system_vm) {
-      std::cout << "\n=== Print Linked Bytecode ===\n\n";
-      ByteCode::print_bytecode(options.build.system->reg_name_from_num, stdout, out_program->code.ptr, out_program->code_size);
-      std::cout << "\n=============================\n\n";
-    }
-    else if (options.build.system == &system_x86_64) {
-      std::cout << "\n=== Print x86_64 Machine code ===\n\n";
-      print_x86_64(out_program->code.ptr, out_program->code_size);
-      std::cout << "\n=================================\n\n";
-    }
-    else {
-      std::cerr << "Incorrect system for printing combined bytecode!\n";
-    }
+  if (compiler.print_options.fully_compiled) {
+    print_program(options, *out_program);
   }
 
   return 0;
 }
 
-RunOutput run_program(const Options& options, Program* prog) {
-  if (options.build.system == &system_vm) {
+RunOutput run_program(const APIOptions& options, Program* prog) {  
+  if (slow_string_eq(options.build.system_name, system_vm.name)) {
     if (options.print.run_headers) {
       std::cout << "\n=== Running in VM ===\n\n";
     }
@@ -156,7 +153,7 @@ RunOutput run_program(const Options& options, Program* prog) {
 
     return ret;
   }
-  else if (options.build.system == &system_x86_64) {
+  else if (slow_string_eq(options.build.system_name, system_x86_64.name)) {
     if (options.print.run_headers) {
       std::cout << "\n=== Running machine code (JIT) ===\n\n";
     }
@@ -173,7 +170,7 @@ RunOutput run_program(const Options& options, Program* prog) {
   }
 }
 
-RunOutput compile_file_and_run(const Options& options) {
+RunOutput compile_file_and_run(const APIOptions& options) {
   Program program ={};
 
   const int res = compile_file(options, &program);
@@ -185,7 +182,7 @@ RunOutput compile_file_and_run(const Options& options) {
   return run_program(options, &program);
 }
 
-int compile_file_and_write(const Options& options) {
+int compile_file_and_write(const APIOptions& options) {
   if (options.build.output_file == nullptr) {
     std::cerr << "No output file specified!";
     return 1;
@@ -199,12 +196,12 @@ int compile_file_and_write(const Options& options) {
     return res;
   }
 
-  if (options.build.system == &system_vm) {
+  if (slow_string_eq(options.build.system_name, system_vm.name)) {
     std::cerr << "Cannot write bytecode to a file!";
 
     return res;
   }
-  else if (options.build.system == &system_x86_64) {
+  else if (slow_string_eq(options.build.system_name, system_x86_64.name)) {
     std::cout << "Writing to file \"" << options.build.output_file << "\"\n";
 
     StringInterner strings ={};

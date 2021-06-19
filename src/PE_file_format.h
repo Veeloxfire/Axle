@@ -250,6 +250,8 @@ struct ExportElement {
 };
 
 struct ExportTable {
+  InternStringSet names = {};
+
   ExportDirectoryTable directory_table ={};
   Array<ExportAddress> address_table ={};
   Array<ExportElement> element_table ={};
@@ -358,7 +360,6 @@ struct ImportantValues {
 };
 
 struct Compiler;
-struct ImportedDll;
 struct Span;
 
 ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const char* file_name);
@@ -367,8 +368,3 @@ void load_portable_executable_from_file(Compiler* const comp,
                                         const Span& span,
                                         PEFile* pe_file,
                                         const char* file_name);
-
-void load_portable_executable_exports(Compiler* const comp,
-                                      ImportedDll* dll,
-                                      const Span& span,
-                                      const char* file_name);

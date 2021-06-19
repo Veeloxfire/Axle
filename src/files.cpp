@@ -242,29 +242,8 @@ FileLocation parse_file_location(const char* path_str,
 
   //Add the file
   {
-    //Try find the extension
-    const char* extension = holder;
-    while (*extension != '.' && *extension != '\0') {
-      extension++;
-    }
-
-    //The '.'
-    if (*extension == '.') {
-      extension++;
-      if (*extension == '\0') {
-        //Should probably be an error
-        loc.extension = nullptr;
-      }
-
-      loc.extension = strings->intern(extension);
-    }
-    else if (*extension == '\0') {
-      loc.extension = nullptr;
-    }
-    else {
-      loc.extension = nullptr;
-    }
-
+    //Load the extension
+    loc.extension = get_extension(holder, strings);
 
     //Load the file
     const size_t len = path_str - holder;
@@ -276,4 +255,30 @@ FileLocation parse_file_location(const char* path_str,
   }
 
   return loc;
+}
+
+const InternString* get_extension(const char* path, StringInterner* strings) {
+  //Try find the extension
+  const char* extension = nullptr;
+  while (true) {
+    char c = *path;
+    if (c == '\0') {
+      break;
+    }
+    else if (c == '.') {
+      extension = path;
+    }
+    else if (c == '\\' || c == '/') {
+      extension = nullptr;
+    }
+
+    path++;
+  }
+
+  if (extension == nullptr) {
+    return nullptr;
+  }
+  else {
+    return strings->intern(extension + 1);
+  }
 }

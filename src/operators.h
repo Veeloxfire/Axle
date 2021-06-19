@@ -2,97 +2,63 @@
 #include "utility.h"
 #include "comp_utilities.h"
 
-using BINARY_OPERATOR_FUNCTION = FUNCTION_PTR<
-  RuntimeValue,
-  Compiler* const,
-  State* const,
-  CodeBlock* const,
-  const RuntimeValue*, const RuntimeValue*
->;
+struct TypeHint;
 
-using UNARY_OPERATOR_FUNCTION = FUNCTION_PTR<
-  RuntimeValue,
-  Compiler* const,
-  State* const,
-  CodeBlock* const,
-  const RuntimeValue*
->;
+enum struct MainOp : uint8_t {
+  LEFT, RIGHT
+};
 
-namespace OP {
+struct BinOpEmitInfo {
+  MainOp main_op;
+  const Structure* main_type;
+};
 
-  RuntimeValue emit_add_64s(Compiler* const comp,
-                            State* const state,
-                            CodeBlock* const code,
-                            const RuntimeValue*, const RuntimeValue*);
+struct BinOpArgs {
+  const BinOpEmitInfo* info;
+  Compiler* comp;
+  State* state;
+  CodeBlock* code;
+  const RuntimeValue* left;
+  const RuntimeValue* right;
 
-  RuntimeValue emit_sub_64s(Compiler* const comp,
-                            State* const state,
-                            CodeBlock* const code,
-                            const RuntimeValue*, const RuntimeValue*);
+  //Emits
+  RuntimeValue emit_add_64s();
+  RuntimeValue emit_add_64_to_ptr();
+  RuntimeValue emit_sub_64s();
+  RuntimeValue emit_sub_ptrs();
+  RuntimeValue emit_mul_64s();
+  RuntimeValue emit_div_u64s();
+  RuntimeValue emit_div_i64s();
+  RuntimeValue emit_eq_64s();
+  RuntimeValue emit_eq_8s();
+  RuntimeValue emit_neq_8s();
+  RuntimeValue emit_lesser_64s();
+  RuntimeValue emit_greater_64s();
+  RuntimeValue emit_or_64s();
+  RuntimeValue emit_and_64s();
+  RuntimeValue emit_shift_l_64_by_8();
+  RuntimeValue emit_shift_r_u64_by_8();
+  RuntimeValue emit_shift_r_i64_by_8();
+};
 
-  RuntimeValue emit_mul_64s(Compiler* const comp,
-                            State* const state,
-                            CodeBlock* const code,
-                            const RuntimeValue*, const RuntimeValue*);
+struct UnOpArgs {
+  Compiler* comp;
+  State* state;
+  CodeBlock* code;
+  const RuntimeValue* prim;
 
-  RuntimeValue emit_div_u64s(Compiler* const comp,
-                             State* const state,
-                             CodeBlock* const code,
-                             const RuntimeValue*, const RuntimeValue*);
+  //Emits
+  RuntimeValue emit_neg_i64();
+  RuntimeValue emit_address();
+  RuntimeValue emit_deref();
+};
 
-  RuntimeValue emit_div_i64s(Compiler* const comp,
-                             State* const state,
-                             CodeBlock* const code,
-                             const RuntimeValue*, const RuntimeValue*);
-
-  RuntimeValue emit_eq_64s(Compiler* const comp,
-                           State* const state,
-                           CodeBlock* const code,
-                           const RuntimeValue*, const RuntimeValue*);
-
-  RuntimeValue emit_or_64s(Compiler* const comp,
-                           State* const state,
-                           CodeBlock* const code,
-                           const RuntimeValue*, const RuntimeValue*);
-
-  RuntimeValue emit_and_64s(Compiler* const comp,
-                            State* const state,
-                            CodeBlock* const code,
-                            const RuntimeValue*, const RuntimeValue*);
-
-  RuntimeValue emit_shift_l_64_by_8(Compiler* const comp,
-                                    State* const state,
-                                    CodeBlock* const code,
-                                    const RuntimeValue*, const RuntimeValue*);
-
-  RuntimeValue emit_shift_r_u64_by_8(Compiler* const comp,
-                                     State* const state,
-                                     CodeBlock* const code,
-                                     const RuntimeValue*, const RuntimeValue*);
-
-  RuntimeValue emit_shift_r_i64_by_8(Compiler* const comp,
-                                     State* const state,
-                                     CodeBlock* const code,
-                                     const RuntimeValue*, const RuntimeValue*);
-
-  RuntimeValue emit_neg_i64(Compiler* const comp,
-                            State* const state,
-                            CodeBlock* const code,
-                            const RuntimeValue*);
-
-  RuntimeValue emit_address(Compiler* const comp,
-                            State* const state,
-                            CodeBlock* const code,
-                            const RuntimeValue*);
-
-  RuntimeValue emit_deref(Compiler* const comp,
-                          State* const state,
-                          CodeBlock* const code,
-                          const RuntimeValue*);
-}
+using BINARY_OPERATOR_FUNCTION = MEMBER<BinOpArgs>::FUNCTION_PTR<RuntimeValue>;
+using UNARY_OPERATOR_FUNCTION = MEMBER<UnOpArgs>::FUNCTION_PTR<RuntimeValue>;
 
 //Sign agnostic arithmetic binary operator
 struct SignAgnArithBinOp {
+  BINARY_OPERATOR_FUNCTION ptrs_emit = nullptr;
   BINARY_OPERATOR_FUNCTION r64_emit = nullptr;
   BINARY_OPERATOR_FUNCTION bools_emit = nullptr;
 };
@@ -105,13 +71,23 @@ struct SignedArithBinOp {
 
 struct EqOpBin {
   BINARY_OPERATOR_FUNCTION r64_emit = nullptr;
+  BINARY_OPERATOR_FUNCTION r8_emit  = nullptr;
   BINARY_OPERATOR_FUNCTION bools_emit = nullptr;
+  BINARY_OPERATOR_FUNCTION ascii_emit = nullptr;
 };
 
 struct BalancedBinOpOptions {
+  BINARY_OPERATOR_FUNCTION ptrs_emit = nullptr;
   BINARY_OPERATOR_FUNCTION u64_emit = nullptr;
   BINARY_OPERATOR_FUNCTION i64_emit = nullptr;
+  BINARY_OPERATOR_FUNCTION u8_emit = nullptr;
   BINARY_OPERATOR_FUNCTION bools_emit = nullptr;
+  BINARY_OPERATOR_FUNCTION ascii_emit = nullptr;
+};
+
+struct UnpositionedBinOpOptions {
+  BINARY_OPERATOR_FUNCTION r64_and_r64_emit = nullptr;
+  BINARY_OPERATOR_FUNCTION ptr_and_r64_emit = nullptr;
 };
 
 struct UnbalancedLeftSignAgnBin {
@@ -119,10 +95,7 @@ struct UnbalancedLeftSignAgnBin {
 };
 
 struct UnbalancedBinOpOptions {
-  //left is u64, right is u8
   BINARY_OPERATOR_FUNCTION Lu64_Ru8_emit = nullptr;
-
-  //left is u64, right is u8
   BINARY_OPERATOR_FUNCTION Li64_Ru8_emit = nullptr;
 };
 
@@ -140,33 +113,47 @@ struct DerefUnOp {
 
 //Overload for operators that dont care about sign
 void compile_binary_operator(Compiler* comp,
+                             State* state,
                              ASTExpression* expr,
-                             const SignAgnArithBinOp& op);
+                             const SignAgnArithBinOp& op,
+                             const TypeHint* hint);
 
 //Overload for operators that do care about sign
 void compile_binary_operator(Compiler* comp,
+                             State* state,
                              ASTExpression* expr,
-                             const SignedArithBinOp& op);
+                             const SignedArithBinOp& op,
+                             const TypeHint* hint);
 
 //Overload for operators that return bools
 void compile_binary_operator(Compiler* comp,
+                             State* state,
                              ASTExpression* expr,
                              const EqOpBin& op);
 
+//Overload for unpositioned operators
+void compile_binary_operator(Compiler* comp,
+                             State* state,
+                             ASTExpression* expr,
+                             const UnpositionedBinOpOptions& op,
+                             const TypeHint* hint);
+
 //Overload for unbalanced operators
 void compile_binary_operator(Compiler* comp,
+                             State* state,
                              ASTExpression* expr,
                              const UnbalancedBinOpOptions& op);
 
 //Overload for unbalanced operators that dont care about left sign
 void compile_binary_operator(Compiler* comp,
+                             State* state,
                              ASTExpression* expr,
                              const UnbalancedLeftSignAgnBin& op);
 
 //Overload for unary operators
 void compile_unary_operator(Compiler* comp,
-                             ASTExpression* expr,
-                             const UnaryOpOptions& op);
+                            ASTExpression* expr,
+                            const UnaryOpOptions& op);
 
 //Overload for taking address
 void compile_take_address(Compiler* comp,
@@ -176,35 +163,79 @@ void compile_take_address(Compiler* comp,
 void compile_deref(Compiler* comp,
                    ASTExpression* expr);
 
-inline constexpr SignAgnArithBinOp add_operators ={ &OP::emit_add_64s, nullptr };//ADD u64 or i64
-inline constexpr SignAgnArithBinOp sub_operators ={ &OP::emit_sub_64s, nullptr };//SUB u64 or i64
-inline constexpr SignAgnArithBinOp mul_operators ={ &OP::emit_mul_64s, nullptr };//MUL u64 or i64
+inline constexpr UnpositionedBinOpOptions add_operators ={ 
+  &BinOpArgs::emit_add_64s,
+  &BinOpArgs::emit_add_64_to_ptr,
+};
+
+inline constexpr SignAgnArithBinOp sub_operators ={
+  &BinOpArgs::emit_sub_ptrs,
+  &BinOpArgs::emit_sub_64s,
+  nullptr,
+};
+
+inline constexpr SignAgnArithBinOp mul_operators ={
+  nullptr,
+  &BinOpArgs::emit_mul_64s,
+  nullptr,
+};
+
 inline constexpr SignedArithBinOp div_operators ={
-  &OP::emit_div_u64s, &OP::emit_div_i64s,
+  &BinOpArgs::emit_div_u64s,
+  &BinOpArgs::emit_div_i64s,
 };
 
-inline constexpr EqOpBin eq_operators = {&OP::emit_eq_64s, &OP::emit_eq_64s};
+inline constexpr EqOpBin eq_operators ={
+  &BinOpArgs::emit_eq_64s,
+  &BinOpArgs::emit_eq_8s,
+  &BinOpArgs::emit_eq_8s,
+  &BinOpArgs::emit_eq_8s
+};
 
-inline constexpr SignAgnArithBinOp or_operators ={ &OP::emit_or_64s, &OP::emit_or_64s};
+inline constexpr EqOpBin neq_operators ={
+  nullptr,
+  &BinOpArgs::emit_neq_8s,
+  &BinOpArgs::emit_neq_8s,
+  &BinOpArgs::emit_neq_8s
+};
+
+inline constexpr EqOpBin lesser_operators ={
+  &BinOpArgs::emit_lesser_64s,
+  nullptr,
+  nullptr,
+};
+inline constexpr EqOpBin greater_operators ={
+  &BinOpArgs::emit_greater_64s,
+  nullptr,
+  nullptr,
+};
+
+inline constexpr SignAgnArithBinOp or_operators ={ 
+  nullptr,
+  &BinOpArgs::emit_or_64s,
+  &BinOpArgs::emit_or_64s,
+};
 inline constexpr SignAgnArithBinOp and_operators ={
-  &OP::emit_and_64s,//AND u64 or i64
-  &OP::emit_and_64s//AND bools
+  nullptr,
+  &BinOpArgs::emit_and_64s,
+  &BinOpArgs::emit_and_64s,
 };
 
-inline constexpr UnbalancedLeftSignAgnBin left_shift_operators ={ &OP::emit_shift_l_64_by_8 };
+inline constexpr UnbalancedLeftSignAgnBin left_shift_operators ={ 
+  &BinOpArgs::emit_shift_l_64_by_8 };
 inline constexpr UnbalancedBinOpOptions right_shift_operators ={
-  &OP::emit_shift_r_u64_by_8,
-  &OP::emit_shift_r_i64_by_8,
+  &BinOpArgs::emit_shift_r_u64_by_8,
+  &BinOpArgs::emit_shift_r_i64_by_8,
 };
 
 inline constexpr UnaryOpOptions neg_operators ={
-  &OP::emit_neg_i64,
+  &UnOpArgs::emit_neg_i64,
 };
 
 inline constexpr AddressUnOp address_operators ={
-  &OP::emit_address,
+  &UnOpArgs::emit_address,
 };
 
 inline constexpr DerefUnOp deref_operators ={
-  &OP::emit_deref,
+  &UnOpArgs::emit_deref,
 };
