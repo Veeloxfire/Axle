@@ -238,6 +238,51 @@ enum struct STATEMENT_TYPE : uint8_t {
 #undef MOD
 };
 
+#define MOD_DECLS \
+MOD(TOKEN_STREAM, tokens) \
+MOD(EXPRESSION, expr) \
+MOD(CODE, block) \
+MOD(STRUCT, struct_body) \
+
+enum struct DECL_TYPE : uint8_t {
+#define MOD(name, expr) name,
+  MOD_DECLS
+#undef MOD
+};
+
+struct ASTTypedName {
+  ASTType type ={};
+  const InternString* name = nullptr;
+};
+
+struct ASTStructBody {
+  Array<ASTTypedName> elements = {};
+};
+
+struct ASTBlock {
+  Array<ASTStatement> block ={};
+};
+
+struct ASTDecl {
+  const InternString* name = nullptr;
+  ASTType type ={};
+
+  DECL_TYPE decl_type;
+  union {
+    char _dummpy = '\0';
+    Array<Token> tokens;
+    ASTExpression* expr;
+    ASTBlock block;
+    ASTStructBody struct_body;
+  };
+
+  void set_union(DECL_TYPE st) noexcept;
+  void destruct_union() noexcept;
+
+  ASTDecl() = default;
+  ~ASTDecl() noexcept;
+};
+
 struct ASTLocal {
   ASTExpression* expression ={};
   ASTType type ={};
@@ -271,10 +316,6 @@ struct ASTIfElse {
   }
 };
 
-struct ASTBlock {
-  Array<ASTStatement> block ={};
-};
-
 struct ASTAssign {
   ASTExpression* assign_to ={};
   ASTExpression* value ={};
@@ -304,11 +345,6 @@ struct ASTStatement {
 
   ASTStatement() = default;
   ~ASTStatement();
-};
-
-struct ASTTypedName {
-  ASTType type ={};
-  const InternString* name = nullptr;
 };
 
 struct ASTStructureDeclaration {

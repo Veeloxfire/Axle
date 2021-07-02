@@ -25,6 +25,10 @@ struct PrintCallSignature {
   const FunctionCallExpr* call;
 };
 
+struct PrintPtr {
+  const void* ptr;
+};
+
 
 void load_string(Array<char>& res, char c);
 void load_string(Array<char>& res, int8_t i8);
@@ -35,6 +39,7 @@ void load_string(Array<char>& res, int32_t i32);
 void load_string(Array<char>& res, uint32_t u32);
 void load_string(Array<char>& res, int64_t i64);
 void load_string(Array<char>& res, uint64_t u64);
+void load_string(Array<char>& res, PrintPtr ptr);
 
 void load_string(Array<char>& res, DisplayChar c);
 void load_string(Array<char>& res, const char* str);

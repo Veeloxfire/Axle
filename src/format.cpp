@@ -158,6 +158,16 @@ static void load_unsigned(Array<char>& res, uint64_t u64) {
   }
 }
 
+void load_string(Array<char>& res, PrintPtr ptr) {
+  if (ptr.ptr == nullptr) {
+    load_string(res, "null");
+  }
+  else {
+
+    load_unsigned(res, (uintptr_t)ptr.ptr);
+  }
+}
+
 void load_string(Array<char>& res, uint64_t u64) {
   load_unsigned(res, u64);
 }

@@ -5311,10 +5311,13 @@ CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
       //It will shortly be loaded into the parsed files
       comp->file_loader.unparsed_files.pop();
 
-      //Set up the parser
-      Parser parser ={};
-      parser.lexer.strings = comp->strings;
-      init_parser(&parser, full_path, text_source.ptr);
+      //Reset the parser for this file
+      reset_parser(comp, full_path, text_source.ptr);
+
+      // ^ Can error (in the lexing)
+      if (comp->is_panic()) {
+        return print_compile_errors(comp);
+      }
 
       //Parse
       comp->parsed_files.insert_uninit(1);
@@ -5322,28 +5325,35 @@ CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
       ast_file->file_loc = file_import->file_loc;
       ast_file->namespace_index = file_import->ns_index;
 
-      parse_file(&parser, ast_file);
+      parse_file(comp, comp->parser, ast_file);
 
-      //Should have all been copied now :) - can free the file
-      text_source.free_no_destruct();
 
-      if (parser.current.type == AxleTokenType::Error) {
-        //Reporting parse errors
-
-        Span span ={};
-        span.full_path = parser.current.pos.full_path;
-
-        span.char_start = parser.current.pos.character;
-        span.char_end = span.char_start + 1;
-
-        span.line_start = parser.current.pos.line;
-        span.line_end = span.line_start;
-
-        comp->report_error(CompileCode::SYNTAX_ERROR, span,
-                           "Parse Error: \"{}\"",
-                           parser.current.string->string);
+      //Test for errors
+      if (comp->is_panic()) {
         return print_compile_errors(comp);
       }
+
+      //Should no longer be needed now - can free the file
+      text_source.free_no_destruct();
+
+      assert(comp->parser->current.type != AxleTokenType::Error);
+      //if (parser.current.type == AxleTokenType::Error) {
+      //  //Reporting parse errors
+
+      //  Span span ={};
+      //  span.full_path = parser.current.pos.full_path;
+
+      //  span.char_start = parser.current.pos.character;
+      //  span.char_end = span.char_start + 1;
+
+      //  span.line_start = parser.current.pos.line;
+      //  span.line_end = span.line_start;
+
+      //  comp->report_error(CompileCode::SYNTAX_ERROR, span,
+      //                     "Parse Error: \"{}\"",
+      //                     parser.current.string->string);
+      //  return print_compile_errors(comp);
+      //}
 
       if (comp->print_options.ast) {
         IO::print("\n=== Print Parsed AST ===\n\n");

@@ -82,10 +82,14 @@ int compile_file(const APIOptions& options,
   StringInterner strings ={};
   Types types ={};
 
+  Lexer lexer ={};
+  Parser parser ={};
   VM vm = {};
 
   Compiler compiler ={};
 
+  compiler.parser = &parser;
+  compiler.lexer = &lexer;
   compiler.strings = &strings;
   compiler.types = &types;
   compiler.vm = &vm;

@@ -50,7 +50,7 @@ MODIFY(Convention, "#conv") \
 
 #define AXLE_TOKEN_MODIFY \
 MODIFY(Error, "") \
-MODIFY(Eof, "") \
+MODIFY(End, "") \
 MODIFY(Identifier, "") \
 MODIFY(Number, "") \
 MODIFY(String, "") \
@@ -61,6 +61,7 @@ AXLE_TOKEN_STRUCTURAL \
 AXLE_TOKEN_INTRINSICS
 
 
+//Error is for reporting lexing errors and should never been seen in the parser
 enum class AxleTokenType : uint8_t {
 #define MODIFY(n, str) n,
   AXLE_TOKEN_MODIFY
@@ -98,6 +99,8 @@ struct Span {
   size_t char_end = 0;
 };
 
+void set_span_start(const Token& token, Span& span);
+void set_span_end(const Token& token, Span& span);
 
 Span span_of_token(const Token& tok);
 OwnedPtr<char> load_span_from_file(const Span& span, const char* source);
@@ -110,18 +113,24 @@ struct Lexer {
   const char* top = nullptr;
 };
 
+struct TokenStream {
+  const Token* i;
+  const Token* end;
+};
+
 struct Parser {
-  Lexer lexer ={};
+  TokenStream stream;
 
   Token prev = {};
   Token current ={};
   Token next ={};
-
-  void report_error(const char* error_message);
 };
 
-void init_parser(Parser* const parser,  const InternString* full_path, const char* source);
-void parse_file(Parser* const parser, ASTFile* const file);
+void reset_parser(struct Compiler* const comp,
+                  const InternString* file_name,
+                  const char* string);
+
+void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file);
 
 struct KeywordPair {
   const char* keyword = nullptr;

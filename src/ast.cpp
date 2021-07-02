@@ -130,3 +130,30 @@ void ASTType::destruct_union() {
 ASTType::~ASTType() {
   destruct_union();
 }
+
+
+void ASTDecl::set_union(DECL_TYPE dt) noexcept {
+  switch (dt) {
+    #define MOD(name, expr_name) case DECL_TYPE:: ## name:\
+      default_init(& expr_name);\
+      break;
+
+      MOD_DECLS
+      #undef MOD
+  }
+}
+
+void ASTDecl::destruct_union() noexcept {
+  switch (decl_type) {
+  #define MOD(name, expr_name) case DECL_TYPE:: ## name:\
+      destruct_single(& expr_name);\
+      break;
+
+    MOD_DECLS
+    #undef MOD
+  }
+}
+
+ASTDecl::~ASTDecl() noexcept {
+  destruct_union();
+}

@@ -496,6 +496,10 @@ struct Compiler {
   APIOptimizationOptions optimization_options ={};
 
   SystemsAndConcentionNames system_names ={};
+  Lexer* lexer = nullptr;
+  Array<Token> current_stream ={};
+
+  Parser* parser = nullptr;
   VM* vm = nullptr;
 
   CompilationUnit* current_unit ={};
