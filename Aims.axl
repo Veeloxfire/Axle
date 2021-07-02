@@ -21,12 +21,15 @@ C: struct(T: type, U: type) = {
 
 //Generic Function
 last:  (arr: [*ascii; #auto])->*ascii = {
+
+  //Compile time variable
   comptime len := arr.len;
   
-  if (len == 0) {
+  //Compile time if
+  #if (len == 0) {
     return nullptr;
   }
-  else {
+  #else {
     return arr[len - 1];
   }
 }
