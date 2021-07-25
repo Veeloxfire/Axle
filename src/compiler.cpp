@@ -487,7 +487,7 @@ const Structure* find_or_make_tuple_literal(Compiler* const comp, const Span& sp
 //Note: Recursive for array types
 void compile_type(Compiler* const comp, ASTType* type) {
   if (type->type != nullptr) {
-    //Incase function re-called
+    //Just in case function re-called
     return;
   }
 
@@ -586,7 +586,7 @@ struct OverloadSet {
 
 static OverloadSet generate_overload_set(Compiler* const comp,
                                          const CallSignature* sig) {
-  Array<NamedElement*> names = find_all_names(comp, comp->current_namespace, sig->name);
+  Array<NamedElement*> names = comp->names->find_all_names(comp->current_namespace, sig->name);
 
   OverloadSet set ={};
 
@@ -638,7 +638,13 @@ static OverloadSet generate_overload_set(Compiler* const comp,
   const auto n_end = names.end();
   for (; n_i < n_end; n_i++) {
     const NamedElement* possible_func = *n_i;
-    if (possible_func->type == NamedElementType::OVERLOADS) {
+
+    if (possible_func->unknowns.size > 0) {
+      //Each one of these could be a valid function
+      comp->set_dep(func->compilation_unit);
+    }
+
+    if (possible_func->overloads.size > 0) {
       auto f_i = possible_func->overloads.begin();
       auto f_end = possible_func->overloads.end();
 
@@ -655,7 +661,8 @@ static OverloadSet generate_overload_set(Compiler* const comp,
         test_func(func);
       }
     }
-    else if (possible_func->type == NamedElementType::FUNCTION_POINTER) {
+    
+    if (possible_func->func_pointer) {
       FunctionPointer* const func_ptr = possible_func->func_pointer;
 
       //Could be valid function
@@ -1761,7 +1768,7 @@ void compile_type_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::ENUM: {
-        const NamedElement* name = find_name(comp, comp->current_namespace, expr->enum_value.name);
+        const NamedElement* name = comp->names->find_name(comp->current_namespace, expr->enum_value.name);
 
         if (name == nullptr) {
           comp->set_unfound_name(expr->enum_value.name, comp->current_namespace, expr->span);
@@ -1769,8 +1776,8 @@ void compile_type_of_expression(Compiler* const comp,
         }
         else {
           comp->report_error(CompileCode::NAME_ERROR, expr->span,
-                             "Expected '{}' to be an enum value but found a '{}'",
-                             expr->enum_value.name, name->type);
+                             "Expected '{}' to be an enum value but it was not",
+                             expr->enum_value.name);
           return;
         }
 
@@ -1882,16 +1889,15 @@ void compile_type_of_expression(Compiler* const comp,
           loc->valid_rvts &= expr->valid_rvts;
         }
         else {
-          NamedElement* non_local = find_name(comp, comp->current_namespace, name);
+          NamedElement* non_local = comp->names->find_name(comp->current_namespace, name);
           if (non_local == nullptr) {
             comp->set_unfound_name(name, comp->current_namespace, expr->span);
           }
           else {
-            if (non_local->type != NamedElementType::GLOBAL) {
+            if (non_local->global == nullptr) {
               comp->report_error(CompileCode::NAME_ERROR, expr->span,
-                                 "Expected '{}' to be a local or a global but found a '{}'",
-                                 name, non_local->type);
-              return;
+                                 "Expected '{}' to be a local or a global but it wasnt",
+                                 name);
             }
 
             const Global* glob = non_local->global;
@@ -2309,64 +2315,40 @@ static void compile_type_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::LOCAL: {
-        ASTLocal* const decl = &statement->local;
+        ASTDecl* const decl = &statement->local;
 
-        if (decl->type.type == nullptr) {
-          compile_type(comp, &decl->type);
           if (comp->is_panic()) {
             return;
           }
+        assert(decl->type != nullptr);//TEMP
+
+        if (decl->type->type == nullptr) {
+          compile_type(comp, decl->type);
         }
 
-        assert(decl->type.type != nullptr);
+        assert(decl->type->type != nullptr);
+        assert(decl->expr != nullptr);
 
         TypeHint hint ={};
         hint.tht = THT::EXACT;
-        hint.type = decl->type.type;
+        hint.type = decl->type->type;
 
-        compile_type_of_expression(comp, state, decl->expression, &hint);
         if (comp->is_panic()) {
           return;
         }
+        compile_type_of_expression(comp, state, decl->expr, &hint);
 
-        assert(decl->expression->type != nullptr);
+        assert(decl->expr->type != nullptr);
 
-        if (can_compile_const_value(decl->expression)) {
+        if (can_compile_const_value(decl->expr)) {
           ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
-          unit->expr = decl->expression;
+          unit->expr = decl->expr;
 
           comp->set_dep(unit);
           return;
         }
 
-        const NamedElement* possible_name = find_name(comp, comp->current_namespace, decl->name);
-
-        if (possible_name != nullptr) {
-          //Is actually the name for something else
-
-          switch (possible_name->type) {
-            case NamedElementType::STRUCTURE:
-              comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                 "Attempted to shadow the type '{}'",
-                                 decl->name);
-              break;
-            case NamedElementType::OVERLOADS:
-            case NamedElementType::FUNCTION_POINTER:
-              comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                 "Attempted to shadow the function '{}'",
-                                 decl->name);
-              break;
-            case NamedElementType::ENUM:
-              comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                 "Attempted to shadow the enum value '{}'",
-                                 decl->name);
-              break;
-            default: assert(false);
-          }
-
-          return;
-        }
-
+        assert_no_shadow(comp, statement->span, comp->current_namespace, decl->name);
 
         //Check for shadowing
 
@@ -2387,16 +2369,16 @@ static void compile_type_of_statement(Compiler* const comp,
         auto* loc = state->all_locals.back();
 
         loc->name = decl->name;
-        loc->type = decl->type.type;
+        loc->type = decl->type->type;
         assert(loc->type != nullptr);
 
-        if (decl->expression->comptime_eval) {
+        if (decl->expr->comptime_eval) {
           //Load as constant
-          force_load_const_value(comp, decl->expression);
-          assert(decl->expression->const_val != nullptr);
+          force_load_const_value(comp, decl->expr);
+          assert(decl->expr->const_val != nullptr);
 
           loc->val.type = RVT::CONST;
-          loc->val.constant = ConstantVal{ decl->expression->const_val, loc->type->size() };
+          loc->val.constant = ConstantVal{ decl->expr->const_val, loc->type->size() };
         }
 
         state->active_locals.insert(decl->local_index);
@@ -2404,11 +2386,11 @@ static void compile_type_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::EXPRESSION: {
-        compile_type_of_expression(comp, state, statement->expression, nullptr);
 
         if (comp->is_panic()) {
           return;
         }
+        compile_type_of_expression(comp, state, statement->expression.expr, nullptr);
 
         return;
       }
@@ -2417,12 +2399,12 @@ static void compile_type_of_statement(Compiler* const comp,
         hint.tht  = THT::EXACT;
         hint.type = func->signature.return_type;
 
-        compile_type_of_expression(comp, state, statement->expression, &hint);
         if (comp->is_panic()) {
           return;
         }
+        ASTExpression* const expr = statement->expression.expr;
 
-        ASTExpression* const expr = statement->expression;
+        compile_type_of_expression(comp, state, expr, &hint);
 
         if (can_compile_const_value(expr)) {
           ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
@@ -3900,7 +3882,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
         compile_bytecode_of_expression_existing(comp,
                                                 state,
                                                 code,
-                                                statement->expression,
+                                                statement->expression.expr,
                                                 &state->return_val);
 
         if (state->return_val.type == RVT::REGISTER) {
@@ -3911,11 +3893,11 @@ void compile_bytecode_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::EXPRESSION: {
-        if (statement->expression->type == comp->types->s_void) {
-          compile_bytecode_of_expression(comp, state, code, statement->expression, nullptr);
+        if (statement->expression.expr->type == comp->types->s_void) {
+          compile_bytecode_of_expression(comp, state, code, statement->expression.expr, nullptr);
         }
         else {
-          auto a = compile_bytecode_of_expression_new(comp, state, code, statement->expression, ALL_RVTS);
+          auto a = compile_bytecode_of_expression_new(comp, state, code, statement->expression.expr, ALL_RVTS);
         }
 
         return;
@@ -4044,7 +4026,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::LOCAL: {
-        ASTLocal* const decl = &statement->local;
+        ASTDecl* const decl = &statement->local;
 
         Local* const local = state->all_locals.data + decl->local_index;
 
@@ -4063,7 +4045,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
         compile_bytecode_of_expression_existing(comp,
                                                 state,
                                                 code,
-                                                decl->expression,
+                                                decl->expr,
                                                 &local->val);
         return;
       }
@@ -4754,7 +4736,10 @@ void coalesce(const Compiler* const comp, const CallingConvention* conv, State* 
 // Build -> Coalesce -> Select -> Map
 //
 // Also emits a function prolog and function epilog
-void graph_colour_algo(Compiler* const comp, const CallingConvention* const conv, CodeBlock* const code, State* const state) {
+void graph_colour_algo(Compiler* const comp,
+                       const CallingConvention* const conv,
+                       CodeBlock* const code,
+                       State* const state) noexcept {
   if (comp->print_options.pre_reg_alloc) {
     IO::print("\n=== Pre Register Allocation Bytecode ===\n\n");
     ByteCode::print_bytecode(&reg_num_as_string, stdout, code->code.data, code->code.size);
@@ -4820,7 +4805,7 @@ ASTStatement* advance_scopes(UntypedIterator* itr, State* state) {
 }
 
 void compile_function_body_types(Compiler* const comp,
-                                 ASTFunctionDeclaration* const ast_func,
+                                 ASTLambda* const ast_lambda,
                                  Function* const func,
                                  UntypedCode* const untyped,
                                  State* const state) {
@@ -4837,11 +4822,11 @@ void compile_function_body_types(Compiler* const comp,
 }
 
 void compile_function_body_init(Compiler* const comp,
-                                ASTFunctionDeclaration* const ast_func,
+                                ASTLambda* const ast_lambda,
                                 Function* const func,
                                 UntypedCode* const untyped,
                                 State* const state) {
-  ASTFunctionSignature* ast_sig = &ast_func->signature;
+  ASTFuncSig* ast_sig = &ast_lambda->sig;
 
   //Enter the body
   state->control_flow.new_flow();
@@ -4859,13 +4844,13 @@ void compile_function_body_init(Compiler* const comp,
     state->active_locals.insert(index);
 
     l_i->name = i->name;
-    l_i->type = i->type.type;
+    l_i->type = i->type->type;
     l_i->valid_rvts &= NON_CONST_RVTS;//Cant have const parameters
     l_i->val = RuntimeValue();
   }
 
   //Set up the scopes
-  new_scope(&untyped->itr, ast_func->body.block.mut_begin(), ast_func->body.block.end(), state);
+  new_scope(&untyped->itr, ast_lambda->body.block.mut_begin(), ast_lambda->body.block.end(), state);
   untyped->current_statement = advance_scopes(&untyped->itr, state);
 }
 
@@ -4891,7 +4876,7 @@ void init_state_regs(const CallingConvention* convention, State* state) {
 
 //Cant error???
 void compile_function_body_code(Compiler* const comp,
-                                ASTFunctionDeclaration* const ast_func,
+                                ASTLambda* const ast_lambda,
                                 Function* const func,
                                 State* const state) {
   //Should never be called twice on the same function
@@ -5094,7 +5079,7 @@ void compile_function_body_code(Compiler* const comp,
   //Calculate all the values
   //and compile the bytecode
   {
-    Array<ASTStatement>& statements = ast_func->body.block;
+    Array<ASTStatement>& statements = ast_lambda->body.block;
 
     auto i = statements.mut_begin();
     const auto end = statements.mut_end();
@@ -5107,7 +5092,7 @@ void compile_function_body_code(Compiler* const comp,
 }
 
 static void compile_function_signature_type(Compiler* const comp,
-                                            ASTFunctionSignature* const ast_sig,
+                                            ASTFuncSig* const ast_sig,
                                             FunctionSignature* const sig) {
   DO_NOTHING;
 
@@ -5118,12 +5103,12 @@ static void compile_function_signature_type(Compiler* const comp,
 
     while (i < end) {
       if (*i == nullptr) {
-        compile_type(comp, &i_ast->type);
+        compile_type(comp, i_ast->type);
         if (comp->is_panic()) {
           return;
         }
 
-        *i = i_ast->type.type;
+        *i = i_ast->type->type;
       }
 
       i++;
@@ -5162,7 +5147,7 @@ static void compile_function_signature_type(Compiler* const comp,
 
       if (as_ptr) {
         //Load as pointer
-        sig->actual_parameter_types.insert(find_or_make_pointer_type(comp, i_ast->type.span, s));
+        sig->actual_parameter_types.insert(find_or_make_pointer_type(comp, i_ast->type->span, s));
       }
       else {
         sig->actual_parameter_types.insert(s);
@@ -5182,29 +5167,31 @@ void compile_untyped_structure_declaration(Compiler* comp, UntypedStructureEleme
   }
 }
 
-void compile_untyped_global(Compiler* comp, State* state, ASTGlobalDeclaration* decl, Global* global) {
-  if (decl->type.type == nullptr) {
-    compile_type(comp, &decl->type);
+void compile_untyped_global(Compiler* comp, State* state, ASTDecl* decl, Global* global) {
+  assert(decl->type != nullptr);
+
+  if (decl->type->type == nullptr) {
+    compile_type(comp, decl->type);
     if (comp->is_panic()) {
       return;
     }
   }
 
-  if (decl->init_expr.type == nullptr) {
+  if (decl->expr->type == nullptr) {
     TypeHint type_hint ={};
     type_hint.tht = THT::EXACT;
-    type_hint.type = decl->type.type;
+    type_hint.type = decl->type->type;
 
-    compile_type_of_expression(comp, state, &decl->init_expr, &type_hint);
+    compile_type_of_expression(comp, state, decl->expr, &type_hint);
     if (comp->is_panic()) {
       return;
     }
   }
 
-  global->type = decl->type.type;
+  global->type = decl->type->type;
 }
 
-void compile_init_expr_of_global(Compiler* comp, State* state, ASTGlobalDeclaration* decl, Global* global) {
+void compile_init_expr_of_global(Compiler* comp, State* state, ASTDecl* decl, Global* global) {
   assert(global->type != nullptr);
 
   state->control_flow.new_flow();
@@ -5227,19 +5214,19 @@ void compile_init_expr_of_global(Compiler* comp, State* state, ASTGlobalDeclarat
   mem_val->size = global->type->size();
   mem_val->mem.base = (uint8_t)reg_mem.val;
 
-  compile_bytecode_of_expression_existing(comp, state, &global->init, &decl->init_expr, &global_mem);
+  compile_bytecode_of_expression_existing(comp, state, &global->init, decl->expr, &global_mem);
 
   graph_colour_algo(comp, comp->build_options.default_calling_convention, &global->init, state);
 }
 
-void compile_new_composite_structure(Compiler* comp, ASTStructureDeclaration* struct_decl) {
-  CompositeStructure* cmp_s = new_composite_type(comp, struct_decl->name_span, struct_decl->name);
+void compile_new_composite_structure(Compiler* comp, ASTStructBody* struct_body) {
+  CompositeStructure* cmp_s = new_composite_type(comp, struct_body->span, comp->strings->intern("anoymous struct"));
 
   uint32_t current_size = 0;
   uint32_t current_alignment = 0;
 
-  auto i = struct_decl->elements.begin();
-  auto end = struct_decl->elements.end();
+  auto i = struct_body->elements.begin();
+  auto end = struct_body->elements.end();
 
   for (; i < end; i++) {
     cmp_s->elements.insert_uninit(1);
@@ -5257,26 +5244,9 @@ void compile_new_composite_structure(Compiler* comp, ASTStructureDeclaration* st
     current_alignment = larger(this_align, current_alignment);
   }
 
-  cmp_s->declaration = struct_decl;
+  cmp_s->declaration = struct_body;
   cmp_s->cached_size = current_size;
   cmp_s->cached_alignment = current_alignment;
-
-  NamedElement* name = find_name(comp, comp->current_namespace, struct_decl->name);
-  if (name->type != NamedElementType::STRUCTURE) {
-    comp->report_error(CompileCode::NAME_ERROR, struct_decl->name_span,
-                       "Name mismatch. Expected '{}' to be a structure but found '{}'",
-                       struct_decl->name, name->type);
-    return;
-  }
-
-  if (name->structure != nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, struct_decl->name_span,
-                       "'{}' already exists",
-                       struct_decl->name);
-    return;
-  }
-
-  name->structure = cmp_s;
 }
 
 
@@ -5362,10 +5332,10 @@ CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
       }
 
       //This may load new files onto the unparsed files stack
-      build_compilation_units_for_file(comp, ast_file);
       if (comp->is_panic()) {
         return print_compile_errors(comp);
       }
+      process_parsed_file(comp, ast_file);
     }
     else {
       comp->report_error(CompileCode::FILE_ERROR, file_import->span,
@@ -5426,9 +5396,9 @@ void compile_calling_convention_for_function(Compiler* const comp,
   }
 }
 
-void build_compilation_units_for_file(Compiler* const comp, ASTFile* const file) {
+void process_parsed_file(Compiler* const comp, ASTFile* const file) {
 
-  Namespace* ns = comp->all_namespaces.data + file->namespace_index.index;
+  Namespace* ns = comp->names->get_raw_namespace(file->namespace_index);
 
   ASTFileHeader& header = file->header;
 
@@ -5482,15 +5452,16 @@ void build_compilation_units_for_file(Compiler* const comp, ASTFile* const file)
         return;
       }
       else if (i->loc.extension == nullptr) {
-
+        comp->report_error(CompileCode::FILE_ERROR, i->span,
+                           "File did not have an extension",
+                           comp->file_loader.axl, i->loc.extension);
       }
 
-
-      const auto is_file =[loc = &i->loc](const ASTFile* f) {
+      const auto is_correct_file =[loc = &i->loc](const ASTFile* f) {
         return f->file_loc == *loc;
       };
 
-      const ASTFile* import_file = comp->parsed_files.find_if(is_file);
+      const ASTFile* import_file = comp->parsed_files.find_if(is_correct_file);
 
       //Do we need to make a new file?
       if (import_file == nullptr) {
@@ -5498,10 +5469,10 @@ void build_compilation_units_for_file(Compiler* const comp, ASTFile* const file)
         FileImport* new_file = comp->file_loader.unparsed_files.back();
 
         //Set the namespace
-        NamespaceIndex new_index = NamespaceIndex{ comp->all_namespaces.size };
-        comp->all_namespaces.insert_uninit(1);
-        //Reset the namespace because it get invalidated
-        ns = comp->all_namespaces.data + file->namespace_index.index;
+        NamespaceIndex new_index = comp->names->new_namespace();
+
+        //Reset the namespace because it gets invalidated when we make a new one in the array
+        ns = comp->names->get_raw_namespace(file->namespace_index);
 
         new_file->file_loc = i->loc;
         new_file->span = i->span;
@@ -5517,332 +5488,55 @@ void build_compilation_units_for_file(Compiler* const comp, ASTFile* const file)
     }
   }
 
+  {
+   ASTDecl* i = file->decls.mut_begin();
+   const auto end = file->decls.end();
+
+   for (; i < end; i++) {
+     NamedElement* el = ns->names.get_val(i->name);
+     if (el == nullptr) {
+       el = ns->names.insert(i->name);
+
+       //Not typed yet
+       el->unknowns.insert(i);
+     }
+   }
+  }
+
   //Might as well try and save some memory
   ns->imported.shrink();
-
-  //Load all the structures
-  {
-    auto i = file->structs.mut_begin();
-    const auto end = file->structs.mut_end();
-
-    for (; i < end; i++) {
-      ASTStructureDeclaration* struct_decl = i;
-
-      //Must first compile the signature
-      StructureUnit* const unit = comp->new_structure_unit(file->namespace_index);
-
-      unit->source = struct_decl;
-
-      unit->untyped.i = struct_decl->elements.mut_begin();
-      unit->untyped.end = struct_decl->elements.end();
-
-      {
-        NamedElement* str = ns->names.get_val(struct_decl->name);
-        if (str != nullptr) {
-          comp->report_error(CompileCode::NAME_ERROR, struct_decl->name_span,
-                             "Name '{}' already exists\n"
-                             "Cannot overload globals",
-                             struct_decl->name);
-          return;
-        }
-      }
-
-      NamedElement* str = ns->names.insert(struct_decl->name);
-      str->set_union(NamedElementType::GLOBAL);
-      str->structure = nullptr;
-    }
-  }
-
-  //Load all the globals
-  {
-    auto i = file->globals.mut_begin();
-    const auto end = file->globals.mut_end();
-
-    for (; i < end; i++) {
-      ASTGlobalDeclaration* global_decl = i;
-
-      //Must first compile the signature
-      GlobalUnit* const unit = comp->new_global_unit(file->namespace_index);
-
-      Global* global = comp->globals.insert();
-
-      unit->source = global_decl;
-      unit->global = global;
-
-      global->source = global_decl;
-      global->name = global_decl->name;
-      global->compilation_unit = unit;
-
-      //Have to insert names before compiled to stop naming conflicts
-
-      {
-        NamedElement* glob = ns->names.get_val(global_decl->name);
-        if (glob != nullptr) {
-          comp->report_error(CompileCode::NAME_ERROR, global_decl->span,
-                             "Name '{}' already exists\n"
-                             "Cannot overload globals",
-                             global_decl->name);
-          return;
-        }
-      }
-
-      NamedElement* glob = ns->names.insert(global_decl->name);
-      glob->set_union(NamedElementType::GLOBAL);
-      glob->global = global;
-    }
-  }
-
-  //Load all the functions
-  {
-    auto i = file->functions.mut_begin();
-    const auto end = file->functions.mut_end();
-
-    for (; i < end; i++) {
-      ASTFunctionDeclaration* func_decl = i;
-
-      ASTFunctionSignature* sig = &func_decl->signature;
-
-      //Must first compile the signature
-      SignatureUnit* const unit = comp->new_signature_unit(file->namespace_index);
-
-      if (header.is_dll_header) {
-        if (func_decl->body.block.size > 0) {
-          comp->report_error(CompileCode::FILE_ERROR, i->signature.signature_span,
-                             "DLL Header functions cannot have bodies");
-          return;
-        }
-
-        FunctionPointer* dll_func = comp->new_function_pointer();
-        dll_func->is_dll = true;
-        dll_func->compilation_unit = unit;
-
-        //Pick the calling convention
-        if (sig->convention == nullptr) {
-          compile_valid_convention_combo(comp, sig->signature_span,
-                                         comp->build_options.default_calling_convention,
-                                         &dll_func->signature.calling_convention);
-        }
-        else {
-          compile_calling_convention_for_function(comp, sig->signature_span,
-                                                  sig->convention, &dll_func->signature.calling_convention);
-        }
-
-        if (comp->is_panic()) {
-          return;
-        }
-
-        //Test doesnt exist already in the namespace
-        {
-          NamedElement* func = ns->names.get_val(sig->name);
-          if (func != nullptr) {
-            comp->report_error(CompileCode::NAME_ERROR, sig->signature_span,
-                               "Name '{}' already exists\n"
-                               "Cannot overload in the dll header",
-                               sig->name);
-            return;
-          }
-        }
-
-        ImportedDll* dll_file = comp->dlls_import.back();
-
-        //Import dll
-        dll_file->imports.insert_uninit(1);
-        SingleDllImport* single = dll_file->imports.back();
-        single->name = sig->name;
-        single->ptr = dll_func;
-
-        //New name
-        NamedElement new_func ={};
-        new_func.set_union(NamedElementType::FUNCTION_POINTER);
-        new_func.func_pointer = dll_func;
-
-        ns->names.insert(sig->name, std::move(new_func));
-
-        //Link up the ast and function
-        unit->source = func_decl;
-        unit->sig = &dll_func->signature;
-        unit->func = nullptr;//no next function
-        dll_func->signature.name = sig->name;
-
-        //Setup parameters
-        sig->parameters.shrink();
-        dll_func->signature.parameter_types.insert_uninit(sig->parameters.size);
-        dll_func->signature.parameter_types.shrink();
-      }
-      else {
-        //Make  new function
-        Function* const func = comp->new_function();
-
-        func->compilation_unit = unit;
-
-        //Pick the calling convention
-        //Pick the calling convention
-        if (sig->convention == nullptr) {
-          compile_valid_convention_combo(comp, sig->signature_span,
-                                         comp->build_options.default_calling_convention,
-                                         &func->signature.calling_convention);
-        }
-        else {
-          compile_calling_convention_for_function(comp, sig->signature_span,
-                                                  sig->convention, &func->signature.calling_convention);
-        }
-
-        if (comp->is_panic()) {
-          return;
-        }
-
-        //Add to the namespace
-        //Have to do this early to let overloads know it exists but isnt ready yet
-
-        NamedElement* overloads = ns->names.get_val(sig->name);
-        if (overloads == nullptr) {
-          NamedElement new_overloads ={};
-          new_overloads.set_union(NamedElementType::OVERLOADS);
-          new_overloads.overloads.insert(func);
-
-          ns->names.insert(sig->name, std::move(new_overloads));
-        }
-        else {
-          if (overloads->type != NamedElementType::OVERLOADS) {
-            comp->report_error(CompileCode::NAME_ERROR, sig->signature_span,
-                               "Name '{}' already exists and cannot be overloaded",
-                               sig->name);
-            return;
-          }
-          else {
-            overloads->overloads.insert(func);
-          }
-        }
-
-        //Link up the ast and function
-        unit->source = func_decl;
-        unit->sig = &func->signature;
-        unit->func = func;
-        func->signature.name = sig->name;
-
-        //Setup parameters - TODO: Check this is actually doing the right thing
-        sig->parameters.shrink();
-        func->signature.parameter_types.insert_uninit(sig->parameters.size);
-        func->signature.parameter_types.shrink();
-      }
-    }
-  }
 }
 
-//Same as 'find_name' but returns all of the possible options - useful for overload sets
-Array<NamedElement*> find_all_names(Compiler* const comp,
-                                    NamespaceIndex ns_index,
-                                    const InternString* name) {
+void add_comp_unit_for_lambda(Compiler* const comp, ASTLambda* lambda) noexcept {
+  //Make  new function
+  Function* const func = comp->new_function();
 
-  Array<NamedElement*> all_names ={};
+  SignatureUnit* const unit = comp->new_signature_unit(comp->current_namespace);
 
-  //first try the builtin namespace for primitive and stuff
-  const Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
-  NamedElement* el = ns->names.get_val(name);
+  func->compilation_unit = unit;
 
-  if (el != nullptr) {
-    all_names.insert(el);
-  }
+  //Link up the ast and function
+  unit->source = lambda;
+  unit->sig = &func->signature;
+  unit->func = func;
 
-  //now test the actual namespace
-  ns = comp->all_namespaces.data + ns_index.index;
+  //Setup parameters - TODO: Check this is actually doing the right thing
+  lambda->sig.parameters.shrink();
+  func->signature.parameter_types.insert_uninit(lambda->sig.parameters.size);
+  func->signature.parameter_types.shrink();
 
-  while (true) {
-    el = ns->names.get_val(name);
-
-    if (el != nullptr) {
-      all_names.insert(el);
-    }
-
-    //Load from imported namespaces
-    auto i = ns->imported.begin();
-    const auto end = ns->imported.end();
-
-    for (; i < end; i++) {
-      const Namespace* imported = comp->all_namespaces.data + i->index;
-
-      el = imported->names.get_val(name);
-      if (el != nullptr) {
-        all_names.insert(el);
-      }
-    }
-
-
-    if (ns->is_sub_namespace) {
-      //Instead of recursion
-      ns = comp->all_namespaces.data + ns->inside.index;
-    }
-    else {
-      break;
-    }
-  }
-
-  //Finally return
-  return all_names;
+  func->signature.calling_convention = comp->build_options.default_calling_convention;
 }
 
-NamedElement* find_name(Compiler* const comp,
-                        NamespaceIndex ns_index,
-                        const InternString* name) {
+void add_comp_unit_for_struct(Compiler* const comp, ASTStructBody* struct_body) noexcept {
+  StructureUnit* const unit = comp->new_structure_unit(comp->current_namespace);
 
-//first try the builtin namespace for primitive and stuff
-  const Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
-  NamedElement* el = ns->names.get_val(name);
+  unit->source = struct_body;
 
-  if (el != nullptr) {
-    return el;
-  }
-
-  //now test the actual namespace
-  ns = comp->all_namespaces.data + ns_index.index;
-
-  while (true) {
-    el = ns->names.get_val(name);
-
-    if (el != nullptr) {
-      return el;
-    }
-
-    //Check from imported namespaces
-    auto i = ns->imported.begin();
-    const auto end = ns->imported.end();
-
-    for (; i < end; i++) {
-      const Namespace* imported = comp->all_namespaces.data + i->index;
-
-      el = imported->names.get_val(name);
-      if (el != nullptr) {
-        return el;
-      }
-    }
-
-
-    if (ns->is_sub_namespace) {
-      //Instead of recursion
-      ns = comp->all_namespaces.data + ns->inside.index;
-    }
-    else {
-      break;
-    }
-  }
-
-  //Didnt find it at all
-  return nullptr;
+  unit->untyped.i = struct_body->elements.mut_begin();
+  unit->untyped.end = struct_body->elements.end();
 }
 
-NamedElement* find_empty_name(Compiler* const comp,
-                              NamespaceIndex ns_index,
-                              const InternString* name) {
-  NamedElement* pos_empty = find_name(comp, ns_index, name);
-
-  if (pos_empty == nullptr) {
-    return (comp->all_namespaces.data + ns_index.index)->names.insert(name);
-  }
-  else {
-    //Wasnt empty
-    return nullptr;
-  }
-}
 
 CompileCode print_compile_errors(const Compiler* const comp) {
   CompileCode ret = CompileCode::NO_ERRORS;
@@ -6327,7 +6021,7 @@ CompileCode compile_all(Compiler* const comp) {
         comp->unfound_deps.unfound.remove_if([comp](const UnfoundDep& dep) {
           switch (dep.type) {
             case UnfoundDepType::Name: {
-                if (find_name(comp, dep.name.namespace_index, dep.name.ident) == nullptr) {
+                if (comp->names->find_name(dep.name.namespace_index, dep.name.ident) == nullptr) {
                   return false;
                 }
                 break;
@@ -6423,8 +6117,8 @@ void print_compiled_functions(const Compiler* const comp) {
 
 void init_compiler(const APIOptions& options, Compiler* comp) {
   //Setup the built in namespace
-  comp->builtin_namespace.index = comp->all_namespaces.size;
-  comp->all_namespaces.insert_uninit(1);
+  //comp->builtin_namespace = comp->names->builtin_namespace;
+  comp->current_namespace = comp->names->builtin_namespace;
 
   //Init the types
   auto* types = comp->types;
