@@ -299,7 +299,7 @@ CompositeStructure* new_composite_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, name);
+  NamedElement* el = create_name(comp, comp->current_namespace, name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",

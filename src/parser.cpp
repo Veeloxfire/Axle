@@ -573,136 +573,6 @@ Span span_of_token(const Token& tok) {
   return span;
 }
 
-OwnedPtr<char> load_span_from_file(const Span& span, const char* source) {
-  Array<char> res ={};
-
-  size_t character = 0;
-  size_t line = 0;
-
-  bool should_emit = false;
-
-  const auto emit_new_line = [&] {
-    line++;
-
-    if (should_emit) {
-      res.insert('\n');
-    }
-
-    if (line == span.line_start) {
-      should_emit = true;
-
-      //Tab out each line
-      res.insert(' ');
-      res.insert(' ');
-    }
-    else if (line == (span.line_start + 1)) {
-      if (span.line_end == span.line_start) {
-        //If its a single line span then just underline the characters
-
-        res.reserve_extra(span.char_end + 2);
-
-        res.insert(' ');
-        res.insert(' ');
-
-        size_t i = 0;
-        for (; i < span.char_start; i++) {
-          res.insert(' ');
-        }
-
-        for (; i < span.char_end; i++) {
-          res.insert('^');
-        }
-      }
-      else {
-        //Do special line stuff
-        //Draw this shape: /------------^
-
-        res.reserve_extra((span.char_start + 2));
-
-        res.insert('/');
-        res.insert('-');
-
-        for (size_t i = 0; i < span.char_start; i++) {
-          res.insert('-');
-        }
-
-        res.insert('^');
-        res.insert('\n');
-
-        //Next line
-        res.insert('|');
-        res.insert(' ');
-      }
-    }
-    else if (line > span.line_start && line <= span.line_end) {
-      res.insert('|');
-      res.insert(' ');
-    }
-    else if (line == (span.line_end + 1)) {
-      //Do special line stuff 2.0
-      //Draw this shape: \-----------^
-
-      res.reserve_extra(span.char_end + 2);
-
-      res.insert('\\');
-      res.insert('-');
-
-      for (size_t i = 1; i < span.char_end; i++) {
-        res.insert('-');
-      }
-
-      res.insert('^');
-    }
-    else if (should_emit) {
-      res.insert(' ');
-      res.insert(' ');
-    }
-  };
-
-  if (line == span.line_start) {
-    should_emit = true;
-
-    //Tab out first line
-    res.insert(' ');
-    res.insert(' ');
-  }
-
-  while (true) {
-    if (source[0] == '\0' || line == (span.line_end + 1)) {
-      res.insert('\0');
-      break;
-    }
-    else if (source[0] == '\n') {
-      if (source[1] == '\r') {
-        source++;
-        //other step will naturally happen
-      }
-
-      emit_new_line();
-    }
-    else if (source[0] == '\r') {
-      if (source[1] == '\n') {
-        source++;
-        //other step will naturally happen
-      }
-
-      emit_new_line();
-    }
-    else if (should_emit) {
-      if (source[0] == '\t') {
-        res.insert(' ');
-      }
-      else {
-        res.insert(source[0]);
-      }
-    }
-
-    source++;
-  }
-
-  return res;
-}
-
 static void parse_name(Compiler* const comp, Parser* const parser, const InternString** name) {
   if (parser->current.type != AxleTokenType::Identifier) {
     comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
@@ -937,6 +807,136 @@ static void parse_expression(Compiler* const comp, Parser* const parser, ASTExpr
   parse_inner_expression(comp, parser, expr);
 }
 
+static const Token* step_scope(const Token* tok, const Token* end);
+static const Token* step_brackets(const Token* tok, const Token* end);
+static const Token* step_squares(const Token* tok, const Token* end);
+
+static const Token* step_squares(const Token* tok, const Token* end) {
+  assert(tok->type == AxleTokenType::Left_Square);
+
+  tok++;
+
+  while (tok < end) {
+    switch (tok->type) {
+      case AxleTokenType::Left_Square: {
+          tok = step_squares(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Square: {
+          tok++;
+          return tok;
+        }
+      case AxleTokenType::Left_Brace: {
+          tok = step_scope(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Brace: {
+          assert(false);
+          break;
+        }
+      case AxleTokenType::Left_Bracket: {
+          tok = step_brackets(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Bracket: {
+          assert(false);
+          break;
+        }
+      default: {
+          tok++;
+          break;
+        }
+    }
+  }
+
+  return tok;
+}
+
+static const Token* step_brackets(const Token* tok, const Token* end) {
+  assert(tok->type == AxleTokenType::Left_Bracket);
+
+  tok++;
+
+  while (tok < end) {
+    switch (tok->type) {
+      case AxleTokenType::Left_Square: {
+          tok = step_squares(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Square: {
+          assert(false);
+          break;
+        }
+      case AxleTokenType::Left_Brace: {
+          tok = step_scope(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Brace: {
+          assert(false);
+          break;
+        }
+      case AxleTokenType::Left_Bracket: {
+          tok = step_brackets(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Bracket: {
+          tok++;
+          return tok;
+        }
+      default: {
+          tok++;
+          break;
+        }
+    }
+  }
+
+  return tok;
+}
+
+static const Token* step_scope(const Token* tok, const Token* end) {
+  assert(tok->type == AxleTokenType::Left_Brace);
+
+  tok++;
+
+  while (tok < end) {
+    switch (tok->type) {
+      case AxleTokenType::Left_Square: {
+          tok = step_squares(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Square: {
+          assert(false);
+          break;
+        }
+      case AxleTokenType::Left_Brace: {
+          tok = step_scope(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Brace: {
+          assert(false);
+          break;
+        }
+      case AxleTokenType::Left_Bracket: {
+          tok = step_brackets(tok, end);
+          break;
+        }
+      case AxleTokenType::Right_Bracket: {
+          tok++;
+          return tok;
+        }
+      default: {
+          tok++;
+          break;
+        }
+    }
+  }
+
+  return tok;
+}
+
+static void parse_structure(Compiler* const comp, Parser* const parser, ASTStructBody* const struct_decl);
+static void parse_lambda(Compiler* const comp, Parser* const parser, ASTLambda* const lambda);
+
 static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpression* const expr) {
   //Will always be a primary so can elevate span stuff out of the switch
   Span span ={};
@@ -947,15 +947,14 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
   };
 
   const Token current = parser->current;
-  advance(comp, parser);
-  if (comp->is_panic()) {
-    return;
-  }
+  //const Token current = parser->current;
+  //advance(comp, parser);
 
-  switch (current.type) {
+  switch (parser->current.type) {
     case AxleTokenType::Left_Brace: {
         // { ... }
 
+        advance(comp, parser);
         expr->set_union(EXPRESSION_TYPE::TUPLE_LIT);
 
         while (!comp->is_panic()) {
@@ -986,6 +985,8 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
       }
     case AxleTokenType::Left_Square: {
         // [ ... ] 
+
+        advance(comp, parser);
 
         expr->set_union(EXPRESSION_TYPE::ARRAY_EXPR);
 
@@ -1018,16 +1019,23 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
     case AxleTokenType::String: {
         // "..."
         expr->set_union(EXPRESSION_TYPE::ASCII_STRING);
-        expr->ascii_string = current.string;
+        expr->ascii_string = parser->current.string;
+
+        advance(comp, parser);
         break;
       }
     case AxleTokenType::Character: {
         expr->set_union(EXPRESSION_TYPE::ASCII_CHAR);
-        expr->ascii_char = current.string->string[0];
+        expr->ascii_char = parser->current.string->string[0];
+
+        advance(comp, parser);
         break;
       }
     case AxleTokenType::Cast: {
         // cast(... , ...)
+
+        advance(comp, parser);
+
         expect(comp, parser, AxleTokenType::Left_Bracket);
         if (comp->is_panic()) {
           return;
@@ -1059,7 +1067,9 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
       }
     case AxleTokenType::Number: {
         expr->set_union(EXPRESSION_TYPE::VALUE);
-        expr->value.value = string_to_uint(current.string->string);
+        expr->value.value = string_to_uint(parser->current.string->string);
+        advance(comp, parser);
+
         if (!parser->current.consumed_whitespace && parser->current.type == AxleTokenType::Identifier) {
           expr->value.suffix = parser->current.string;
           advance(comp, parser);
@@ -1069,12 +1079,18 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
     case AxleTokenType::Identifier: {
         //Name or function call
 
-        if (parser->current.type == AxleTokenType::Left_Bracket) {
+        if (parser->next.type == AxleTokenType::Left_Bracket) {
           //Is function call
           expr->set_union(EXPRESSION_TYPE::FUNCTION_CALL);
           FunctionCallExpr& call = expr->call;
 
-          call.function_name = current.string;
+          call.function_name = parser->current.string;
+
+          //ident
+          advance(comp, parser);
+
+          //left bracket
+          advance(comp, parser);
 
           //Advance past the left bracket
           expect(comp, parser, AxleTokenType::Left_Bracket);
@@ -1117,7 +1133,9 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
         }
         else {
           expr->set_union(EXPRESSION_TYPE::NAME);
-          expr->name = current.string;
+          expr->name = parser->current.string;
+
+          advance(comp, parser);
         }
 
         break;
@@ -1125,23 +1143,48 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
     case AxleTokenType::True:
     case AxleTokenType::False: {
         expr->set_union(EXPRESSION_TYPE::ENUM);
-        expr->enum_value.name = current.string;
+        expr->enum_value.name = parser->current.string;
+
+        advance(comp, parser);
         break;
       }
     case AxleTokenType::Nullptr: {
         expr->set_union(EXPRESSION_TYPE::NULLPTR);
+        advance(comp, parser);
+        break;
+      }
+    case AxleTokenType::Struct: {
+        expr->set_union(EXPRESSION_TYPE::STRUCT);
+        parse_structure(comp, parser, &expr->struct_body);
         break;
       }
     case AxleTokenType::Left_Bracket: {
-        parse_inner_expression(comp, parser, expr);
-        if (comp->is_panic()) {
-          return;
+        //Function or expression
+
+        constexpr auto parser_is_func = [](const Token* tokens, const Token* end)->bool {
+          const Token* new_tok = step_brackets(tokens, end);
+          return (new_tok + 1) < end
+            && new_tok->type == AxleTokenType::Sub
+            && (new_tok + 1)->type == AxleTokenType::Greater;
+        };
+
+        const bool is_func = parser_is_func(parser->stream.i - 2, parser->stream.end);
+
+        if (is_func) {
+          expr->set_union(EXPRESSION_TYPE::LAMBDA);
+          expr->lambda.lambda = allocate_default<ASTLambda>();
+
+          parse_lambda(comp, parser, expr->lambda.lambda);
         }
-        expect(comp, parser, AxleTokenType::Right_Bracket);
+        else {
+          expect(comp, parser, AxleTokenType::Left_Bracket);
+          parse_inner_expression(comp, parser, expr);
+          expect(comp, parser, AxleTokenType::Right_Bracket);
+        }
         break;
-    default: comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(current),
-                                "Unexpected Token Type '{}'", current.type);
       }
+    default: comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+                                "Unexpected Token Type '{}'", parser->current.type);
   }
 }
 
@@ -1187,7 +1230,7 @@ static void parse_suffix(Compiler* const comp, Parser* const parser, ASTExpressi
           break;
         }
       case AxleTokenType::Full_Stop: {
-          //Member time
+          //Members
           advance(comp, parser);
           if (comp->is_panic()) {
             return;
@@ -1380,6 +1423,30 @@ static void parse_typed_name(Compiler* const comp, Parser* const parser, ASTType
 
 static void parse_block(Compiler* const comp, Parser* const parser, ASTBlock* const block);
 
+static void parse_decl(Compiler* const comp, Parser* const parser, ASTDecl* const decl) {
+  if (parser->current.type != AxleTokenType::Identifier) {
+    comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+                       "Expected Identifier as declarations start with identifiers");
+  }
+
+  decl->name = parser->current.string;
+  advance(comp, parser);
+
+  expect(comp, parser, AxleTokenType::Colon);
+
+  //Explicit type??
+  if (parser->current.type != AxleTokenType::Equals) {
+    decl->type = allocate_default<ASTType>();
+
+    parse_type(comp, parser, decl->type);
+  }
+
+  expect(comp, parser, AxleTokenType::Equals);
+
+  decl->expr = allocate_default<ASTExpression>();
+  parse_expression(comp, parser, decl->expr);
+}
+
 static void parse_statement(Compiler* const comp, Parser* const parser, ASTStatement* const statement) {
   Span span ={};
   set_span_start(parser->current, span);
@@ -1403,11 +1470,11 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
           return;
         }
 
-        statement->expression = allocate_default<ASTExpression>();
-        parse_expression(comp, parser, statement->expression);
         if (comp->is_panic()) {
           return;
         }
+        statement->expression.expr = allocate_default<ASTExpression>();
+        parse_expression(comp, parser, statement->expression.expr);
 
         expect(comp, parser, AxleTokenType::Semicolon);
         break;
@@ -1481,67 +1548,61 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
         parse_statement(comp, parser, statement->while_loop.statement);
         break;
       }
-    default: {
-        //Ambiguous at this point - save the position
-        Parser save = *parser;
-
-        //try declaration first
-        statement->set_union(STATEMENT_TYPE::LOCAL);
-        parse_type(comp, parser, &statement->local.type);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        //This might cause some errors at the moment
-
-        if (!comp->is_panic() && parser->current.type == AxleTokenType::Identifier) {
-          //Is declaration
-          parse_name(comp, parser, &statement->local.name);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          expect(comp, parser, AxleTokenType::Equals);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          statement->local.expression = allocate_default<ASTExpression>();
-          parse_expression(comp, parser, statement->local.expression);
+    case AxleTokenType::Identifier: {
+        if (parser->next.type == AxleTokenType::Colon) {
+          //Declaration!
+          statement->set_union(STATEMENT_TYPE::LOCAL);
+          parse_decl(comp, parser, &statement->local);
         }
         else {
-          //Not a declaration - expression or assignment
-          *parser = std::move(save);
 
-          ASTExpression* expr = allocate_default<ASTExpression>();
-          parse_expression(comp, parser, expr);
+          statement->set_union(STATEMENT_TYPE::EXPRESSION);
+          statement->expression.expr = allocate_default<ASTExpression>();
+          parse_expression(comp, parser, statement->expression.expr);
+        }
+
+        break;
+      }
+    default: {
+        if (parser->current.type == AxleTokenType::Identifier && parser->next.type == AxleTokenType::Colon) {
+          //Declaration!
+          statement->set_union(STATEMENT_TYPE::LOCAL);
+          parse_decl(comp, parser, &statement->local);
+          break;
+        }
+
+        //Expression or assignment
 
           if (comp->is_panic()) {
             return;
           }
+        //Get the assign to expression
+        ASTExpression* expr = allocate_default<ASTExpression>();
+        parse_expression(comp, parser, expr);
 
-          if (parser->current.type == AxleTokenType::Equals) {
-            //Is Assign
-            statement->set_union(STATEMENT_TYPE::ASSIGN);
-            statement->assign.assign_to = expr;
+        if (parser->current.type == AxleTokenType::Equals) {
+          //is assignment
+          statement->set_union(STATEMENT_TYPE::ASSIGN);
+          statement->assign.assign_to = expr;
 
-            advance(comp, parser);
-            if (comp->is_panic()) {
-              return;
-            }
+          //reset the expr
+          expr = allocate_default<ASTExpression>();
+          parse_expression(comp, parser, expr);
 
-            //Load the value expression
-            statement->assign.value = allocate_default<ASTExpression>();
-            parse_expression(comp, parser, statement->assign.value);
-            if (comp->is_panic()) {
-              return;
-            }
-          }
-          else {
-            //Is expression
-            statement->set_union(STATEMENT_TYPE::EXPRESSION);
-            statement->expression = expr;
-          }
+          statement->assign.value = expr;
+          expect(comp, parser, AxleTokenType::Semicolon);
+        }
+        else if (parser->current.type == AxleTokenType::Semicolon) {
+          //is expressiom
+          statement->set_union(STATEMENT_TYPE::EXPRESSION);
+          statement->expression.expr = expr;
+        }
+        else {
+          comp->report_error(CompileCode::SYNTAX_ERROR, expr->span,
+                             "Expected one of '{}' or '{}' at the end of the expression shown\n"
+                             "Found '{}'",
+                             AxleTokenType::Equals, AxleTokenType::Semicolon,
+                             parser->current.type);
         }
         break;
       }
@@ -1577,35 +1638,7 @@ static void parse_block(Compiler* const comp, Parser* const parser, ASTBlock* co
   expect(comp, parser, AxleTokenType::Right_Brace);
 }
 
-static void parse_function_signature(Compiler* const comp, Parser* const parser, ASTFunctionSignature* const sig) {
-  //Might specifiy a convention
-  if (parser->current.type == AxleTokenType::Convention) {
-    advance(comp, parser);
-    if (comp->is_panic()) {
-      return;
-    }
-
-    expect(comp, parser, AxleTokenType::Left_Bracket);
-    if (comp->is_panic()) {
-      return;
-    }
-
-    parse_name(comp, parser, &sig->convention);
-    if (comp->is_panic()) {
-      return;
-    }
-
-    expect(comp, parser, AxleTokenType::Right_Bracket);
-    if (comp->is_panic()) {
-      return;
-    }
-  }
-
-  parse_name(comp, parser, &sig->name);
-  if (comp->is_panic()) {
-    return;
-  }
-
+static void parse_function_signature(Compiler* const comp, Parser* const parser, ASTFuncSig* const sig) {
   expect(comp, parser, AxleTokenType::Left_Bracket);
   if (comp->is_panic()) {
     return;
@@ -1615,11 +1648,11 @@ static void parse_function_signature(Compiler* const comp, Parser* const parser,
   if (parser->current.type != AxleTokenType::Right_Bracket) {
     while (!comp->is_panic()) {
       sig->parameters.insert_uninit(1);
-      ASTLocal* loc = sig->parameters.back();
-      parse_typed_name(comp, parser, &loc->type, &loc->name);
-      if (comp->is_panic()) {
-        return;
-      }
+      ASTDecl* param = sig->parameters.back();
+      param->expr = nullptr;
+      param->type = allocate_default<ASTType>();
+
+      parse_typed_name(comp, parser, param->type, &param->name);
 
       if (parser->current.type == AxleTokenType::Right_Bracket) {
         break;
@@ -1665,15 +1698,8 @@ static void parse_function_signature(Compiler* const comp, Parser* const parser,
   parse_type(comp, parser, &sig->return_type);
 }
 
-static void parse_function(Compiler* const comp, Parser* const parser, ASTFunctionDeclaration* const func) {
-  expect(comp, parser, AxleTokenType::Function);
-  if (comp->is_panic()) {
-    return;
-  }
-  parse_function_signature(comp, parser, &func->signature);
-  if (comp->is_panic()) {
-    return;
-  }
+static void parse_lambda(Compiler* const comp, Parser* const parser, ASTLambda* const func) {
+  parse_function_signature(comp, parser, &func->sig);
 
   if (parser->current.type == AxleTokenType::Left_Brace) {
     parse_block(comp, parser, &func->body);
@@ -1688,9 +1714,12 @@ static void parse_function(Compiler* const comp, Parser* const parser, ASTFuncti
                        parser->current.type);
     return;
   }
+
+  //Load to a compilation unit
+  add_comp_unit_for_lambda(comp, func);
 }
 
-static void parse_structure(Compiler* const comp, Parser* const parser, ASTStructureDeclaration* const struct_decl) {
+static void parse_structure(Compiler* const comp, Parser* const parser, ASTStructBody* const struct_decl) {
   expect(comp, parser, AxleTokenType::Struct);
   if (comp->is_panic()) {
     return;
@@ -1723,6 +1752,9 @@ static void parse_structure(Compiler* const comp, Parser* const parser, ASTStruc
   struct_decl->elements.shrink();
 
   expect(comp, parser, AxleTokenType::Right_Brace);
+
+  //Load to a compilation unit
+  add_comp_unit_for_struct(comp, struct_decl);
 }
 
 void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file) {
@@ -1767,12 +1799,12 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
        !comp->is_panic() && current != AxleTokenType::End;
        current = parser->current.type)
   {
-    if (current == AxleTokenType::Import || current == AxleTokenType::Stdlib) {
+    if (parser->current.type == AxleTokenType::Import || parser->current.type == AxleTokenType::Stdlib) {
       //Import
       file->imports.insert_uninit(1);
       ASTImport* imp = file->imports.back();
 
-      imp->std = (current == AxleTokenType::Stdlib);
+      imp->std = (parser->current.type == AxleTokenType::Stdlib);
 
       advance(comp, parser);
       if (comp->is_panic()) {
@@ -1799,50 +1831,13 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
       }
       expect(comp, parser, AxleTokenType::Semicolon);
     }
-    else if (current == AxleTokenType::Function) {
-      file->functions.insert_uninit(1);
-      ASTFunctionDeclaration* func = file->functions.back();
-      parse_function(comp, parser, func);
-    }
-    else if (current == AxleTokenType::Struct) {
-      file->structs.insert_uninit(1);
-      ASTStructureDeclaration* structure = file->structs.back();
-      parse_structure(comp, parser, structure);
-    }
-    else if (current == AxleTokenType::Global) {
-      file->globals.insert_uninit(1);
-      ASTGlobalDeclaration* global = file->globals.back();
+    else if (parser->current.type == AxleTokenType::Identifier
+             && parser->next.type == AxleTokenType::Colon) {
+      //Decl
+      file->decls.insert_uninit(1);
+      ASTDecl* decl = file->decls.back();
 
-      set_span_start(parser->current, global->span);
-      DEFER(&) {
-        set_span_end(parser->prev, global->span);
-      };
-
-      advance(comp, parser);//global
-      if (comp->is_panic()) {
-        return;
-      }
-
-      parse_type(comp, parser, &global->type);
-      if (comp->is_panic()) {
-        return;
-      }
-      parse_name(comp, parser, &global->name);
-      if (comp->is_panic()) {
-        return;
-      }
-
-      expect(comp, parser, AxleTokenType::Equals);
-      if (comp->is_panic()) {
-        return;
-      }
-
-      parse_expression(comp, parser, &global->init_expr);
-      if (comp->is_panic()) {
-        return;
-      }
-
-      expect(comp, parser, AxleTokenType::Semicolon);
+      parse_decl(comp, parser, decl);
     }
     else {
       comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
@@ -1852,13 +1847,7 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
 
   //reduce over allocating space
   file->imports.shrink();
-  file->functions.shrink();
-  file->globals.shrink();
-  file->structs.shrink();
-
-  if (comp->is_panic()) {
-    return;
-  }
+  file->decls.shrink();
 }
 
 struct Printer {
@@ -1999,6 +1988,16 @@ void print_ast_expression(const ASTExpression* expr) {
   }
 }
 
+static void print_ast_decl(Printer* const printer, const ASTDecl* decl) {
+  printf("%s :", decl->name->string);
+  print_type(decl->type);
+
+  if (decl->expr != nullptr) {
+    IO::print(" = ");
+    print_ast_expression(decl->expr);
+  }
+}
+
 static void print_ast_statement(Printer* const printer, const ASTStatement* statement) {
   printer->newline();
 
@@ -2007,20 +2006,19 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
       print_ast_expression(statement->assign.assign_to);
       IO::print(" = ");
       print_ast_expression(statement->assign.value);
+      IO::print(';');
       break;
     case STATEMENT_TYPE::LOCAL:
-      print_type(&statement->local.type);
-      printf(" %s = ", statement->local.name->string);
-      print_ast_expression(statement->local.expression);
+      print_ast_decl(printer, &statement->local);
       IO::print(';');
       break;
     case STATEMENT_TYPE::RETURN:
       IO::print("return ");
-      print_ast_expression(statement->expression);
+      print_ast_expression(statement->expression.expr);
       IO::print(';');
       break;
     case STATEMENT_TYPE::EXPRESSION:
-      print_ast_expression(statement->expression);
+      print_ast_expression(statement->expression.expr);
       IO::print(';');
       break;
     case STATEMENT_TYPE::WHILE:
@@ -2085,13 +2083,8 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
   }
 }
 
-static void print_function_sig(Printer* const printer, const ASTFunctionSignature* sig) {
-  if (sig->convention == nullptr) {
-    printf("%s(", sig->name->string);
-  }
-  else {
-    printf("#conv(%s) %s(", sig->convention->string, sig->name->string);
-  }
+static void print_function_sig(Printer* const printer, const ASTFuncSig* sig) {
+  IO::print('(');
 
 
   //Parameters
@@ -2101,12 +2094,11 @@ static void print_function_sig(Printer* const printer, const ASTFunctionSignatur
 
     if (p_end - p_i > 0) {
       for (; p_i < (p_end - 1); p_i++) {
-        print_type(&p_i->type);
-        printf(" %s, ", p_i->name->string);
+        print_ast_decl(printer, p_i);
+        IO::print(", ");
       }
 
-      print_type(&p_i->type);
-      printf(" %s", p_i->name->string);
+      print_ast_decl(printer, p_i);
     }
   }
 
@@ -2141,73 +2133,15 @@ void print_ast(const ASTFile* file) {
     }
   }
 
-  //Structures
+  //Declarations
   {
-    auto i = file->structs.begin();
-    const auto end = file->structs.end();
+    auto i = file->decls.begin();
+    const auto end = file->decls.end();
 
     for (; i < end; i++) {
-      const ASTStructureDeclaration* str = i;
-
-      printf("struct %s {", str->name->string);
-
-      printer.tabs++;
-
-
-      auto el_i = str->elements.begin();
-      auto el_end = str->elements.end();
-
-      for (; el_i < el_end; el_i++) {
-        printer.newline();
-
-        print_type(&el_i->type);
-
-        printf(" %s;", el_i->name->string);
-      }
-
-      printer.tabs--;
-      printer.newline();
-      IO::print('}');
-
-      printer.newline();
-      printer.newline();
-    }
-  }
-
-
-  //Functions
-  {
-    auto i = file->functions.begin();
-    const auto end = file->functions.end();
-
-    for (; i < end; i++) {
-      const ASTFunctionDeclaration* func = i;
-      const ASTFunctionSignature* sig = &func->signature;
-
-      IO::print("function ");
-      print_function_sig(&printer, sig);
-      if (func->body.block.size == 0) {
-        IO::print(';');
-      }
-      else {
-        IO::print(" {");
-        printer.tabs++;
-
-        //Function body
-        {
-          auto b_i = func->body.block.begin();
-          const auto b_end = func->body.block.end();
-
-          for (; b_i < b_end; b_i++) {
-            print_ast_statement(&printer, b_i);
-          }
-        }
-
-        printer.tabs--;
-        printer.newline();
-        IO::print('}');
-      }
-
+      Printer printer ={};
+      print_ast_decl(&printer, i);
+      IO::print(';');
       printer.newline();
       printer.newline();
     }
