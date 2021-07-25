@@ -7,10 +7,12 @@
 #include "parser.h"
 #include "files.h"
 #include "ast.h"
+#include "names.h"
 
 #include "api.h"
 
 #include "type.h"
+
 
 
 struct VM;
@@ -242,7 +244,7 @@ struct UntypedStructureElements {
 };
 
 struct Global {
-  ASTGlobalDeclaration* source = nullptr;
+  ASTDecl* source = nullptr;
   CompilationUnit* compilation_unit = nullptr;
 
   const Structure* type = nullptr;
@@ -290,7 +292,7 @@ struct CompilationUnit {
 struct SignatureUnit : public CompilationUnit {
   SIGNATURE_COMP_STAGE stage = SIGNATURE_COMP_STAGE::UNTYPED;
 
-  ASTFunctionDeclaration* source = nullptr;
+  ASTLambda* source = nullptr;
   FunctionSignature* sig = nullptr;
   Function* func = nullptr;
 };
@@ -298,14 +300,14 @@ struct SignatureUnit : public CompilationUnit {
 struct StructureUnit : public CompilationUnit {
   STRUCTURE_COMP_STAGE stage = STRUCTURE_COMP_STAGE::UNTYPED;
 
-  ASTStructureDeclaration* source = nullptr;
+  ASTStructBody* source = nullptr;
   UntypedStructureElements untyped ={};
 };
 
 struct GlobalUnit : public CompilationUnit {
   GLOBAL_COMP_STAGE stage = GLOBAL_COMP_STAGE::UNTYPED;
 
-  ASTGlobalDeclaration* source = nullptr;
+  ASTDecl* source = nullptr;
   Global* global = nullptr;
 
   State state ={};
@@ -314,7 +316,7 @@ struct GlobalUnit : public CompilationUnit {
 struct FunctionUnit : public CompilationUnit {
   FUNCTION_COMP_STAGE stage = FUNCTION_COMP_STAGE::UNINIT;
 
-  ASTFunctionDeclaration* source = nullptr;
+  ASTLambda* source = nullptr;
   Function* func = nullptr;
 
   UntypedCode untyped ={};
@@ -389,62 +391,6 @@ struct UnfoundDependencies {
   Array<UnfoundDep> unfound ={};
 };
 
-#define N_E_T_MODS \
-MODIFY(NONE, "unknown", _dummy) \
-MODIFY(OVERLOADS, "funciton", overloads) \
-MODIFY(FUNCTION_POINTER, "funciton", func_pointer) \
-MODIFY(STRUCTURE, "structure", structure) \
-MODIFY(ENUM, "enum", enum_value) \
-MODIFY(GLOBAL, "global", global)
-
-enum struct NamedElementType : uint8_t {
-#define MODIFY(name, str, expr_name) name,
-  N_E_T_MODS
-#undef MODIFY
-};
-
-struct NamedElement {
-  NamedElementType type;
-  union {
-    char _dummy;
-    Array<Function*> overloads;
-    FunctionPointer* func_pointer;
-    const Structure* structure;
-    const EnumValue* enum_value;
-    const Global* global;
-    //NamespaceIndex other_namespace;
-  };
-
-  void set_union(NamedElementType ty);
-  void destruct_union();
-  void move_from(NamedElement&& ne);
-
-  //This is not '= default' because intellisense complains and that annoys me
-  NamedElement() : type(NamedElementType::NONE), _dummy('\0') {}
-
-  NamedElement(NamedElement&& ne) noexcept {
-    move_from(std::move(ne));
-  }
-
-  NamedElement& operator=(NamedElement&& ne) noexcept {
-    this->~NamedElement();
-    move_from(std::move(ne));
-    return *this;
-  }
-
-  ~NamedElement() noexcept {
-    destruct_union();
-  }
-};
-
-struct Namespace {
-  bool is_sub_namespace = false;
-  NamespaceIndex inside ={};
-
-  InternHashTable<NamedElement> names ={};
-  Array<NamespaceIndex> imported ={};
-};
-
 struct FileImport {
   FileLocation file_loc ={};
   NamespaceIndex ns_index ={};
@@ -470,7 +416,7 @@ struct ImportedDll {
   Array<SingleDllImport> imports ={};
 };
 
-struct SystemsAndConcentionNames {
+struct SystemsAndConventionNames {
   const InternString* sys_vm      = nullptr;
   const InternString* sys_x86_64  = nullptr;
 
@@ -495,7 +441,7 @@ struct Compiler {
   BuildOptions           build_options        ={};
   APIOptimizationOptions optimization_options ={};
 
-  SystemsAndConcentionNames system_names ={};
+  SystemsAndConventionNames system_names ={};
   Lexer* lexer = nullptr;
   Array<Token> current_stream ={};
 
@@ -507,9 +453,10 @@ struct Compiler {
   Errors errors ={};
   UnfoundDependencies unfound_deps ={};
 
-  NamespaceIndex builtin_namespace ={};
+  //NamespaceIndex builtin_namespace ={};
+  NamespaceIndex build_file_namespace ={};
   NamespaceIndex current_namespace ={};
-  Array<Namespace> all_namespaces ={};
+  NamesHandler* names;
 
   FileLoader file_loader ={};
 
@@ -562,6 +509,9 @@ struct Compiler {
   void set_dep(CompilationUnit* unit);
 };
 
+void add_comp_unit_for_lambda(Compiler* const comp, ASTLambda* lambda) noexcept;
+void add_comp_unit_for_struct(Compiler* const comp, ASTStructBody* struct_body) noexcept;
+
 void init_compiler(const APIOptions& options, Compiler* comp);
 
 CompileCode compile_all(Compiler* const comp);
@@ -576,7 +526,7 @@ void compile_type_of_expression(Compiler* const comp,
 
 CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp);
 
-void build_compilation_units_for_file(Compiler* const comp, ASTFile* const func);
+void process_parsed_file(Compiler* const comp, ASTFile* const func);
 
 void print_compiled_functions(const Compiler* comp);
 
@@ -605,18 +555,6 @@ const Structure* find_or_make_pointer_type(Compiler* const comp,
 const Structure* find_or_make_tuple_literal(Compiler* const comp,
                                             const Span& span,
                                             Array<const Structure*>&& elements);
-
-NamedElement* find_name(Compiler* const comp,
-                        NamespaceIndex ns_index,
-                        const InternString* name);
-
-NamedElement* find_empty_name(Compiler* const comp,
-                              NamespaceIndex ns_index,
-                              const InternString* name);
-
-Array<NamedElement*> find_all_names(Compiler* const comp,
-                                    NamespaceIndex ns_index,
-                                    const InternString* name);
 
 CompileCode print_compile_errors(const Compiler* const comp);
 
