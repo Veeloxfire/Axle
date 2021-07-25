@@ -1,8 +1,8 @@
-function main() -> u64 {
-  i64 one = 1;
-  i64 minus_two = -2;
-  i64 three = 3;
-  i64 four = 4;
+main :: () -> u64 {
+  one : i64 = 1;
+  minus_two : i64 = -2;
+  three : i64 = 3;
+  four: i64 = 4;
 
   return cast(u64, one + minus_two * three / four);
 }
