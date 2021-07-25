@@ -332,17 +332,6 @@ struct ConstantExprUnit : public CompilationUnit {
   State state ={};
 };
 
-struct ErrorMessage {
-  CompileCode type = CompileCode::NO_ERRORS;
-  Span span ={};
-  OwnedPtr<char> message ={};
-};
-
-struct Errors {
-  bool panic = false;
-  Array<ErrorMessage> error_messages ={};
-};
-
 struct CallSignature {
   const InternString* name = nullptr;
   Array<const Structure*> arguments ={};
@@ -448,14 +437,10 @@ struct Compiler {
   Parser* parser = nullptr;
   VM* vm = nullptr;
 
-  CompilationUnit* current_unit ={};
-
   Errors errors ={};
   UnfoundDependencies unfound_deps ={};
 
-  //NamespaceIndex builtin_namespace ={};
-  NamespaceIndex build_file_namespace ={};
-  NamespaceIndex current_namespace ={};
+  NamespaceIndex build_file_namespace ={};//needs to be saved for finding main
   NamesHandler* names;
 
   FileLoader file_loader ={};
@@ -497,11 +482,10 @@ struct Compiler {
   constexpr void reset_panic() { errors.panic = false; unfound_deps.panic = false; }
 
   template<typename ... T>
-  void report_error(CompileCode code, const Span& span, const char* f_message, T&& ... ts) {
-    errors.panic = true;
+  void report_error(ERROR_CODE code, const Span& span, const char* f_message, T&& ... ts) {
+    errors.register_error(code, span, f_messasge, std::forward<T>(ts)...);
 
-    OwnedPtr<char> message = format(f_message, std::forward<T>(ts)...);
-    errors.error_messages.insert({ code, span, std::move(message) });
+    errors.panic = true;
   }
 
   void set_unfound_name(const InternString* name, NamespaceIndex ns, const Span& span);
@@ -514,7 +498,7 @@ void add_comp_unit_for_struct(Compiler* const comp, ASTStructBody* struct_body) 
 
 void init_compiler(const APIOptions& options, Compiler* comp);
 
-CompileCode compile_all(Compiler* const comp);
+ERROR_CODE compile_all(Compiler* const comp);
 
 void set_runtime_flags(ASTExpression* const expr, State* const state,
                        bool modified, uint8_t valid_rvts);
@@ -524,7 +508,7 @@ void compile_type_of_expression(Compiler* const comp,
                                 ASTExpression* const expr,
                                 const TypeHint* const hint);
 
-CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp);
+ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp);
 
 void process_parsed_file(Compiler* const comp, ASTFile* const func);
 
@@ -556,6 +540,6 @@ const Structure* find_or_make_tuple_literal(Compiler* const comp,
                                             const Span& span,
                                             Array<const Structure*>&& elements);
 
-CompileCode print_compile_errors(const Compiler* const comp);
+ERROR_CODE print_compile_errors(const Compiler* const comp);
 
 void build_data_section_for_exec(Program* prog, Compiler* const comp);

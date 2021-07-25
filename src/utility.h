@@ -849,14 +849,14 @@ struct SquareBitMatrix {
 template<typename T>
 struct Queue {
   struct CircularBuffer {
-    static constexpr size_t BUFFER_SIZE = 64;
-    static_assert(BUFFER_SIZE < 255, "u8 needs to be small enough");
+    static constexpr size_t SINGLE_BUFFER_SIZE = 64;
+    static_assert(SINGLE_BUFFER_SIZE < 255, "u8 needs to be small enough");
 
     bool empty = false;
     u8 front_offset = 0;
     u8 end_offset = 0;
 
-    T data[BUFFER_SIZE] = {};
+    T data[SINGLE_BUFFER_SIZE] ={};
 
     CircularBuffer* prev = nullptr;
     CircularBuffer* next = nullptr;
@@ -870,15 +870,13 @@ struct Queue {
 
   Queue() = default;
   ~Queue() {
-    if(linked_list_start == nullptr) { return; }
-
-    CircularBuffer* curr = linked_list_start;
+    CircularBuffer* curr = front;
     CircularBuffer* next = curr->next;
 
     while (true) {
       free_destruct_single(curr);
 
-      if(next == nullptr) { return; }
+      if (next == nullptr) { return; }
 
       //Break the loop
       CircularBuffer* holder = next->next;
@@ -905,7 +903,7 @@ struct Queue {
         //the next isnt empty so we need a new buffer
 
         CircularBuffer* new_back = allocate_default<CircularBuffer>();
-        
+
         back->next->prev = new_back;
         new_back->next = back->next;
 
@@ -922,13 +920,15 @@ struct Queue {
     back->empty = false;
     back->data[back->end_offset] = std::move(t);
     back->end_offset++;
-    
+
     //loop end offset
-    if (back->end_offset == BUFFER_SIZE) back->end_offset -= BUFFER_SIZE;
+    if (back->end_offset == CircularBuffer::SINGLE_BUFFER_SIZE) {
+      back->end_offset -= CircularBuffer::SINGLE_BUFFER_SIZE;
+    }
   }
 
   bool is_empty() const {
-    return front == nullptr || font->empty;
+    return front == nullptr || front->empty;
   }
 
   T dequeue() {
@@ -937,8 +937,8 @@ struct Queue {
     //Cannot be empty so no need to check for that
     T ret = std::move(front->data[front->front_offset]);
 
-    if (front_offset == 0) {
-      front->front_offset += BUFFER_SIZE;
+    if (front->front_offset == 0) {
+      front->front_offset += CircularBuffer::SINGLE_BUFFER_SIZE;
     }
 
     front->front_offset--;

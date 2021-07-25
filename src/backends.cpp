@@ -152,7 +152,7 @@ void vm_backend_single_func(Program* prog, const CodeBlock* code, Compiler* cons
     prog->entry_point = label_indexes[entry_point_label];
   }
   else {
-    comp->report_error(CompileCode::LINK_ERROR, Span{},
+    comp->report_error(ERROR_CODE::LINK_ERROR, Span{},
                        "Could not find entry point");
   }
 
@@ -341,19 +341,19 @@ void vm_backend(Program* prog, Compiler* comp) {
       NamedElement* named_el = find_unimported_name(comp, comp->build_file_namespace, comp->build_options.entry_point);
 
       if (named_el == nullptr) {
-        comp->report_error(CompileCode::LINK_ERROR, Span{},
+        comp->report_error(ERROR_CODE::LINK_ERROR, Span{},
                            "Could not find entry point in build file");
       }
 
       if (named_el->type != NamedElementType::GLOBAL) {
-        comp->report_error(CompileCode::LINK_ERROR,  Span{},
+        comp->report_error(ERROR_CODE::LINK_ERROR,  Span{},
                            "The entry point was not a function");
       }
 
       const Global* entry = named_el->global;
 
       if (entry->type->type != STRUCTURE_TYPE::LAMBDA) {
-        comp->report_error(CompileCode::LINK_ERROR,  Span{},
+        comp->report_error(ERROR_CODE::LINK_ERROR,  Span{},
                            "The entry point was not a function");
       }
 
@@ -1322,7 +1322,7 @@ void x86_64_machine_code_backend(Program* prog, Compiler* comp) {
             }
           default: {
               uint8_t op = *code_i;
-              comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+              comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                  "Backend found unsupported bytecode instruction\n"
                                  "Code: {}, Name: {}",
                                  op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
@@ -1356,7 +1356,7 @@ void x86_64_machine_code_backend(Program* prog, Compiler* comp) {
     prog->entry_point = label_indexes[entry_point_label];
   }
   else {
-    comp->report_error(CompileCode::LINK_ERROR, Span{},
+    comp->report_error(ERROR_CODE::LINK_ERROR, Span{},
                        "Could not find entry point");
   }
 

@@ -158,33 +158,33 @@ const Structure* get_signed_type_of(const Types* types, const Structure* s) {
   return nullptr;
 }
 
-SimpleLiteralStructure* new_simple_literal_type(Compiler* const comp,
-                                                const Span& span,
-                                                const InternString* name) {
+void TypeCreator::add_type_to_namespace(const Structure* s, const InternString* name, const Span& span) {
+  NamedElement* el = comp->names->create_name(current_namespace, name);
+  if (el == nullptr) {
+    comp->report_error(ERROR_CODE::NAME_ERROR, span,
+                       "Tried to make type '{}' but it conflicted with existing names",
+                       name);
+    return;
+  }
+
+  el->structure = s;
+}
+
+SimpleLiteralStructure* TypeCreator::new_simple_literal_type(const Span& span,
+                                                             const InternString* name) {
   SimpleLiteralStructure* const type = comp->types->simple_literal_structures.allocate();
   type->type = STRUCTURE_TYPE::SIMPLE_LITERAL;
   type->name = name;
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = create_name(comp, comp->current_namespace, name);
-  if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
-                       "Tried to make type '{}' but it conflicted with existing names",
-                       name);
-  }
-  else {
-    default_init(el);
-    el->set_union(NamedElementType::STRUCTURE);
-    el->structure = (const Structure*)type;
-  }
+  add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
 }
 
-TupleLiteralStructure* new_tuple_literal_type(Compiler* const comp,
-                                               const Span& span,
-                                               Array<const Structure*>&& types) {
+TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
+                                                           Array<const Structure*>&& types) {
   TupleLiteralStructure* const type = comp->types->tuple_literal_structures.allocate();
 
   type->type = STRUCTURE_TYPE::TUPLE_LITERAL;
@@ -196,7 +196,7 @@ TupleLiteralStructure* new_tuple_literal_type(Compiler* const comp,
     uint32_t current_size = 0;
     uint32_t current_align = 0;
 
-    Array<char> name = {};
+    Array<char> name ={};
 
     auto i = types.begin();
     const auto end = types.end();
@@ -250,121 +250,66 @@ TupleLiteralStructure* new_tuple_literal_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = create_name(comp, comp->current_namespace, type->name);
-  if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
-                       "Tried to make type '{}' but it conflicted with existing names",
-                       type->name);
-  }
-  else {
-    default_init(el);
-    el->set_union(NamedElementType::STRUCTURE);
-    el->structure = (const Structure*)type;
-  }
+  add_type_to_namespace((const Structure*)type, type->name, span);
 
   return type;
 }
 
 
-IntegerStructure* new_int_type(Compiler* comp,
-                               const Span& span,
-                               const InternString* name) {
+IntegerStructure* TypeCreator::new_int_type(const Span& span,
+                                            const InternString* name) {
   IntegerStructure* const type = comp->types->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
   type->name = name;
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = create_name(comp, comp->current_namespace, name);
-  if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
-                       "Tried to make type '{}' but it conflicted with existing names",
-                       name);
-  }
-  else {
-    default_init(el);
-    el->set_union(NamedElementType::STRUCTURE);
-    el->structure = (const Structure*)type;
-  }
+  add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
 }
 
-CompositeStructure* new_composite_type(Compiler* const comp,
-                                       const Span& span,
-                                       const InternString* name) {
+CompositeStructure* TypeCreator::new_composite_type(const Span& span,
+                                                    const InternString* name) {
   CompositeStructure* const type = comp->types->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
   type->name = name;
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = create_name(comp, comp->current_namespace, name);
-  if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
-                       "Tried to make type '{}' but it conflicted with existing names",
-                       name);
-  }
-  else {
-    default_init(el);
-    el->set_union(NamedElementType::STRUCTURE);
-    el->structure = (const Structure*)type;
-  }
+  add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
 }
 
-EnumStructure* new_enum_type(Compiler* const comp,
-                             const Span& span,
-                             const InternString* name) {
+EnumStructure* TypeCreator::new_enum_type(const Span& span,
+                                          const InternString* name) {
   EnumStructure* const type = comp->types->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
   type->name = name;
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = create_name(comp, comp->current_namespace, name);
-  if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
-                       "Tried to make type '{}' but it conflicted with existing names",
-                       name);
-  }
-  else {
-    default_init(el);
-    el->set_union(NamedElementType::STRUCTURE);
-    el->structure = (const Structure*)type;
-  }
+  add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
 }
 
-Structure* new_base_type(Compiler* const comp,
-                         const Span& span,
-                         const InternString* name) {
+Structure* TypeCreator::new_base_type(const Span& span,
+                                      const InternString* name) {
   Structure* const type = comp->types->base_structures.allocate();
   type->name = name;
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = comp->names->create_name(comp->current_namespace, name);
-  if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
-                       "Tried to make type '{}' but it conflicted with existing names",
-                       name);
-  }
-  else {
-    default_init(el);
-    el->set_union(NamedElementType::STRUCTURE);
-    el->structure = (const Structure*)type;
-  }
+  add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
 }
 
-ArrayStructure* new_array_type(Compiler* const comp,
-                               const Span& span,
-                               const Structure* base,
-                               size_t length) {
+ArrayStructure* TypeCreator::new_array_type(const Span& span,
+                                            const Structure* base,
+                                            size_t length) {
   const InternString* name = comp->strings->intern(ArrayStructure::gen_name(base, length).ptr);
 
   ArrayStructure* const type = comp->types->array_structures.allocate();
@@ -375,24 +320,13 @@ ArrayStructure* new_array_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = create_name(comp, comp->current_namespace, name);
-  if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
-                       "Tried to make type '{}' but it conflicted with existing names",
-                       name);
-  }
-  else {
-    default_init(el);
-    el->set_union(NamedElementType::STRUCTURE);
-    el->structure = (const Structure*)type;
-  }
+  add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
 }
 
-PointerStructure* new_pointer_type(Compiler* const comp,
-                                   const Span& span,
-                                   const Structure* base) {
+PointerStructure* TypeCreator::new_pointer_type(const Span& span,
+                                                const Structure* base) {
   const InternString* name = comp->strings->intern(PointerStructure::gen_name(base).ptr);
 
   PointerStructure* const type = comp->types->pointer_structures.allocate();
@@ -402,25 +336,14 @@ PointerStructure* new_pointer_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = create_name(comp, comp->current_namespace, name);
-  if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
-                       "Tried to make type '{}' but it conflicted with existing names",
-                       name);
-  }
-  else {
-    default_init(el);
-    el->set_union(NamedElementType::STRUCTURE);
-    el->structure = (const Structure*)type;
-  }
+  add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
 }
 
-EnumValue* new_enum_value(Compiler* const comp,
-                          const Span& span,
-                          EnumStructure* enum_s,
-                          const InternString* name) {
+EnumValue* TypeCreator::new_enum_value(const Span& span,
+                                       EnumStructure* enum_s,
+                                       const InternString* name) {
   EnumValue* const val = comp->types->enum_values.allocate();
   val->type = enum_s;
   val->name = name;
@@ -428,17 +351,17 @@ EnumValue* new_enum_value(Compiler* const comp,
   enum_s->enum_values.insert(val);
   comp->types->enums.insert(val);
 
-  NamedElement* el = create_name(comp, comp->current_namespace, name);
+  NamedElement* el = comp->names->create_name(current_namespace, name);
   if (el == nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, span,
+    comp->report_error(ERROR_CODE::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
                        name);
+
   }
   else {
-    default_init(el);
-    el->set_union(NamedElementType::ENUM);
     el->enum_value = val;
   }
+
 
   return val;
 }
@@ -499,7 +422,6 @@ Types::~Types() {
       enum_values.free(*i);
     }
   }
-
 }
 
 using CAST_BYTECODE = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;

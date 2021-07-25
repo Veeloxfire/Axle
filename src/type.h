@@ -3,6 +3,8 @@
 #include "bytecode.h"
 #include "strings.h"
 #include "comp_utilities.h"
+#include "names.h"
+#include "errors.h"
 
 struct Structure;
 struct State;
@@ -201,43 +203,42 @@ struct Types {
   }
 };
 
-SimpleLiteralStructure* new_simple_literal_type(Compiler* const comp,
-                                                const Span& span,
-                                                const InternString* name);
+struct TypeCreator {
+  Compiler* comp;
+  NamespaceIndex current_namespace;
 
-TupleLiteralStructure* new_tuple_literal_type(Compiler* const comp,
-                                              const Span& span,
-                                              Array<const Structure*>&& types);
+  void add_type_to_namespace(const Structure* s, const InternString* name, const Span& span);
 
-IntegerStructure* new_int_type(Compiler* const comp,
-                               const Span& span,
+
+  SimpleLiteralStructure* new_simple_literal_type(const Span& span,
+                                                  const InternString* name);
+
+  TupleLiteralStructure* new_tuple_literal_type(const Span& span,
+                                                Array<const Structure*>&& types);
+
+  IntegerStructure* new_int_type(const Span& span,
+                                 const InternString* name);
+
+  CompositeStructure* new_composite_type(const Span& span,
+                                         const InternString* name);
+
+  EnumStructure* new_enum_type(const Span& span,
                                const InternString* name);
 
-CompositeStructure* new_composite_type(Compiler* const comp,
-                                       const Span& span,
-                                       const InternString* name);
+  Structure* new_base_type(const Span& span,
+                           const InternString* name);
 
-EnumStructure* new_enum_type(Compiler* const comp,
-                             const Span& span,
-                             const InternString* name);
+  ArrayStructure* new_array_type(const Span& span,
+                                 const Structure* base,
+                                 size_t length);
 
-Structure* new_base_type(Compiler* const comp,
-                         const Span& span,
-                         const InternString* name);
+  PointerStructure* new_pointer_type(const Span& span,
+                                     const Structure* base);
 
-ArrayStructure* new_array_type(Compiler* const comp,
-                               const Span& span,
-                               const Structure* base,
-                               size_t length);
-
-PointerStructure* new_pointer_type(Compiler* const comp,
-                                   const Span& span,
-                                   const Structure* base);
-
-EnumValue* new_enum_value(Compiler* const comp,
-                          const Span& span,
-                          EnumStructure* enum_s,
-                          const InternString* name);
+  EnumValue* new_enum_value(const Span& span,
+                            EnumStructure* enum_s,
+                            const InternString* name);
+};
 
 
 //Can cast without any value modification or checks

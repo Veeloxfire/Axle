@@ -208,7 +208,7 @@ T* allocate_default(const size_t num) {
 
 template<typename T>
 inline T* allocate_default() {
-  return allocate_default(1);
+  return allocate_default<T>(1);
 }
 
 template<typename T, typename ... U>

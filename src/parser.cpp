@@ -414,7 +414,7 @@ static TokenStream next_lex_stream(Compiler* const comp) {
       break;
     }
     else if (tok->type == AxleTokenType::Error) {
-      comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(*tok),
+      comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(*tok),
                          tok->string->string);
       return { nullptr, nullptr };
     }
@@ -436,7 +436,7 @@ static void check_valid_stream(Compiler* const comp, const Parser* parser) {
     set_span_start(parser->current, span);
     set_span_end(*parser->stream.i, span);
 
-    comp->report_error(CompileCode::FILE_ERROR, span,
+    comp->report_error(ERROR_CODE::FILE_ERROR, span,
                        "Found '{}' token in the middle of a token stream",
                        AxleTokenType::End);
   }
@@ -449,7 +449,7 @@ static void advance(Compiler* const comp, Parser* parser) {
     parser->current = parser->next;
   }
   else {
-    comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Attempted to advance past the end of a file");
     return;
   }
@@ -477,7 +477,7 @@ static void expect(Compiler* const comp, Parser* parser, const AxleTokenType t) 
     advance(comp, parser);
   }
   else {
-    comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Unexpected Token: {}, Expected: {}", parser->current.type, t);
   }
 }
@@ -515,7 +515,7 @@ void reset_parser(Compiler* const comp,
   }
 
   if (parser->stream.i == nullptr || parser->stream.end == nullptr) {
-    comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+    comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                        "Parser was passed a fully or partially null stream"
                        "Start: '{}', End: '{}'",
                        PrintPtr{ parser->stream.i }, PrintPtr{ parser->stream.end });
@@ -523,7 +523,7 @@ void reset_parser(Compiler* const comp,
   }
 
   if (parser->stream.i >= parser->stream.end) {
-    comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+    comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                        "Parser was passed a stream of 0 elements");
     return;
   }
@@ -537,7 +537,7 @@ void reset_parser(Compiler* const comp,
     set_span_start(parser->current, span);
     set_span_end(*parser->stream.i, span);
 
-    comp->report_error(CompileCode::FILE_ERROR, span,
+    comp->report_error(ERROR_CODE::FILE_ERROR, span,
                        "Found '{}' token in the middle of a token stream",
                        AxleTokenType::End);
     return;
@@ -575,7 +575,7 @@ Span span_of_token(const Token& tok) {
 
 static void parse_name(Compiler* const comp, Parser* const parser, const InternString** name) {
   if (parser->current.type != AxleTokenType::Identifier) {
-    comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Expected token type '{}'. Found: '{}'",
                        AxleTokenType::Identifier, parser->current.type);
     return;
@@ -667,7 +667,7 @@ static BINARY_OPERATOR parse_binary_operator(Compiler* const comp, Parser* const
     case AxleTokenType::And: advance(comp, parser); return BINARY_OPERATOR::AND;
   }
 
-  comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+  comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                      "'{}' is not a valid binary operator", parser->current.string);
   return BINARY_OPERATOR::ADD;//just return whatever and hope everything errors out
 }
@@ -1115,7 +1115,7 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
               }
               else {
                 //ERROR
-                comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+                comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                                    "Expected '{}', Found '{}'",
                                    AxleTokenType::Comma, parser->current.type);
                 return;
@@ -1183,7 +1183,7 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
         }
         break;
       }
-    default: comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+    default: comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                                 "Unexpected Token Type '{}'", parser->current.type);
   }
 }
@@ -1408,7 +1408,7 @@ static void parse_type(Compiler* const comp, Parser* const parser, ASTType* cons
         parse_type(comp, parser, type->ptr.base);
         break;
       }
-    default: comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+    default: comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                                 "Expected A Type! Found '{}'", parser->current.type);
   }
 }
@@ -1425,7 +1425,7 @@ static void parse_block(Compiler* const comp, Parser* const parser, ASTBlock* co
 
 static void parse_decl(Compiler* const comp, Parser* const parser, ASTDecl* const decl) {
   if (parser->current.type != AxleTokenType::Identifier) {
-    comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Expected Identifier as declarations start with identifiers");
   }
 
@@ -1598,7 +1598,7 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
           statement->expression.expr = expr;
         }
         else {
-          comp->report_error(CompileCode::SYNTAX_ERROR, expr->span,
+          comp->report_error(ERROR_CODE::SYNTAX_ERROR, expr->span,
                              "Expected one of '{}' or '{}' at the end of the expression shown\n"
                              "Found '{}'",
                              AxleTokenType::Equals, AxleTokenType::Semicolon,
@@ -1666,7 +1666,7 @@ static void parse_function_signature(Compiler* const comp, Parser* const parser,
       }
       else {
         //ERROR
-        comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+        comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                            "Expected a comma!");
         return;
       }
@@ -1708,7 +1708,7 @@ static void parse_lambda(Compiler* const comp, Parser* const parser, ASTLambda* 
     advance(comp, parser);
   }
   else {
-    comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Expected '{}' or '{}'\nFound '{}'",
                        AxleTokenType::Left_Brace, AxleTokenType::Semicolon,
                        parser->current.type);
@@ -1721,10 +1721,6 @@ static void parse_lambda(Compiler* const comp, Parser* const parser, ASTLambda* 
 
 static void parse_structure(Compiler* const comp, Parser* const parser, ASTStructBody* const struct_decl) {
   expect(comp, parser, AxleTokenType::Struct);
-  if (comp->is_panic()) {
-    return;
-  }
-  parse_name(comp, parser, &struct_decl->name);
   if (comp->is_panic()) {
     return;
   }
@@ -1768,7 +1764,7 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
     }
 
     if (parser->current.type != AxleTokenType::String) {
-      comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+      comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                          "Expected a string!");
       return;
     }
@@ -1812,7 +1808,7 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
       }
 
       if (parser->current.type != AxleTokenType::String) {
-        comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+        comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                            "Expected a string!");
         return;
       }
@@ -1840,7 +1836,7 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
       parse_decl(comp, parser, decl);
     }
     else {
-      comp->report_error(CompileCode::SYNTAX_ERROR, span_of_token(parser->current),
+      comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                          "Unexpected token");
     }
   }

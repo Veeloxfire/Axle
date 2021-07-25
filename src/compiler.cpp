@@ -501,7 +501,7 @@ void compile_type(Compiler* const comp, ASTType* type) {
         }
         else {
           if (name->type != NamedElementType::STRUCTURE) {
-            comp->report_error(CompileCode::NAME_ERROR, type->span,
+            comp->report_error(ERROR_CODE::NAME_ERROR, type->span,
                                "Expected '{}' to be a structure but found a '{}'",
                                type->name, name->type);
             return;
@@ -534,7 +534,7 @@ void compile_type(Compiler* const comp, ASTType* type) {
         }
         else {
           if (!TYPE_TESTS::is_int(type->arr.expr->type)) {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, type->arr.expr->span,
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, type->arr.expr->span,
                                "Expected an integer type value for array length\n"
                                "Instead found: {}", type->arr.expr->type->name);
             return;
@@ -544,7 +544,7 @@ void compile_type(Compiler* const comp, ASTType* type) {
           if (TYPE_TESTS::is_signed_int(type->arr.expr->type)) {
             int64_t i_length = *(const int64_t*)type->arr.expr->const_val;
             if (i_length < 0) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, type->arr.expr->span,
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, type->arr.expr->span,
                                  "Length of array must positive\n"
                                  "Instead found: {}", i_length);
               return;
@@ -715,7 +715,7 @@ static void compile_find_function_call(Compiler* const comp,
     func->is_called = true;//tell it to be included in the final result
   }
   else if (set.complete_match) {
-    comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                        "More than one function exists that exactly matches signature '{}'",
                        call->function_name);
   }
@@ -733,7 +733,7 @@ static void compile_find_function_call(Compiler* const comp,
     //Instead replace the last '\n' with '\0'
     *options_message.back() = '\0';
 
-    comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                        "Found more than one function '{}' with signature that required implicit casts\n"
                        "Expcted: {}\n"
                        "{}", call->function_name, sig, options_message);
@@ -867,7 +867,7 @@ static void cast_operator_type(Compiler* const comp,
             }
           }
 
-          comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+          comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                              "Cannot cast type '{}' to type '{}'\n"
                              "They are both integers and this should be implemented",
                              cast_from->name, cast_to->name);
@@ -900,7 +900,7 @@ static void cast_operator_type(Compiler* const comp,
               case 4: hint.type = comp->types->s_i32; break;
               case 8: hint.type = comp->types->s_i64; break;
               default: {
-                  comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+                  comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                                      "No signed version of size {} int is available",
                                      to_int->bytes);
                   return;
@@ -936,7 +936,7 @@ static void cast_operator_type(Compiler* const comp,
         break;
       }
     case STRUCTURE_TYPE::VOID: {
-        comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+        comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                            "Cannot cast '{}' to any type\n"
                            "Attempted to cast '{}' to '{}'",
                            cast_from->name, cast_from->name, cast_to->name);
@@ -944,7 +944,7 @@ static void cast_operator_type(Compiler* const comp,
       }
   }
 
-  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                      "Cannot cast type '{}' to type '{}'",
                      cast_from->name, cast_to->name);
   return;
@@ -1058,7 +1058,7 @@ static void do_literal_cast(Compiler* const comp,
                 const int64_t max_positive_val = bit_fill_lower<int64_t>(to_is->bytes * 8 - 1);
 
                 if (comptime_val < max_negative_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                      "'{}' value is too large to fit in type '{}'\n"
                                      "The maximum negative value is: '{}'\n"
                                      "Try using '% {}' to make the value small enough",
@@ -1067,7 +1067,7 @@ static void do_literal_cast(Compiler* const comp,
 
                 }
                 else if (comptime_val > max_positive_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                      "'{}' value is too large to fit in type '{}'\n"
                                      "The maximum positive value is: '{}'\n"
                                      "Try using '% {}' to make the value small enough",
@@ -1079,14 +1079,14 @@ static void do_literal_cast(Compiler* const comp,
                 const uint64_t max_positive_val = bit_fill_lower<uint64_t>(to_is->bytes * 8);
                 const uint64_t abs_val = absolute(comptime_val);
                 if (comptime_val < 0) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                      "Tried to assign negative value '{}' into unsigned type '{}'\n"
                                      "Try casting to '{}' first as this legally converts it to an unsigned type",
                                      comptime_val, to_is->name, comp->types->s_int_lit->name);
                   return;
                 }
                 else if (abs_val > max_positive_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                      "'{}' value is too large to fit in type '{}'\n"
                                      "The maximum positive value is: '{}'\n"
                                      "Try using '% {}' to make the value small enough",
@@ -1109,7 +1109,7 @@ static void do_literal_cast(Compiler* const comp,
               if (to_is->is_signed) {
                 const uint64_t max_positive_val = bit_fill_lower<uint64_t>(to_is->bytes * 8 - 1);
                 if (comptime_val > max_positive_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                      "'{}' value is too large to fit in type '{}'\n"
                                      "The maximum positive value is: '{}'\n"
                                      "Try using '% {}' to make the value small enough",
@@ -1120,7 +1120,7 @@ static void do_literal_cast(Compiler* const comp,
               else {
                 const uint64_t max_val = bit_fill_lower<uint64_t>(to_is->bytes * 8);
                 if (comptime_val > max_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                      "'{}' value is too large to fit in type '{}'\n"
                                      "The maximum value is: '{}'"
                                      "Try using '% {}' to make the value small enough",
@@ -1158,7 +1158,7 @@ static void compile_unary_operator_emit(Compiler* const comp, State* const state
     default: {
         const char* name = UNARY_OP_STRING::get(expr->un_op.op);
 
-        comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                            "Type checking is not implemented for unary operator '{}'",
                            name);
         return;
@@ -1208,7 +1208,7 @@ static void compile_binary_operator_emit(Compiler* const comp, State* const stat
     default: {
         const char* const name = BINARY_OP_STRING::get(expr->bin_op.op);
 
-        comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                            "Type Checking is not implemented for binary operator '{}'",
                            name);
         return;
@@ -1300,7 +1300,7 @@ static void compile_test_type_satisfies_hint(Compiler* const comp, const Span& s
     assert(hint->type != nullptr);
 
     if (ty != hint->type) {
-      comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
                          "Could not implicity cast '{}' to '{}'",
                          ty->name, hint->type->name);
       return;
@@ -1318,14 +1318,14 @@ static void compile_test_type_satisfies_hint(Compiler* const comp, const Span& s
         base = static_cast<const PointerStructure*>(ty)->base;
         break;
       default:
-        comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+        comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
                            "'{}' is not an array or pointer type so has no base type",
                            ty->name);
         return;
     }
 
     if (base != hint->type) {
-      comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
                          "Could not implicity cast '{}' to '{}'",
                          hint->type->name, base->name);
       return;
@@ -1341,7 +1341,7 @@ static void compile_test_type_satisfies_hint(Compiler* const comp, const Span& s
           ty = static_cast<const PointerStructure*>(ty)->base;
           break;
         default:
-          comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
                              "'{}' is not an array or pointer type so has no base type",
                              ty->name);
           return;
@@ -1396,7 +1396,7 @@ void compile_type_of_expression(Compiler* const comp,
         assert(expr->member.expr->type != nullptr);
 
         if (expr->member.expr->type->type != STRUCTURE_TYPE::COMPOSITE) {
-          comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                              "Type '{}' does not have any members (it is not a composite type)",
                              expr->member.expr->type->name);
           return;
@@ -1418,7 +1418,7 @@ void compile_type_of_expression(Compiler* const comp,
         }
 
         if (expr->type == nullptr) {
-          comp->report_error(CompileCode::NAME_ERROR, expr->span,
+          comp->report_error(ERROR_CODE::NAME_ERROR, expr->span,
                              "Type '{}' has no member '{}'",
                              cs->name, expr->member.name);
           return;
@@ -1479,14 +1479,14 @@ void compile_type_of_expression(Compiler* const comp,
         auto* index_expr = expr->index.index;
 
         if (!TYPE_TESTS::can_index(arr_expr->type)) {
-          comp->report_error(CompileCode::TYPE_CHECK_ERROR, arr_expr->span,
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, arr_expr->span,
                              "Cannot take index of type: {}",
                              arr_expr->type->name);
           return;
         }
 
         if (!TYPE_TESTS::is_int(index_expr->type)) {
-          comp->report_error(CompileCode::TYPE_CHECK_ERROR, index_expr->span,
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, index_expr->span,
                              "An index must be in integer\n"
                              "Found non-integer type: {}",
                              index_expr->type->name);
@@ -1558,13 +1558,13 @@ void compile_type_of_expression(Compiler* const comp,
         }
         else {
           if (hint->tht != THT::EXACT) {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                "Tuple expressions have no base type");
             return;
           }
 
           if (hint->type->type != STRUCTURE_TYPE::COMPOSITE) {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                "'{}' is not a composite type",
                                hint->type->name);
             return;
@@ -1637,7 +1637,7 @@ void compile_type_of_expression(Compiler* const comp,
           }
           else if (hint->tht == THT::EXACT) {
             if (hint->type->type != STRUCTURE_TYPE::FIXED_ARRAY) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                  "Could not implicity cast array to non-array type: '{}'",
                                  hint->type->name);
               return;
@@ -1683,7 +1683,7 @@ void compile_type_of_expression(Compiler* const comp,
             for (; i < end; i++) {
               if (i->type != base) {
                 if (!can_comptime_cast(i->type, base)) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, i->span,
+                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, i->span,
                                      "Array type was inferred as '{}'\n"
                                      "Cannot implicity cast '{}' to '{}'",
                                      base->name, i->type->name, base->name);
@@ -1775,7 +1775,7 @@ void compile_type_of_expression(Compiler* const comp,
           return;
         }
         else {
-          comp->report_error(CompileCode::NAME_ERROR, expr->span,
+          comp->report_error(ERROR_CODE::NAME_ERROR, expr->span,
                              "Expected '{}' to be an enum value but it was not",
                              expr->enum_value.name);
           return;
@@ -1797,7 +1797,7 @@ void compile_type_of_expression(Compiler* const comp,
         if (val->suffix == nullptr) {
           if (hint != nullptr) {
             if (hint->tht != THT::EXACT) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                  "Type '{}' has no base type",
                                  comp->types->s_int_lit->name);
               return;
@@ -1806,7 +1806,7 @@ void compile_type_of_expression(Compiler* const comp,
             expr->type = hint->type;
 
             if (!can_comptime_cast(comp->types->s_int_lit, expr->type)) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                  "Could not implicity cast type '{}' to type '{}'",
                                  comp->types->s_int_lit->name, expr->type->name);
               return;
@@ -1824,7 +1824,7 @@ void compile_type_of_expression(Compiler* const comp,
             expr->type = comp->types->s_u64;
           }
           else {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                "Invalid integer literal suffix type '{}'",
                                val->suffix);
             return;
@@ -1847,7 +1847,7 @@ void compile_type_of_expression(Compiler* const comp,
         if (hint != nullptr) {
           if (hint->tht == THT::EXACT) {
             if (hint->type->type != STRUCTURE_TYPE::POINTER) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                  "'{}' is not a valid pointer type",
                                  hint->type->name);
               return;
@@ -1863,7 +1863,7 @@ void compile_type_of_expression(Compiler* const comp,
           }
 
           if (!can_comptime_cast(comp->types->s_lit_ptr, expr->type)) {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                "Could not implicity cast type '{}' to type '{}'",
                                comp->types->s_lit_ptr->name, expr->type->name);
             return;
@@ -1895,7 +1895,7 @@ void compile_type_of_expression(Compiler* const comp,
           }
           else {
             if (non_local->global == nullptr) {
-              comp->report_error(CompileCode::NAME_ERROR, expr->span,
+              comp->report_error(ERROR_CODE::NAME_ERROR, expr->span,
                                  "Expected '{}' to be a local or a global but it wasnt",
                                  name);
             }
@@ -2181,7 +2181,7 @@ void compile_type_of_expression(Compiler* const comp,
           const size_t size = func->signature.parameter_types.size;
 
           if (call->arguments.size != size) {
-            comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+            comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                                "Compiler linked a function with {} parameters for a call with {} arguments!",
                                size, call->arguments.size);
             return;
@@ -2234,7 +2234,7 @@ void compile_type_of_expression(Compiler* const comp,
         break;
       }
     default: {
-        comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                            "Invalid Expression type found! Expression id: '{}'",
                            (int)expr->expr_type);
         return;
@@ -2257,7 +2257,7 @@ static void compile_type_of_statement(Compiler* const comp,
         }
 
         if (!statement->assign.assign_to->assignable) {
-          comp->report_error(CompileCode::CONST_ERROR, statement->assign.assign_to->span,
+          comp->report_error(ERROR_CODE::CONST_ERROR, statement->assign.assign_to->span,
                              "Cannot assign to non-assignable expression");
           return;
         }
@@ -2355,7 +2355,7 @@ static void compile_type_of_statement(Compiler* const comp,
         const Local* shadowing = state->find_local(decl->name);
 
         if (shadowing != nullptr) {
-          comp->report_error(CompileCode::NAME_ERROR, statement->span,
+          comp->report_error(ERROR_CODE::NAME_ERROR, statement->span,
                              "Attempted to shadow the local variable '{}'",
                              decl->name);
           return;
@@ -2417,7 +2417,7 @@ static void compile_type_of_statement(Compiler* const comp,
       }
   }
 
-  comp->report_error(CompileCode::INTERNAL_ERROR, statement->span,
+  comp->report_error(ERROR_CODE::INTERNAL_ERROR, statement->span,
                      "Reached end of statement type checking without exiting\n"
                      "Statement type: {}\n", statement->type);
 }
@@ -5220,6 +5220,10 @@ void compile_init_expr_of_global(Compiler* comp, State* state, ASTDecl* decl, Gl
 }
 
 void compile_new_composite_structure(Compiler* comp, ASTStructBody* struct_body) {
+  TypeCreator type_creator ={};
+  type_creator.comp = comp;
+  type_creator.current_namespace = comp->current_namespace;
+
   CompositeStructure* cmp_s = new_composite_type(comp, struct_body->span, comp->strings->intern("anoymous struct"));
 
   uint32_t current_size = 0;
@@ -5250,7 +5254,7 @@ void compile_new_composite_structure(Compiler* comp, ASTStructBody* struct_body)
 }
 
 
-CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
+ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp) {
   while (comp->file_loader.unparsed_files.size > 0) {
     //still have files to parse
 
@@ -5271,7 +5275,7 @@ CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
       OwnedPtr<const char> text_source = FILES::load_file_to_string(full_path->string);
 
       if (text_source.ptr == nullptr) {
-        comp->report_error(CompileCode::FILE_ERROR, comp->file_loader.unparsed_files.back()->span,
+        comp->report_error(ERROR_CODE::FILE_ERROR, comp->file_loader.unparsed_files.back()->span,
                            "File '{}' could not be opened, perhaps it does not exist",
                            full_path);
         return print_compile_errors(comp);
@@ -5319,7 +5323,7 @@ CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
       //  span.line_start = parser.current.pos.line;
       //  span.line_end = span.line_start;
 
-      //  comp->report_error(CompileCode::SYNTAX_ERROR, span,
+      //  comp->report_error(ERROR_CODE::SYNTAX_ERROR, span,
       //                     "Parse Error: \"{}\"",
       //                     parser.current.string->string);
       //  return print_compile_errors(comp);
@@ -5338,7 +5342,7 @@ CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
       process_parsed_file(comp, ast_file);
     }
     else {
-      comp->report_error(CompileCode::FILE_ERROR, file_import->span,
+      comp->report_error(ERROR_CODE::FILE_ERROR, file_import->span,
                          "'{}' is not a loadable file extension",
                          file_import->file_loc.extension);
       return print_compile_errors(comp);
@@ -5348,7 +5352,7 @@ CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
   //Should have no new files
   comp->file_loader.unparsed_files.free();
 
-  return CompileCode::NO_ERRORS;
+  return ERROR_CODE::NO_ERRORS;
 }
 
 void compile_valid_convention_combo(Compiler* comp,
@@ -5368,7 +5372,7 @@ void compile_valid_convention_combo(Compiler* comp,
     *fill = conv;
   }
   else {
-    //comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+    //comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
     //                   "Calling convention '{}' is not valid with system '{}'",
     //                   conv->name, comp->build_options.system->name);
   }
@@ -5390,7 +5394,7 @@ void compile_calling_convention_for_function(Compiler* const comp,
     compile_valid_convention_combo(comp, span, &convention_vm, fill);
   }
   else {
-    comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
                        "Calling convention '{}' does not exist",
                        conv_name);
   }
@@ -5409,7 +5413,7 @@ void process_parsed_file(Compiler* const comp, ASTFile* const file) {
 
     if (header.dll_header.loc.extension != comp->file_loader.dll) {
     //.dll is the only valid extension
-      comp->report_error(CompileCode::FILE_ERROR, header.dll_header.span,
+      comp->report_error(ERROR_CODE::FILE_ERROR, header.dll_header.span,
                          "#dll_header extension was invalid\n"
                          "Expected: '.{}'\n"
                          "Found:    '.{}'",
@@ -5444,7 +5448,7 @@ void process_parsed_file(Compiler* const comp, ASTFile* const file) {
       //Check file extensions
       if (i->loc.extension != comp->file_loader.axl
           && i->loc.extension != nullptr) {
-        comp->report_error(CompileCode::FILE_ERROR, i->span,
+        comp->report_error(ERROR_CODE::FILE_ERROR, i->span,
                            "Import extension was invalid\n"
                            "Expected no extension or '.{}'\n"
                            "Found '.{}'",
@@ -5452,7 +5456,7 @@ void process_parsed_file(Compiler* const comp, ASTFile* const file) {
         return;
       }
       else if (i->loc.extension == nullptr) {
-        comp->report_error(CompileCode::FILE_ERROR, i->span,
+        comp->report_error(ERROR_CODE::FILE_ERROR, i->span,
                            "File did not have an extension",
                            comp->file_loader.axl, i->loc.extension);
       }
@@ -5538,8 +5542,8 @@ void add_comp_unit_for_struct(Compiler* const comp, ASTStructBody* struct_body) 
 }
 
 
-CompileCode print_compile_errors(const Compiler* const comp) {
-  CompileCode ret = CompileCode::NO_ERRORS;
+ERROR_CODE print_compile_errors(const Compiler* const comp) {
+  ERROR_CODE ret = ERROR_CODE::NO_ERRORS;
 
   IO::err_print("--- Compiler Encountered A Fatal Error ---\n\n");
 
@@ -5575,7 +5579,7 @@ CompileCode print_compile_errors(const Compiler* const comp) {
       assert(ptr_ptr != nullptr);
 
       const char* source = ptr_ptr->ptr;
-      OwnedPtr<char> string = load_span_from_file(span, source);
+      OwnedPtr<char> string = load_span_from_source(span, source);
 
       IO::err_print(format("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start));
       IO::err_print(string.ptr);
@@ -5623,14 +5627,26 @@ void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
   }
 }
 
-CompileCode compile_all(Compiler* const comp) {
+ERROR_CODE compile_all(Compiler* const comp) {
   while (comp->to_compile.size > 0) {
+
+    Pipeline compile_decl ={};
+
+    compile_decl.pipe.enqueue();
+
+    while() {
+      
+    }
+
+
     //Compile waiting
     {
       Array<CompilationUnit*> to_compile = std::move(comp->to_compile);
 
       auto i = to_compile.mut_begin();
       const auto end = to_compile.mut_end();
+
+
 
       for (; i < end; i++) {
         CompilationUnit* comp_u = *i;
@@ -5704,7 +5720,7 @@ CompileCode compile_all(Compiler* const comp) {
                     break;
                   }
                 default: {
-                    comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+                    comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                        "A compilation unit was created for a completed structure");
                     return print_compile_errors(comp);
                   }
@@ -5716,7 +5732,7 @@ CompileCode compile_all(Compiler* const comp) {
               SignatureUnit* const unit = (SignatureUnit*)comp_u;
 
               if (unit->stage != SIGNATURE_COMP_STAGE::UNTYPED) {
-                comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+                comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                    "A compilation unit was created for a completed signature");
                 return print_compile_errors(comp);
               }
@@ -5956,7 +5972,7 @@ CompileCode compile_all(Compiler* const comp) {
 
                     ErrorCode err = vm_rum(comp->vm, &prog);
                     if (err != ErrorCode::OK) {
-                      comp->report_error(CompileCode::INTERNAL_ERROR, unit->expr->span,
+                      comp->report_error(ERROR_CODE::INTERNAL_ERROR, unit->expr->span,
                                          "VM returned error code '{}' in compile time execution",
                                          err);
                       return print_compile_errors(comp);
@@ -6051,12 +6067,12 @@ CompileCode compile_all(Compiler* const comp) {
           for (; i < end; i++) {
             switch (i->type) {
               case UnfoundDepType::Name: {
-                  comp->report_error(CompileCode::UNFOUND_DEPENDENCY, i->span,
+                  comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i->span,
                                      "'{}' does not exist", i->name.ident);
                   break;
                 }
               case UnfoundDepType::Function: {
-                  comp->report_error(CompileCode::UNFOUND_DEPENDENCY, i->span,
+                  comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i->span,
                                      "'{}' does not exist", i->signature);
                   break;
                 }
@@ -6086,7 +6102,7 @@ CompileCode compile_all(Compiler* const comp) {
       for (; i_el < end_el; i_el++) {
         if (!single_dll.export_table.names.contains(i_el->name)) {
           //Now thats a lot of indirection
-          comp->report_error(CompileCode::UNFOUND_DEPENDENCY, i_el->ptr->declaration->signature.signature_span,
+          comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i_el->ptr->declaration->signature.signature_span,
                              "Dll '{}' does export anything named '{}'",
                              i->name, i_el->name);
         }
@@ -6099,7 +6115,7 @@ CompileCode compile_all(Compiler* const comp) {
     }
   }
 
-  return CompileCode::NO_ERRORS;
+  return ERROR_CODE::NO_ERRORS;
 }
 
 void print_compiled_functions(const Compiler* const comp) {
@@ -6228,7 +6244,7 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
   comp->optimization_options = options.optimize;
 
   if (options.build.file_name == nullptr) {
-    comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+    comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                        "Expected input file name");
     return;
   }
@@ -6236,7 +6252,7 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
   comp->build_options.file_name = comp->strings->intern(options.build.file_name);
 
   if (options.build.entry_point == nullptr) {
-    comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+    comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                        "Expected entry point");
     return;
   }
@@ -6249,7 +6265,7 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
 
 
   if (options.build.std_lib_folder == nullptr) {
-    comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+    comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                        "Expected std lib folder");
     return;
   }
@@ -6265,7 +6281,7 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
       comp->build_options.system = &system_x86_64;
     }
     else {
-      comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+      comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                          "Invalid system '{}'", system_name);
       return;
     }
@@ -6278,7 +6294,7 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
       comp->build_options.default_calling_convention = &convention_vm;
 
       if (comp->build_options.system != &system_vm) {
-        comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+        comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                            "Invalid system and calling convention combo '{}' and '{}'",
                            comp->build_options.system->name, conv_name);
       }
@@ -6287,18 +6303,18 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
       comp->build_options.default_calling_convention = &convention_microsoft_x64;
 
       if (comp->build_options.system != &system_x86_64) {
-        comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+        comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                            "Invalid system and calling convention combo '{}' and '{}'",
                            comp->build_options.system->name, conv_name);
       }
     }
     else if (conv_name == comp->system_names.conv_stdcall) {
-      comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+      comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                          "Invalid system and calling convention combo '{}' and '{}'",
                          comp->build_options.system->name, conv_name);
     }
     else {
-      comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+      comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                          "Invalid default calling convention '{}'", conv_name);
     }
   }

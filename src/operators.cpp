@@ -578,7 +578,7 @@ void impl_compile_balanced_binary_op(Compiler* comp,
 
   const char* const op_string = BINARY_OP_STRING::get(expr->bin_op.op);
 
-  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                      "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
                      op_string, left->type->name, right->type->name);
 }
@@ -801,7 +801,7 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, State* state, ASTExpressi
 
   const char* const op_string = BINARY_OP_STRING::get(expr->bin_op.op);
 
-  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                      "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
                      op_string, left->type->name, right->type->name);
 }
@@ -832,7 +832,7 @@ void impl_compile_unary_op(Compiler* comp, ASTExpression* expr, const UnaryOpOpt
 
   const char* const op_string = UNARY_OP_STRING::get(expr->un_op.op);
 
-  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                      "No unary operator '{}' exists for type: '{}'",
                      op_string, prim->type->name);
 }
@@ -1034,7 +1034,7 @@ void compile_deref(Compiler* comp,
   else {
     const char* const op_string = UNARY_OP_STRING::get(expr->un_op.op);
 
-    comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                        "No unary operator '{}' exists for type: '{}'",
                        op_string, prim->type->name);
   }

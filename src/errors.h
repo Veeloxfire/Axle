@@ -31,6 +31,6 @@ struct Errors {
   void register_error(ERROR_CODE code, const Span& span, const char* f_message, T&& ... ts) noexcept {
 
     OwnedPtr<char> message = format(f_message, std::forward<T>(ts)...);
-    errors.error_messages.insert({ code, span, std::move(message) });
+    error_messages.insert({ code, span, std::move(message) });
   }  
 };

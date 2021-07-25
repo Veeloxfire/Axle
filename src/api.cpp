@@ -111,8 +111,8 @@ int compile_file(const APIOptions& options,
     compiler.file_loader.unparsed_files.insert(FileImport{ loc, ns_index, Span{} });//use null span
 
     //Parsing/loading
-    CompileCode ret = parse_all_unparsed_files_with_imports(&compiler);
-    if (ret != CompileCode::NO_ERRORS) {
+    ERROR_CODE ret = parse_all_unparsed_files_with_imports(&compiler);
+    if (ret != ERROR_CODE::NO_ERRORS) {
       std::cerr << "Parsing was not completed due to an error!\nError Code '"
         << compile_code_string(ret)
         << "'\n";
@@ -121,7 +121,7 @@ int compile_file(const APIOptions& options,
 
     //Compilation
     ret = compile_all(&compiler);
-    if (ret != CompileCode::NO_ERRORS) {
+    if (ret != ERROR_CODE::NO_ERRORS) {
       std::cerr << "Compilation was not completed due to an error!\nError Code '"
         << compile_code_string(ret)
         << "'\n";

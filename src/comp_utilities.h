@@ -132,15 +132,15 @@ MOD(FILE_ERROR)\
 MOD(INTERNAL_ERROR) \
 MOD(CONST_ERROR)
 
-enum struct CompileCode : uint8_t {
+enum struct ERROR_CODE : uint8_t {
 #define MOD(E) E,
   COMPCODEINC
 #undef MOD
 };
 
-constexpr const char* compile_code_string(CompileCode c) {
+constexpr const char* compile_code_string(ERROR_CODE c) {
   switch (c) {
-  #define MOD(E) case CompileCode:: ## E: return #E;
+  #define MOD(E) case ERROR_CODE:: ## E: return #E;
     COMPCODEINC
     #undef MOD
   }
