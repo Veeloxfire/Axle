@@ -167,7 +167,7 @@ SimpleLiteralStructure* new_simple_literal_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, name);
+  NamedElement* el = create_name(comp, comp->current_namespace, name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
@@ -250,7 +250,7 @@ TupleLiteralStructure* new_tuple_literal_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, type->name);
+  NamedElement* el = create_name(comp, comp->current_namespace, type->name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
@@ -275,7 +275,7 @@ IntegerStructure* new_int_type(Compiler* comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, name);
+  NamedElement* el = create_name(comp, comp->current_namespace, name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
@@ -323,7 +323,7 @@ EnumStructure* new_enum_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, name);
+  NamedElement* el = create_name(comp, comp->current_namespace, name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
@@ -346,7 +346,7 @@ Structure* new_base_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, name);
+  NamedElement* el = comp->names->create_name(comp->current_namespace, name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
@@ -375,7 +375,7 @@ ArrayStructure* new_array_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, name);
+  NamedElement* el = create_name(comp, comp->current_namespace, name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
@@ -402,7 +402,7 @@ PointerStructure* new_pointer_type(Compiler* const comp,
 
   comp->types->structures.insert(type);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, name);
+  NamedElement* el = create_name(comp, comp->current_namespace, name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
@@ -428,7 +428,7 @@ EnumValue* new_enum_value(Compiler* const comp,
   enum_s->enum_values.insert(val);
   comp->types->enums.insert(val);
 
-  NamedElement* el = find_empty_name(comp, comp->current_namespace, name);
+  NamedElement* el = create_name(comp, comp->current_namespace, name);
   if (el == nullptr) {
     comp->report_error(CompileCode::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",

@@ -4,10 +4,6 @@
 #include "strings.h"
 #include "comp_utilities.h"
 
-struct ASTFunctionDeclaration;
-struct ASTFunctionSignature;
-struct ASTStructureDeclaration;
-
 struct Structure;
 struct State;
 struct Function;
@@ -15,16 +11,22 @@ struct CompilationUnit;
 struct CallingConvention;
 struct Span;
 
+struct ASTFuncSig;
+struct ASTLambda;
+struct ASTStructBody;
+
 enum struct STRUCTURE_TYPE : uint8_t {
+  VOID = 0,
+  STRUCT,//Meta type for other types
   INTEGER,
   POINTER,
   SIMPLE_LITERAL,
   COMPOSITE,
-  VOID,
   ENUM,
   FIXED_ARRAY,
   ASCII_CHAR,
   TUPLE_LITERAL,
+  LAMBDA,
 };
 
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;
@@ -96,7 +98,7 @@ struct StructElement {
 };
 
 struct CompositeStructure : public Structure {
-  const ASTStructureDeclaration* declaration = nullptr;
+  const ASTStructBody* declaration = nullptr;
 
   uint32_t cached_size = 0;
   uint32_t cached_alignment = 0;
@@ -104,7 +106,7 @@ struct CompositeStructure : public Structure {
 };
 
 struct FunctionSignature {
-  const ASTFunctionSignature* declaration = nullptr;
+  const ASTFuncSig* declaration = nullptr;
 
   const CallingConvention* calling_convention = nullptr;
 
@@ -121,11 +123,11 @@ enum struct FUNCTION_TYPE {
   DEFAULT, POINTER
 };
 
-struct FunctionBase {
+struct FunctionBase : public Structure {
   FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
   bool is_called = false;
 
-  const ASTFunctionDeclaration* declaration = nullptr;
+  const ASTLambda* declaration = nullptr;
 
   FunctionSignature signature ={};
   CompilationUnit* compilation_unit = nullptr;

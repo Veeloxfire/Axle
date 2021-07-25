@@ -3,6 +3,7 @@
 #include "safe_lib.h"
 #include "utility.h"
 #include "files.h"
+#include "errors.h"
 
 struct ASTFile;
 
@@ -40,6 +41,7 @@ MODIFY(Left_Square, "[") \
 MODIFY(Right_Square, "]") \
 MODIFY(Comma, ",") \
 MODIFY(Semicolon, ";") \
+MODIFY(Colon, ":") \
 MODIFY(Full_Stop, ".")
 
 #define AXLE_TOKEN_INTRINSICS \
@@ -90,20 +92,12 @@ struct Token {
   Position pos ={};
 };
 
-struct Span {
-  //is null if file_name == nullptr
-  const InternString* full_path ={};
-  size_t line_start = 0;
-  size_t line_end = 0;
-  size_t char_start = 0;
-  size_t char_end = 0;
-};
+struct Span;
 
 void set_span_start(const Token& token, Span& span);
 void set_span_end(const Token& token, Span& span);
 
 Span span_of_token(const Token& tok);
-OwnedPtr<char> load_span_from_file(const Span& span, const char* source);
 
 struct Lexer {
   StringInterner* strings = nullptr;

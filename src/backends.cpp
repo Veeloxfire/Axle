@@ -337,10 +337,29 @@ void vm_backend(Program* prog, Compiler* comp) {
       vm_backend_code_block(prog, out_code, code, label_indexes, instruction_offsets);
     }
 
-    if (!found_entry) {
-      comp->report_error(CompileCode::LINK_ERROR, Span{},
-                         "Could not find entry point");
-      return;
+    {
+      NamedElement* named_el = find_unimported_name(comp, comp->build_file_namespace, comp->build_options.entry_point);
+
+      if (named_el == nullptr) {
+        comp->report_error(CompileCode::LINK_ERROR, Span{},
+                           "Could not find entry point in build file");
+      }
+
+      if (named_el->type != NamedElementType::GLOBAL) {
+        comp->report_error(CompileCode::LINK_ERROR,  Span{},
+                           "The entry point was not a function");
+      }
+
+      const Global* entry = named_el->global;
+
+      if (entry->type->type != STRUCTURE_TYPE::LAMBDA) {
+        comp->report_error(CompileCode::LINK_ERROR,  Span{},
+                           "The entry point was not a function");
+      }
+
+      const Function* func = (const Function*)entry->type;
+
+      entry_point_label = func->code_block.label;
     }
 
     //Init all the globals - then call the main function

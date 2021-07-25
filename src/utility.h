@@ -847,6 +847,113 @@ struct SquareBitMatrix {
 };
 
 template<typename T>
+struct Queue {
+  struct CircularBuffer {
+    static constexpr size_t BUFFER_SIZE = 64;
+    static_assert(BUFFER_SIZE < 255, "u8 needs to be small enough");
+
+    bool empty = false;
+    u8 front_offset = 0;
+    u8 end_offset = 0;
+
+    T data[BUFFER_SIZE] = {};
+
+    CircularBuffer* prev = nullptr;
+    CircularBuffer* next = nullptr;
+  };
+
+  //Not guaranteed to be the first allocated
+  CircularBuffer* front = nullptr;
+
+  //Not actually the last allocated, just the last used
+  CircularBuffer* back = nullptr;
+
+  Queue() = default;
+  ~Queue() {
+    if(linked_list_start == nullptr) { return; }
+
+    CircularBuffer* curr = linked_list_start;
+    CircularBuffer* next = curr->next;
+
+    while (true) {
+      free_destruct_single(curr);
+
+      if(next == nullptr) { return; }
+
+      //Break the loop
+      CircularBuffer* holder = next->next;
+      next->next = nullptr;
+
+      curr = next;
+      next = holder;
+    }
+  }
+
+  void enqueue(T&& t) {
+    if (back == nullptr) {
+      CircularBuffer* first = allocate_default<CircularBuffer>();
+
+      front = first;
+      back = first;
+
+      //Its a loop
+      back->next = back;
+      back->prev = back;
+    }
+    else if (back->front_offset == back->end_offset) {
+      if (!back->next->emtpy) {
+        //the next isnt empty so we need a new buffer
+
+        CircularBuffer* new_back = allocate_default<CircularBuffer>();
+        
+        back->next->prev = new_back;
+        new_back->next = back->next;
+
+        new_back->prev = back;
+        back->next = new_back;
+
+        back = new_back;
+      }
+      else {
+        back = back->next;
+      }
+    }
+
+    back->empty = false;
+    back->data[back->end_offset] = std::move(t);
+    back->end_offset++;
+    
+    //loop end offset
+    if (back->end_offset == BUFFER_SIZE) back->end_offset -= BUFFER_SIZE;
+  }
+
+  bool is_empty() const {
+    return front == nullptr || font->empty;
+  }
+
+  T dequeue() {
+    assert(!is_empty());
+
+    //Cannot be empty so no need to check for that
+    T ret = std::move(front->data[front->front_offset]);
+
+    if (front_offset == 0) {
+      front->front_offset += BUFFER_SIZE;
+    }
+
+    front->front_offset--;
+
+    if (front->front_offset == front->end_offset) {
+      //Now is empty
+      front->empty = true;
+      front = front->next;
+    }
+
+    return ret;
+  }
+};
+
+template<typename T>
 struct OwnedPtr {
   T* ptr = nullptr;
   OwnedPtr(const OwnedPtr&) = delete;

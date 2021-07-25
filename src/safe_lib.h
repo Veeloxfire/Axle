@@ -6,6 +6,9 @@
 
 #include <memory>
 
+using u8 = uint8_t;
+using u32 = uint32_t;
+
 //#define COUNT_ALLOC
 
 template<typename T>
@@ -190,7 +193,7 @@ struct ALLOC_COUNTER {
 #endif
 
 template<typename T>
-T* allocate_default(const size_t num = 1) {
+T* allocate_default(const size_t num) {
   T* t = (T*)std::malloc(sizeof(T) * num);
 
   assert(t != nullptr);
@@ -201,6 +204,11 @@ T* allocate_default(const size_t num = 1) {
 
   default_init(t, num);
   return t;
+}
+
+template<typename T>
+inline T* allocate_default() {
+  return allocate_default(1);
 }
 
 template<typename T, typename ... U>
