@@ -28,6 +28,7 @@ MODIFY(BackSlash, "/") \
 MODIFY(Lesser, "<") \
 MODIFY(Greater, ">") \
 MODIFY(Or, "|") \
+MODIFY(Xor, "^") \
 MODIFY(And, "&") \
 MODIFY(Equals, "=") \
 MODIFY(Bang, "!") \
@@ -114,6 +115,7 @@ struct TokenStream {
 
 struct Parser {
   TokenStream stream;
+  NamespaceIndex current_namespace;
 
   Token prev = {};
   Token current ={};

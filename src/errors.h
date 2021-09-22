@@ -1,6 +1,8 @@
 #pragma once
 #include "utility.h"
+#include "comp_utilities.h"
 #include "strings.h"
+#include "format.h"
 
 struct Span {
   //the span is null if full_path == nullptr
@@ -12,10 +14,6 @@ struct Span {
 };
 
 OwnedPtr<char> load_span_from_source(const Span& span, const char* source);
-
-enum struct ERROR_CODE {
-
-};
 
 struct ErrorMessage {
   ERROR_CODE type;
@@ -32,5 +30,7 @@ struct Errors {
 
     OwnedPtr<char> message = format(f_message, std::forward<T>(ts)...);
     error_messages.insert({ code, span, std::move(message) });
-  }  
+  }
+
+  ERROR_CODE print_all() const;
 };

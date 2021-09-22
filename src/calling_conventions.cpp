@@ -67,7 +67,8 @@ static constexpr System make_system(const char* name,
                                     const REGISTER_CONSTANT& stack_pointer,
                                     const REGISTER_CONSTANT& base_pointer,
                                     REG_NAME_FROM_NUM_PTR reg_name_from_num,
-                                    BACKEND_PTR backend) {
+                                    BACKEND_TRANSLATE_PTR backend_translate,
+                                    BACKEND_JUMP_FIX_PTR backend_jump_fix) {
   System system ={};
 
   system.name = name;
@@ -76,7 +77,8 @@ static constexpr System make_system(const char* name,
   system.num_registers = num_registers;
 
   system.reg_name_from_num = reg_name_from_num;
-  system.backend = backend;
+  system.backend_translate = backend_translate;
+  system.backend_jump_fix = backend_jump_fix;
 
   return system;
 }
@@ -84,12 +86,14 @@ static constexpr System make_system(const char* name,
 const System system_x86_64 = make_system(System::x86_64_name,
                                          all_x64_regs, RSP, RBP,
                                          &x86_64_reg_name_from_num,
-                                         &x86_64_machine_code_backend);
+                                         &x86_64_backend_code_block,
+                                         &x86_64_backend_fix_jump);
 
 const System system_vm = make_system(System::vm_name,
                                      all_vm_regs, all_vm_regs[VM_SP_R], all_vm_regs[VM_BP_R],
                                      &vm_regs_name_from_num,
-                                     &vm_backend);
+                                     &vm_backend_code_block,
+                                     &vm_backend_fix_jump);
 
 template<typename T, size_t size>
 struct ConstArray {

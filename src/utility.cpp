@@ -13,6 +13,7 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
   //Should otherwise all be combined
   //Just need to find if this is after a free space or before a free space
 
+  assert(!_debug_freelist_loops());
 
   FreeList* prev = nullptr;
   FreeList* fl = free_list;
@@ -21,6 +22,8 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
     free_list = new_fl;
     return;
   }
+
+  assert(fl->next != fl);
 
   bool found_before = false;
   bool found_after = false;
@@ -78,9 +81,41 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
     new_fl->next = (FreeList*)free_list;
   }
   free_list = new_fl;
+
+  assert(free_list->next != free_list);
+}
+
+bool ArenaAllocator::_debug_freelist_loops() const {
+  Array<FreeList*> list_elements ={};
+
+  FreeList* list = free_list;
+
+  while (list != nullptr) {
+    if(list_elements.contains(list)) return true;
+
+    list_elements.insert(list);
+    list = list->next;
+  }
+
+  return false;
+}
+
+bool ArenaAllocator::_debug_valid_free_pointer(void* ptr) const {
+  Block* block = base;
+
+  while (block != nullptr) {
+    if(ptr >= (block->data + 1)/*+ 1 for the saved free size*/
+       && ptr < (block->data + Block::BLOCK_SIZE)) return true;
+
+    block = block->next;
+  }
+
+  return false;
 }
 
 uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
+  assert(!_debug_freelist_loops());
+
   size_t req_size = ceil_div(bytes, 8);
 
   FreeList* prev = nullptr;
@@ -105,7 +140,7 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
   const uint64_t available_space = fl->qwords_available;
  
   uint64_t* const used_space = (uint64_t*)fl;
-  uint64_t* current_alloc = (uint64_t*)used_space + 1;
+  uint64_t* current_alloc = used_space + 1;
 
 
   //can we fit a new node?
@@ -141,10 +176,14 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
   //How much data to free
   *used_space = req_size;
 
+  assert(!_debug_freelist_loops());
   return (uint8_t*)current_alloc;
 }
 
 void ArenaAllocator::free_no_destruct(void* val) {
+  assert(!_debug_freelist_loops());
+  assert(_debug_valid_free_pointer(val));
+
   uint64_t* ptr = (uint64_t*)val;
 
   const uint64_t free_size = ptr[-1];

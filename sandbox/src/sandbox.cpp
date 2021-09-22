@@ -19,19 +19,19 @@ int main(int argc, const char** args) {
   
   options.build.file_name       = args[1];
   options.build.entry_point     = "main";
-  options.build.system_name     = "vm";
-  options.build.default_calling_convention = "vm";
-  //options.build.system             = "x86_64";
-  //options.build.default_calling_convention = "x64";
+  //options.build.system_name                = "vm";
+  //options.build.default_calling_convention = "vm";
+  options.build.system_name                = "x86_64";
+  options.build.default_calling_convention = "x64";
   options.build.output_file        = output_file;
   options.build.std_lib_folder = "D:\\GitHub\\Compiler\\stdlib";
   
-  options.print.ast             = false;
+  options.print.ast             = true;
   options.print.pre_reg_alloc   = false;
-  options.print.normal_bytecode = false;
+  options.print.normal_bytecode = true;
   options.print.comptime_res    = false;
   options.print.coalesce_values = false;
-  options.print.fully_compiled  = false;
+  options.print.fully_compiled  = true;
   options.print.run_headers     = false;
 
   options.optimize.non_stack_locals = true;
@@ -40,8 +40,8 @@ int main(int argc, const char** args) {
   int out = compile_file(options, &program);
   
   if (out == 0) {
-    RunOutput res = run_program(options, &program);
-    std::cout << "Returned: " << res.program_return;
+    //RunOutput res = run_program(options, &program);
+    //std::cout << "Returned: " << res.program_return;
     
     return out;
   }

@@ -107,12 +107,8 @@ struct CompositeStructure : public Structure {
   Array<StructElement> elements ={};
 };
 
-struct FunctionSignature {
-  const ASTFuncSig* declaration = nullptr;
-
+struct SignatureStructure : public Structure {
   const CallingConvention* calling_convention = nullptr;
-
-  const InternString* name ={};
 
   Array<const Structure*> parameter_types ={};
   const Structure* return_type = nullptr;
@@ -121,26 +117,28 @@ struct FunctionSignature {
   Array<const Structure*> actual_parameter_types ={};
 };
 
-enum struct FUNCTION_TYPE {
-  DEFAULT, POINTER
+struct FunctionSignature {
+  const ASTFuncSig* declaration = nullptr;
+  const SignatureStructure* sig_struct = nullptr;
+
+  const InternString* name ={};
 };
 
-struct FunctionBase : public Structure {
-  FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
+enum struct FUNCTION_TYPE {
+  DEFAULT, EXTERN
+};
+
+struct Function {
   bool is_called = false;
 
   const ASTLambda* declaration = nullptr;
 
   FunctionSignature signature ={};
   CompilationUnit* compilation_unit = nullptr;
-};
+  
+  FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
 
-struct FunctionPointer : public FunctionBase {
-  bool is_dll = false;
   size_t data_index = 0;
-};
-
-struct Function : public FunctionBase {
   CodeBlock code_block;
 };
 
@@ -170,6 +168,7 @@ struct Types {
   static FreelistBlockAllocator<Structure> base_structures;
   static FreelistBlockAllocator<ArrayStructure> array_structures;
   static FreelistBlockAllocator<PointerStructure> pointer_structures;
+  static FreelistBlockAllocator<SignatureStructure> lambda_structures;
   static FreelistBlockAllocator<EnumValue> enum_values;
 
   const Structure* s_bool = nullptr;
@@ -186,6 +185,7 @@ struct Types {
   const Structure* s_empty_arr = nullptr;
   const Structure* s_lit_ptr = nullptr;
 
+  const Structure* s_struct = nullptr;
   const Structure* s_void = nullptr;
   const Structure* s_void_ptr = nullptr;
   const Structure* s_ascii = nullptr;
@@ -205,6 +205,7 @@ struct Types {
 
 struct TypeCreator {
   Compiler* comp;
+  const Structure* meta_struct;
   NamespaceIndex current_namespace;
 
   void add_type_to_namespace(const Structure* s, const InternString* name, const Span& span);
@@ -235,6 +236,11 @@ struct TypeCreator {
   PointerStructure* new_pointer_type(const Span& span,
                                      const Structure* base);
 
+  SignatureStructure* new_lambda_type(const Span& span,
+                                    const CallingConvention* conv,
+                                    Array<const Structure*>&& params,
+                                    const Structure* ret_type);
+
   EnumValue* new_enum_value(const Span& span,
                             EnumStructure* enum_s,
                             const InternString* name);
@@ -244,6 +250,11 @@ struct TypeCreator {
 //Can cast without any value modification or checks
 constexpr bool can_implicit_cast(const Structure* from, const Structure* to) {
   if (from == to) return true;
+  else if (from->type == STRUCTURE_TYPE::ASCII_CHAR) {
+    return to->type == STRUCTURE_TYPE::INTEGER
+      && ((const IntegerStructure*)to)->bytes == 1
+      && !((const IntegerStructure*)to)->is_signed;
+  }
   else if (from->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
     //both literals
     const SimpleLiteralStructure* f_ls = (const SimpleLiteralStructure*)from;

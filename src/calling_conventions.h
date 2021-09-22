@@ -12,6 +12,7 @@ struct Compiler;
 struct Program;
 struct Structure;
 struct State;
+struct CodeBlock;
 
 //header
 
@@ -33,7 +34,18 @@ struct ForcedColours {
 };
 
 using REG_NAME_FROM_NUM_PTR = FUNCTION_PTR<const char*, uint8_t>;
-using BACKEND_PTR = FUNCTION_PTR<void, Program*, Compiler*>;
+
+using BACKEND_TRANSLATE_PTR = FUNCTION_PTR<
+  void, 
+  Compiler*,
+  Program*,
+  Array<uint8_t>&,
+  const CodeBlock*,
+  size_t*,
+  Array<size_t>&
+>;
+
+using BACKEND_JUMP_FIX_PTR = FUNCTION_PTR<void, uint8_t*, size_t, size_t*>;
 
 struct System {
 #define CONST_NAME(n) static constexpr char n ## _name[] = #n
@@ -47,7 +59,9 @@ struct System {
   uint8_t num_registers;
 
   REG_NAME_FROM_NUM_PTR reg_name_from_num;
-  BACKEND_PTR backend;
+
+  BACKEND_TRANSLATE_PTR backend_translate;
+  BACKEND_JUMP_FIX_PTR backend_jump_fix;
 };
 
 struct CallingConvention {

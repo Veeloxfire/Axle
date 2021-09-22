@@ -3,6 +3,7 @@
 
 //Important forward declarations
 struct Compiler;
+struct Context;
 struct State;
 struct Structure;
 struct CodeBlock;
@@ -130,7 +131,8 @@ MOD(TYPE_CHECK_ERROR)\
 MOD(NAME_ERROR)\
 MOD(FILE_ERROR)\
 MOD(INTERNAL_ERROR) \
-MOD(CONST_ERROR)
+MOD(CONST_ERROR) \
+MOD(VM_ERROR)
 
 enum struct ERROR_CODE : uint8_t {
 #define MOD(E) E,
@@ -138,7 +140,7 @@ enum struct ERROR_CODE : uint8_t {
 #undef MOD
 };
 
-constexpr const char* compile_code_string(ERROR_CODE c) {
+constexpr const char* error_code_string(ERROR_CODE c) {
   switch (c) {
   #define MOD(E) case ERROR_CODE:: ## E: return #E;
     COMPCODEINC
@@ -159,6 +161,7 @@ MODIFY(EQUIVALENT, "==", 2)\
 MODIFY(NOT_EQ, "!=", 2)\
 MODIFY(OR, "|", 1)\
 MODIFY(AND, "&", 1)\
+MODIFY(XOR, "^", 1)\
 MODIFY(RIGHT_SHIFT, ">>", 4)\
 MODIFY(LEFT_SHIFT, "<<", 4)
 

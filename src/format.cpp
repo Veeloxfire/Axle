@@ -92,19 +92,6 @@ void load_string(Array<char>& res, const AxleTokenType tt) {
   load_string(res, str);
 }
 
-void load_string(Array<char>& res, NamedElementType nt) {
-  switch (nt) {
-    #define MODIFY(name, str, expr_name) case NamedElementType:: ## name: load_string(res, str); break;
-      N_E_T_MODS
-      #undef MODIFY
-
-    default:
-      load_string(res, "unknown_name(");
-      load_string(res, (uint8_t)nt);
-      load_string(res, ')');
-      break;
-  }
-}
 
 void load_string(Array<char>& res, STATEMENT_TYPE st) {
 
@@ -237,12 +224,16 @@ void load_string(Array<char>& res, PrintCallSignature p_call) {
 }
 
 void load_string(Array<char>& res, PrintFuncSignature p_func) {
-  const FunctionBase* func = p_func.func;
+  load_string(res, PrintSignatureType{p_func.func->signature.sig_struct});
+}
+
+void load_string(Array<char>& res, PrintSignatureType p_sig) {
+  const SignatureStructure* sig = p_sig.sig;
 
   res.insert('(');
 
-  auto i = func->signature.parameter_types.begin();
-  const auto end = func->signature.parameter_types.end();
+  auto i = sig->parameter_types.begin();
+  const auto end = sig->parameter_types.end();
 
   if (i < end) {
     for (; i < (end - 1); i++) {
@@ -254,7 +245,7 @@ void load_string(Array<char>& res, PrintFuncSignature p_func) {
   }
 
   load_string(res, ") -> ");
-  load_string(res, func->signature.return_type->name);
+  load_string(res, sig->return_type->name);
 }
 
 void load_string(Array<char>& res, const CallSignature& call_sig) {

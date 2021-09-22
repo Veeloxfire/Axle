@@ -32,9 +32,12 @@ struct BinOpArgs {
   RuntimeValue emit_eq_64s();
   RuntimeValue emit_eq_8s();
   RuntimeValue emit_neq_8s();
-  RuntimeValue emit_lesser_64s();
-  RuntimeValue emit_greater_64s();
+  RuntimeValue emit_lesser_u64s();
+  RuntimeValue emit_lesser_i64s();
+  RuntimeValue emit_greater_u64s();
+  RuntimeValue emit_greater_i64s();
   RuntimeValue emit_or_64s();
+  RuntimeValue emit_xor_64s();
   RuntimeValue emit_and_64s();
   RuntimeValue emit_shift_l_64_by_8();
   RuntimeValue emit_shift_r_u64_by_8();
@@ -70,7 +73,8 @@ struct SignedArithBinOp {
 };
 
 struct EqOpBin {
-  BINARY_OPERATOR_FUNCTION r64_emit = nullptr;
+  BINARY_OPERATOR_FUNCTION u64_emit = nullptr;
+  BINARY_OPERATOR_FUNCTION i64_emit = nullptr;
   BINARY_OPERATOR_FUNCTION r8_emit  = nullptr;
   BINARY_OPERATOR_FUNCTION bools_emit = nullptr;
   BINARY_OPERATOR_FUNCTION ascii_emit = nullptr;
@@ -113,6 +117,7 @@ struct DerefUnOp {
 
 //Overload for operators that dont care about sign
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const SignAgnArithBinOp& op,
@@ -120,6 +125,7 @@ void compile_binary_operator(Compiler* comp,
 
 //Overload for operators that do care about sign
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const SignedArithBinOp& op,
@@ -127,12 +133,14 @@ void compile_binary_operator(Compiler* comp,
 
 //Overload for operators that return bools
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const EqOpBin& op);
 
 //Overload for unpositioned operators
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const UnpositionedBinOpOptions& op,
@@ -140,12 +148,14 @@ void compile_binary_operator(Compiler* comp,
 
 //Overload for unbalanced operators
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const UnbalancedBinOpOptions& op);
 
 //Overload for unbalanced operators that dont care about left sign
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const UnbalancedLeftSignAgnBin& op);
@@ -157,6 +167,7 @@ void compile_unary_operator(Compiler* comp,
 
 //Overload for taking address
 void compile_take_address(Compiler* comp,
+                          Context* context,
                           State* state,
                           ASTExpression* expr);
 
@@ -187,6 +198,7 @@ inline constexpr SignedArithBinOp div_operators ={
 
 inline constexpr EqOpBin eq_operators ={
   &BinOpArgs::emit_eq_64s,
+  &BinOpArgs::emit_eq_64s,
   &BinOpArgs::emit_eq_8s,
   &BinOpArgs::emit_eq_8s,
   &BinOpArgs::emit_eq_8s
@@ -194,18 +206,21 @@ inline constexpr EqOpBin eq_operators ={
 
 inline constexpr EqOpBin neq_operators ={
   nullptr,
+  nullptr,
   &BinOpArgs::emit_neq_8s,
   &BinOpArgs::emit_neq_8s,
   &BinOpArgs::emit_neq_8s
 };
 
 inline constexpr EqOpBin lesser_operators ={
-  &BinOpArgs::emit_lesser_64s,
+  &BinOpArgs::emit_lesser_u64s,
+  &BinOpArgs::emit_lesser_i64s,
   nullptr,
   nullptr,
 };
 inline constexpr EqOpBin greater_operators ={
-  &BinOpArgs::emit_greater_64s,
+  &BinOpArgs::emit_greater_u64s,
+  &BinOpArgs::emit_greater_i64s,
   nullptr,
   nullptr,
 };
@@ -215,6 +230,13 @@ inline constexpr SignAgnArithBinOp or_operators ={
   &BinOpArgs::emit_or_64s,
   &BinOpArgs::emit_or_64s,
 };
+
+inline constexpr SignAgnArithBinOp xor_operators ={ 
+  nullptr,
+  &BinOpArgs::emit_xor_64s,
+  &BinOpArgs::emit_xor_64s,
+};
+
 inline constexpr SignAgnArithBinOp and_operators ={
   nullptr,
   &BinOpArgs::emit_and_64s,

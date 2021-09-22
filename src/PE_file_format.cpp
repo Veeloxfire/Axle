@@ -784,7 +784,7 @@ void load_portable_executable_from_file(Compiler* const comp,
 
         name_holder.insert('\0');
 
-        ptr->str = comp->strings->intern(name_holder.data);
+        ptr->str = comp->services.strings->intern(name_holder.data);
         pe_file->export_table.names.insert(ptr->str);
 
         name_holder.clear();

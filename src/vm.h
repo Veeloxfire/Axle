@@ -3,6 +3,7 @@
 #include "bytecode.h"
 #include "calling_conventions.h"
 #include "Program.h"
+#include "errors.h"
 
 struct Reg64_8BL {
   union {
@@ -64,6 +65,7 @@ struct Register {
 struct Function;
 
 struct VM {
+  Errors* errors;
 
   constexpr static size_t STACK_SIZE = 256 * 8;
   uint8_t stack[STACK_SIZE] ={};
@@ -126,4 +128,4 @@ void vm_set_parameters(const CallingConvention* conv, VM* vm, T&& ... t) {
 }
 
 void vm_call_native_x64(VM* const vm, const void* func_ptr, uint64_t num_params);
-ErrorCode vm_rum(VM* vm, Program* prog) noexcept;
+void vm_rum(VM* vm, Program* prog) noexcept;

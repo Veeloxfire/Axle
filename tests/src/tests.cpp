@@ -132,6 +132,20 @@ constexpr auto operations_signed_cpp() -> uint64_t {
   return static_cast<uint64_t>(one + minus_two * three / four);
 }
 
+constexpr auto fnv1_hash(const char* ptr, u64 len) -> u64 {
+  u64 hash_v = 0xcbf29ce484222325;
+
+  while(len > 0) {
+    hash_v = hash_v * 0x100000001b3;
+    hash_v = hash_v ^ CAST(u64, *ptr);
+
+    ptr = ptr + 1;
+    len = len - 1;
+  }
+
+  return hash_v;
+}
+
 struct Environment {
   const char* system_name;
   const char* convention;
@@ -153,6 +167,7 @@ static constexpr Test tests[] ={
   Test{"Operators Comptime", TEST_DIR("operators_comptime.axl"), operations_optim()},
   Test{"Arrays", TEST_DIR("arrays.axl"), arrays_main()},
   Test{"Pointers", TEST_DIR("pointers.axl"), 3},
+  Test{"FNV1 Hash", TEST_DIR("fnv1_hash.axl"), fnv1_hash("hello", 5)},
 };
 
 static constexpr size_t num_tests = sizeof(tests)/sizeof(Test);

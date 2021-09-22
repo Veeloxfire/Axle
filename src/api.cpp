@@ -47,11 +47,14 @@ void print_program(const APIOptions& opts, const Program& prog) {
 }
 
 RunOutput run_in_vm(Program* prog) {
+  Errors errors ={};
   VM vm ={};
-  ErrorCode error = vm_rum(&vm, prog);
 
-  if (error != ErrorCode::OK) {
-    std::cerr << error_code_string(error);
+  vm.errors = &errors;
+  vm_rum(&vm, prog);
+
+  if (errors.panic) {
+    errors.print_all();
     return { 1, 0 };
   }
 
@@ -81,40 +84,46 @@ int compile_file(const APIOptions& options,
   //Setup
   StringInterner strings ={};
   Types types ={};
-
   Lexer lexer ={};
   Parser parser ={};
   VM vm = {};
+  NamesHandler names = {};
+  Errors errors ={};
+  FileLoader file_loader ={};
 
   Compiler compiler ={};
 
-  compiler.parser = &parser;
-  compiler.lexer = &lexer;
-  compiler.strings = &strings;
-  compiler.types = &types;
-  compiler.vm = &vm;
+  compiler.services.lexer = &lexer;
+  compiler.services.parser = &parser;
+  compiler.services.vm = &vm;
+  compiler.services.errors = &errors;
+  compiler.services.names = &names;
+  compiler.services.file_loader = &file_loader;
+  compiler.services.types = &types;
+  compiler.services.strings = &strings;
 
   //Load the builtin types
   init_compiler(options, &compiler);
   if (compiler.is_panic()) {
-    print_compile_errors(&compiler);
+    compiler.services.errors->print_all();
     return 1;
   }
 
   {
-    FileLocation loc = parse_file_location(compiler.build_options.file_name->string, nullptr, compiler.strings);
-
-    NamespaceIndex ns_index = NamespaceIndex{ compiler.all_namespaces.size };
-    compiler.all_namespaces.insert_uninit(1);
+    FileLocation loc = parse_file_location(compiler.build_options.file_name->string, nullptr, compiler.services.strings);
 
 
-    compiler.file_loader.unparsed_files.insert(FileImport{ loc, ns_index, Span{} });//use null span
+    NamespaceIndex ns_index = compiler.services.names->new_namespace();
+    compiler.build_file_namespace = ns_index;
+
+
+    compiler.services.file_loader->unparsed_files.insert(FileImport{ loc, ns_index, Span{} });//use null span
 
     //Parsing/loading
     ERROR_CODE ret = parse_all_unparsed_files_with_imports(&compiler);
     if (ret != ERROR_CODE::NO_ERRORS) {
       std::cerr << "Parsing was not completed due to an error!\nError Code '"
-        << compile_code_string(ret)
+        << error_code_string(ret)
         << "'\n";
       return 1;
     }
@@ -123,18 +132,23 @@ int compile_file(const APIOptions& options,
     ret = compile_all(&compiler);
     if (ret != ERROR_CODE::NO_ERRORS) {
       std::cerr << "Compilation was not completed due to an error!\nError Code '"
-        << compile_code_string(ret)
+        << error_code_string(ret)
         << "'\n";
       return 1;
     }
   }
 
+  if (compiler.is_panic()) {
+    std::cerr << "Compiler paniced but did not have an error message\n";
+    return -1;
+  }
+
   //Backend
   build_data_section_for_exec(out_program, &compiler);
   
-  (compiler.build_options.system->backend)(out_program, &compiler);
+  compile_backend(out_program, &compiler, compiler.build_options.endpoint_system);
   if (compiler.is_panic()) {
-    print_compile_errors(&compiler);
+    compiler.services.errors->print_all();
     return 1;
   }
 

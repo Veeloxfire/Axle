@@ -62,7 +62,7 @@ static void un_op_impl(Compiler* const comp,
 }
 
 RuntimeValue BinOpArgs::emit_add_64s() {
-  const Structure* ty = comp->types->s_u64;
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -74,7 +74,7 @@ RuntimeValue BinOpArgs::emit_add_64s() {
 
 RuntimeValue BinOpArgs::emit_sub_64s() {
 
-  const Structure* ty = comp->types->s_u64;
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -142,7 +142,7 @@ RuntimeValue BinOpArgs::emit_add_64_to_ptr() {
 
 RuntimeValue BinOpArgs::emit_mul_64s() {
 
-  const Structure* ty = comp->types->s_u64;
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -153,12 +153,12 @@ RuntimeValue BinOpArgs::emit_mul_64s() {
 }
 
 RuntimeValue BinOpArgs::emit_div_u64s() {
-  const Structure* type = comp->types->s_u64;
+  const Structure* type = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
 
-  if (comp->build_options.system == &system_x86_64) {
+  if (comp->build_options.endpoint_system == &system_x86_64) {
     {
       auto* res_val       = state->value_tree.values.data + temp_left.reg.val;
       res_val->value_type = ValueType::FIXED;
@@ -192,12 +192,12 @@ RuntimeValue BinOpArgs::emit_div_u64s() {
 }
 
 RuntimeValue BinOpArgs::emit_div_i64s() {
-  const Structure* type = comp->types->s_u64;
+  const Structure* type = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
 
-  if (comp->build_options.system == &system_x86_64) {
+  if (comp->build_options.endpoint_system == &system_x86_64) {
     {
       auto* res_val       = state->value_tree.values.data + temp_left.reg.val;
       res_val->value_type = ValueType::FIXED;
@@ -232,7 +232,7 @@ RuntimeValue BinOpArgs::emit_div_i64s() {
 
 RuntimeValue BinOpArgs::emit_eq_64s() {
 
-  const Structure* ty = comp->types->s_u64;
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -244,7 +244,7 @@ RuntimeValue BinOpArgs::emit_eq_64s() {
 
 RuntimeValue BinOpArgs::emit_eq_8s() {
 
-  const Structure* ty = comp->types->s_u64;
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -256,7 +256,7 @@ RuntimeValue BinOpArgs::emit_eq_8s() {
 
 RuntimeValue BinOpArgs::emit_neq_8s() {
 
-  const Structure* ty = comp->types->s_u64;
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -266,33 +266,53 @@ RuntimeValue BinOpArgs::emit_neq_8s() {
   return temp_left;
 }
 
-RuntimeValue BinOpArgs::emit_lesser_64s() {
-
-  const Structure* ty = comp->types->s_u64;
+RuntimeValue BinOpArgs::emit_lesser_u64s() {
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
 
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::LESS_R64S);
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::LESS_U64S);
 
   return temp_left;
 }
 
-RuntimeValue BinOpArgs::emit_greater_64s() {
-
-  const Structure* ty = comp->types->s_u64;
+RuntimeValue BinOpArgs::emit_greater_u64s() {
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
 
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::GREAT_R64S);
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::GREAT_U64S);
+
+  return temp_left;
+}
+
+RuntimeValue BinOpArgs::emit_lesser_i64s() {
+  const Structure* ty = comp->services.types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::LESS_I64S);
+
+  return temp_left;
+}
+
+RuntimeValue BinOpArgs::emit_greater_i64s() {
+  const Structure* ty = comp->services.types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::GREAT_I64S);
 
   return temp_left;
 }
 
 RuntimeValue BinOpArgs::emit_or_64s() {
 
-  const Structure* ty = comp->types->s_u64;
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -302,8 +322,20 @@ RuntimeValue BinOpArgs::emit_or_64s() {
   return temp_left;
 }
 
+RuntimeValue BinOpArgs::emit_xor_64s() {
+
+  const Structure* ty = comp->services.types->s_u64;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::XOR_R64S);
+
+  return temp_left;
+}
+
 RuntimeValue BinOpArgs::emit_and_64s() {
-  const Structure* ty = comp->types->s_u64;
+  const Structure* ty = comp->services.types->s_u64;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -314,13 +346,13 @@ RuntimeValue BinOpArgs::emit_and_64s() {
 }
 
 RuntimeValue BinOpArgs::emit_shift_l_64_by_8() {
-  const Structure* left_t = comp->types->s_u64;
-  const Structure* right_t = comp->types->s_u8;
+  const Structure* left_t = comp->services.types->s_u64;
+  const Structure* right_t = comp->services.types->s_u8;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
 
-  if (comp->build_options.system == &system_x86_64) {
+  if (comp->build_options.endpoint_system == &system_x86_64) {
     auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
     res_val->value_type = ValueType::FIXED;
     res_val->reg        = RCX.REG;
@@ -337,13 +369,13 @@ RuntimeValue BinOpArgs::emit_shift_l_64_by_8() {
 }
 
 RuntimeValue BinOpArgs::emit_shift_r_u64_by_8() {
-  const Structure* left_t = comp->types->s_u64;
-  const Structure* right_t = comp->types->s_u8;
+  const Structure* left_t = comp->services.types->s_u64;
+  const Structure* right_t = comp->services.types->s_u8;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
 
-  if (comp->build_options.system == &system_x86_64) {
+  if (comp->build_options.endpoint_system == &system_x86_64) {
     auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
     res_val->value_type = ValueType::FIXED;
     res_val->reg        = RCX.REG;
@@ -360,13 +392,13 @@ RuntimeValue BinOpArgs::emit_shift_r_u64_by_8() {
 }
 
 RuntimeValue BinOpArgs::emit_shift_r_i64_by_8() {
-  const Structure* left_t = comp->types->s_i64;
-  const Structure* right_t = comp->types->s_u8;
+  const Structure* left_t = comp->services.types->s_i64;
+  const Structure* right_t = comp->services.types->s_u8;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
 
-  if (comp->build_options.system == &system_x86_64) {
+  if (comp->build_options.endpoint_system == &system_x86_64) {
     auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
     res_val->value_type = ValueType::FIXED;
     res_val->reg        = RCX.REG;
@@ -384,7 +416,7 @@ RuntimeValue BinOpArgs::emit_shift_r_i64_by_8() {
 
 RuntimeValue UnOpArgs::emit_neg_i64() {
 
-  const RuntimeValue temp = load_to_mod_op(comp, state, code, comp->types->s_i64, prim);
+  const RuntimeValue temp = load_to_mod_op(comp, state, code, comp->services.types->s_i64, prim);
 
   un_op_impl(comp, state, code, &temp, ByteCode::EMIT::NEG_R64);
 
@@ -464,7 +496,7 @@ void impl_compile_balanced_binary_op(Compiler* comp,
                                      L&& try_emit) {
   assert(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
 
-  const Types* const types = comp->types;
+  const Types* const types = comp->services.types;
 
   //Reset
   expr->bin_op.emit = nullptr;
@@ -583,14 +615,14 @@ void impl_compile_balanced_binary_op(Compiler* comp,
                      op_string, left->type->name, right->type->name);
 }
 
-void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpression* expr, const UnpositionedBinOpOptions& op,
+void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State* state, ASTExpression* expr, const UnpositionedBinOpOptions& op,
                                          const TypeHint* hint) {
   assert(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
 
   //Reset
   expr->bin_op.emit = nullptr;
 
-  const Types* const types = comp->types;
+  const Types* const types = comp->services.types;
 
   ASTExpression* const left = expr->bin_op.left;
   ASTExpression* const right = expr->bin_op.right;
@@ -607,7 +639,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpres
           inner_hint.tht = THT::EXACT;
           inner_hint.type = main_type;
 
-          compile_type_of_expression(comp, state, right, &inner_hint);
+          compile_type_of_expression(comp, context, state, right, &inner_hint);
           if (comp->is_panic()) {
             return;
           }
@@ -626,7 +658,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpres
           inner_hint.tht = THT::EXACT;
           inner_hint.type = main_type;
 
-          compile_type_of_expression(comp, state, right, &inner_hint);
+          compile_type_of_expression(comp, context, state, right, &inner_hint);
           if (comp->is_panic()) {
             return;
           }
@@ -645,7 +677,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpres
         inner_hint.tht = THT::EXACT;
         inner_hint.type = types->s_u64;
 
-        compile_type_of_expression(comp, state, right, &inner_hint);
+        compile_type_of_expression(comp, context, state, right, &inner_hint);
         if (comp->is_panic()) {
           return;
         }
@@ -655,7 +687,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpres
         inner_hint.tht = THT::EXACT;
         inner_hint.type = types->s_i64;
 
-        compile_type_of_expression(comp, state, right, &inner_hint);
+        compile_type_of_expression(comp, context, state, right, &inner_hint);
         if (comp->is_panic()) {
           return;
         }
@@ -679,7 +711,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpres
           inner_hint.tht = THT::EXACT;
           inner_hint.type = main_type;
 
-          compile_type_of_expression(comp, state, right, &inner_hint);
+          compile_type_of_expression(comp, context, state, right, &inner_hint);
           if (comp->is_panic()) {
             return;
           }
@@ -698,7 +730,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpres
           inner_hint.tht = THT::EXACT;
           inner_hint.type = main_type;
 
-          compile_type_of_expression(comp, state, right, &inner_hint);
+          compile_type_of_expression(comp, context, state, right, &inner_hint);
           if (comp->is_panic()) {
             return;
           }
@@ -714,12 +746,12 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpres
   if (hint != nullptr && left->type->type == STRUCTURE_TYPE::SIMPLE_LITERAL
       && right->type->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
 
-    compile_type_of_expression(comp, state, left, hint);
+    compile_type_of_expression(comp, context, state, left, hint);
     if (comp->is_panic()) {
       return;
     }
 
-    compile_type_of_expression(comp, state, right, hint);
+    compile_type_of_expression(comp, context, state, right, hint);
     if (comp->is_panic()) {
       return;
     }
@@ -750,10 +782,10 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, State* state, ASTExpres
   }
 }
 
-void impl_compile_unbalanced_binary_op(Compiler* comp, State* state, ASTExpression* expr, const UnbalancedBinOpOptions& op) {
+void impl_compile_unbalanced_binary_op(Compiler* comp, Context* context, State* state, ASTExpression* expr, const UnbalancedBinOpOptions& op) {
   assert(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
 
-  const Types* const types = comp->types;
+  const Types* const types = comp->services.types;
 
   //Reset
   expr->bin_op.emit = nullptr;
@@ -769,7 +801,7 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, State* state, ASTExpressi
       inner_hint.tht = THT::EXACT;
       inner_hint.type = types->s_u8;
 
-      compile_type_of_expression(comp, state, right, &inner_hint);
+      compile_type_of_expression(comp, context, state, right, &inner_hint);
       if (comp->is_panic()) {
         return;
       }
@@ -788,7 +820,7 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, State* state, ASTExpressi
       inner_hint.tht = THT::EXACT;
       inner_hint.type = types->s_u8;
 
-      compile_type_of_expression(comp, state, right, &inner_hint);
+      compile_type_of_expression(comp, context, state, right, &inner_hint);
       if (comp->is_panic()) {
         return;
       }
@@ -809,7 +841,7 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, State* state, ASTExpressi
 void impl_compile_unary_op(Compiler* comp, ASTExpression* expr, const UnaryOpOptions& op) {
   assert(expr->expr_type == EXPRESSION_TYPE::UNARY_OPERATOR);
 
-  const Types* const types = comp->types;
+  const Types* const types = comp->services.types;
 
   ASTExpression* const prim = expr->un_op.expr;
 
@@ -839,24 +871,27 @@ void impl_compile_unary_op(Compiler* comp, ASTExpression* expr, const UnaryOpOpt
 
 //Overload for unbalanced operators
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const UnpositionedBinOpOptions& op,
                              const TypeHint* hint) {
-  impl_compile_unpositioned_binary_op(comp, state, expr, op, hint);
+  impl_compile_unpositioned_binary_op(comp, context, state, expr, op, hint);
 }
 
 //Overload for unbalanced operators
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const UnbalancedBinOpOptions& op) {
 
-  impl_compile_unbalanced_binary_op(comp, state, expr, op);
+  impl_compile_unbalanced_binary_op(comp, context, state, expr, op);
 }
 
 //Overload for unbalanced operators that dont care about left sign
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const UnbalancedLeftSignAgnBin& op) {
@@ -865,11 +900,12 @@ void compile_binary_operator(Compiler* comp,
   normal.Li64_Ru8_emit = op.Lr64_Ru8_emit;
   normal.Lu64_Ru8_emit = op.Lr64_Ru8_emit;
 
-  impl_compile_unbalanced_binary_op(comp, state, expr, normal);
+  impl_compile_unbalanced_binary_op(comp, context, state, expr, normal);
 }
 
 
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const EqOpBin& op) {
@@ -883,17 +919,17 @@ void compile_binary_operator(Compiler* comp,
         hint.tht = THT::EXACT;
         hint.type = expect;
 
-        compile_type_of_expression(comp, state, other, &hint);
+        compile_type_of_expression(comp, context, state, other, &hint);
       }
 
       expr->bin_op.emit = emit_op;
-      expr->type        = comp->types->s_bool;
+      expr->type        = comp->services.types->s_bool;
     }
   };
 
   BalancedBinOpOptions balanced_op ={};
-  balanced_op.u64_emit = op.r64_emit;
-  balanced_op.i64_emit = op.r64_emit;
+  balanced_op.u64_emit = op.u64_emit;
+  balanced_op.i64_emit = op.i64_emit;
   balanced_op.u8_emit  = op.r8_emit;
   balanced_op.bools_emit = op.bools_emit;
   balanced_op.ascii_emit = op.ascii_emit;
@@ -902,6 +938,7 @@ void compile_binary_operator(Compiler* comp,
 }
 
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const SignAgnArithBinOp& op,
@@ -916,7 +953,7 @@ void compile_binary_operator(Compiler* comp,
         hint.tht = THT::EXACT;
         hint.type = expect;
 
-        compile_type_of_expression(comp, state, other, &hint);
+        compile_type_of_expression(comp, context, state, other, &hint);
       }
 
       expr->bin_op.emit = emit_op;
@@ -925,14 +962,14 @@ void compile_binary_operator(Compiler* comp,
   };
 
   if (TYPE_TESTS::is_literal(expr->bin_op.left->type) && hint != nullptr) {
-    compile_type_of_expression(comp, state, expr->bin_op.left, hint);
+    compile_type_of_expression(comp, context, state, expr->bin_op.left, hint);
     if (comp->is_panic()) {
       return;
     }
   }
 
   if (TYPE_TESTS::is_literal(expr->bin_op.right->type) && hint != nullptr) {
-    compile_type_of_expression(comp, state, expr->bin_op.right, hint);
+    compile_type_of_expression(comp, context, state, expr->bin_op.right, hint);
     if (comp->is_panic()) {
       return;
     }
@@ -949,6 +986,7 @@ void compile_binary_operator(Compiler* comp,
 
 
 void compile_binary_operator(Compiler* comp,
+                             Context* context,
                              State* state,
                              ASTExpression* expr,
                              const SignedArithBinOp& op,
@@ -961,7 +999,7 @@ void compile_binary_operator(Compiler* comp,
         hint.tht = THT::EXACT;
         hint.type = expect;
 
-        compile_type_of_expression(comp, state, other, &hint);
+        compile_type_of_expression(comp, context, state, other, &hint);
       }
 
       expr->bin_op.emit = emit_op;
@@ -970,14 +1008,14 @@ void compile_binary_operator(Compiler* comp,
   };
 
   if (TYPE_TESTS::is_literal(expr->bin_op.left->type) && hint != nullptr) {
-    compile_type_of_expression(comp, state, expr->bin_op.left, hint);
+    compile_type_of_expression(comp, context, state, expr->bin_op.left, hint);
     if (comp->is_panic()) {
       return;
     }
   }
 
   if (TYPE_TESTS::is_literal(expr->bin_op.right->type) && hint != nullptr) {
-    compile_type_of_expression(comp, state, expr->bin_op.right, hint);
+    compile_type_of_expression(comp, context, state, expr->bin_op.right, hint);
     if (comp->is_panic()) {
       return;
     }
@@ -1000,6 +1038,7 @@ void compile_unary_operator(Compiler* comp,
 
 //Overload for taking address
 void compile_take_address(Compiler* comp,
+                          Context* context,
                           State* state,
                           ASTExpression* expr) {
   //Cant actually fail
@@ -1007,7 +1046,7 @@ void compile_take_address(Compiler* comp,
 
   const Structure* base = expr->un_op.expr->type;
 
-  const Structure* ptr = find_or_make_pointer_type(comp, expr->span, base);
+  const Structure* ptr = find_or_make_pointer_type(comp, context, expr->span, base);
   expr->type = ptr;
   expr->un_op.emit = &UnOpArgs::emit_address;
 

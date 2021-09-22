@@ -19,7 +19,7 @@ namespace X64 {
     uint8_t r;
   };
 
-  struct R8 { 
+  struct R8 {
     R r;
   };
 
@@ -103,6 +103,11 @@ namespace X64 {
     return sib_scale(s) | sib_i_b(i, b);
   }
 
+  enum OVERIDE_CODE : u8 {
+    OVERIDE_OPERAND = 0x66,
+    OVERIDE_ADDRESS = 0x67,
+  };
+
 
   enum MODRM_MOD_CODES : uint8_t {
     MODRM_MOD_DIRECT   = 0b11'000'000,
@@ -130,18 +135,32 @@ namespace X64 {
     OR_R_TO_RM = 0x09,
     AND_R_TO_RM = 0x21,
     SUB_R_TO_RM = 0x29,
+    XOR_R_TO_RM = 0x33,
     CMP_R_TO_RM = 0x39,
     PUSH_R = 0x50,//+ register
     POP_R = 0x58,//+ register
     SUB_32_TO_RM = 0x81,// r = 5
     CMP_32_TO_RM = 0x81,// r = 7
+    JB_NEAR = 0x82,
+    JNB_NEAR = 0x83,
     JZ_NEAR = 0x84,
+    JE_NEAR = 0x84,
     JNE_NEAR = 0x85,
+    JNA_NEAR = 0x86,
+    JBE_NEAR = 0x86,
+    JA_NEAR = 0x87,
     MOV_R8_TO_RM8 = 0x88,
     MOV_R_TO_RM = 0x89,
+    MOV_RM8_TO_R8 = 0x8A,
     MOV_RM_TO_R = 0x8B,
+    JL_NEAR = 0x8C,
     LEA_RM_TO_R = 0x8D,
+    JNL_NEAR = 0x8D,
+    JNG_NEAR = 0x8E,
+    JG_NEAR = 0x8F,
     SETE_RM8 = 0x94,
+    SETL_RM8 = 0x9C,
+    SETG_RM8 = 0x9F,
     CQO = 0x99,
     IMUL_RM_TO_R = 0xAF,
     MOV_ZX_RM8_TO_R = 0xB6,
@@ -174,6 +193,10 @@ namespace X64 {
            const RM8& rm8);
 
   void mov(Array<uint8_t>& arr,
+           const RM8& rm8,
+           R8 r8);
+
+  void mov(Array<uint8_t>& arr,
            const RM& rm,
            R r);
 
@@ -188,6 +211,10 @@ namespace X64 {
   void mov(Array<uint8_t>& arr,
            R8 r8,
            uint8_t u8);
+
+  void mov(Array<uint8_t>& arr,
+           const RM& rm,
+           u16 imm16);
 
   void mov(Array<uint8_t>& arr,
            const RM& rm,
@@ -209,13 +236,33 @@ namespace X64 {
 
 struct Compiler;
 struct CodeBlock;
+struct System;
 
-void vm_backend(Program* prog, Compiler* comp);
+void compile_backend_single_func(Program* prog,
+                                 const CodeBlock* code,
+                                 Compiler* const comp,
+                                 const System* system);
 
-void vm_backend_single_func(Program* prog,
-                            const CodeBlock* code,
-                            Compiler* const comp);
+void compile_backend(Program* prog, Compiler* comp, const System* system);
 
-void x86_64_machine_code_backend(Program* prog, Compiler* comp);
+void vm_backend_code_block(Compiler* const,
+                           Program*,
+                           Array<uint8_t>&,
+                           const CodeBlock*,
+                           size_t*,
+                           Array<size_t>&);
+
+void vm_backend_fix_jump(uint8_t*,
+                         size_t,
+                         size_t*);
+
+void x86_64_backend_code_block(Compiler* const,
+                               Program*,
+                               Array<uint8_t>&,
+                               const CodeBlock*,
+                               size_t*,
+                               Array<size_t>&);
+
+void x86_64_backend_fix_jump(uint8_t*, size_t, size_t*);
 
 void print_x86_64(const uint8_t* bytes, size_t size);

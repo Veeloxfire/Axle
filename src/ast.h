@@ -84,7 +84,8 @@ struct FunctionCallExpr {
   Array<ASTExpression> arguments ={};
 
   const InternString* function_name = nullptr;
-  const FunctionBase* function = nullptr;
+  const SignatureStructure* sig = nullptr;
+  //const Function* function = nullptr;
 };
 
 struct EnumValueExpr {
@@ -236,7 +237,6 @@ struct ASTExpression {
     return *this;
   }
 
-  void reset_linked_list() noexcept;
   void move_from(ASTExpression&&) noexcept;
 
   void set_union(EXPRESSION_TYPE et) noexcept;
@@ -267,12 +267,16 @@ struct ASTBlock {
 
 struct ASTDecl {
   const InternString* name = nullptr;
+  bool compile_time_const = false;
+  const Structure* structure = nullptr;
 
   //Only used in locals
   size_t local_index = 0;
 
   ASTType* type ={};
-  ASTExpression* expr;
+  ASTExpression* expr ={};
+
+  Span span ={};
 
   ~ASTDecl() {
     free_destruct_single(type);
@@ -281,6 +285,9 @@ struct ASTDecl {
 };
 
 struct ASTFuncSig {
+  FunctionSignature* sig;
+  const CallingConvention* convention;
+
   ASTType return_type;
   Array<ASTDecl> parameters;
 
@@ -288,6 +295,8 @@ struct ASTFuncSig {
 };
 
 struct ASTLambda {
+  Function* function;
+
   ASTFuncSig sig ={};
   ASTBlock body ={};
 };
@@ -387,5 +396,11 @@ struct ScopeView {
   const ASTStatement* end;
 };
 
+struct Printer {
+  size_t tabs = 0;
+
+  void newline() const;
+};
+
 void print_ast(const ASTFile* file);
-void print_ast_expression(const ASTExpression* expr);
+void print_ast_expression(Printer* printer, const ASTExpression* expr);

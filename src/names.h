@@ -2,25 +2,16 @@
 #include "utility.h"
 #include "comp_utilities.h"
 #include "strings.h"
+#include "type.h"
 
-struct Function;
-struct FunctionPointer;
-struct Structure;
-struct EnumValue;
 struct Global;
 struct ASTDecl;
-
+struct Span;
 
 struct NamedElement {
-  Array<Function*> overloads;
-  FunctionPointer* func_pointer;
-  const Structure* structure;
-  const EnumValue* enum_value;
-  const Global* global;
+  Array<const Global*> globals;
 
-  Array<const ASTDecl*> unknowns;
-
-  bool is_valid() const noexcept;
+  u64 unknowns;
 };
 
 struct Namespace {
@@ -31,22 +22,28 @@ struct Namespace {
   Array<NamespaceIndex> imported ={};
 };
 
+struct NamespaceElement {
+  NamedElement* named_element;
+  NamespaceIndex ns_index;
+};
+
 struct NamesHandler {
   //Namespace that is available everywhere in the program (contains the language primitives)
   NamespaceIndex builtin_namespace ={};
   Array<Namespace> all_namespaces ={};
 
+  NamesHandler();
+
   NamespaceIndex new_namespace();
-  Namespace* get_raw_namespace(NamespaceIndex);
+  Namespace* get_raw_namespace(NamespaceIndex index);
 
   NamedElement* find_name(NamespaceIndex ns_index, const InternString* name) const noexcept;
   NamedElement* find_unimported_name(NamespaceIndex ns_index, const InternString* name) const noexcept;
 
   //Same as 'find_name' but returns all of the possible options - useful for overload sets
-  Array<NamedElement*> find_all_names(NamespaceIndex ns_index, const InternString* name) const noexcept;
+  Array<NamespaceElement> find_all_names(NamespaceIndex ns_index, const InternString* name) const noexcept;
 
   NamedElement* create_name(NamespaceIndex ns_index, const InternString* name) noexcept;
 };
 
-void init_names_handler(NamesHandler* uninit_names_handler);
-void assert_no_shadow(Compiler* comp, const Span& span, NamespaceIndex ns, const InternString* name);
+void assert_empty_name(Compiler* comp, const Span& span, NamespaceIndex ns, const InternString* name);

@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 
-void vm_backend_single_func(Program* prog, const CodeBlock* code, Compiler* const comp) {
+void compile_backend_single_func(Program* prog, const CodeBlock* code, Compiler* const comp, const System* system) {
   Array<uint8_t> out_code ={};
 
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
@@ -13,108 +13,13 @@ void vm_backend_single_func(Program* prog, const CodeBlock* code, Compiler* cons
 
   Array<size_t> instruction_offsets ={};
 
-  size_t entry_point_label = code->label;
+  size_t entry_point_label = 0;
 
-  {
-    auto code_i = code->code.begin();
-    const auto code_end = code->code.end();
-
-    //First is guaranteed to be label
-    {
-      const auto p = ByteCode::PARSE::LABEL(code_i);
-
-      label_indexes[p.u64.val] = out_code.size;
-
-      code_i += ByteCode::SIZE_OF::LABEL;
-    }
-
-    while (code_i < code_end) {
-      switch (*code_i) {
-        case ByteCode::RESERVE: {
-            code_i += ByteCode::SIZE_OF::RESERVE;
-            break;
-          }
-        case ByteCode::LABEL: {
-            const auto p = ByteCode::PARSE::LABEL(code_i);
-
-            label_indexes[p.u64.val] = out_code.size;
-
-            code_i += ByteCode::SIZE_OF::LABEL;
-            break;
-          }
-        case ByteCode::JUMP_TO_FIXED: {
-            const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED(code_i);
-            code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED;
-
-            //Can ignore anything between a fixed jump and a label - it wont every be reached
-            while (code_i < code_end && code_i[0] != ByteCode::LABEL) {
-              code_i += ByteCode::instruction_size(code_i[0]);
-            }
-
-            size_t next = 0;
-
-            //Could be series of labels so needs to while loop
-            while (code_i + next < code_end && code_i[next] == ByteCode::LABEL) {
-              const auto p_l = ByteCode::PARSE::LABEL(code_i + next);
-
-              if (p_l.u64.val == p_j.u64.val) {
-                //About to jump to next instruction - can ignore jump
-                goto SKIP_JUMP;
-              }
-
-              //Next might also be a label
-              next += ByteCode::SIZE_OF::LABEL;
-            }
-
-            instruction_offsets.insert(out_code.size);
-            ByteCode::EMIT::JUMP_TO_FIXED(out_code, p_j.u64);
-          SKIP_JUMP:
-            break;
-          }
-        case ByteCode::CALL_NATIVE_X64: {
-            const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
-            const FunctionPointer* ptr = p_c.u64_1;
-
-            ByteCode::EMIT::CALL_NATIVE_X64(out_code, prog->data.ptr + ptr->data_index, p_c.u64_2);
-            code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
-            break;
-          }
-        case ByteCode::CALL: {
-            const auto p_c = ByteCode::PARSE::CALL(code_i);
-            const FunctionBase* func_base = p_c.u64;
-            if (func_base->func_type == FUNCTION_TYPE::POINTER) {
-              //Is known at this time
-              assert(false);
-            }
-            else {
-              const Function* func = (const Function*)func_base;
-              instruction_offsets.insert(out_code.size);
-              //Switch to a code label rather than func ptr
-              ByteCode::EMIT::CALL(out_code, func->code_block.label);
-            }
-
-            code_i += ByteCode::SIZE_OF::CALL;
-            break;
-          }
-        case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO:
-        case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO:
-          //Could try removing these jumps maybe
-          //but they shouldnt ever jump to the next instruction anyway
-          //Would be checking for something that never happens
-          instruction_offsets.insert(out_code.size);
-          goto EMIT_INSTRUCTION;
-        default: {
-          EMIT_INSTRUCTION:
-            const size_t i_size = ByteCode::instruction_size(*code_i);
-            out_code.insert_uninit(i_size);
-            memcpy_ts(out_code.data + out_code.size - i_size, i_size, code_i, i_size);
-
-            code_i += i_size;
-            break;
-          }
-      }
-    }
+  system->backend_translate(comp, prog, out_code, code, label_indexes, instruction_offsets);
+  if (comp->is_panic()) {
+    return;
   }
+
 
   {
     auto jumps_i = instruction_offsets.begin();
@@ -123,44 +28,19 @@ void vm_backend_single_func(Program* prog, const CodeBlock* code, Compiler* cons
     for (; jumps_i < jumps_end; jumps_i++) {
       const size_t index = *jumps_i;
 
-      switch (out_code.data[index]) {
-        case ByteCode::CALL: {
-            const auto p = ByteCode::PARSE::CALL(out_code.data + index);
-            ByteCode::WRITE::CALL(out_code.data + index, label_indexes[p.u64.val]);
-            break;
-          }
-        case ByteCode::JUMP_TO_FIXED: {
-            const auto p = ByteCode::PARSE::JUMP_TO_FIXED(out_code.data + index);
-            ByteCode::WRITE::JUMP_TO_FIXED(out_code.data + index, label_indexes[p.u64.val]);
-            break;
-          }
-        case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
-            const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_ZERO(out_code.data + index);
-            ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_ZERO(out_code.data + index, p.val, label_indexes[p.u64.val]);
-            break;
-          }
-        case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
-            const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(out_code.data + index);
-            ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(out_code.data + index, p.val, label_indexes[p.u64.val]);
-            break;
-          }
-      }
+      system->backend_jump_fix(out_code.data, index, label_indexes);
     }
   }
 
-  if (entry_point_label <= comp->labels) {
-    prog->entry_point = label_indexes[entry_point_label];
-  }
-  else {
-    comp->report_error(ERROR_CODE::LINK_ERROR, Span{},
-                       "Could not find entry point");
-  }
+  prog->entry_point = label_indexes[code->label];
+
 
   prog->code_size = out_code.size;
   prog->code = std::move(out_code);
 }
 
-void vm_backend_code_block(Program* prog,
+void vm_backend_code_block(Compiler* const,//compiler is currently not used in this version but is in the x86_64
+                           Program* prog,
                            Array<uint8_t>& out_code,
                            const CodeBlock* code,
                            size_t* label_indexes,
@@ -168,16 +48,6 @@ void vm_backend_code_block(Program* prog,
 
   auto code_i = code->code.begin();
   const auto code_end = code->code.end();
-
-  //First is guaranteed to be label
-  {
-    const auto p = ByteCode::PARSE::LABEL(code_i);
-    assert(p.op == ByteCode::LABEL);
-
-    label_indexes[p.u64.val] = out_code.size;
-
-    code_i += ByteCode::SIZE_OF::LABEL;
-  }
 
   while (code_i < code_end) {
     switch (*code_i) {
@@ -234,27 +104,33 @@ void vm_backend_code_block(Program* prog,
         }
       case ByteCode::CALL_NATIVE_X64: {
           const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
-          const FunctionPointer* ptr = p_c.u64_1;
 
-          ByteCode::EMIT::CALL_NATIVE_X64(out_code, prog->data.ptr + ptr->data_index, p_c.u64_2);
+          instruction_offsets.insert(out_code.size);
+          ByteCode::EMIT::CALL_NATIVE_X64(out_code, p_c.u64_1, p_c.u64_2);
           code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
           break;
         }
       case ByteCode::CALL: {
           const auto p_c = ByteCode::PARSE::CALL(code_i);
-          const FunctionBase* func_base = p_c.u64;
-          if (func_base->func_type == FUNCTION_TYPE::POINTER) {
-            //Is known at this time
-            assert(false);
-          }
-          else {
-            const Function* func = (const Function*)func_base;
-            instruction_offsets.insert(out_code.size);
-            //Switch to a code label rather than func ptr
-            ByteCode::EMIT::CALL(out_code, func->code_block.label);
-          }
+          const Function* func = p_c.u64;
+
+          instruction_offsets.insert(out_code.size);
+          //Switch to a code label rather than func ptr
+          ByteCode::EMIT::CALL(out_code, func->code_block.label);
+
 
           code_i += ByteCode::SIZE_OF::CALL;
+          break;
+        }
+      case ByteCode::CALL_LABEL: {
+          const auto p_c = ByteCode::PARSE::CALL_LABEL(code_i);
+          const u64 label = p_c.u64;
+
+          instruction_offsets.insert(out_code.size);
+          //Switch to a code label rather than func ptr
+          ByteCode::EMIT::CALL(out_code, label);
+
+          code_i += ByteCode::SIZE_OF::CALL_LABEL;
           break;
         }
       case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO:
@@ -277,8 +153,12 @@ void vm_backend_code_block(Program* prog,
   }
 }
 
-void vm_backend_fix_jump(uint8_t* instruction,
+void vm_backend_fix_jump(uint8_t* code,
+                         size_t index,
                          size_t* label_indexes) {
+
+  uint8_t* instruction = code + index;
+
   switch (*instruction) {
     case ByteCode::CALL: {
         const auto p = ByteCode::PARSE::CALL(instruction);
@@ -303,63 +183,132 @@ void vm_backend_fix_jump(uint8_t* instruction,
   }
 }
 
-void vm_backend(Program* prog, Compiler* comp) {
+void compile_backend(Program* prog, Compiler* comp, const System* system) {
   Array<uint8_t> out_code ={};
+
+  CodeBlock actual_entry_function ={};
+  actual_entry_function.label = comp->labels++;
 
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
   DEFER(&) { free_no_destruct(label_indexes); };
 
   Array<size_t> instruction_offsets ={};
 
-  {
-    bool found_entry = false;
-    size_t entry_point_label = 0;
+  size_t entry_point_label = 0;
 
+  //Find the entry point first - allows us to say its called
+  {
+    const InternString* entry_name = comp->build_options.entry_point;
+
+    NamedElement* el = comp->services.names->find_unimported_name(comp->build_file_namespace, entry_name);
+
+    if (el == nullptr) {
+      CallSignature sig ={};
+      sig.name = entry_name;
+
+      comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
+                         "No function '{}' exists in the build file to be the entry point",
+                         sig);
+      return;
+    }
+
+    if (el->unknowns > 0) {
+      comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                         "Some declarations with name '{}' were not compiled\n"
+                         "The compiler should not be linking if this is the case ...",
+                         entry_name);
+      return;
+    }
+
+    Function* entry_point_func = nullptr;
+
+    {
+      auto i = el->globals.begin();
+      auto end = el->globals.end();
+
+      for (; i < end; i++) {
+        const Global* g = *i;
+
+        if (g->type->type != STRUCTURE_TYPE::LAMBDA) {
+          continue;
+        }
+
+        const SignatureStructure* sig = (const SignatureStructure*)g->type;
+
+        if (!(sig->parameter_types.size == 0 && sig->return_type == comp->services.types->s_u64)) {
+          continue;
+        }
+
+        //The function will be correct from now on
+
+        if (entry_point_func != nullptr) {
+          comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
+                             "There are multiple functions elligble to be the entry point");
+          return;
+        }
+
+        entry_point_func = (Function*)g->constant_value;
+      }
+    }
+
+    if (entry_point_func == nullptr) {
+      comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
+                         "Could not find a function '{}' in the build file for the entry point",
+                         entry_name);
+      return;
+    }
+
+    entry_point_func->is_called = true;//makes it compile
+    entry_point_label = entry_point_func->code_block.label;
+  }
+
+  {
     auto func_i = comp->functions.begin_const_iter();
     const auto func_end = comp->functions.end_const_iter();
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
-      if (!func->is_called && func->signature.name != comp->build_options.entry_point) {
-        //Isnt called and isnt entry point so dont need to compile
+      if (!func->is_called) {
+        //Isnt called
         continue;
       }
 
-      //Find entry point
-      if (func->signature.name == comp->build_options.entry_point
-          && func->signature.parameter_types.size == 0) {
-        found_entry = true;
-        entry_point_label = func->code_block.label;
+      if (func->func_type == FUNCTION_TYPE::DEFAULT) {
+        const CodeBlock* const code = &func->code_block;
+
+        system->backend_translate(comp, prog, out_code, code, label_indexes, instruction_offsets);
+        if (comp->is_panic()) {
+          return;
+        }
+      }
+      else if (func->func_type == FUNCTION_TYPE::EXTERN
+               && system == &system_vm) {
+        CodeBlock block ={};
+        block.label = comp->labels++;
+
+        u64 stack_size = 0;
+        {
+          const u64 num_params = func->signature.sig_struct->actual_parameter_types.size;
+          const u64 num_regs = convention_microsoft_x64.num_parameter_registers;
+          if (num_params > num_regs) {
+            stack_size = 8 * (num_params - num_regs);
+          }
+        }
+
+        ByteCode::EMIT::CALL_NATIVE_X64(block.code,
+                                        prog->data.ptr + func->data_index,
+                                        stack_size);
+        ByteCode::EMIT::RETURN(block.code);
+
+        system->backend_translate(comp, prog, out_code, &block, label_indexes, instruction_offsets);
+        if (comp->is_panic()) {
+          return;
+        }
+      }
+      else {
+        assert(false);
       }
 
-      const CodeBlock* const code = &func->code_block;
-
-      vm_backend_code_block(prog, out_code, code, label_indexes, instruction_offsets);
-    }
-
-    {
-      NamedElement* named_el = find_unimported_name(comp, comp->build_file_namespace, comp->build_options.entry_point);
-
-      if (named_el == nullptr) {
-        comp->report_error(ERROR_CODE::LINK_ERROR, Span{},
-                           "Could not find entry point in build file");
-      }
-
-      if (named_el->type != NamedElementType::GLOBAL) {
-        comp->report_error(ERROR_CODE::LINK_ERROR,  Span{},
-                           "The entry point was not a function");
-      }
-
-      const Global* entry = named_el->global;
-
-      if (entry->type->type != STRUCTURE_TYPE::LAMBDA) {
-        comp->report_error(ERROR_CODE::LINK_ERROR,  Span{},
-                           "The entry point was not a function");
-      }
-
-      const Function* func = (const Function*)entry->type;
-
-      entry_point_label = func->code_block.label;
     }
 
     //Init all the globals - then call the main function
@@ -370,24 +319,34 @@ void vm_backend(Program* prog, Compiler* comp) {
       for (; i != end; i.next()) {
         Global* glob = i.get();
 
-        vm_backend_code_block(prog, out_code, &glob->init, label_indexes, instruction_offsets);
+        if (glob->constant_value == nullptr) {
+          system->backend_translate(comp, prog, out_code, &glob->init, label_indexes, instruction_offsets);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
       }
-
-      //Entry before emitting possible inits
-      prog->entry_point = out_code.size;
 
       //Just init calls
       i = comp->globals.begin_iter();
       for (; i != end; i.next()) {
         Global* glob = i.get();
 
-        instruction_offsets.insert(out_code.size);
-        ByteCode::EMIT::CALL(out_code, glob->init.label);
+        if (glob->constant_value == nullptr) {
+          ByteCode::EMIT::CALL_LABEL(actual_entry_function.code, glob->init.label);
+        }
       }
 
-      instruction_offsets.insert(out_code.size);
-      ByteCode::EMIT::CALL(out_code, entry_point_label);
-      ByteCode::EMIT::RETURN(out_code);
+      ByteCode::EMIT::CALL_LABEL(actual_entry_function.code, entry_point_label);
+      ByteCode::EMIT::RETURN(actual_entry_function.code);
+
+
+      //Entry before emitting possible inits
+      prog->entry_point = out_code.size;
+      system->backend_translate(comp, prog, out_code, &actual_entry_function, label_indexes, instruction_offsets);
+      if (comp->is_panic()) {
+        return;
+      }
     }
   }
 
@@ -398,7 +357,7 @@ void vm_backend(Program* prog, Compiler* comp) {
     for (; jumps_i < jumps_end; jumps_i++) {
       const size_t index = *jumps_i;
 
-      vm_backend_fix_jump(out_code.data + index, label_indexes);
+      system->backend_jump_fix(out_code.data, index, label_indexes);
     }
   }
 
@@ -622,6 +581,21 @@ void X64::mov(Array<uint8_t>& arr,
   emit_mod_rm(arr, r, rm);
 }
 
+void X64::mov(Array<uint8_t>& arr,
+              const RM8& rm8,
+              R8 r8) {
+  R r = r8.r;
+  const RM& rm = rm8.rm;
+
+  if ((r.r & 0b1000) > 0 || (rm.r & 0b1000) > 0) {
+    arr.insert(X64::REX | X64::rex_r_rm(r.r, rm.r));
+  }
+
+  arr.insert(X64::MOV_RM8_TO_R8);
+
+  emit_mod_rm(arr, r, rm);
+}
+
 void X64::lea(Array<uint8_t>& arr,
               const RM& rm,
               R r) {
@@ -678,6 +652,24 @@ void X64::mov(Array<uint8_t>& arr,
 
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(u32.imm, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+void X64::mov(Array<uint8_t>& arr,
+              const RM& rm,
+              u16 imm16) {
+  arr.insert(X64::OVERIDE_OPERAND);
+
+  if ((rm.r & 0b1000) > 0) {
+    arr.insert(X64::REX | X64::rex_b(rm.r));
+  }
+
+  arr.insert(X64::MOV_IMM32_RM);
+
+  emit_mod_rm(arr, R{ '\0' }, rm);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(imm16, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
@@ -738,7 +730,7 @@ inline static void call_near(Array<uint8_t>& arr, int32_t relative) {
   arr.size += sizeof(relative);
 }
 
-inline static void jump_zero(Array<uint8_t>& arr, int32_t relative) {
+static void jump_zero(Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JZ_NEAR);
 
@@ -747,7 +739,9 @@ inline static void jump_zero(Array<uint8_t>& arr, int32_t relative) {
   arr.size += sizeof(uint32_t);
 }
 
-inline static void jump_not_equal(Array<uint8_t>& arr, int32_t relative) {
+static constexpr auto jump_equal = jump_zero;
+
+static void jump_not_equal(Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JNE_NEAR);
 
@@ -756,14 +750,86 @@ inline static void jump_not_equal(Array<uint8_t>& arr, int32_t relative) {
   arr.size += sizeof(uint32_t);
 }
 
-inline static void cmp(Array<uint8_t>& arr, uint8_t r, uint8_t rm) {
+static void jump_above(Array<uint8_t>& arr, int32_t relative) {
+  arr.insert(0x0F);
+  arr.insert(X64::JA_NEAR);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(relative, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+static void jump_not_above(Array<uint8_t>& arr, int32_t relative) {
+  arr.insert(0x0F);
+  arr.insert(X64::JNA_NEAR);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(relative, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+static void jump_below(Array<uint8_t>& arr, int32_t relative) {
+  arr.insert(0x0F);
+  arr.insert(X64::JB_NEAR);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(relative, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+static void jump_not_below(Array<uint8_t>& arr, int32_t relative) {
+  arr.insert(0x0F);
+  arr.insert(X64::JNB_NEAR);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(relative, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+static void jump_lesser(Array<uint8_t>& arr, int32_t relative) {
+  arr.insert(0x0F);
+  arr.insert(X64::JL_NEAR);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(relative, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+static void jump_not_lesser(Array<uint8_t>& arr, int32_t relative) {
+  arr.insert(0x0F);
+  arr.insert(X64::JNL_NEAR);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(relative, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+static void jump_greater(Array<uint8_t>& arr, int32_t relative) {
+  arr.insert(0x0F);
+  arr.insert(X64::JG_NEAR);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(relative, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+static void jump_not_greater(Array<uint8_t>& arr, int32_t relative) {
+  arr.insert(0x0F);
+  arr.insert(X64::JNG_NEAR);
+
+  arr.reserve_extra(sizeof(uint32_t));
+  x32_to_bytes(relative, arr.data + arr.size);
+  arr.size += sizeof(uint32_t);
+}
+
+static void cmp(Array<uint8_t>& arr, uint8_t r, uint8_t rm) {
   arr.insert(X64::REX_W | X64::rex_r_rm(r, rm));
   arr.insert(X64::CMP_R_TO_RM);
   arr.insert(X64::MODRM_MOD_DIRECT
              | X64::modrm_r_rm(r, rm));
 }
 
-inline static void cmp(Array<uint8_t>& arr, uint8_t rm, int32_t i32) {
+static void cmp(Array<uint8_t>& arr, uint8_t rm, int32_t i32) {
   arr.insert(X64::REX_W | X64::rex_rm(rm));
   arr.insert(X64::CMP_32_TO_RM);
   arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(7, rm));
@@ -773,47 +839,67 @@ inline static void cmp(Array<uint8_t>& arr, uint8_t rm, int32_t i32) {
   arr.size += sizeof(uint32_t);
 }
 
-static void check_eq(Array<size_t>& instruction_offsets,
-                     Array<uint8_t>& out_code,
-                     const uint8_t** code_i_ptr, const uint8_t* end) {
+static void sete(Array<u8>& arr, u8 r) {
+  arr.insert(X64::REX | X64::rex_rm(r));
+  arr.insert(0x0F);
+  arr.insert(X64::SETE_RM8);
+  arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_rm(r));
+}
+
+static void setl(Array<u8>& arr, u8 r) {
+  arr.insert(X64::REX | X64::rex_rm(r));
+  arr.insert(0x0F);
+  arr.insert(X64::SETL_RM8);
+  arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_rm(r));
+}
+
+static void setg(Array<u8>& arr, u8 r) {
+  arr.insert(X64::REX | X64::rex_rm(r));
+  arr.insert(0x0F);
+  arr.insert(X64::SETG_RM8);
+  arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_rm(r));
+}
+
+static void check_cmp_jump(Array<size_t>& instruction_offsets,
+                           Array<uint8_t>& out_code,
+                           const uint8_t** code_i_ptr, const uint8_t* end,
+                           FUNCTION_PTR<void, Array<u8>&, i32> success_jump_func,
+                           FUNCTION_PTR<void, Array<u8>&, i32> fail_jump_func,
+                           FUNCTION_PTR<void, Array<u8>&, u8> no_jump) {
 
   const uint8_t* const code_i = *code_i_ptr;
   const uint8_t* const code_i_2 = code_i + ByteCode::SIZE_OF::EQ_R64S;
 
-  switch (*code_i) {
+  switch (*code_i_2) {
     case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
-        const auto p_e = ByteCode::PARSE::EQ_R64S(code_i);
-        const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(code_i_2);
+        const auto p_e = ByteCode::OP_R_R::parse(code_i);
+        const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_ZERO(code_i_2);
 
         cmp(out_code, p_e.val1, p_e.val2);
 
         instruction_offsets.insert(out_code.size);
-        jump_zero(out_code, (int32_t)p_j.u64.val);
+        fail_jump_func(out_code, (int32_t)p_j.u64.val);
 
-        *code_i_ptr = code_i_2 + ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
+        *code_i_ptr = code_i_2 + ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_ZERO;
         break;
       }
     case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
-        const auto p_e = ByteCode::PARSE::EQ_R64S(code_i);
+        const auto p_e = ByteCode::OP_R_R::parse(code_i);
         const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(code_i_2);
 
         cmp(out_code, p_e.val1, p_e.val2);
 
         instruction_offsets.insert(out_code.size);
-        jump_not_equal(out_code, (int32_t)p_j.u64.val);
+        success_jump_func(out_code, (int32_t)p_j.u64.val);
 
         *code_i_ptr = code_i_2 + ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
         break;
       }
     default: {
-        const auto p = ByteCode::PARSE::EQ_R64S(code_i);
+        const auto p = ByteCode::OP_R_R::parse(code_i);
 
         cmp(out_code, p.val1, p.val2);
-
-        out_code.insert(X64::REX | X64::rex_rm(p.val2));
-        out_code.insert(0x0F);
-        out_code.insert(X64::SETE_RM8);
-        out_code.insert(X64::MODRM_MOD_DIRECT | X64::modrm_rm(p.val2));
+        no_jump(out_code, p.val2);
 
         //Clear the top of the register
         out_code.insert(X64::REX_W | X64::rex_r_rm(p.val2, p.val2));
@@ -870,498 +956,504 @@ static void check_for_jumps(Array<size_t>& instruction_offsets, Array<uint8_t>& 
   }
 }
 
-void x86_64_machine_code_backend(Program* prog, Compiler* comp) {
-  Array<uint8_t> out_code ={};
+void x86_64_backend_code_block(Compiler* const comp,
+                               Program* prog,
+                               Array<uint8_t>& out_code,
+                               const CodeBlock* code,
+                               size_t* label_indexes,
+                               Array<size_t>& instruction_offsets) {
+  auto code_i = code->code.begin();
+  const auto code_end = code->code.end();
 
-  size_t* const label_indexes = allocate_default<size_t>(comp->labels);
-  DEFER(&) { free_no_destruct(label_indexes); };
-
-  Array<size_t> instruction_offsets ={};
-
-  size_t entry_point_label = -1;
-
-  {
-    auto func_i = comp->functions.begin_const_iter();
-    const auto func_end = comp->functions.end_const_iter();
-
-    for (; func_i != func_end; func_i.next()) {
-      const Function* const func = func_i.get();
-      if (!func->is_called && func->signature.name != comp->build_options.entry_point) {
-        //Isnt called and isnt entry point so dont need to compile
-        continue;
-      }
-
-      const CodeBlock* const code = &func->code_block;
-
-      auto code_i = code->code.begin();
-      const auto code_end = code->code.end();
-
-      //First is guaranteed to be label
-      {
-        const auto p = ByteCode::PARSE::LABEL(code_i);
-
-        label_indexes[p.u64.val] = out_code.size;
-
-        //Find entry point
-        if (func->signature.name == comp->build_options.entry_point
-            && func->signature.parameter_types.size == 0) {
-          entry_point_label = p.u64.val;
+  while (code_i < code_end) {
+    switch (*code_i) {
+      case ByteCode::RESERVE: {
+          code_i += ByteCode::SIZE_OF::RESERVE;
+          break;
         }
-
-        code_i += ByteCode::SIZE_OF::LABEL;
-      }
-
-      while (code_i < code_end) {
-        switch (*code_i) {
-          case ByteCode::RESERVE: {
-              code_i += ByteCode::SIZE_OF::RESERVE;
-              break;
-            }
-          case ByteCode::COPY_R64_TO_R64: {
-              const auto p = ByteCode::PARSE::COPY_R64_TO_R64(code_i);
-              X64::mov(out_code, p.val1, p.val2);
-              code_i += ByteCode::SIZE_OF::COPY_R64_TO_R64;
-              break;
-            }
-          case ByteCode::COPY_R8_TO_R8: {
-              const auto p = ByteCode::PARSE::COPY_R8_TO_R8(code_i);
-
-              X64::RM rm ={};
-              rm.r = p.val2;
-              rm.indirect = false;
-
-              X64::mov(out_code, X64::R8{ X64::R{p.val1} }, X64::RM8{ rm });
-              code_i += ByteCode::SIZE_OF::COPY_R8_TO_R8;
-              break;
-            }
-          case ByteCode::SET_R64_TO_64: {
-              const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
-              X64::mov(out_code, X64::R{ p.val }, p.u64);
-              code_i += ByteCode::SIZE_OF::SET_R64_TO_64;
-              break;
-            }
-          case ByteCode::SET_R8_TO_8: {
-              const auto p = ByteCode::PARSE::SET_R8_TO_8(code_i);
-
-              X64::mov(out_code, X64::R8{ X64::R{ p.val } }, p.u8);
-              code_i += ByteCode::SIZE_OF::SET_R8_TO_8;
-              break;
-            }
-          case ByteCode::ADD_R64S: {
-              const auto p = ByteCode::PARSE::ADD_R64S(code_i);
-
-              out_code.insert(X64::REX_W | X64::rex_r_rm(p.val1, p.val2));
-              out_code.insert(X64::ADD_R_TO_RM);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(p.val1, p.val2));
-
-              code_i += ByteCode::SIZE_OF::ADD_R64S;
-
-              check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
-              break;
-            }
-          case ByteCode::SUB_R64S: {
-              const auto p = ByteCode::PARSE::SUB_R64S(code_i);
-
-              X64::sub(out_code, p.val1, p.val2);
-
-              code_i += ByteCode::SIZE_OF::SUB_R64S;
-
-              check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
-              break;
-            }
-          case ByteCode::MUL_R64S: {
-              const auto p = ByteCode::PARSE::MUL_R64S(code_i);
-
-              //Can use IMUL here even though it might be unsigned (only important if you need the overflow??)
-              out_code.insert(X64::REX_W | X64::rex_r_rm(p.val2, p.val1));
-              out_code.insert(0x0F);
-              out_code.insert(X64::IMUL_RM_TO_R);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(p.val2, p.val1));
-
-              code_i += ByteCode::SIZE_OF::MUL_R64S;
-
-              check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
-              break;
-            }
-          case ByteCode::DIV_RU64S: {
-              const auto p = ByteCode::PARSE::DIV_RU64S(code_i);
-
-              assert(p.val2 == RAX.REG);
-
-              //Set RDX to 0
-              X64::mov(out_code, X64::R{ RDX.REG }, 0ull);
-
-              out_code.insert(X64::REX_W | X64::rex_rm(p.val1));
-              out_code.insert(X64::DIV_RM_TO_RAX);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(6, p.val1));
-
-              code_i += ByteCode::SIZE_OF::DIV_RU64S;
-
-              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
-              break;
-            }
-          case ByteCode::DIV_RI64S: {
-              const auto p = ByteCode::PARSE::DIV_RI64S(code_i);
-
-              assert(p.val2 == RAX.REG);
-
-              //Sign extend to RDX
-              out_code.insert(X64::REX_W);
-              out_code.insert(X64::CQO);
-
-              out_code.insert(X64::REX_W | X64::rex_rm(p.val1));
-              out_code.insert(X64::IDIV_RM_TO_RAX);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(7, p.val1));
-
-              code_i += ByteCode::SIZE_OF::DIV_RI64S;
-
-              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
-              break;
-            }
-          case ByteCode::SHIFT_L_BY_R8_R64: {
-              const auto p = ByteCode::PARSE::SHIFT_L_BY_R8_R64(code_i);
-
-              assert(p.val1 == RCX.REG);
-
-              out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
-              out_code.insert(X64::SAL_R_BY_CL);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(7, p.val2));
-
-              code_i += ByteCode::SIZE_OF::SHIFT_L_BY_R8_R64;
-
-              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
-              break;
-            }
-          case ByteCode::SHIFT_R_BY_R8_RU64: {
-              const auto p = ByteCode::PARSE::SHIFT_R_BY_R8_RU64(code_i);
-
-              assert(p.val1 == RCX.REG);
-
-              out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
-              out_code.insert(X64::SHR_R_BY_CL);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(5, p.val2));
-
-              code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RU64;
-
-              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
-              break;
-            }
-          case ByteCode::SHIFT_R_BY_R8_RI64: {
-              const auto p = ByteCode::PARSE::SHIFT_R_BY_R8_RI64(code_i);
-
-              assert(p.val1 == RCX.REG);
-
-              out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
-              out_code.insert(X64::SAR_R_BY_CL);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(7, p.val2));
-
-              code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RI64;
-
-              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
-              break;
-            }
-          case ByteCode::OR_R64S: {
-              const auto p = ByteCode::PARSE::OR_R64S(code_i);
-
-              out_code.insert(X64::REX_W | X64::rex_r_rm(p.val1, p.val2));
-              out_code.insert(X64::OR_R_TO_RM);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(p.val1, p.val2));
-
-              code_i += ByteCode::SIZE_OF::OR_R64S;
-
-              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
-              break;
-            }
-          case ByteCode::AND_R64S: {
-              const auto p = ByteCode::PARSE::AND_R64S(code_i);
-
-              out_code.insert(X64::REX_W | X64::rex_r_rm(p.val1, p.val2));
-              out_code.insert(X64::AND_R_TO_RM);
-              out_code.insert(X64::MODRM_MOD_DIRECT
-                              | X64::modrm_r_rm(p.val1, p.val2));
-
-              code_i += ByteCode::SIZE_OF::AND_R64S;
-
-              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
-              break;
-            }
-          case ByteCode::EQ_R64S: {
-              check_eq(instruction_offsets, out_code, &code_i, code_end);
-              break;
-            }
-          case ByteCode::NEG_R64: {
-              const auto p = ByteCode::PARSE::NEG_R64(code_i);
-
-              out_code.insert(X64::REX_W | X64::rex_rm(p.val));
-              out_code.insert(X64::NEG_RM);
-              out_code.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(3, p.val));
-
-              code_i += ByteCode::SIZE_OF::NEG_R64;
-
-              check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
-              break;
-            }
-          case ByteCode::PUSH_R64: {
-              const auto p = ByteCode::PARSE::PUSH_R64(code_i);
-
-              X64::push(out_code, p.val);
-              code_i += ByteCode::SIZE_OF::PUSH_R64;
-              break;
-            }
-          case ByteCode::POP_TO_R64: {
-              const auto p = ByteCode::PARSE::POP_TO_R64(code_i);
-
-              X64::pop(out_code, p.val);
-              code_i += ByteCode::SIZE_OF::POP_TO_R64;
-              break;
-            }
-          case ByteCode::PUSH_FRAME: {
-              const auto p = ByteCode::PARSE::PUSH_FRAME(code_i);
-
-              X64::push(out_code, RBP.REG);
-              X64::mov(out_code, RSP.REG, RBP.REG);
-
-              code_i += ByteCode::SIZE_OF::PUSH_FRAME;
-              break;
-            }
-          case ByteCode::POP_FRAME: {
-              const auto p = ByteCode::PARSE::POP_FRAME(code_i);
-
-              X64::mov(out_code, RBP.REG, RSP.REG);
-              X64::pop(out_code, RBP.REG);
-
-              code_i += ByteCode::SIZE_OF::POP_FRAME;
-              break;
-            }
-          case ByteCode::ALLOCATE_STACK: {
-              const auto p = ByteCode::PARSE::ALLOCATE_STACK(code_i);
-
-              X64::sub(out_code, RSP.REG, (int32_t)p.u64.sig_val);
-
-              code_i += ByteCode::SIZE_OF::ALLOCATE_STACK;
-              break;
-            }
-          case ByteCode::COPY_R64_TO_MEM: {
-              const auto i = ByteCode::PARSE::COPY_R64_TO_MEM(code_i);
-
-              X64::RM rm = X64::rm_from_mem_complex(i.mem);
-
-              X64::mov(out_code, X64::R{ i.val }, rm);
-
-              code_i += ByteCode::SIZE_OF::COPY_R64_TO_MEM;
-              break;
-            }
-          case ByteCode::COPY_64_TO_MEM: {
-              const auto i = ByteCode::PARSE::COPY_64_TO_MEM(code_i);
-
-              X64::RM rm = X64::rm_from_mem_complex(i.mem);
-
-              const uint32_t low = i.u64.val & 0xFFFFFFFF;
-              const uint32_t high = (i.u64.val >> (8 * 4)) & 0xFFFFFFFF;
-
-
-              if (can_be_from_sign_extension(i.u64.val)) {
-
-                //Sign extend
-                X64::mov(out_code, rm, X64::IMM32{ true, low });
-              }
-              else {
-                rm.disp += 4;
-                X64::mov(out_code, rm, X64::IMM32{ false, high });
-
-                rm.disp -= 4;
-                X64::mov(out_code, rm, X64::IMM32{ false, low });
-              }
-
-              code_i += ByteCode::SIZE_OF::COPY_64_TO_MEM;
-              break;
-            }
-          case ByteCode::LOAD_ADDRESS: {
-              const auto i = ByteCode::PARSE::LOAD_ADDRESS(code_i);
-
-              X64::RM rm = X64::rm_from_mem_complex(i.mem);
-
-              X64::lea(out_code, rm, X64::R{ i.val });
-
-
-              code_i += ByteCode::SIZE_OF::LOAD_ADDRESS;
-              break;
-            }
-          case ByteCode::COPY_R8_FROM_MEM: {
-              const auto p = ByteCode::PARSE::COPY_R8_FROM_MEM(code_i);
-
-              X64::RM rm = X64::rm_from_mem_complex(p.mem);
-
-              X64::mov(out_code, X64::R8{ X64::R{p.val} }, X64::RM8{ rm });
-              code_i += ByteCode::SIZE_OF::COPY_R8_FROM_MEM;
-              break;
-            }
-          case ByteCode::COPY_R64_FROM_MEM: {
-              const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(code_i);
-
-              X64::RM rm = X64::rm_from_mem_complex(i.mem);
-
-              X64::mov(out_code, rm, X64::R{ i.val });
-
-              code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
-              break;
-            }
-          case ByteCode::CONV_RU8_TO_R64: {
-              const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(code_i);
-
-              out_code.insert(X64::REX_W | X64::rex_r_rm(i.val, i.val));
-              out_code.insert(0x0F);
-              out_code.insert(X64::MOV_ZX_RM8_TO_R);
-              out_code.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(i.val, i.val));
-
-              code_i += ByteCode::SIZE_OF::CONV_RU8_TO_R64;
-              break;
-            }
-          case ByteCode::CONV_RI8_TO_R64: {
-              const auto i = ByteCode::PARSE::CONV_RI8_TO_R64(code_i);
-
-              out_code.insert(X64::REX_W | X64::rex_r_rm(i.val, i.val));
-              out_code.insert(0x0F);
-              out_code.insert(X64::MOV_SX_RM8_TO_R);
-              out_code.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(i.val, i.val));
-
-              code_i += ByteCode::SIZE_OF::CONV_RI8_TO_R64;
-              break;
-            }
-          case ByteCode::LABEL: {
-              const auto p = ByteCode::PARSE::LABEL(code_i);
-
-              label_indexes[p.u64.val] = out_code.size;
-
-              code_i += ByteCode::SIZE_OF::LABEL;
-              break;
-            }
-          case ByteCode::RETURN: {
-              X64::ret(out_code);
-              code_i += ByteCode::SIZE_OF::RETURN;
-              break;
-            }
-          case ByteCode::CALL: {
-              const auto p = ByteCode::PARSE::CALL(code_i);
-              const FunctionBase* func_base = p.u64;
-              if (func_base->func_type == FUNCTION_TYPE::POINTER) {
-                //Is known at this time
-                assert(false);
-              }
-              else {
-                const Function* func = (const Function*)func_base;
-                instruction_offsets.insert(out_code.size);
-                //Switch to a code label rather than func ptr
-                call_near(out_code, (int32_t)func->code_block.label);
-              }
-
-              code_i += ByteCode::SIZE_OF::CALL;
-              break;
-            }
-          case ByteCode::JUMP_TO_FIXED: {
-              const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED(code_i);
-              code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED;
-
-              //Can ignore anything between a fixed jump and a label - it wont every be reached
-              while (code_i < code_end && code_i[0] != ByteCode::LABEL) {
-                code_i += ByteCode::instruction_size(code_i[0]);
-              }
-
-              size_t next = 0;
-
-              //Could be series of labels so needs to while loop
-              while (code_i + next < code_end && code_i[next] == ByteCode::LABEL) {
-                const auto p_l = ByteCode::PARSE::LABEL(code_i + next);
-
-                if (p_l.u64.val == p_j.u64.val) {
-                  //About to jump to next instruction - can ignore jump
-                  goto SKIP_JUMP;
-                }
-
-                //Next might also be a label
-                next += ByteCode::SIZE_OF::LABEL;
-              }
-
-              instruction_offsets.insert(out_code.size);
-              jump_near(out_code, (int32_t)p_j.u64.val);
-
-            SKIP_JUMP:
-              break;
-            }
-          case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
-              const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(code_i);
-
-              //need to recompare
-              cmp(out_code, p.val, (int32_t)0);
-
-              instruction_offsets.insert(out_code.size);
-              jump_zero(out_code, (int32_t)p.u64.val);
-
-              code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
-              break;
-            }
-          case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
-              const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(code_i);
-
-              //need to recompare
-              cmp(out_code, p.val, (int32_t)0);
-
-              instruction_offsets.insert(out_code.size);
-              jump_not_equal(out_code, (int32_t)p.u64.val);
-
-              code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
-              break;
-            }
-          default: {
-              uint8_t op = *code_i;
-              comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
-                                 "Backend found unsupported bytecode instruction\n"
-                                 "Code: {}, Name: {}",
-                                 op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
-              return;
-            }
+      case ByteCode::COPY_R64_TO_R64: {
+          const auto p = ByteCode::PARSE::COPY_R64_TO_R64(code_i);
+          X64::mov(out_code, p.val1, p.val2);
+          code_i += ByteCode::SIZE_OF::COPY_R64_TO_R64;
+          break;
         }
-      }
+      case ByteCode::COPY_R8_TO_R8: {
+          const auto p = ByteCode::PARSE::COPY_R8_TO_R8(code_i);
+
+          X64::RM rm ={};
+          rm.r = p.val2;
+          rm.indirect = false;
+
+          X64::mov(out_code, X64::R8{ X64::R{p.val1} }, X64::RM8{ rm });
+          code_i += ByteCode::SIZE_OF::COPY_R8_TO_R8;
+          break;
+        }
+      case ByteCode::SET_R64_TO_64: {
+          const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
+          X64::mov(out_code, X64::R{ p.val }, p.u64);
+          code_i += ByteCode::SIZE_OF::SET_R64_TO_64;
+          break;
+        }
+      case ByteCode::SET_R8_TO_8: {
+          const auto p = ByteCode::PARSE::SET_R8_TO_8(code_i);
+
+          X64::mov(out_code, X64::R8{ X64::R{ p.val } }, p.u8);
+          code_i += ByteCode::SIZE_OF::SET_R8_TO_8;
+          break;
+        }
+      case ByteCode::ADD_R64S: {
+          const auto p = ByteCode::PARSE::ADD_R64S(code_i);
+
+          out_code.insert(X64::REX_W | X64::rex_r_rm(p.val1, p.val2));
+          out_code.insert(X64::ADD_R_TO_RM);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(p.val1, p.val2));
+
+          code_i += ByteCode::SIZE_OF::ADD_R64S;
+
+          check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
+          break;
+        }
+      case ByteCode::SUB_R64S: {
+          const auto p = ByteCode::PARSE::SUB_R64S(code_i);
+
+          X64::sub(out_code, p.val1, p.val2);
+
+          code_i += ByteCode::SIZE_OF::SUB_R64S;
+
+          check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
+          break;
+        }
+      case ByteCode::MUL_R64S: {
+          const auto p = ByteCode::PARSE::MUL_R64S(code_i);
+
+          //Can use IMUL here even though it might be unsigned (only important if you need the overflow??)
+          out_code.insert(X64::REX_W | X64::rex_r_rm(p.val2, p.val1));
+          out_code.insert(0x0F);
+          out_code.insert(X64::IMUL_RM_TO_R);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(p.val2, p.val1));
+
+          code_i += ByteCode::SIZE_OF::MUL_R64S;
+
+          check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
+          break;
+        }
+      case ByteCode::DIV_RU64S: {
+          const auto p = ByteCode::PARSE::DIV_RU64S(code_i);
+
+          assert(p.val2 == RAX.REG);
+
+          //Set RDX to 0
+          X64::mov(out_code, X64::R{ RDX.REG }, 0ull);
+
+          out_code.insert(X64::REX_W | X64::rex_rm(p.val1));
+          out_code.insert(X64::DIV_RM_TO_RAX);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(6, p.val1));
+
+          code_i += ByteCode::SIZE_OF::DIV_RU64S;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::DIV_RI64S: {
+          const auto p = ByteCode::PARSE::DIV_RI64S(code_i);
+
+          assert(p.val2 == RAX.REG);
+
+          //Sign extend to RDX
+          out_code.insert(X64::REX_W);
+          out_code.insert(X64::CQO);
+
+          out_code.insert(X64::REX_W | X64::rex_rm(p.val1));
+          out_code.insert(X64::IDIV_RM_TO_RAX);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(7, p.val1));
+
+          code_i += ByteCode::SIZE_OF::DIV_RI64S;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::SHIFT_L_BY_R8_R64: {
+          const auto p = ByteCode::PARSE::SHIFT_L_BY_R8_R64(code_i);
+
+          assert(p.val1 == RCX.REG);
+
+          out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
+          out_code.insert(X64::SAL_R_BY_CL);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(7, p.val2));
+
+          code_i += ByteCode::SIZE_OF::SHIFT_L_BY_R8_R64;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::SHIFT_R_BY_R8_RU64: {
+          const auto p = ByteCode::PARSE::SHIFT_R_BY_R8_RU64(code_i);
+
+          assert(p.val1 == RCX.REG);
+
+          out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
+          out_code.insert(X64::SHR_R_BY_CL);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(5, p.val2));
+
+          code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RU64;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::SHIFT_R_BY_R8_RI64: {
+          const auto p = ByteCode::PARSE::SHIFT_R_BY_R8_RI64(code_i);
+
+          assert(p.val1 == RCX.REG);
+
+          out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
+          out_code.insert(X64::SAR_R_BY_CL);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(7, p.val2));
+
+          code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RI64;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::OR_R64S: {
+          const auto p = ByteCode::PARSE::OR_R64S(code_i);
+
+          out_code.insert(X64::REX_W | X64::rex_r_rm(p.val2, p.val1));
+          out_code.insert(X64::OR_R_TO_RM);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(p.val2, p.val1));
+
+          code_i += ByteCode::SIZE_OF::OR_R64S;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::XOR_R64S: {
+          const auto p = ByteCode::PARSE::XOR_R64S(code_i);
+
+          out_code.insert(X64::REX_W | X64::rex_r_rm(p.val2, p.val1));
+          out_code.insert(X64::XOR_R_TO_RM);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(p.val2, p.val1));
+
+          code_i += ByteCode::SIZE_OF::XOR_R64S;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::AND_R64S: {
+          const auto p = ByteCode::PARSE::AND_R64S(code_i);
+
+          out_code.insert(X64::REX_W | X64::rex_r_rm(p.val2, p.val1));
+          out_code.insert(X64::AND_R_TO_RM);
+          out_code.insert(X64::MODRM_MOD_DIRECT
+                          | X64::modrm_r_rm(p.val2, p.val1));
+
+          code_i += ByteCode::SIZE_OF::AND_R64S;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::EQ_R64S: {
+          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+                         jump_equal, jump_not_equal, sete);
+          break;
+        }
+      case ByteCode::LESS_U64S: {
+          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+                         jump_below, jump_not_below, setl);
+          break;
+        }
+      case ByteCode::GREAT_U64S: {
+          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+                         jump_above, jump_not_above, setg);
+          break;
+        }
+      case ByteCode::LESS_I64S: {
+          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+                         jump_lesser, jump_not_lesser, setl);
+          break;
+        }
+      case ByteCode::GREAT_I64S: {
+          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+                         jump_greater, jump_not_greater, setg);
+          break;
+        }
+      case ByteCode::NEG_R64: {
+          const auto p = ByteCode::PARSE::NEG_R64(code_i);
+
+          out_code.insert(X64::REX_W | X64::rex_rm(p.val));
+          out_code.insert(X64::NEG_RM);
+          out_code.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(3, p.val));
+
+          code_i += ByteCode::SIZE_OF::NEG_R64;
+
+          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          break;
+        }
+      case ByteCode::PUSH_R64: {
+          const auto p = ByteCode::PARSE::PUSH_R64(code_i);
+
+          X64::push(out_code, p.val);
+          code_i += ByteCode::SIZE_OF::PUSH_R64;
+          break;
+        }
+      case ByteCode::POP_TO_R64: {
+          const auto p = ByteCode::PARSE::POP_TO_R64(code_i);
+
+          X64::pop(out_code, p.val);
+          code_i += ByteCode::SIZE_OF::POP_TO_R64;
+          break;
+        }
+      case ByteCode::PUSH_FRAME: {
+          const auto p = ByteCode::PARSE::PUSH_FRAME(code_i);
+
+          X64::push(out_code, RBP.REG);
+          X64::mov(out_code, RSP.REG, RBP.REG);
+
+          code_i += ByteCode::SIZE_OF::PUSH_FRAME;
+          break;
+        }
+      case ByteCode::POP_FRAME: {
+          const auto p = ByteCode::PARSE::POP_FRAME(code_i);
+
+          X64::mov(out_code, RBP.REG, RSP.REG);
+          X64::pop(out_code, RBP.REG);
+
+          code_i += ByteCode::SIZE_OF::POP_FRAME;
+          break;
+        }
+      case ByteCode::ALLOCATE_STACK: {
+          const auto p = ByteCode::PARSE::ALLOCATE_STACK(code_i);
+
+          X64::sub(out_code, RSP.REG, (int32_t)p.u64.sig_val);
+
+          code_i += ByteCode::SIZE_OF::ALLOCATE_STACK;
+          break;
+        }
+      case ByteCode::COPY_R64_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R64_TO_MEM(code_i);
+
+          X64::RM rm = X64::rm_from_mem_complex(i.mem);
+
+          X64::mov(out_code, X64::R{ i.val }, rm);
+
+          code_i += ByteCode::SIZE_OF::COPY_R64_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_64_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_64_TO_MEM(code_i);
+
+          X64::RM rm = X64::rm_from_mem_complex(i.mem);
+
+          const uint32_t low = i.u64.val & 0xFFFFFFFF;
+          const uint32_t high = (i.u64.val >> (8 * 4)) & 0xFFFFFFFF;
+
+
+          if (can_be_from_sign_extension(i.u64.val)) {
+
+            //Sign extend
+            X64::mov(out_code, rm, X64::IMM32{ true, low });
+          }
+          else {
+            rm.disp += 4;
+            X64::mov(out_code, rm, X64::IMM32{ false, high });
+
+            rm.disp -= 4;
+            X64::mov(out_code, rm, X64::IMM32{ false, low });
+          }
+
+          code_i += ByteCode::SIZE_OF::COPY_64_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_32_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_32_TO_MEM(code_i);
+
+          X64::RM rm = X64::rm_from_mem_complex(i.mem);
+
+          X64::mov(out_code, rm, X64::IMM32{ false, i.u32 });
+
+          code_i += ByteCode::SIZE_OF::COPY_32_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_16_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_16_TO_MEM(code_i);
+
+          X64::RM rm = X64::rm_from_mem_complex(i.mem);
+
+          X64::mov(out_code, rm, i.u16);
+
+          code_i += ByteCode::SIZE_OF::COPY_16_TO_MEM;
+          break;
+        }
+      case ByteCode::LOAD_ADDRESS: {
+          const auto i = ByteCode::PARSE::LOAD_ADDRESS(code_i);
+
+          X64::RM rm = X64::rm_from_mem_complex(i.mem);
+
+          X64::lea(out_code, rm, X64::R{ i.val });
+
+
+          code_i += ByteCode::SIZE_OF::LOAD_ADDRESS;
+          break;
+        }
+      case ByteCode::COPY_R8_FROM_MEM: {
+          const auto p = ByteCode::PARSE::COPY_R8_FROM_MEM(code_i);
+
+          X64::RM rm = X64::rm_from_mem_complex(p.mem);
+
+          X64::mov(out_code, X64::RM8{ rm }, X64::R8{ X64::R{p.val} });
+          code_i += ByteCode::SIZE_OF::COPY_R8_FROM_MEM;
+          break;
+        }
+      case ByteCode::COPY_R64_FROM_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(code_i);
+
+          X64::RM rm = X64::rm_from_mem_complex(i.mem);
+
+          X64::mov(out_code, rm, X64::R{ i.val });
+
+          code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
+          break;
+        }
+      case ByteCode::CONV_RU8_TO_R64: {
+          const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(code_i);
+
+          out_code.insert(X64::REX_W | X64::rex_r_rm(i.val, i.val));
+          out_code.insert(0x0F);
+          out_code.insert(X64::MOV_ZX_RM8_TO_R);
+          out_code.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(i.val, i.val));
+
+          code_i += ByteCode::SIZE_OF::CONV_RU8_TO_R64;
+          break;
+        }
+      case ByteCode::CONV_RI8_TO_R64: {
+          const auto i = ByteCode::PARSE::CONV_RI8_TO_R64(code_i);
+
+          out_code.insert(X64::REX_W | X64::rex_r_rm(i.val, i.val));
+          out_code.insert(0x0F);
+          out_code.insert(X64::MOV_SX_RM8_TO_R);
+          out_code.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(i.val, i.val));
+
+          code_i += ByteCode::SIZE_OF::CONV_RI8_TO_R64;
+          break;
+        }
+      case ByteCode::LABEL: {
+          const auto p = ByteCode::PARSE::LABEL(code_i);
+
+          label_indexes[p.u64.val] = out_code.size;
+
+          code_i += ByteCode::SIZE_OF::LABEL;
+          break;
+        }
+      case ByteCode::RETURN: {
+          X64::ret(out_code);
+          code_i += ByteCode::SIZE_OF::RETURN;
+          break;
+        }
+      case ByteCode::CALL: {
+          const auto p = ByteCode::PARSE::CALL(code_i);
+          const Function* func = p.u64;
+          instruction_offsets.insert(out_code.size);
+          //Switch to a code label rather than func ptr
+          call_near(out_code, (int32_t)func->code_block.label);
+
+
+          code_i += ByteCode::SIZE_OF::CALL;
+          break;
+        }
+      case ByteCode::CALL_LABEL: {
+          const auto p = ByteCode::PARSE::CALL_LABEL(code_i);
+          const u64 label = p.u64;
+
+          instruction_offsets.insert(out_code.size);
+          call_near(out_code, (int32_t)label);
+
+          code_i += ByteCode::SIZE_OF::CALL_LABEL;
+          break;
+        }
+      case ByteCode::JUMP_TO_FIXED: {
+          const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED(code_i);
+          code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED;
+
+          //Can ignore anything between a fixed jump and a label - it wont every be reached
+          while (code_i < code_end && code_i[0] != ByteCode::LABEL) {
+            code_i += ByteCode::instruction_size(code_i[0]);
+          }
+
+          size_t next = 0;
+
+          //Could be series of labels so needs to while loop
+          while (code_i + next < code_end && code_i[next] == ByteCode::LABEL) {
+            const auto p_l = ByteCode::PARSE::LABEL(code_i + next);
+
+            if (p_l.u64.val == p_j.u64.val) {
+              //About to jump to next instruction - can ignore jump
+              goto SKIP_JUMP;
+            }
+
+            //Next might also be a label
+            next += ByteCode::SIZE_OF::LABEL;
+          }
+
+          instruction_offsets.insert(out_code.size);
+          jump_near(out_code, (int32_t)p_j.u64.val);
+
+        SKIP_JUMP:
+          break;
+        }
+      case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
+          const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(code_i);
+
+          //need to recompare
+          cmp(out_code, p.val, (int32_t)0);
+
+          instruction_offsets.insert(out_code.size);
+          jump_zero(out_code, (int32_t)p.u64.val);
+
+          code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
+          break;
+        }
+      case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
+          const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(code_i);
+
+          //need to recompare
+          cmp(out_code, p.val, (int32_t)0);
+
+          instruction_offsets.insert(out_code.size);
+          jump_not_equal(out_code, (int32_t)p.u64.val);
+
+          code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
+          break;
+        }
+      default: {
+          uint8_t op = *code_i;
+          comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                             "Backend found unsupported bytecode instruction\n"
+                             "Code: {}, Name: {}",
+                             op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
+          return;
+        }
     }
   }
+}
 
-  {
-    auto jumps_i = instruction_offsets.begin();
-    const auto jumps_end = instruction_offsets.end();
+void x86_64_backend_fix_jump(uint8_t* code, size_t index, size_t* label_indexes) {
+  if (code[index] == 0x0F) index++;
 
-    for (; jumps_i < jumps_end; jumps_i++) {
-      size_t index = *jumps_i;
+  //jumps are all from the end of the instruction
+  //all jumps are a op + imm32 (so far)
 
-      if (out_code.data[index] == 0x0F) index++;
+  const uint64_t j_index = x32_from_bytes(code + index + 1);
+  const int32_t jump = (int32_t)label_indexes[j_index] - (int32_t)(index + 1 + sizeof(int32_t));
 
-      //jumps are all from the end of the instruction
-      //all jumps are a op + imm32 (so far)
-
-      const uint64_t j_index = x32_from_bytes(out_code.data + index + 1);
-      const int32_t jump = (int32_t)label_indexes[j_index] - (int32_t)(index + 1 + sizeof(int32_t));
-
-      x32_to_bytes(jump, out_code.data + index + 1);
-    }
-  }
-
-  if (entry_point_label <= comp->labels) {
-    prog->entry_point = label_indexes[entry_point_label];
-  }
-  else {
-    comp->report_error(ERROR_CODE::LINK_ERROR, Span{},
-                       "Could not find entry point");
-  }
-
-  prog->code_size = out_code.size;
-  prog->code = std::move(out_code);
+  x32_to_bytes(jump, code + index + 1);
 }
 
 struct RegisterNames {
@@ -1643,26 +1735,26 @@ static RegisterNames register_names(x86PrintOptions* p_opts,
 }
 
 static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_address, bool short_operand) {
+  if (short_address) {
+    ops->rm_name = b32_reg_name;
+  }
+  else {
+    ops->rm_name = x86_64_reg_name_from_num;
+  }
+  
   if (rex_w) {
     ops->r_name = x86_64_reg_name_from_num;
-    ops->rm_name = x86_64_reg_name_from_num;
+    ops->mem_size = "QWORD PTR";
   }
   else {
     if (short_operand) {
       ops->r_name = b16_reg_name;
-      ops->rm_name = b16_reg_name;
+      ops->mem_size = "WORD PTR";
     }
     else {
       ops->r_name = b32_reg_name;
-      ops->rm_name = b32_reg_name;
+      ops->mem_size = "DWORD PTR";
     }
-  }
-
-  if (short_address) {
-    ops->mem_size = "DWORD PTR";
-  }
-  else {
-    ops->mem_size = "QWORD PTR";
   }
 }
 
@@ -1736,6 +1828,16 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
             printf("sub %s, %s\n", names.rm.ptr, names.r.ptr);
+            break;
+          }
+        case X64::XOR_R_TO_RM: {
+            uint8_t modrm = *bytes++;
+
+            load_default_sizes(&p_opts, true, short_address, short_operand);
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+
+            printf("xor %s, %s\n", names.rm.ptr, names.r.ptr);
             break;
           }
         case X64::CMP_R_TO_RM: {
@@ -2036,6 +2138,28 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
                   printf("sete %s\n", r_string.ptr);
                   break;
                 }
+              case X64::SETG_RM8: {
+                  uint8_t modrm = *bytes++;
+
+                  p_opts.rm_name = b8_rex_reg_name;
+                  p_opts.r_name = b8_rex_reg_name;
+                  p_opts.mem_size = "BYTE PTR";
+
+                  OwnedPtr<char> r_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+                  printf("setg %s\n", r_string.ptr);
+                  break;
+                }
+              case X64::SETL_RM8: {
+                  uint8_t modrm = *bytes++;
+
+                  p_opts.rm_name = b8_rex_reg_name;
+                  p_opts.r_name = b8_rex_reg_name;
+                  p_opts.mem_size = "BYTE PTR";
+
+                  OwnedPtr<char> r_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+                  printf("setl %s\n", r_string.ptr);
+                  break;
+                }
               default: {
                   printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
                          maybe_rex, op, op2);
@@ -2054,14 +2178,14 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
       }
     }
     else if (maybe_rex == 0x0F) {
-      //0xFF instructions
+      //0x0F instructions
       uint8_t op = *bytes++;
       switch (op) {
-        case X64::JZ_NEAR: {
+        case X64::JE_NEAR: {
             int rel32 = x32_from_bytes(bytes);
             bytes += 4;
 
-            printf("jz 0x%llx\n", bytes - machine_code + rel32);
+            printf("je 0x%llx\n", bytes - machine_code + rel32);
             break;
           }
         case X64::JNE_NEAR: {
@@ -2069,6 +2193,62 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             bytes += 4;
 
             printf("jne 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::JB_NEAR: {
+            int rel32 = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("jb 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::JNB_NEAR: {
+            int rel32 = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("jnb 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::JA_NEAR: {
+            int rel32 = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("ja 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::JNA_NEAR: {
+            int rel32 = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("jna 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::JL_NEAR: {
+            int rel32 = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("jl 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::JNL_NEAR: {
+            int rel32 = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("jnl 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::JG_NEAR: {
+            int rel32 = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("jg 0x%llx\n", bytes - machine_code + rel32);
+            break;
+          }
+        case X64::JNG_NEAR: {
+            int rel32 = x32_from_bytes(bytes);
+            bytes += 4;
+
+            printf("jng 0x%llx\n", bytes - machine_code + rel32);
             break;
           }
         case X64::SETE_RM8: {
@@ -2079,6 +2259,26 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
 
             OwnedPtr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &bytes);
             printf("sete %s\n", r_string.ptr);
+            break;
+          }
+        case X64::SETL_RM8: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.rm_name = b8_rex_reg_name;
+            p_opts.mem_size = "BYTE PTR";
+
+            OwnedPtr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &bytes);
+            printf("setl %s\n", r_string.ptr);
+            break;
+          }
+        case X64::SETG_RM8: {
+            uint8_t modrm = *bytes++;
+
+            p_opts.rm_name = b8_rex_reg_name;
+            p_opts.mem_size = "BYTE PTR";
+
+            OwnedPtr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &bytes);
+            printf("setg %s\n", r_string.ptr);
             break;
           }
         default: {

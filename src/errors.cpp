@@ -1,4 +1,5 @@
 #include "errors.h"
+#include "files.h"
 
 OwnedPtr<char> load_span_from_source(const Span& span, const char* source) {
   Array<char> res ={};
@@ -128,4 +129,53 @@ OwnedPtr<char> load_span_from_source(const Span& span, const char* source) {
   }
 
   return res;
+}
+
+ERROR_CODE Errors::print_all() const {
+  ERROR_CODE ret = ERROR_CODE::NO_ERRORS;
+
+  IO::err_print("--- Compiler Encountered A Fatal Error ---\n\n");
+
+  auto i = error_messages.begin();
+  const auto end = error_messages.end();
+
+  InternHashTable<OwnedPtr<const char>> files ={};
+
+  for (; i < end; i++) {
+    ret = i->type;
+
+    const char* message_type = error_code_string(i->type);
+    IO::err_print(message_type);
+    IO::err_print(":\n");
+
+    OwnedPtr<char> type_set_message = format_type_set(i->message.ptr, 4, 70);
+
+    IO::err_print(type_set_message.ptr);
+    IO::err_print('\n');
+
+    if (i->span.full_path != nullptr) {
+      const Span& span = i->span;
+
+      IO::err_print("Location: ");
+
+      if (!files.contains(i->span.full_path)) {
+        auto load_file = FILES::load_file_to_string(i->span.full_path->string);
+
+        files.insert(i->span.full_path, std::move(load_file));
+      }
+
+      OwnedPtr<const char>* ptr_ptr = files.get_val(i->span.full_path);
+      assert(ptr_ptr != nullptr);
+
+      const char* source = ptr_ptr->ptr;
+      OwnedPtr<char> string = load_span_from_source(span, source);
+
+      IO::err_print(format("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start));
+      IO::err_print(string.ptr);
+      IO::err_print("\n\n");
+    }
+  }
+
+  IO::err_print("------------------------------------------\n");
+  return ret;
 }

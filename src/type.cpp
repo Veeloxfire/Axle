@@ -11,6 +11,7 @@ FreelistBlockAllocator<Structure> Types::base_structures ={};
 FreelistBlockAllocator<EnumValue> Types::enum_values ={};
 FreelistBlockAllocator<ArrayStructure> Types::array_structures ={};
 FreelistBlockAllocator<PointerStructure> Types::pointer_structures ={};
+FreelistBlockAllocator<SignatureStructure> Types::lambda_structures ={};
 
 uint32_t Structure::size() const {
   switch (type) {
@@ -37,6 +38,8 @@ uint32_t Structure::size() const {
         break;
       }
     case STRUCTURE_TYPE::VOID: return 0;
+    case STRUCTURE_TYPE::LAMBDA: return 8;
+    case STRUCTURE_TYPE::STRUCT: return 8;
   }
 
   assert(false);
@@ -65,6 +68,7 @@ uint32_t Structure::alignment() const {
         break;
       }
     case STRUCTURE_TYPE::VOID: return 0;
+    case STRUCTURE_TYPE::LAMBDA: return 8;
   }
 
   assert(false);
@@ -159,7 +163,7 @@ const Structure* get_signed_type_of(const Types* types, const Structure* s) {
 }
 
 void TypeCreator::add_type_to_namespace(const Structure* s, const InternString* name, const Span& span) {
-  NamedElement* el = comp->names->create_name(current_namespace, name);
+  NamedElement* el = comp->services.names->create_name(current_namespace, name);
   if (el == nullptr) {
     comp->report_error(ERROR_CODE::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
@@ -167,16 +171,21 @@ void TypeCreator::add_type_to_namespace(const Structure* s, const InternString* 
     return;
   }
 
-  el->structure = s;
+  Global* glob = comp->globals.insert();
+  glob->name = name;
+  glob->type = meta_struct;//meta type for all types
+  glob->constant_value = (void*)s;
+
+  el->globals.insert(glob);
 }
 
 SimpleLiteralStructure* TypeCreator::new_simple_literal_type(const Span& span,
                                                              const InternString* name) {
-  SimpleLiteralStructure* const type = comp->types->simple_literal_structures.allocate();
+  SimpleLiteralStructure* const type = comp->services.types->simple_literal_structures.allocate();
   type->type = STRUCTURE_TYPE::SIMPLE_LITERAL;
   type->name = name;
 
-  comp->types->structures.insert(type);
+  comp->services.types->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
@@ -185,7 +194,7 @@ SimpleLiteralStructure* TypeCreator::new_simple_literal_type(const Span& span,
 
 TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
                                                            Array<const Structure*>&& types) {
-  TupleLiteralStructure* const type = comp->types->tuple_literal_structures.allocate();
+  TupleLiteralStructure* const type = comp->services.types->tuple_literal_structures.allocate();
 
   type->type = STRUCTURE_TYPE::TUPLE_LITERAL;
 
@@ -245,10 +254,51 @@ TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
 
     type->cached_size = current_size;
     type->cached_alignment = current_align;
-    type->name = comp->strings->intern(name.data);
+    type->name = comp->services.strings->intern(name.data);
   }
 
-  comp->types->structures.insert(type);
+  comp->services.types->structures.insert(type);
+
+  add_type_to_namespace((const Structure*)type, type->name, span);
+
+  return type;
+}
+
+
+SignatureStructure* TypeCreator::new_lambda_type(const Span& span,
+                                                 const CallingConvention* conv,
+                                                 Array<const Structure*>&& params,
+                                                 const Structure* ret_type) {
+  SignatureStructure* type = comp->services.types->lambda_structures.allocate();
+  type->type = STRUCTURE_TYPE::LAMBDA;
+  type->parameter_types = std::move(params);
+  type->return_type = ret_type;
+  type->calling_convention = conv;
+
+  {
+    Array<char> name ={};
+
+    auto i = type->parameter_types.begin();
+    auto end = type->parameter_types.end();
+
+    name.insert('(');
+
+    if (i < end) {
+      format_to_array(name, "{}", (*i)->name);
+      i++;
+    }
+
+    for (; i < end; i++) {
+      format_to_array(name, ", {}", (*i)->name);
+    }
+
+    format_to_array(name, ") -> {}", type->return_type->name);
+    name.insert('\0');
+
+    type->name = comp->services.strings->intern(name.data);
+  }
+
+  comp->services.types->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, type->name, span);
 
@@ -258,11 +308,11 @@ TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
 
 IntegerStructure* TypeCreator::new_int_type(const Span& span,
                                             const InternString* name) {
-  IntegerStructure* const type = comp->types->int_structures.allocate();
+  IntegerStructure* const type = comp->services.types->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
   type->name = name;
 
-  comp->types->structures.insert(type);
+  comp->services.types->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
@@ -271,11 +321,11 @@ IntegerStructure* TypeCreator::new_int_type(const Span& span,
 
 CompositeStructure* TypeCreator::new_composite_type(const Span& span,
                                                     const InternString* name) {
-  CompositeStructure* const type = comp->types->composite_structures.allocate();
+  CompositeStructure* const type = comp->services.types->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
   type->name = name;
 
-  comp->types->structures.insert(type);
+  comp->services.types->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
@@ -284,11 +334,11 @@ CompositeStructure* TypeCreator::new_composite_type(const Span& span,
 
 EnumStructure* TypeCreator::new_enum_type(const Span& span,
                                           const InternString* name) {
-  EnumStructure* const type = comp->types->enum_structures.allocate();
+  EnumStructure* const type = comp->services.types->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
   type->name = name;
 
-  comp->types->structures.insert(type);
+  comp->services.types->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
@@ -297,10 +347,10 @@ EnumStructure* TypeCreator::new_enum_type(const Span& span,
 
 Structure* TypeCreator::new_base_type(const Span& span,
                                       const InternString* name) {
-  Structure* const type = comp->types->base_structures.allocate();
+  Structure* const type = comp->services.types->base_structures.allocate();
   type->name = name;
 
-  comp->types->structures.insert(type);
+  comp->services.types->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
@@ -310,15 +360,15 @@ Structure* TypeCreator::new_base_type(const Span& span,
 ArrayStructure* TypeCreator::new_array_type(const Span& span,
                                             const Structure* base,
                                             size_t length) {
-  const InternString* name = comp->strings->intern(ArrayStructure::gen_name(base, length).ptr);
+  const InternString* name = comp->services.strings->intern(ArrayStructure::gen_name(base, length).ptr);
 
-  ArrayStructure* const type = comp->types->array_structures.allocate();
+  ArrayStructure* const type = comp->services.types->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
   type->base = base;
   type->length = length;
   type->name = name;
 
-  comp->types->structures.insert(type);
+  comp->services.types->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
@@ -327,14 +377,14 @@ ArrayStructure* TypeCreator::new_array_type(const Span& span,
 
 PointerStructure* TypeCreator::new_pointer_type(const Span& span,
                                                 const Structure* base) {
-  const InternString* name = comp->strings->intern(PointerStructure::gen_name(base).ptr);
+  const InternString* name = comp->services.strings->intern(PointerStructure::gen_name(base).ptr);
 
-  PointerStructure* const type = comp->types->pointer_structures.allocate();
+  PointerStructure* const type = comp->services.types->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
   type->base = base;
   type->name = name;
 
-  comp->types->structures.insert(type);
+  comp->services.types->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
@@ -344,22 +394,26 @@ PointerStructure* TypeCreator::new_pointer_type(const Span& span,
 EnumValue* TypeCreator::new_enum_value(const Span& span,
                                        EnumStructure* enum_s,
                                        const InternString* name) {
-  EnumValue* const val = comp->types->enum_values.allocate();
+  EnumValue* const val = comp->services.types->enum_values.allocate();
   val->type = enum_s;
   val->name = name;
 
   enum_s->enum_values.insert(val);
-  comp->types->enums.insert(val);
+  comp->services.types->enums.insert(val);
 
-  NamedElement* el = comp->names->create_name(current_namespace, name);
+  NamedElement* el = comp->services.names->create_name(current_namespace, name);
   if (el == nullptr) {
     comp->report_error(ERROR_CODE::NAME_ERROR, span,
                        "Tried to make type '{}' but it conflicted with existing names",
                        name);
-
   }
   else {
-    el->enum_value = val;
+    Global* glob = comp->globals.insert();
+    glob->type = enum_s;
+    glob->name = name;
+    glob->constant_value = (void*)val;
+
+    el->globals.insert(glob);
   }
 
 
@@ -404,10 +458,14 @@ Types::~Types() {
           break;
         case STRUCTURE_TYPE::VOID:
         case STRUCTURE_TYPE::ASCII_CHAR:
+        case STRUCTURE_TYPE::STRUCT:
           base_structures.free(s);
           break;
         case STRUCTURE_TYPE::TUPLE_LITERAL:
           tuple_literal_structures.free((const TupleLiteralStructure*)s);
+          break;
+        case STRUCTURE_TYPE::LAMBDA:
+          lambda_structures.free((const SignatureStructure*)s);
           break;
         default: assert(false);
       }
@@ -452,28 +510,28 @@ RuntimeValue CASTS::u8_to_r64(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->types->s_u8, val, ByteCode::EMIT::CONV_RU8_TO_R64);
+  return impl_single_cast(comp, state, code, comp->services.types->s_u8, val, ByteCode::EMIT::CONV_RU8_TO_R64);
 }
 
 RuntimeValue CASTS::i8_to_r64(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->types->s_i8, val, ByteCode::EMIT::CONV_RI8_TO_R64);
+  return impl_single_cast(comp, state, code, comp->services.types->s_i8, val, ByteCode::EMIT::CONV_RI8_TO_R64);
 }
 
 RuntimeValue CASTS::u32_to_r64(Compiler* const comp,
                                State* const state,
                                CodeBlock* const code,
                                const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->types->s_u8, val, ByteCode::EMIT::CONV_RU32_TO_R64);
+  return impl_single_cast(comp, state, code, comp->services.types->s_u8, val, ByteCode::EMIT::CONV_RU32_TO_R64);
 }
 
 RuntimeValue CASTS::i32_to_r64(Compiler* const comp,
                                State* const state,
                                CodeBlock* const code,
                                const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->types->s_i8, val, ByteCode::EMIT::CONV_RI32_TO_R64);
+  return impl_single_cast(comp, state, code, comp->services.types->s_i8, val, ByteCode::EMIT::CONV_RI32_TO_R64);
 }
 
 RuntimeValue CASTS::no_op(Compiler* const comp,

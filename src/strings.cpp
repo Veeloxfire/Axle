@@ -100,7 +100,7 @@ const InternString* StringInterner::intern(const char* string) {
 const InternString* StringInterner::intern(const char* string, const size_t length) {
   assert(string != nullptr);
 
-  const uint64_t hash = fnv1_hash(string, length);
+  const uint64_t hash = fnv1a_hash(string, length);
 
   const InternString** const place = table.find(string, length, hash);
 

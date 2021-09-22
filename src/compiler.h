@@ -149,13 +149,22 @@ struct StackState {
   int32_t next_stack_local(uint64_t size, uint64_t alignment);
 };
 
+struct Decl {
+  bool comptime_eval = false;
+  const InternString* name ={};
+  const Structure* type = nullptr;
+
+  uint8_t valid_rvts = ALL_RVTS;
+  RuntimeValue val ={};
+};
+
 struct MemValue {
   MemComplex mem;
   size_t size;
 };
 
 struct Local {
-  bool comptime_eval = false;
+  bool comptime_constant = false;
   const InternString* name ={};
   const Structure* type = nullptr;
 
@@ -250,6 +259,7 @@ struct Global {
   const Structure* type = nullptr;
   const InternString* name = nullptr;
   size_t data_index = 0;
+  void* constant_value = nullptr;
   CodeBlock init ={};
 };
 
@@ -337,42 +347,22 @@ struct CallSignature {
   Array<const Structure*> arguments ={};
 };
 
-struct UnknownName {
-  const InternString* ident;
-  NamespaceIndex namespace_index;
+struct OverloadSet {
+  bool complete_match = false;
+  Array<const SignatureStructure*> valid_overloads ={};
 };
 
-enum struct UnfoundDepType {
-  Unkown, Name, Function
+
+struct UnknownName {
+  const InternString* ident = nullptr;
+  NamespaceIndex namespace_index ={};
 };
+
 
 struct UnfoundDep {
   CompilationUnit* unit_waiting ={};
-  UnfoundDepType type = UnfoundDepType::Unkown;
   Span span ={};
-
-  union {
-    char _dummpy ={};
-    UnknownName name;
-    CallSignature signature;
-  };
-
-  UnfoundDep() = default;
-  UnfoundDep(UnfoundDep&& a) noexcept {
-    move_from(std::move(a));
-  }
-  UnfoundDep& operator=(UnfoundDep&& a) noexcept {
-    this->~UnfoundDep();
-    move_from(std::move(a));
-    return *this;
-  }
-
-  void move_from(UnfoundDep&&) noexcept;
-
-  void set_union(UnfoundDepType et) noexcept;
-  void destruct_union() noexcept;
-
-  ~UnfoundDep();
+  UnknownName name ={};
 };
 
 struct UnfoundDependencies {
@@ -394,7 +384,7 @@ struct FileLoader {
 };
 
 struct SingleDllImport {
-  FunctionPointer* ptr;
+  Function* ptr;
   uint32_t rva_hint;
   const InternString* name;
 };
@@ -421,8 +411,30 @@ struct BuildOptions {
 
   const InternString* std_lib_folder = nullptr;
 
-  const System* system = nullptr;
+  const System* endpoint_system = nullptr;
+  const System* vm_system = nullptr;
   const CallingConvention* default_calling_convention = nullptr;
+};
+
+struct Context {
+  const System* system = nullptr;
+  const CallingConvention* calling_convention = nullptr;
+
+  Span span;
+
+  CompilationUnit* current_unit;
+  NamespaceIndex current_namespace;
+};
+
+struct Services {
+  Lexer* lexer = nullptr;
+  Parser* parser = nullptr;
+  VM* vm = nullptr;
+  Errors* errors = nullptr;
+  NamesHandler* names = nullptr;
+  FileLoader* file_loader = nullptr;
+  Types* types = nullptr;
+  StringInterner* strings = nullptr;
 };
 
 struct Compiler {
@@ -431,19 +443,14 @@ struct Compiler {
   APIOptimizationOptions optimization_options ={};
 
   SystemsAndConventionNames system_names ={};
-  Lexer* lexer = nullptr;
+
+  Services services;
+
   Array<Token> current_stream ={};
 
-  Parser* parser = nullptr;
-  VM* vm = nullptr;
-
-  Errors errors ={};
   UnfoundDependencies unfound_deps ={};
 
   NamespaceIndex build_file_namespace ={};//needs to be saved for finding main
-  NamesHandler* names;
-
-  FileLoader file_loader ={};
 
   Array<ImportedDll> dlls_import ={};
   Array<ASTFile> parsed_files ={};
@@ -458,17 +465,12 @@ struct Compiler {
 
   BucketArray<Global> globals ={};
   BucketArray<Function> functions ={};
-  BucketArray<FunctionPointer> function_pointers ={};
 
   ArenaAllocator constants ={};
-
-  Types* types = nullptr;
-  StringInterner* strings = nullptr;
 
   uint64_t labels = 0;
 
   Function* new_function();
-  FunctionPointer* new_function_pointer();
 
   ConstantExprUnit* new_const_expr_unit(NamespaceIndex ns);
   FunctionUnit* new_function_unit(NamespaceIndex ns);
@@ -476,25 +478,23 @@ struct Compiler {
   StructureUnit* new_structure_unit(NamespaceIndex ns);
   GlobalUnit* new_global_unit(NamespaceIndex ns);
 
-
-  constexpr bool is_panic() const { return errors.panic || unfound_deps.panic; }
-  constexpr bool is_fatal() const { return errors.panic; }
-  constexpr void reset_panic() { errors.panic = false; unfound_deps.panic = false; }
+  constexpr bool is_panic() const { return services.errors->panic || unfound_deps.panic; }
+  constexpr bool is_fatal() const { return services.errors->panic; }
+  constexpr void reset_panic() { services.errors->panic = false; unfound_deps.panic = false; }
 
   template<typename ... T>
   void report_error(ERROR_CODE code, const Span& span, const char* f_message, T&& ... ts) {
-    errors.register_error(code, span, f_messasge, std::forward<T>(ts)...);
+    services.errors->register_error(code, span, f_message, std::forward<T>(ts)...);
 
-    errors.panic = true;
+    services.errors->panic = true;
   }
 
-  void set_unfound_name(const InternString* name, NamespaceIndex ns, const Span& span);
-  void set_unfound_signature(CallSignature&& sig, const Span& span);
-  void set_dep(CompilationUnit* unit);
+  void set_unfound_name(Context* context, const InternString* name, NamespaceIndex ns,  const Span& span);
+  void set_dep(Context* context, CompilationUnit* unit);
 };
 
-void add_comp_unit_for_lambda(Compiler* const comp, ASTLambda* lambda) noexcept;
-void add_comp_unit_for_struct(Compiler* const comp, ASTStructBody* struct_body) noexcept;
+void add_comp_unit_for_lambda(Compiler* const comp, NamespaceIndex ns_index, ASTLambda* lambda) noexcept;
+void add_comp_unit_for_struct(Compiler* const comp, NamespaceIndex ns_index, ASTStructBody* struct_body) noexcept;
 
 void init_compiler(const APIOptions& options, Compiler* comp);
 
@@ -504,6 +504,7 @@ void set_runtime_flags(ASTExpression* const expr, State* const state,
                        bool modified, uint8_t valid_rvts);
 
 void compile_type_of_expression(Compiler* const comp,
+                                Context* context,
                                 State* const state,
                                 ASTExpression* const expr,
                                 const TypeHint* const hint);
@@ -528,18 +529,19 @@ void copy_runtime_to_runtime(Compiler* const comp,
                              RuntimeValue* to);
 
 const Structure* find_or_make_array_type(Compiler* const comp,
+                                         Context* context,
                                          const Span& span,
                                          const Structure* base,
                                          size_t length);
 
 const Structure* find_or_make_pointer_type(Compiler* const comp,
+                                           Context* context,
                                            const Span& span,
                                            const Structure* base);
 
 const Structure* find_or_make_tuple_literal(Compiler* const comp,
+                                            Context* context,
                                             const Span& span,
                                             Array<const Structure*>&& elements);
-
-ERROR_CODE print_compile_errors(const Compiler* const comp);
 
 void build_data_section_for_exec(Program* prog, Compiler* const comp);

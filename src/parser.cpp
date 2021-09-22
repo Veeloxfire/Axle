@@ -16,10 +16,6 @@ TokenTypeString token_type_string(AxleTokenType t) {
   return { "UNKNOWN TOKEN TYPE", sizeof("UNKNOWN TOKEN TYPE") };
 }
 
-static uint64_t string_to_uint(const char* str) {
-  return atoll(str);
-}
-
 constexpr KeywordPair intrinsics[] ={
 #define MODIFY(n, str) {str, AxleTokenType:: ## n},
   AXLE_TOKEN_INTRINSICS
@@ -55,13 +51,107 @@ constexpr static bool is_identifier_char(const char c) {
   return is_letter(c) || c == '_';
 }
 
-constexpr static bool is_number(const char c) {
+constexpr static bool is_dec_number(const char c) {
   return '0' <= c && c <= '9';
+}
+
+constexpr static bool is_hex_number(const char c) {
+  return is_dec_number(c) || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F';
+}
+
+constexpr static bool is_any_digit(const char c) {
+  return is_hex_number(c);
 }
 
 constexpr static  bool is_letter_or_number(const char c) {
   return is_letter(c)
-    || is_number(c);
+    || is_any_digit(c);
+}
+
+constexpr static u64 num_hex_digits(const char* str) {
+  const char* start = str;
+  while (*str != '\0' && is_hex_number(*str)) {
+    str++;
+  }
+
+  return str - start;
+}
+
+constexpr static u64 num_dec_digits(const char* str) {
+  const char* start = str;
+  while (*str != '\0' && is_dec_number(*str)) {
+    str++;
+  }
+
+  return str - start;
+}
+
+static u64 parse_hex_uint(const char* digits, const u64 len) {
+  assert(0 < len && len <= 64);
+
+  const auto get_digit = [](const char c) -> u8 {
+    assert(is_hex_number(c));
+
+    if ('0' <= c && c <= '9') {
+      return c - '0';
+    }
+    else if ('a' <= c && c <= 'z') {
+      return (c - 'a' + 0xa);
+    }
+    else if ('A' <= c && c <= 'Z') {
+      return (c - 'A' + 0xa);
+    }
+    else {
+      return -1;
+    }
+  };
+
+  constexpr auto base = 0x10;
+  u64 shift = 1;
+  u64 result = 0;
+  for (u64 digit = 0; digit < len; digit++) {
+    u64 digit_val = get_digit(digits[len - digit - 1]);
+    assert(digit_val <= 0xF);
+    digit_val *= shift;
+
+    shift *= base;
+    result += digit_val;
+  }
+
+  return result;
+}
+
+static u64 parse_dec_uint(const char* digits, const u64 len) {
+  assert(0 < len && len <= MAX_DECIMAL_U64_DIGITS);
+
+  const auto get_digit = [](const char c) -> u8 {
+    assert(is_dec_number(c));
+    return c - '0';
+  };
+
+  constexpr auto base = 10;
+  u64 shift = 1;
+  u64 result = 0;
+  for (u64 digit = 0; digit < len; digit++) {
+    u64 digit_val = get_digit(digits[len - digit - 1]);
+    assert(digit_val <= 9);
+    digit_val *= shift;
+
+    shift *= base;
+    result += digit_val;
+  }
+
+  return result;
+}
+
+static u64 string_to_uint(const char* str) {
+  if (str[0] == '0' && str[1] == 'x') {
+    const auto len = num_hex_digits(str + 2);
+    return parse_hex_uint(str + 2, len);
+  }
+
+  const auto len = num_dec_digits(str);
+  return parse_dec_uint(str, len);
 }
 
 constexpr static Token make_token(Lexer* const lex, const AxleTokenType type, const InternString* string) {
@@ -166,7 +256,7 @@ static Token lex_identifier(Lexer* const lex) {
   do {
     lex->top++;
     lex->curr_pos.character++;
-  } while (is_identifier_char(lex->top[0]) || is_number(lex->top[0]));
+  } while (is_identifier_char(lex->top[0]) || is_any_digit(lex->top[0]));
 
   const size_t ident_len = lex->top - name_base;
 
@@ -219,17 +309,28 @@ static Token lex_intrinsic_identifier(Lexer* const lex) {
     }
   }
 
+  const auto message = format("'{}' in not a valid compiler intrinsic", ident.string);
+
   //Error
-  return error_token(lex, "Was not a valid compiler intrinsic");
+  return error_token(lex, message.ptr);
 }
 
 static Token lex_number(Lexer* const lex) {
   const char* const number_base = lex->top;
 
+  if (lex->top[0] == '0' && (lex->top[1] == 'x' || lex->top[1] == 'X')) {
+    lex->top += 2;
+    lex->curr_pos.character += 2;
+
+    if (!is_any_digit(lex->top[0])) {
+      return error_token(lex, "0x/0X is not a valid integer");
+    }
+  }
+
   do {
     lex->top++;
     lex->curr_pos.character++;
-  } while (is_number(lex->top[0]));
+  } while (is_any_digit(lex->top[0]));
 
   const size_t ident_length = lex->top - number_base;
 
@@ -260,7 +361,7 @@ static Token make_single_char_token(Lexer* lex) {
     }
   }
 
-  OwnedPtr<char> error = format("Unlexable character: '{}'", DisplayChar{ *lex->top });
+  const OwnedPtr<char> error = format("Unlexable character: '{}'", DisplayChar{ *lex->top });
   return error_token(lex, error.ptr);
 }
 
@@ -299,7 +400,7 @@ static Token lex_char(Lexer* const lex) {
     return tok;
   }
   else {
-    return error_token(lex, "Characte literal was not closed!");
+    return error_token(lex, "Character literal was not closed!");
   }
 }
 
@@ -355,7 +456,7 @@ static Token lex_unpositioned_token(Lexer* const lex) {
   if (is_identifier_char(lex->top[0])) {
     return lex_identifier(lex);
   }
-  else if (is_number(c)) {
+  else if (is_dec_number(c)) {
     return lex_number(lex);
   }
   else if (c == '#') {
@@ -394,7 +495,7 @@ static Token lex_token(Lexer* const lex) {
 }
 
 static TokenStream next_lex_stream(Compiler* const comp) {
-  Lexer* const lex = comp->lexer;
+  Lexer* const lex = comp->services.lexer;
 
   constexpr size_t STREAM_LEN = 64;
 
@@ -414,8 +515,12 @@ static TokenStream next_lex_stream(Compiler* const comp) {
       break;
     }
     else if (tok->type == AxleTokenType::Error) {
-      comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(*tok),
-                         tok->string->string);
+      Span span ={};
+      set_span_start(*tok, span);
+      span.char_end = lex->curr_pos.character + 1;
+      span.line_end = lex->curr_pos.line;
+
+      comp->report_error(ERROR_CODE::SYNTAX_ERROR, span, tok->string->string);
       return { nullptr, nullptr };
     }
   }
@@ -498,11 +603,11 @@ void set_span_end(const Token& token, Span& span) {
 void reset_parser(Compiler* const comp,
                   const InternString* file_name,
                   const char* string) {
-  Lexer* const lex = comp->lexer;
-  Parser* const parser = comp->parser;
+  Lexer* const lex = comp->services.lexer;
+  Parser* const parser = comp->services.parser;
 
 
-  lex->strings = comp->strings;
+  lex->strings = comp->services.strings;
   lex->top = string;
 
   lex->curr_pos.full_path = file_name;
@@ -604,6 +709,7 @@ static bool is_binary_operator(const Parser* const parser) {
     case AxleTokenType::Lesser: return true;
     case AxleTokenType::Greater: return true;
     case AxleTokenType::Or: return true;
+    case AxleTokenType::Xor: return true;
     case AxleTokenType::And: return true;
     case AxleTokenType::Equals:
       return parser->next.type == AxleTokenType::Equals && !parser->next.consumed_whitespace;
@@ -664,6 +770,7 @@ static BINARY_OPERATOR parse_binary_operator(Compiler* const comp, Parser* const
         break;
       }
     case AxleTokenType::Or: advance(comp, parser); return BINARY_OPERATOR::OR;
+    case AxleTokenType::Xor: advance(comp, parser); return BINARY_OPERATOR::XOR;
     case AxleTokenType::And: advance(comp, parser); return BINARY_OPERATOR::AND;
   }
 
@@ -946,10 +1053,6 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
     expr->span = std::move(span);
   };
 
-  const Token current = parser->current;
-  //const Token current = parser->current;
-  //advance(comp, parser);
-
   switch (parser->current.type) {
     case AxleTokenType::Left_Brace: {
         // { ... }
@@ -1088,12 +1191,12 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
 
           //ident
           advance(comp, parser);
+          if (comp->is_panic()) {
+            return;
+          }
 
           //left bracket
           advance(comp, parser);
-
-          //Advance past the left bracket
-          expect(comp, parser, AxleTokenType::Left_Bracket);
           if (comp->is_panic()) {
             return;
           }
@@ -1414,34 +1517,72 @@ static void parse_type(Compiler* const comp, Parser* const parser, ASTType* cons
 }
 
 static void parse_typed_name(Compiler* const comp, Parser* const parser, ASTType* const type, const InternString** name) {
+  parse_name(comp, parser, name);
+  if (comp->is_panic()) {
+    return;
+  }
+
+  expect(comp, parser, AxleTokenType::Colon);
+  if (comp->is_panic()) {
+    return;
+  }
+
   parse_type(comp, parser, type);
   if (comp->is_panic()) {
     return;
   }
-  parse_name(comp, parser, name);
 }
 
 static void parse_block(Compiler* const comp, Parser* const parser, ASTBlock* const block);
 
 static void parse_decl(Compiler* const comp, Parser* const parser, ASTDecl* const decl) {
+  set_span_start(parser->current, decl->span);
+  DEFER(&) { set_span_end(parser->prev, decl->span); };
+
   if (parser->current.type != AxleTokenType::Identifier) {
     comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Expected Identifier as declarations start with identifiers");
+    return;
   }
 
   decl->name = parser->current.string;
   advance(comp, parser);
+  if (comp->is_panic()) {
+    return;
+  }
 
   expect(comp, parser, AxleTokenType::Colon);
+  if (comp->is_panic()) {
+    return;
+  }
 
   //Explicit type??
-  if (parser->current.type != AxleTokenType::Equals) {
+  if (parser->current.type != AxleTokenType::Equals && parser->current.type != AxleTokenType::Colon) {
     decl->type = allocate_default<ASTType>();
 
     parse_type(comp, parser, decl->type);
+    if (comp->is_panic()) {
+      return;
+    }
   }
 
-  expect(comp, parser, AxleTokenType::Equals);
+  if (parser->current.type == AxleTokenType::Equals) {
+    decl->compile_time_const = false;
+    advance(comp, parser);
+  }
+  else if (parser->current.type == AxleTokenType::Colon) {
+    decl->compile_time_const = true;
+    advance(comp, parser);
+  }
+  else {
+    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+                       "Expected ':' or '=' to continue the delaration");
+    return;
+  }
+
+  if (comp->is_panic()) {
+    return;
+  }
 
   decl->expr = allocate_default<ASTExpression>();
   parse_expression(comp, parser, decl->expr);
@@ -1470,11 +1611,11 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
           return;
         }
 
+        statement->expression.expr = allocate_default<ASTExpression>();
+        parse_expression(comp, parser, statement->expression.expr);
         if (comp->is_panic()) {
           return;
         }
-        statement->expression.expr = allocate_default<ASTExpression>();
-        parse_expression(comp, parser, statement->expression.expr);
 
         expect(comp, parser, AxleTokenType::Semicolon);
         break;
@@ -1548,21 +1689,6 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
         parse_statement(comp, parser, statement->while_loop.statement);
         break;
       }
-    case AxleTokenType::Identifier: {
-        if (parser->next.type == AxleTokenType::Colon) {
-          //Declaration!
-          statement->set_union(STATEMENT_TYPE::LOCAL);
-          parse_decl(comp, parser, &statement->local);
-        }
-        else {
-
-          statement->set_union(STATEMENT_TYPE::EXPRESSION);
-          statement->expression.expr = allocate_default<ASTExpression>();
-          parse_expression(comp, parser, statement->expression.expr);
-        }
-
-        break;
-      }
     default: {
         if (parser->current.type == AxleTokenType::Identifier && parser->next.type == AxleTokenType::Colon) {
           //Declaration!
@@ -1573,14 +1699,19 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
 
         //Expression or assignment
 
-          if (comp->is_panic()) {
-            return;
-          }
         //Get the assign to expression
         ASTExpression* expr = allocate_default<ASTExpression>();
         parse_expression(comp, parser, expr);
+        if (comp->is_panic()) {
+          return;
+        }
 
         if (parser->current.type == AxleTokenType::Equals) {
+          advance(comp, parser);
+          if (comp->is_panic()) {
+            return;
+          }
+
           //is assignment
           statement->set_union(STATEMENT_TYPE::ASSIGN);
           statement->assign.assign_to = expr;
@@ -1588,6 +1719,9 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
           //reset the expr
           expr = allocate_default<ASTExpression>();
           parse_expression(comp, parser, expr);
+          if (comp->is_panic()) {
+            return;
+          }
 
           statement->assign.value = expr;
           expect(comp, parser, AxleTokenType::Semicolon);
@@ -1603,6 +1737,7 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
                              "Found '{}'",
                              AxleTokenType::Equals, AxleTokenType::Semicolon,
                              parser->current.type);
+          return;
         }
         break;
       }
@@ -1716,7 +1851,7 @@ static void parse_lambda(Compiler* const comp, Parser* const parser, ASTLambda* 
   }
 
   //Load to a compilation unit
-  add_comp_unit_for_lambda(comp, func);
+  add_comp_unit_for_lambda(comp, parser->current_namespace, func);
 }
 
 static void parse_structure(Compiler* const comp, Parser* const parser, ASTStructBody* const struct_decl) {
@@ -1750,7 +1885,7 @@ static void parse_structure(Compiler* const comp, Parser* const parser, ASTStruc
   expect(comp, parser, AxleTokenType::Right_Brace);
 
   //Load to a compilation unit
-  add_comp_unit_for_struct(comp, struct_decl);
+  add_comp_unit_for_struct(comp, parser->current_namespace, struct_decl);
 }
 
 void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file) {
@@ -1846,48 +1981,74 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
   file->decls.shrink();
 }
 
-struct Printer {
-  size_t tabs = 0;
+void Printer::newline() const {
+  IO::print('\n');
 
-  void newline() {
-    IO::print('\n');
-
-    for (size_t i = 0; i < tabs; i++) {
-      IO::print("  ");
-    }
+  for (size_t i = 0; i < tabs; i++) {
+    IO::print("  ");
   }
-};
+}
 
-static void print_type(const ASTType* type) {
+static void print_function_sig(Printer* const, const ASTFuncSig*);
+static void print_ast_statement(Printer* const, const ASTStatement*);
+
+static void print_type(Printer* const printer, const ASTType* type) {
   switch (type->type_type) {
     case TYPE_TYPE::NORMAL:
       IO::print(type->name->string);
       break;
     case TYPE_TYPE::ARRAY:
       IO::print('[');
-      print_type(type->arr.base);
+      print_type(printer, type->arr.base);
       IO::print("; ");
-      print_ast_expression(type->arr.expr);
+      print_ast_expression(printer, type->arr.expr);
       IO::print(']');
       break;
     case TYPE_TYPE::PTR:
       IO::print('*');
-      print_type(type->arr.base);
+      print_type(printer, type->arr.base);
       break;
   }
 }
 
-void print_ast_expression(const ASTExpression* expr) {
+static void print_ast_block(Printer* const printer, const ASTBlock* block) {
+  IO::print('{');
+
+  auto i = block->block.begin();
+  auto end = block->block.end();
+
+  if (i < end) {
+    printer->tabs++;
+
+    for (; i < end; i++) {
+      print_ast_statement(printer, i);
+    }
+
+    printer->tabs--;
+    printer->newline();
+  }
+
+  IO::print('}');
+}
+
+void print_ast_expression(Printer* const printer, const ASTExpression* expr) {
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::LAMBDA: {
+        const ASTLambda* lambda = expr->lambda.lambda;
+
+        print_function_sig(printer, &lambda->sig);
+        print_ast_block(printer, &lambda->body);
+        break;
+      }
     case EXPRESSION_TYPE::MEMBER: {
-        print_ast_expression(expr->member.expr);
+        print_ast_expression(printer, expr->member.expr);
         printf(".%s", expr->member.name->string);
         break;
       }
     case EXPRESSION_TYPE::INDEX: {
-        print_ast_expression(expr->index.expr);
+        print_ast_expression(printer, expr->index.expr);
         IO::print('[');
-        print_ast_expression(expr->index.index);
+        print_ast_expression(printer, expr->index.index);
         IO::print(']');
         break;
       }
@@ -1897,12 +2058,12 @@ void print_ast_expression(const ASTExpression* expr) {
         const auto end = expr->array_expr.elements.end();
 
         if (i < end) {
-          print_ast_expression(i);
+          print_ast_expression(printer, i);
           i++;
 
           for (; i < end; i++) {
             IO::print(", ");
-            print_ast_expression(i);
+            print_ast_expression(printer, i);
           }
         }
 
@@ -1915,12 +2076,12 @@ void print_ast_expression(const ASTExpression* expr) {
         const auto end = expr->array_expr.elements.end();
 
         if (i < end) {
-          print_ast_expression(i);
+          print_ast_expression(printer, i);
           i++;
 
           for (; i < end; i++) {
             IO::print(", ");
-            print_ast_expression(i);
+            print_ast_expression(printer, i);
           }
         }
 
@@ -1938,11 +2099,11 @@ void print_ast_expression(const ASTExpression* expr) {
 
         if ((end - i) > 0) {
           for (; i < (end - 1); i++) {
-            print_ast_expression(i);
+            print_ast_expression(printer, i);
             IO::print(", ");
           }
 
-          print_ast_expression(i);
+          print_ast_expression(printer, i);
         }
 
         IO::print(')');
@@ -1962,35 +2123,57 @@ void print_ast_expression(const ASTExpression* expr) {
       break;
     case EXPRESSION_TYPE::CAST: {
         IO::print("cast(");
-        print_type(&expr->cast.type);
+        print_type(printer, &expr->cast.type);
         IO::print(", ");
-        print_ast_expression(expr->cast.expr);
+        print_ast_expression(printer, expr->cast.expr);
         IO::print(')');
         break;
       }
     case EXPRESSION_TYPE::UNARY_OPERATOR:
       IO::print(UNARY_OP_STRING::get(expr->un_op.op));
-      print_ast_expression(expr->un_op.expr);
+      print_ast_expression(printer, expr->un_op.expr);
       break;
     case EXPRESSION_TYPE::BINARY_OPERATOR:
       IO::print("(");
-      print_ast_expression(expr->bin_op.left);
+      print_ast_expression(printer, expr->bin_op.left);
 
       printf(" %s ", BINARY_OP_STRING::get(expr->bin_op.op));
 
-      print_ast_expression(expr->bin_op.right);
+      print_ast_expression(printer, expr->bin_op.right);
       IO::print(")");
       break;
   }
 }
 
 static void print_ast_decl(Printer* const printer, const ASTDecl* decl) {
-  printf("%s :", decl->name->string);
-  print_type(decl->type);
+  if (decl->type != nullptr && decl->expr != nullptr) {
+    printf("%s: ", decl->name->string);
+    print_type(printer, decl->type);
 
-  if (decl->expr != nullptr) {
-    IO::print(" = ");
-    print_ast_expression(decl->expr);
+    if (decl->compile_time_const) {
+      IO::print(" : ");
+    }
+    else {
+      IO::print(" = ");
+    }
+    print_ast_expression(printer, decl->expr);
+  }
+  else if (decl->expr != nullptr) {
+    if (decl->compile_time_const) {
+      printf("%s :: ", decl->name->string);
+    }
+    else {
+      printf("%s := ", decl->name->string);
+    }
+
+    print_ast_expression(printer, decl->expr);
+  }
+  else if (decl->type != nullptr) {
+    printf("%s: ", decl->name->string);
+    print_type(printer, decl->type);
+  }
+  else {
+    assert(false);//shouldnt be possible to be here
   }
 }
 
@@ -1999,9 +2182,9 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
 
   switch (statement->type) {
     case STATEMENT_TYPE::ASSIGN:
-      print_ast_expression(statement->assign.assign_to);
+      print_ast_expression(printer, statement->assign.assign_to);
       IO::print(" = ");
-      print_ast_expression(statement->assign.value);
+      print_ast_expression(printer, statement->assign.value);
       IO::print(';');
       break;
     case STATEMENT_TYPE::LOCAL:
@@ -2010,16 +2193,16 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
       break;
     case STATEMENT_TYPE::RETURN:
       IO::print("return ");
-      print_ast_expression(statement->expression.expr);
+      print_ast_expression(printer, statement->expression.expr);
       IO::print(';');
       break;
     case STATEMENT_TYPE::EXPRESSION:
-      print_ast_expression(statement->expression.expr);
+      print_ast_expression(printer, statement->expression.expr);
       IO::print(';');
       break;
     case STATEMENT_TYPE::WHILE:
       IO::print("while(");
-      print_ast_expression(statement->while_loop.condition);
+      print_ast_expression(printer, statement->while_loop.condition);
       IO::print(") ");
 
       if (statement->while_loop.statement->type != STATEMENT_TYPE::BLOCK) {
@@ -2034,7 +2217,7 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
       break;
     case STATEMENT_TYPE::IF_ELSE:
       IO::print("if(");
-      print_ast_expression(statement->if_else.condition);
+      print_ast_expression(printer, statement->if_else.condition);
       IO::print(") ");
 
       if (statement->if_else.if_statement->type != STATEMENT_TYPE::BLOCK) {
@@ -2061,19 +2244,7 @@ static void print_ast_statement(Printer* const printer, const ASTStatement* stat
       }
       break;
     case STATEMENT_TYPE::BLOCK: {
-        auto b_i = statement->block.block.begin();
-        const auto b_end = statement->block.block.end();
-
-        IO::print('{');
-        printer->tabs++;
-
-        for (; b_i < b_end; b_i++) {
-          print_ast_statement(printer, b_i);
-        }
-
-        printer->tabs--;
-        printer->newline();
-        IO::print('}');
+        print_ast_block(printer, &statement->block);
         break;
       }
   }
@@ -2099,7 +2270,8 @@ static void print_function_sig(Printer* const printer, const ASTFuncSig* sig) {
   }
 
   IO::print(") -> ");
-  print_type(&sig->return_type);
+  print_type(printer, &sig->return_type);
+  IO::print(' ');
 }
 
 void print_ast(const ASTFile* file) {
