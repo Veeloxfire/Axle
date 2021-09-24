@@ -97,6 +97,7 @@ OwnedPtr<char> load_span_from_source(const Span& span, const char* source) {
 
   while (true) {
     if (source[0] == '\0' || line == (span.line_end + 1)) {
+      emit_new_line();
       res.insert('\0');
       break;
     }

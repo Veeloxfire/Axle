@@ -10,6 +10,7 @@ struct CodeBlock;
 struct Types;
 struct ASTExpression;
 struct Local;
+struct Global;
 
 //New structures
 
@@ -46,9 +47,9 @@ struct MemIndex {
 //Runtime value type
 enum struct RVT : uint8_t {
   UNKNOWN  = 0,
-  REGISTER = 1,
-  MEMORY   = 2,
-  CONST    = 4,
+  REGISTER = 1 << 0,
+  MEMORY   = 1 << 1,
+  CONST    = 1 << 3,
 };
 
 constexpr uint8_t operator|(RVT l, RVT r) {

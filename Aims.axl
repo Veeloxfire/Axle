@@ -1,36 +1,36 @@
 
-//Imports
-#import "other_file";
+#import "std";
 
-//Struct
-A : struct = {
- el_1: u64;
- el_2: i64;
+FUNC1 :: (a: A, b: A) -> int {
+  min_a := MIN(a.a, a.b);
+  min_b := MIN(b.a, b.b);
+  return MAX(min_a, min_b);
 }
 
-//Function
-B : (arg1: u32, arg2: *A)->void = {
-
+A :: struct {
+  a: int;
+  b: int;
 }
 
-//Generic Struct
-C: struct(T: type, U: type) = {
-  t: T;
-  u: U;
-}
-
-//Generic Function
-last:  (arr: [*ascii; #auto])->*ascii = {
-
-  //Compile time variable
-  comptime len := arr.len;
-  
-  //Compile time if
-  #if (len == 0) {
-    return nullptr;
+MAX :: (a: int, b: int) -> int {
+  if a < b {
+    return b;
   }
-  #else {
-    return arr[len - 1];
+  else {
+    return a;
   }
 }
 
+MIN :: (a: int, b: int) -> int {
+  if a < b {
+    return a;
+  }
+  else {
+    return b;
+  }
+}
+
+main := () -> void {
+  std::print()
+
+}

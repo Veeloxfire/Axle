@@ -17,6 +17,40 @@ struct ASTFuncSig;
 struct ASTLambda;
 struct ASTStructBody;
 
+#define FLAGS_DECL(num) (1 << num)
+
+enum struct META_TYPE : u8 {
+  NORMAL   = 0,
+  COMPTIME = FLAGS_DECL(1),
+  CONST    = FLAGS_DECL(2),
+};
+
+constexpr auto operator|(META_TYPE t, u8 u) -> u8 {
+  return u | ((u8)t);
+}
+
+constexpr auto operator|(u8 u, META_TYPE t) -> u8 {
+  return u | ((u8)t);
+}
+
+constexpr auto operator|=(u8& u, META_TYPE t) -> u8& {
+  u |= ((u8)t);
+  return u;
+}
+
+constexpr auto operator&(META_TYPE t, u8 u) -> u8 {
+  return u & ((u8)t);
+}
+
+constexpr auto operator&(u8 u, META_TYPE t) -> u8 {
+  return u & ((u8)t);
+}
+
+constexpr auto operator&=(u8& u, META_TYPE t) -> u8& {
+  u &= ((u8)t);
+  return u;
+}
+
 enum struct STRUCTURE_TYPE : uint8_t {
   VOID = 0,
   STRUCT,//Meta type for other types

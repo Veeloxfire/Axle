@@ -4,6 +4,18 @@
 
 struct MemComplex;
 
+enum struct RELOCATION_TYPE : u8 {
+  U64_LABEL_OFFSET,
+  U64_DATA_OFFSET,
+  I32_RELATIVE_TO_NEXT,//other_offset is next instruction 
+};
+
+struct Relocation {
+  RELOCATION_TYPE type;
+  size_t value_offset;
+  size_t other_offset;
+};
+
 namespace X64 {
   struct SIB {
     bool use_base = false;
@@ -250,19 +262,13 @@ void vm_backend_code_block(Compiler* const,
                            Array<uint8_t>&,
                            const CodeBlock*,
                            size_t*,
-                           Array<size_t>&);
-
-void vm_backend_fix_jump(uint8_t*,
-                         size_t,
-                         size_t*);
+                           Array<Relocation>&);
 
 void x86_64_backend_code_block(Compiler* const,
                                Program*,
                                Array<uint8_t>&,
                                const CodeBlock*,
                                size_t*,
-                               Array<size_t>&);
-
-void x86_64_backend_fix_jump(uint8_t*, size_t, size_t*);
+                               Array<Relocation>&);
 
 void print_x86_64(const uint8_t* bytes, size_t size);

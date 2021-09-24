@@ -240,14 +240,14 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::LOAD_ADDRESS;
           break;
         }
-      case ByteCode::LOAD_GLOBAL_MEM: {
+      /*case ByteCode::LOAD_GLOBAL_MEM: {
           const auto i = ByteCode::PARSE::LOAD_GLOBAL_MEM(vm->IP);
 
           vm->registers[i.val].b64.b_ptr = i.u64;
 
           vm->IP += ByteCode::SIZE_OF::LOAD_GLOBAL_MEM;
           break;
-        }
+        }*/
       case ByteCode::NEG_R64: {
           const auto i = ByteCode::PARSE::NEG_R64(vm->IP);
 
@@ -559,6 +559,7 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           }
           break;
         }
+      case ByteCode::LOAD_GLOBAL_MEM://should never actually be called
       default: {
           uint8_t op = vm->IP[0];
           vm->errors->register_error(ERROR_CODE::VM_ERROR, Span{},

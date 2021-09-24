@@ -494,7 +494,7 @@ static Token lex_token(Lexer* const lex) {
   return tok;
 }
 
-static TokenStream next_lex_stream(Compiler* const comp) {
+static TokenStream next_lex_stream(Compiler* const comp, u64 free_start) {
   Lexer* const lex = comp->services.lexer;
 
   constexpr size_t STREAM_LEN = 64;
@@ -504,7 +504,7 @@ static TokenStream next_lex_stream(Compiler* const comp) {
   stream.clear();
   stream.reserve_extra(STREAM_LEN);
 
-  size_t i = 0;
+  size_t i = free_start;
   for (; i < STREAM_LEN; i++) {
     auto* tok = stream.data + i;
 
@@ -529,8 +529,8 @@ static TokenStream next_lex_stream(Compiler* const comp) {
   stream.size = i;
 
   TokenStream tok_stream ={};
-  tok_stream.i = stream.begin();
-  tok_stream.end = stream.end();
+  tok_stream.i = stream.mut_begin();
+  tok_stream.end = stream.mut_end();
 
   return tok_stream;
 }
@@ -564,12 +564,16 @@ static void advance(Compiler* const comp, Parser* parser) {
   }
   else {
     if (parser->stream.i >= parser->stream.end) {
-      parser->stream = next_lex_stream(comp);
+      parser->stream = next_lex_stream(comp, 1);
 
       if (comp->is_panic()) {
         return;
       }
+
+      *parser->stream.i = parser->current;
+      parser->stream.i++;
     }
+
     parser->next = *parser->stream.i;
     assert(parser->next.type != AxleTokenType::Error);
 
@@ -614,7 +618,7 @@ void reset_parser(Compiler* const comp,
   lex->curr_pos.character = 0;
   lex->curr_pos.line = 0;
 
-  parser->stream = next_lex_stream(comp);
+  parser->stream = next_lex_stream(comp, 0);
   if (comp->is_panic()) {
     return;
   }
@@ -1258,7 +1262,8 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
       }
     case AxleTokenType::Struct: {
         expr->set_union(EXPRESSION_TYPE::STRUCT);
-        parse_structure(comp, parser, &expr->struct_body);
+        expr->struct_body.body = allocate_default<ASTStructBody>();
+        parse_structure(comp, parser, expr->struct_body.body);
         break;
       }
     case AxleTokenType::Left_Bracket: {
@@ -1512,7 +1517,7 @@ static void parse_type(Compiler* const comp, Parser* const parser, ASTType* cons
         break;
       }
     default: comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                                "Expected A Type! Found '{}'", parser->current.type);
+                                "Expected a Type! Found '{}'", parser->current.type);
   }
 }
 
@@ -1567,16 +1572,17 @@ static void parse_decl(Compiler* const comp, Parser* const parser, ASTDecl* cons
   }
 
   if (parser->current.type == AxleTokenType::Equals) {
-    decl->compile_time_const = false;
     advance(comp, parser);
+    decl->compile_time_const = false;
   }
   else if (parser->current.type == AxleTokenType::Colon) {
-    decl->compile_time_const = true;
     advance(comp, parser);
+    decl->compile_time_const = true;
   }
   else {
     comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                       "Expected ':' or '=' to continue the delaration");
+                       "Expected '{}' or '{}' but found '{}'",
+                       AxleTokenType::Equals,  AxleTokenType::Colon, parser->current.type);
     return;
   }
 
@@ -1586,6 +1592,13 @@ static void parse_decl(Compiler* const comp, Parser* const parser, ASTDecl* cons
 
   decl->expr = allocate_default<ASTExpression>();
   parse_expression(comp, parser, decl->expr);
+  if (comp->is_panic()) {
+    return;
+  }
+
+  if (decl->expr->expr_type != EXPRESSION_TYPE::LAMBDA) {
+    expect(comp, parser, AxleTokenType::Semicolon);
+  }
 }
 
 static void parse_statement(Compiler* const comp, Parser* const parser, ASTStatement* const statement) {
@@ -1694,10 +1707,12 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
           //Declaration!
           statement->set_union(STATEMENT_TYPE::LOCAL);
           parse_decl(comp, parser, &statement->local);
+
+          //Dont parse the rest
           break;
         }
 
-        //Expression or assignment
+        //Not decl -> Expression or assignment
 
         //Get the assign to expression
         ASTExpression* expr = allocate_default<ASTExpression>();
@@ -1889,38 +1904,38 @@ static void parse_structure(Compiler* const comp, Parser* const parser, ASTStruc
 }
 
 void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file) {
-  if (parser->current.type == AxleTokenType::DLLHeader) {
-    file->header.is_dll_header = true;
+  //if (parser->current.type == AxleTokenType::DLLHeader) {
+  //  file->header.is_dll_header = true;
 
-    ASTImport* imp = &file->header.dll_header;
-    advance(comp, parser);
-    if (comp->is_panic()) {
-      return;
-    }
+  //  ASTImport* imp = &file->header.dll_header;
+  //  advance(comp, parser);
+  //  if (comp->is_panic()) {
+  //    return;
+  //  }
 
-    if (parser->current.type != AxleTokenType::String) {
-      comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                         "Expected a string!");
-      return;
-    }
+  //  if (parser->current.type != AxleTokenType::String) {
+  //    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+  //                       "Expected a string!");
+  //    return;
+  //  }
 
-    imp->relative_path = parser->current.string;
+  //  imp->relative_path = parser->current.string;
 
-    //Load the span
-    Span span ={};
-    set_span_start(parser->current, span);
-    DEFER(&) {
-      set_span_end(parser->prev, span);
-      imp->span = std::move(span);
-    };
+  //  //Load the span
+  //  Span span ={};
+  //  set_span_start(parser->current, span);
+  //  DEFER(&) {
+  //    set_span_end(parser->prev, span);
+  //    imp->span = std::move(span);
+  //  };
 
-    advance(comp, parser);
+  //  advance(comp, parser);
 
-    if (comp->is_panic()) {
-      return;
-    }
-    expect(comp, parser, AxleTokenType::Semicolon);
-  }
+  //  if (comp->is_panic()) {
+  //    return;
+  //  }
+  //  expect(comp, parser, AxleTokenType::Semicolon);
+  //}
 
   if (comp->is_panic()) {
     return;
@@ -1930,25 +1945,52 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
        !comp->is_panic() && current != AxleTokenType::End;
        current = parser->current.type)
   {
-    if (parser->current.type == AxleTokenType::Import || parser->current.type == AxleTokenType::Stdlib) {
+    if (parser->current.type == AxleTokenType::Import) {
       //Import
       file->imports.insert_uninit(1);
       ASTImport* imp = file->imports.back();
-
-      imp->std = (parser->current.type == AxleTokenType::Stdlib);
 
       advance(comp, parser);
       if (comp->is_panic()) {
         return;
       }
 
-      if (parser->current.type != AxleTokenType::String) {
-        comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                           "Expected a string!");
-        return;
+      switch (parser->current.type) {
+        case AxleTokenType::Std: {
+            imp->std = true;
+            expect(comp, parser, AxleTokenType::Left_Bracket);
+            if (comp->is_panic()) {
+              return;
+            }
+
+            if (parser->current.type != AxleTokenType::String) {
+              comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+                                 "invalid std relative path");
+            }
+            imp->relative_path = parser->current.string;
+            advance(comp, parser);
+            if (comp->is_panic()) {
+              return;
+            }
+
+            expect(comp, parser, AxleTokenType::Right_Bracket);
+            break;
+          }
+        case AxleTokenType::String: {
+            imp->relative_path = parser->current.string;
+            break;
+          }
+        
+        default: {
+            comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+                               "Invalid token after #import statement");
+            return;
+          }
       }
 
-      imp->relative_path = parser->current.string;
+      if (comp->is_panic()) {
+        return;
+      }
 
       //Load the span
       set_span_start(parser->current, imp->span);

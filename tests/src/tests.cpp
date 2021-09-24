@@ -137,7 +137,7 @@ constexpr auto fnv1_hash(const char* ptr, u64 len) -> u64 {
 
   while(len > 0) {
     hash_v = hash_v * 0x100000001b3;
-    hash_v = hash_v ^ CAST(u64, *ptr);
+    hash_v = hash_v ^ (u64)*ptr;
 
     ptr = ptr + 1;
     len = len - 1;
@@ -168,6 +168,7 @@ static constexpr Test tests[] ={
   Test{"Arrays", TEST_DIR("arrays.axl"), arrays_main()},
   Test{"Pointers", TEST_DIR("pointers.axl"), 3},
   Test{"FNV1 Hash", TEST_DIR("fnv1_hash.axl"), fnv1_hash("hello", 5)},
+  Test{"Globals", TEST_DIR("globals.axl"), fib_recurse_main()},
 };
 
 static constexpr size_t num_tests = sizeof(tests)/sizeof(Test);
@@ -222,7 +223,6 @@ bool run_test(const APIOptions& opts, const uint64_t res) {
 
     return false;
   }
-
 }
 
 bool run_all_tests_in_env_and_optimization(const Environment& env, const APIOptimizationOptions& optimize) {

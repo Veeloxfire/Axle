@@ -197,7 +197,7 @@ Local* State::find_local(const InternString* i_s) {
 
   for (; i < end; i++) {
     Local* l = all_locals.data + *i;
-    if (l->name == i_s) {
+    if (l->decl.name == i_s) {
       return l;
     }
   }
@@ -317,6 +317,13 @@ const Structure* find_or_make_array_type(Compiler* const comp, Context* const co
   type_creator.current_namespace = context->current_namespace;
 
   return type_creator.new_array_type(span, base, length);
+}
+
+static ConstantVal copy_constant_value(Compiler* comp, ConstantVal val) {
+  u8* data = comp->constants.alloc_no_construct(val.size);
+
+  memcpy_ts(data, val.size, val.ptr, val.size);
+  return { data, val.size };
 }
 
 const Structure* find_or_make_pointer_type(Compiler* const comp, Context* const context, const Span& span, const Structure* base) {
@@ -505,19 +512,19 @@ void compile_type(Compiler* const comp,
 
           const Global* global = name->globals.data[0];
 
-          if (global->type->type != STRUCTURE_TYPE::STRUCT) {
+          if (global->decl.type->type != STRUCTURE_TYPE::STRUCT) {
             comp->report_error(ERROR_CODE::NAME_ERROR, type->span,
                                "'{}' was not a type",
                                type->name);
             return;
           }
 
-          if (global->constant_value == nullptr) {
+          if (global->constant_value.ptr == nullptr) {
             comp->set_dep(context, global->compilation_unit);
             return;
           }
 
-          type->type = (const Structure*)global->constant_value;
+          type->type = *(const Structure**)global->constant_value.ptr;
         }
         break;
       }
@@ -662,9 +669,9 @@ static OverloadSet generate_overload_set(Compiler* const comp,
         for (; f_i < f_end; f_i++) {
           const Global* global = *f_i;
 
-          if (global->type->type != STRUCTURE_TYPE::LAMBDA) { continue; }
+          if (global->decl.type->type != STRUCTURE_TYPE::LAMBDA) { continue; }
 
-          const SignatureStructure* sig_struct = (const SignatureStructure*)global->type;
+          const SignatureStructure* sig_struct = (const SignatureStructure*)global->decl.type;
 
           /*if (global->constant_value == nullptr) {
             comp->set_dep(context, global->compilation_unit);
@@ -685,8 +692,8 @@ static OverloadSet generate_overload_set(Compiler* const comp,
     for (; i < end; i++) {
       const Local* loc = state->all_locals.data + *i;
 
-      if (loc->type->type == STRUCTURE_TYPE::LAMBDA) {
-        const SignatureStructure* sig_struct = (const SignatureStructure*)loc->type;
+      if (loc->decl.type->type == STRUCTURE_TYPE::LAMBDA) {
+        const SignatureStructure* sig_struct = (const SignatureStructure*)loc->decl.type;
         test_func(sig_struct);
       }
 
@@ -970,7 +977,8 @@ constexpr static bool already_const_type(EXPRESSION_TYPE et) {
     || et == EXPRESSION_TYPE::VALUE
     || et == EXPRESSION_TYPE::ASCII_STRING
     || et == EXPRESSION_TYPE::ASCII_CHAR
-    || et == EXPRESSION_TYPE::NULLPTR;
+    || et == EXPRESSION_TYPE::NULLPTR
+    || et == EXPRESSION_TYPE::STRUCT;
 }
 
 constexpr static bool can_compile_const_value(const ASTExpression* const expr) {
@@ -1399,6 +1407,20 @@ void compile_type_of_expression(Compiler* const comp,
   DEFER(&) { assert(expr->valid_rvts != 0); };//shouldnt end 0
 
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::STRUCT: {
+        ASTStructBody* struct_body = expr->struct_body.body;
+
+        if (struct_body->type == nullptr) {
+          comp->set_dep(context, struct_body->compilation_unit);
+          return;
+        }
+
+        expr->comptime_eval = true;
+        expr->type = comp->services.types->s_struct;
+        expr->assignable = false;
+
+        break;
+      }
     case EXPRESSION_TYPE::LAMBDA: {
         //Never type the actual lambda here, its typed elsewhere
         ASTLambda* lambda = expr->lambda.lambda;
@@ -1913,50 +1935,53 @@ void compile_type_of_expression(Compiler* const comp,
 
         Local* const loc = state->find_local(name);
 
+        const Decl* decl = nullptr; 
         if (loc != nullptr) {
           expr->set_union(EXPRESSION_TYPE::LOCAL);
           expr->local = loc - state->all_locals.data;
-          expr->type  = loc->type;
+          expr->type = loc->decl.type;
 
           loc->valid_rvts &= expr->valid_rvts;
+          decl = &loc->decl;
         }
         else {
           NamedElement* non_local = comp->services.names->find_name(context->current_namespace, name);
           if (non_local == nullptr || non_local->unknowns > 0) {
             comp->set_unfound_name(context, name, context->current_namespace, expr->span);
-          }
-          else {
-            if (non_local->globals.size != 1) {
-              comp->report_error(ERROR_CODE::NAME_ERROR, expr->span,
-                                 "Name '{}' is ambiguous in this context", name);
-              return;
-            }
-
-            const Global* glob = non_local->globals.data[0];
-
-            if (glob->type == nullptr) {
-              comp->set_dep(context, glob->compilation_unit);
-              return;
-            }
-
-            expr->set_union(EXPRESSION_TYPE::GLOBAL);
-            expr->global = glob;
-            expr->type   = glob->type;
-
-            assert(expr->type != nullptr);
+            return;
           }
 
-          return;
+          if (non_local->globals.size != 1) {
+            comp->report_error(ERROR_CODE::NAME_ERROR, expr->span,
+                               "Name '{}' is ambiguous in this context", name);
+            return;
+          }
+
+          const Global* glob = non_local->globals.data[0];
+
+          if (glob->decl.type == nullptr) {
+            comp->set_dep(context, glob->compilation_unit);
+            return;
+          }
+
+          expr->set_union(EXPRESSION_TYPE::GLOBAL);
+          expr->global = glob;
+          expr->type   = glob->decl.type;
+
+          decl = &glob->decl;
         }
 
-        compile_test_type_satisfies_hint(comp, expr->span, loc->type, hint);
+        assert(expr->type != nullptr);
+        assert(decl != nullptr);
+
+        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
 
         //Can be comptime
-        expr->comptime_eval = loc->comptime_constant;
-        expr->assignable = true;
+        expr->comptime_eval = TEST_MASK(decl->meta_type, META_TYPE::COMPTIME);
+        expr->assignable = TEST_MASK(decl->meta_type, META_TYPE::COMPTIME | META_TYPE::CONST);
 
         break;
       }
@@ -1965,23 +1990,25 @@ void compile_type_of_expression(Compiler* const comp,
 
         Local* const loc = state->all_locals.data + expr->local;
 
-        compile_test_type_satisfies_hint(comp, expr->span, loc->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, loc->decl.type, hint);
         if (comp->is_panic()) {
           return;
         }
 
-        expr->assignable = true;
+        expr->comptime_eval = TEST_MASK(loc->decl.meta_type, META_TYPE::COMPTIME);
+        expr->assignable = TEST_MASK(loc->decl.meta_type, META_TYPE::COMPTIME | META_TYPE::CONST);
 
         break;
       }
     case EXPRESSION_TYPE::GLOBAL: {
         //Can be reached during type inference
-        compile_test_type_satisfies_hint(comp, expr->span, expr->global->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->global->decl.type, hint);
         if (comp->is_panic()) {
           return;
         }
 
-        expr->assignable = !expr->global->constant_value;
+        expr->comptime_eval = TEST_MASK(expr->global->decl.meta_type, META_TYPE::COMPTIME);
+        expr->assignable = TEST_MASK(expr->global->decl.meta_type, META_TYPE::COMPTIME | META_TYPE::CONST);
 
         break;
       }
@@ -2322,6 +2349,13 @@ static void compile_type_of_decl(Compiler* const comp,
                        decl->name, decl->structure->name);
     return;
   }
+
+  if (decl->compile_time_const && (decl->expr == nullptr || !decl->expr->comptime_eval)) {
+    comp->report_error(ERROR_CODE::CONST_ERROR, decl->span,
+                       "Compile time declaration '{}' must be initialized by a compile time expression",
+                       decl->name);
+    return;
+  }
 }
 
 static void compile_type_of_statement(Compiler* const comp,
@@ -2434,12 +2468,16 @@ static void compile_type_of_statement(Compiler* const comp,
         state->all_locals.insert_uninit(1);
         auto* loc = state->all_locals.back();
 
-        loc->name = decl->name;
-        loc->type = decl->structure;
-        loc->comptime_constant = decl->compile_time_const;
-        assert(loc->type != nullptr);
+        loc->decl.name = decl->name;
+        loc->decl.type = decl->structure;
+        loc->decl.source = decl;
+        if (decl->compile_time_const) {
+          loc->decl.meta_type |= META_TYPE::COMPTIME;
+        }
 
-        if (loc->comptime_constant) {
+        assert(loc->decl.type != nullptr);
+
+        if (TEST_MASK(loc->decl.meta_type, META_TYPE::COMPTIME)) {
           if (!decl->expr->comptime_eval) {
             comp->report_error(ERROR_CODE::CONST_ERROR, decl->span,
                                "Cannot initialize a compile time constant with "
@@ -2452,7 +2490,7 @@ static void compile_type_of_statement(Compiler* const comp,
           assert(decl->expr->const_val != nullptr);
 
           loc->val.type = RVT::CONST;
-          loc->val.constant = ConstantVal{ decl->expr->const_val, loc->type->size() };
+          loc->val.constant = ConstantVal{ decl->expr->const_val, loc->decl.type->size() };
         }
 
         state->active_locals.insert(decl->local_index);
@@ -2582,6 +2620,7 @@ static RuntimeValue advance_runtime_param(State* state,
 }
 
 static RuntimeValue load_to_argument_itr(Compiler* comp,
+                                         Context* context,
                                          State* state,
                                          CodeBlock* const code,
                                          const Structure* type,
@@ -2599,10 +2638,13 @@ static RuntimeValue load_to_argument_itr(Compiler* comp,
     args.code = code;
     args.prim = val;
 
+    //Load as pointer
     RuntimeValue address = args.emit_address();
+    const Structure* ptr_type = find_or_make_pointer_type(comp, context, Span{}, type);
+    assert(!comp->is_panic());
 
     //Copy
-    copy_runtime_to_runtime(comp, state, code, type, &address, &param);
+    copy_runtime_to_runtime(comp, state, code, ptr_type, &address, &param);
   }
   else if (param.type == RVT::REGISTER && !reg_passed_as_ptr) {
     copy_runtime_to_runtime(comp, state, code, type, val, &param);
@@ -3294,7 +3336,7 @@ static void compile_function_call(Compiler* const comp,
 
   //Load the actual arguments
   for (; i < end; i++) {
-    RuntimeValue param_val = load_to_argument_itr(comp, state, code, i->type, &i->rv, &conv_iter);
+    RuntimeValue param_val = load_to_argument_itr(comp, context, state, code, i->type, &i->rv, &conv_iter);
 
     i->rv = std::move(param_val);
   }
@@ -3329,9 +3371,9 @@ static void compile_function_call(Compiler* const comp,
 
       for (; gi < gend; gi++) {
         const Global* glob = *gi;
-        if (glob->type == call->sig) {
-          assert(glob->constant_value != nullptr);
-          func = (Function*)glob->constant_value;
+        if (glob->decl.type == call->sig) {
+          assert(glob->constant_value.ptr != nullptr);
+          func = *(Function**)glob->constant_value.ptr;
           goto FOUND_FUNC;
         }
       }
@@ -3345,8 +3387,8 @@ static void compile_function_call(Compiler* const comp,
     for (; li < lend; li++) {
       const Local* loc = state->all_locals.data + *li;
 
-      if (loc->type == call->sig && loc->name == call->function_name) {
-        assert(loc->comptime_constant);
+      if (loc->decl.type == call->sig && loc->decl.name == call->function_name) {
+        assert(TEST_MASK(loc->decl.meta_type, META_TYPE::COMPTIME));
         assert(loc->val.type == RVT::CONST);
         assert(loc->val.constant.size == 8);
         func = *(Function**)loc->val.constant.ptr;
@@ -3434,6 +3476,21 @@ static void compile_bytecode_of_expression(Compiler* const comp,
   }
 
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::STRUCT: {
+        assert(state->comptime_compilation);
+
+        if (hint->is_hint) {
+          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+        }
+
+        const Structure** struct_c = (const Structure**)comp->constants.alloc_no_construct(8);
+        *struct_c = expr->struct_body.body->type;
+
+        load_const_to_runtime_val(comp, state, code, expr->type,
+                                  ConstantVal{ (uint8_t*)struct_c, 8 },
+                                  &hint->val);
+        break;
+      }
     case EXPRESSION_TYPE::LAMBDA: {
         assert(state->comptime_compilation);
 
@@ -3616,8 +3673,6 @@ static void compile_bytecode_of_expression(Compiler* const comp,
       }
     case EXPRESSION_TYPE::TUPLE_LIT: {
         assert(hint != nullptr);
-        //Can only load into memory at the moment
-        assert(hint->val.type == RVT::MEMORY);
         assert(expr->type->type == STRUCTURE_TYPE::COMPOSITE);
 
         const CompositeStructure* cpst = (const CompositeStructure*)expr->type;
@@ -3900,27 +3955,40 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::GLOBAL: {
-        //TODO: Handle constant global values??? - remember to avoid double free
-
         assert(hint != nullptr);
         const Global* glob = expr->global;
 
-        ValueIndex reg_mem = state->new_value();
+        if (glob->constant_value.ptr != nullptr) {
+          if (hint->is_hint) {
+            load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+          }
 
-        ByteCode::EMIT::LOAD_GLOBAL_MEM(code->code, (uint8_t)reg_mem.val, glob);//changed later to be the actual location
-        state->set_value(reg_mem);
+          ConstantVal copied_val = copy_constant_value(comp, glob->constant_value);
 
-        state->control_flow.expression_num++;
+          load_const_to_runtime_val(comp,
+                                    state,
+                                    code,
+                                    glob->decl.type, copied_val,
+                                    &hint->val);
+        }
+        else {
+          const auto reg_mem = state->new_value();
 
-        RuntimeValue global_mem ={};
-        global_mem.type = RVT::MEMORY;
-        global_mem.mem = state->new_mem();
+          ByteCode::EMIT::LOAD_GLOBAL_MEM(code->code, (uint8_t)reg_mem.val, glob);//changed later to be the actual location
+          state->set_value(reg_mem);
 
-        MemValue* mem_val = state->get_mem(global_mem.mem);
-        mem_val->size = glob->type->size();
-        mem_val->mem.base = (uint8_t)reg_mem.val;
+          state->control_flow.expression_num++;
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->type, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
+          RuntimeValue global_mem ={};
+          global_mem.type = RVT::MEMORY;
+          global_mem.mem = state->new_mem();
+
+          MemValue* mem_val = state->get_mem(global_mem.mem);
+          mem_val->size = glob->decl.type->size();
+          mem_val->mem.base = (uint8_t)reg_mem.val;
+
+          copy_runtime_to_runtime_hint(comp, state, code, expr->type, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
+        }
         break;
       }
     case EXPRESSION_TYPE::CAST: {
@@ -3998,6 +4066,11 @@ static void compile_bytecode_of_expression(Compiler* const comp,
     case EXPRESSION_TYPE::FUNCTION_CALL:
       compile_function_call(comp, context, state, code, expr, hint);
       break;
+    default: {
+        //Invalid enum type
+        //probably just didnt get around to supporting it
+        assert(false);
+      }
   }
 }
 
@@ -4192,14 +4265,14 @@ void compile_bytecode_of_statement(Compiler* const comp,
 
         Local* const local = state->all_locals.data + decl->local_index;
 
-        if (!local->comptime_constant) {
+        if (!TEST_MASK(local->decl.meta_type, META_TYPE::COMPTIME)) {
           RuntimeHint hint ={};
           hint.is_hint = true;
           hint.hint_types = (comp->optimization_options.non_stack_locals ?
                              NON_CONST_RVTS
                              : (u8)RVT::MEMORY);
 
-          load_runtime_hint(comp, state, local->type, &hint, local->valid_rvts);
+          load_runtime_hint(comp, state, local->decl.type, &hint, local->valid_rvts);
 
           local->val = std::move(hint.val);
 
@@ -5018,8 +5091,8 @@ void compile_function_body_init(Compiler* const comp,
     auto l_i = state->all_locals.data + index;
     state->active_locals.insert(index);
 
-    l_i->name = i->name;
-    l_i->type = i->type->type;
+    l_i->decl.name = i->name;
+    l_i->decl.type = i->type->type;
     l_i->valid_rvts &= NON_CONST_RVTS;//Cant have const parameters
     l_i->val = RuntimeValue();
   }
@@ -5182,7 +5255,7 @@ void compile_function_body_code(Compiler* const comp,
       const Structure* param_t = *i_param;
       const Structure* act_param_t = *i_act_param;
 
-      assert(i_loc->type == param_t);
+      assert(i_loc->decl.type == param_t);
 
       RuntimeValue rt_p ={};
 
@@ -5322,11 +5395,14 @@ void compile_untyped_global(Compiler* comp, Context* context, State* state, ASTD
     return;
   }
 
-  global->type = decl->structure;
+  global->decl.type = decl->structure;
+  if (decl->compile_time_const) {
+    global->decl.meta_type |= META_TYPE::COMPTIME;
+  }
 }
 
 void compile_init_expr_of_global(Compiler* comp, Context* context, State* state, ASTDecl* decl, Global* global) {
-  if (decl->compile_time_const) {
+  if (TEST_MASK(global->decl.meta_type, META_TYPE::COMPTIME)) {
     if (decl->expr->const_val == nullptr) {
       ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
       unit->expr = decl->expr;
@@ -5335,13 +5411,12 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
       return;
     }
 
-    global->constant_value = *(Function**)decl->expr->const_val;
-
-    comp->constants.free_no_destruct(decl->expr->const_val);
+    global->constant_value.ptr = decl->expr->const_val;
+    global->constant_value.size = global->decl.type->size();
     decl->expr->const_val = nullptr;
   }
   else {
-    assert(global->type != nullptr);
+    assert(global->decl.type != nullptr);
 
     state->control_flow.new_flow();
 
@@ -5360,7 +5435,7 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
     global_mem.mem = state->new_mem();
 
     MemValue* mem_val = state->get_mem(global_mem.mem);
-    mem_val->size = global->type->size();
+    mem_val->size = global->decl.type->size();
     mem_val->mem.base = (uint8_t)reg_mem.val;
 
     compile_bytecode_of_expression_existing(comp, context, state, &global->init, decl->expr, &global_mem);
@@ -5380,8 +5455,8 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
 
       for (; i < end; i++) {
         const Global* g = *i;
-        if (g->type->type != STRUCTURE_TYPE::LAMBDA) {
-          comp->report_error(ERROR_CODE::NAME_ERROR, g->source->span,
+        if (g->decl.type->type != STRUCTURE_TYPE::LAMBDA) {
+          comp->report_error(ERROR_CODE::NAME_ERROR, g->decl.source->span,
                              "Cannot overload the non-function '{}'", decl->name);
           return;
         }
@@ -5435,6 +5510,8 @@ void compile_new_composite_structure(Compiler* comp, Context* context, ASTStruct
   cmp_s->declaration = struct_body;
   cmp_s->cached_size = current_size;
   cmp_s->cached_alignment = current_alignment;
+
+  struct_body->type = cmp_s;
 }
 
 
@@ -5693,8 +5770,8 @@ void process_parsed_file(Compiler* const comp, ASTFile* const file) {
       GlobalUnit* unit = comp->new_global_unit(file->namespace_index);
       Global* glob =  comp->globals.insert();
 
-      glob->name = i->name;
-      glob->source = i;
+      glob->decl.name = i->name;
+      glob->decl.source = i;
 
       unit->global = glob;
       unit->source = i;
@@ -5733,6 +5810,8 @@ void add_comp_unit_for_struct(Compiler* const comp, NamespaceIndex namespace_ind
 
   unit->untyped.i = struct_body->elements.mut_begin();
   unit->untyped.end = struct_body->elements.end();
+
+  struct_body->compilation_unit = unit;
 }
 
 void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
@@ -6201,15 +6280,18 @@ ERROR_CODE compile_all(Compiler* const comp) {
             NamedElement* el = comp->services.names->find_name(i->name.namespace_index, i->name.ident);
             if (el == nullptr) {
               comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i->span,
-                                 "'{}' does not exist", i->name.ident);
+                                 "'{}' does not exist, perhaps it was not imported or is misspelled",
+                                 i->name.ident);
             }
             else if (el->unknowns > 0) {
               comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i->span,
-                                 "One or more '{}'s could not be compiled (perhaps circular dependency)", i->name.ident);
+                                 "One or more dependencies for '{}' could not be compiled (perhaps circular dependency?)", i->name.ident);
             }
             else {
               comp->report_error(ERROR_CODE::INTERNAL_ERROR, i->span,
-                                 "'{}' does exist and there was somehow a dependency error", i->name.ident);
+                                 "'{}' does exist and there was somehow a dependency error\n"
+                                 "This should not happen and is bug :) sorry",
+                                 i->name.ident);
             }
           }
 
@@ -6547,8 +6629,8 @@ void build_data_section_for_exec(Program* prog, Compiler* const comp) {
     for (; i != end; i.next()) {
       Global* glob = i.get();
 
-      if (glob->constant_value == nullptr) {
-        glob->data_index = write_num_bytes(data, glob->type->size(), glob->type->alignment());
+      if (glob->constant_value.ptr == nullptr) {
+        glob->data_index = write_num_bytes(data, glob->decl.type->size(), glob->decl.type->alignment());
       }
     }
   }

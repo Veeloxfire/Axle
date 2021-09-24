@@ -150,12 +150,11 @@ struct StackState {
 };
 
 struct Decl {
-  bool comptime_eval = false;
+  ASTDecl* source = nullptr;
+
+  u8 meta_type = (u8)META_TYPE::NORMAL;
   const InternString* name ={};
   const Structure* type = nullptr;
-
-  uint8_t valid_rvts = ALL_RVTS;
-  RuntimeValue val ={};
 };
 
 struct MemValue {
@@ -164,9 +163,7 @@ struct MemValue {
 };
 
 struct Local {
-  bool comptime_constant = false;
-  const InternString* name ={};
-  const Structure* type = nullptr;
+  Decl decl;
 
   uint8_t valid_rvts = ALL_RVTS;
   RuntimeValue val ={};
@@ -253,13 +250,13 @@ struct UntypedStructureElements {
 };
 
 struct Global {
-  ASTDecl* source = nullptr;
   CompilationUnit* compilation_unit = nullptr;
 
-  const Structure* type = nullptr;
-  const InternString* name = nullptr;
+  Decl decl;
+
   size_t data_index = 0;
-  void* constant_value = nullptr;
+  ConstantVal constant_value ={};
+
   CodeBlock init ={};
 };
 

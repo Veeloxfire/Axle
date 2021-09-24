@@ -12,8 +12,6 @@
 #define JOIN2(a, b) a ## b
 #define JOIN(a, b) JOIN2(a, b)
 
-#define CAST(t, expr) ((t)(expr))
-
 constexpr inline u64 MAX_DECIMAL_U64_DIGITS = sizeof("9223372036854775807") - 1;
 
 constexpr inline u64 FNV1_HASH_BASE = 0xcbf29ce484222325;

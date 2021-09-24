@@ -13,6 +13,7 @@ struct Program;
 struct Structure;
 struct State;
 struct CodeBlock;
+struct Relocation;
 
 //header
 
@@ -42,10 +43,8 @@ using BACKEND_TRANSLATE_PTR = FUNCTION_PTR<
   Array<uint8_t>&,
   const CodeBlock*,
   size_t*,
-  Array<size_t>&
+  Array<Relocation>&
 >;
-
-using BACKEND_JUMP_FIX_PTR = FUNCTION_PTR<void, uint8_t*, size_t, size_t*>;
 
 struct System {
 #define CONST_NAME(n) static constexpr char n ## _name[] = #n
@@ -61,7 +60,7 @@ struct System {
   REG_NAME_FROM_NUM_PTR reg_name_from_num;
 
   BACKEND_TRANSLATE_PTR backend_translate;
-  BACKEND_JUMP_FIX_PTR backend_jump_fix;
+  //BACKEND_JUMP_FIX_PTR backend_jump_fix;
 };
 
 struct CallingConvention {

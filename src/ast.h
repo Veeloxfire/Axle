@@ -10,6 +10,7 @@ struct ASTType;
 struct ASTExpression;
 struct ASTStatement;
 struct ASTLambda;
+struct ASTStructBody;
 
 struct Structure;
 struct Function;
@@ -152,14 +153,12 @@ struct LambdaExpr {
   }
 };
 
-struct ASTTypedName {
-  ASTType type ={};
-  const InternString* name = nullptr;
-};
+struct StructExpr {
+  ASTStructBody* body;
 
-struct ASTStructBody {
-  Span span ={};
-  Array<ASTTypedName> elements = {};
+  ~StructExpr() {
+    free_destruct_single(body);
+  }
 };
 
 #define EXPRESSION_TYPE_MODIFY \
@@ -222,7 +221,7 @@ struct ASTExpression {
     IndexExpr index;
     MemberAccessExpr member;
     LambdaExpr lambda;
-    ASTStructBody struct_body;
+    StructExpr struct_body;
   };
 
   ASTExpression() = default;
@@ -299,6 +298,18 @@ struct ASTLambda {
 
   ASTFuncSig sig ={};
   ASTBlock body ={};
+};
+
+struct ASTTypedName {
+  ASTType type ={};
+  const InternString* name = nullptr;
+};
+
+struct ASTStructBody {
+  CompilationUnit* compilation_unit;
+  const Structure* type;
+  Span span ={};
+  Array<ASTTypedName> elements = {};
 };
 
 struct ASTWhile {

@@ -5,30 +5,60 @@
 
 #include <stdio.h>
 
+static void relocation_fix(uint8_t* code,
+                           const uint8_t* data_base,
+                           const Relocation* reloc,
+                           size_t* label_indexes) {
+  u8* ptr = code + reloc->value_offset;
+
+  switch (reloc->type) {
+    case RELOCATION_TYPE::U64_LABEL_OFFSET: {
+        const u64 label = x64_from_bytes(ptr);
+        x64_to_bytes(label_indexes[label], ptr);
+        break;
+      }
+    case RELOCATION_TYPE::U64_DATA_OFFSET: {
+        //Shouldnt be using non-const globals if we have no data
+        assert(data_base != nullptr);
+        const u64 offset = x64_from_bytes(ptr);
+        x64_to_bytes(data_base + offset, ptr);
+        break;
+      }
+    case RELOCATION_TYPE::I32_RELATIVE_TO_NEXT: {
+        const u32 label = x32_from_bytes(ptr);
+        x32_to_bytes((i32)((i64)label_indexes[label] - (i64)reloc->other_offset), ptr);
+        break;
+      }
+    default: {
+        //Should not be here
+        assert(false);
+      }
+  }
+}
+
+
 void compile_backend_single_func(Program* prog, const CodeBlock* code, Compiler* const comp, const System* system) {
   Array<uint8_t> out_code ={};
 
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
   DEFER(&) { free_no_destruct(label_indexes); };
 
-  Array<size_t> instruction_offsets ={};
+  Array<Relocation> relocations ={};
 
   size_t entry_point_label = 0;
 
-  system->backend_translate(comp, prog, out_code, code, label_indexes, instruction_offsets);
+  system->backend_translate(comp, prog, out_code, code, label_indexes, relocations);
   if (comp->is_panic()) {
     return;
   }
 
 
   {
-    auto jumps_i = instruction_offsets.begin();
-    const auto jumps_end = instruction_offsets.end();
+    auto reloc_i = relocations.begin();
+    const auto reloc_end = relocations.end();
 
-    for (; jumps_i < jumps_end; jumps_i++) {
-      const size_t index = *jumps_i;
-
-      system->backend_jump_fix(out_code.data, index, label_indexes);
+    for (; reloc_i < reloc_end; reloc_i++) {
+      relocation_fix(out_code.data, nullptr, reloc_i, label_indexes);
     }
   }
 
@@ -44,7 +74,7 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
                            Array<uint8_t>& out_code,
                            const CodeBlock* code,
                            size_t* label_indexes,
-                           Array<size_t>& instruction_offsets) {
+                           Array<Relocation>& relocations) {
 
   auto code_i = code->code.begin();
   const auto code_end = code->code.end();
@@ -56,7 +86,10 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
           const auto p_g = ByteCode::PARSE::LOAD_GLOBAL_MEM(code_i);
 
           const Global* glob = p_g.u64;
-          ByteCode::EMIT::LOAD_GLOBAL_MEM(out_code, p_g.val, prog->data.ptr + glob->data_index);
+
+          const auto offset = out_code.size + 2;
+          ByteCode::EMIT::SET_R64_TO_64(out_code, p_g.val, glob->data_index);
+          relocations.insert({ RELOCATION_TYPE::U64_DATA_OFFSET, offset, out_code.size });
 
           code_i += ByteCode::SIZE_OF::LOAD_GLOBAL_MEM;
           break;
@@ -97,26 +130,35 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
             next += ByteCode::SIZE_OF::LABEL;
           }
 
-          instruction_offsets.insert(out_code.size);
-          ByteCode::EMIT::JUMP_TO_FIXED(out_code, p_j.u64);
+          {
+            const size_t offset = out_code.size + 1;
+            ByteCode::EMIT::JUMP_TO_FIXED(out_code, p_j.u64);
+            relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
+          }
+
         SKIP_JUMP:
           break;
         }
-      case ByteCode::CALL_NATIVE_X64: {
+      /*case ByteCode::CALL_NATIVE_X64: {
           const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
 
-          instruction_offsets.insert(out_code.size);
+
+          relocations.insert({RELOCATION_TYPE::U64_DATA_OFFSET, out_code.size, 1});
+
           ByteCode::EMIT::CALL_NATIVE_X64(out_code, p_c.u64_1, p_c.u64_2);
           code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
           break;
-        }
+        }*/
       case ByteCode::CALL: {
           const auto p_c = ByteCode::PARSE::CALL(code_i);
           const Function* func = p_c.u64;
 
-          instruction_offsets.insert(out_code.size);
-          //Switch to a code label rather than func ptr
-          ByteCode::EMIT::CALL(out_code, func->code_block.label);
+          {
+            const size_t offset = out_code.size + 1;
+            //Switch to a code label rather than func ptr
+            ByteCode::EMIT::CALL(out_code, func->code_block.label);
+            relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
+          }
 
 
           code_i += ByteCode::SIZE_OF::CALL;
@@ -124,24 +166,31 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
         }
       case ByteCode::CALL_LABEL: {
           const auto p_c = ByteCode::PARSE::CALL_LABEL(code_i);
-          const u64 label = p_c.u64;
 
-          instruction_offsets.insert(out_code.size);
-          //Switch to a code label rather than func ptr
-          ByteCode::EMIT::CALL(out_code, label);
+          {
+            const size_t offset = out_code.size + 1;
+            ByteCode::EMIT::CALL(out_code, p_c.u64);
+            relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
+          }
 
           code_i += ByteCode::SIZE_OF::CALL_LABEL;
           break;
         }
       case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO:
-      case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO:
-        //Could try removing these jumps maybe
-        //but they shouldnt ever jump to the next instruction anyway
-        //Would be checking for something that never happens
-        instruction_offsets.insert(out_code.size);
-        goto EMIT_INSTRUCTION;
+      case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
+          const auto p_j = ByteCode::OP_R_64::parse(code_i);
+
+          //Could try checking for redundant jumps maybe
+          //but they shouldnt ever jump to the next instruction anyway
+          //Would be checking for something that probably never happens
+
+          const size_t offset = out_code.size + 2;
+          p_j.emit(out_code, p_j.op, p_j.val, p_j.u64);
+          relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
+          code_i += p_j.INSTRUCTION_SIZE;
+          break;
+        }
       default: {
-        EMIT_INSTRUCTION:
           const size_t i_size = ByteCode::instruction_size(*code_i);
           out_code.insert_uninit(i_size);
           memcpy_ts(out_code.data + out_code.size - i_size, i_size, code_i, i_size);
@@ -150,36 +199,6 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
           break;
         }
     }
-  }
-}
-
-void vm_backend_fix_jump(uint8_t* code,
-                         size_t index,
-                         size_t* label_indexes) {
-
-  uint8_t* instruction = code + index;
-
-  switch (*instruction) {
-    case ByteCode::CALL: {
-        const auto p = ByteCode::PARSE::CALL(instruction);
-        ByteCode::WRITE::CALL(instruction, label_indexes[p.u64.val]);
-        break;
-      }
-    case ByteCode::JUMP_TO_FIXED: {
-        const auto p = ByteCode::PARSE::JUMP_TO_FIXED(instruction);
-        ByteCode::WRITE::JUMP_TO_FIXED(instruction, label_indexes[p.u64.val]);
-        break;
-      }
-    case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
-        const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_ZERO(instruction);
-        ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_ZERO(instruction, p.val, label_indexes[p.u64.val]);
-        break;
-      }
-    case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
-        const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(instruction);
-        ByteCode::WRITE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(instruction, p.val, label_indexes[p.u64.val]);
-        break;
-      }
   }
 }
 
@@ -192,7 +211,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
   DEFER(&) { free_no_destruct(label_indexes); };
 
-  Array<size_t> instruction_offsets ={};
+  Array<Relocation> relocations ={};
 
   size_t entry_point_label = 0;
 
@@ -229,11 +248,11 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
       for (; i < end; i++) {
         const Global* g = *i;
 
-        if (g->type->type != STRUCTURE_TYPE::LAMBDA) {
+        if (g->decl.type->type != STRUCTURE_TYPE::LAMBDA) {
           continue;
         }
 
-        const SignatureStructure* sig = (const SignatureStructure*)g->type;
+        const SignatureStructure* sig = (const SignatureStructure*)g->decl.type;
 
         if (!(sig->parameter_types.size == 0 && sig->return_type == comp->services.types->s_u64)) {
           continue;
@@ -247,7 +266,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
           return;
         }
 
-        entry_point_func = (Function*)g->constant_value;
+        entry_point_func = *(Function**)g->constant_value.ptr;
       }
     }
 
@@ -276,7 +295,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
       if (func->func_type == FUNCTION_TYPE::DEFAULT) {
         const CodeBlock* const code = &func->code_block;
 
-        system->backend_translate(comp, prog, out_code, code, label_indexes, instruction_offsets);
+        system->backend_translate(comp, prog, out_code, code, label_indexes, relocations);
         if (comp->is_panic()) {
           return;
         }
@@ -300,7 +319,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
                                         stack_size);
         ByteCode::EMIT::RETURN(block.code);
 
-        system->backend_translate(comp, prog, out_code, &block, label_indexes, instruction_offsets);
+        system->backend_translate(comp, prog, out_code, &block, label_indexes, relocations);
         if (comp->is_panic()) {
           return;
         }
@@ -319,8 +338,8 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
       for (; i != end; i.next()) {
         Global* glob = i.get();
 
-        if (glob->constant_value == nullptr) {
-          system->backend_translate(comp, prog, out_code, &glob->init, label_indexes, instruction_offsets);
+        if (glob->constant_value.ptr == nullptr) {
+          system->backend_translate(comp, prog, out_code, &glob->init, label_indexes, relocations);
           if (comp->is_panic()) {
             return;
           }
@@ -332,7 +351,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
       for (; i != end; i.next()) {
         Global* glob = i.get();
 
-        if (glob->constant_value == nullptr) {
+        if (glob->constant_value.ptr == nullptr) {
           ByteCode::EMIT::CALL_LABEL(actual_entry_function.code, glob->init.label);
         }
       }
@@ -343,7 +362,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
 
       //Entry before emitting possible inits
       prog->entry_point = out_code.size;
-      system->backend_translate(comp, prog, out_code, &actual_entry_function, label_indexes, instruction_offsets);
+      system->backend_translate(comp, prog, out_code, &actual_entry_function, label_indexes, relocations);
       if (comp->is_panic()) {
         return;
       }
@@ -351,13 +370,11 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
   }
 
   {
-    auto jumps_i = instruction_offsets.begin();
-    const auto jumps_end = instruction_offsets.end();
+    auto reloc_i = relocations.begin();
+    const auto reloc_end = relocations.end();
 
-    for (; jumps_i < jumps_end; jumps_i++) {
-      const size_t index = *jumps_i;
-
-      system->backend_jump_fix(out_code.data, index, label_indexes);
+    for (; reloc_i < reloc_end; reloc_i++) {
+      relocation_fix(out_code.data, prog->data.ptr, reloc_i, label_indexes);
     }
   }
 
@@ -714,25 +731,33 @@ void X64::ret(Array<uint8_t>& arr) {
   arr.insert(X64::RET_NEAR);
 }
 
-inline static void jump_near(Array<uint8_t>& arr, int32_t relative) {
+inline static void jump_near(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.reserve_extra(1 + sizeof(relative));
 
   arr.insert(X64::JMP_NEAR);
+
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   x32_to_bytes((uint32_t)relative, arr.data + arr.size);
   arr.size += sizeof(relative);
 }
 
-inline static void call_near(Array<uint8_t>& arr, int32_t relative) {
+inline static void call_near(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.reserve_extra(1 + sizeof(relative));
 
   arr.insert(X64::CALL_NEAR);
+
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   x32_to_bytes((uint32_t)relative, arr.data + arr.size);
   arr.size += sizeof(relative);
 }
 
-static void jump_zero(Array<uint8_t>& arr, int32_t relative) {
+static void jump_zero(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JZ_NEAR);
+
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
 
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
@@ -741,81 +766,99 @@ static void jump_zero(Array<uint8_t>& arr, int32_t relative) {
 
 static constexpr auto jump_equal = jump_zero;
 
-static void jump_not_equal(Array<uint8_t>& arr, int32_t relative) {
+static void jump_not_equal(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JNE_NEAR);
 
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
-static void jump_above(Array<uint8_t>& arr, int32_t relative) {
+static void jump_above(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JA_NEAR);
 
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
-static void jump_not_above(Array<uint8_t>& arr, int32_t relative) {
+static void jump_not_above(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JNA_NEAR);
 
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
-static void jump_below(Array<uint8_t>& arr, int32_t relative) {
+static void jump_below(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JB_NEAR);
 
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
-static void jump_not_below(Array<uint8_t>& arr, int32_t relative) {
+static void jump_not_below(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JNB_NEAR);
 
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
-static void jump_lesser(Array<uint8_t>& arr, int32_t relative) {
+static void jump_lesser(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JL_NEAR);
 
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
-static void jump_not_lesser(Array<uint8_t>& arr, int32_t relative) {
+static void jump_not_lesser(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JNL_NEAR);
 
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
-static void jump_greater(Array<uint8_t>& arr, int32_t relative) {
+static void jump_greater(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JG_NEAR);
 
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
+
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
   arr.size += sizeof(uint32_t);
 }
 
-static void jump_not_greater(Array<uint8_t>& arr, int32_t relative) {
+static void jump_not_greater(Array<Relocation>& relocs, Array<uint8_t>& arr, int32_t relative) {
   arr.insert(0x0F);
   arr.insert(X64::JNG_NEAR);
+
+  relocs.insert({ RELOCATION_TYPE::I32_RELATIVE_TO_NEXT, arr.size, arr.size + 4 });
 
   arr.reserve_extra(sizeof(uint32_t));
   x32_to_bytes(relative, arr.data + arr.size);
@@ -860,11 +903,11 @@ static void setg(Array<u8>& arr, u8 r) {
   arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_rm(r));
 }
 
-static void check_cmp_jump(Array<size_t>& instruction_offsets,
+static void check_cmp_jump(Array<Relocation>& relocs,
                            Array<uint8_t>& out_code,
                            const uint8_t** code_i_ptr, const uint8_t* end,
-                           FUNCTION_PTR<void, Array<u8>&, i32> success_jump_func,
-                           FUNCTION_PTR<void, Array<u8>&, i32> fail_jump_func,
+                           FUNCTION_PTR<void, Array<Relocation>&, Array<u8>&, i32> success_jump_func,
+                           FUNCTION_PTR<void, Array<Relocation>&, Array<u8>&, i32> fail_jump_func,
                            FUNCTION_PTR<void, Array<u8>&, u8> no_jump) {
 
   const uint8_t* const code_i = *code_i_ptr;
@@ -877,8 +920,7 @@ static void check_cmp_jump(Array<size_t>& instruction_offsets,
 
         cmp(out_code, p_e.val1, p_e.val2);
 
-        instruction_offsets.insert(out_code.size);
-        fail_jump_func(out_code, (int32_t)p_j.u64.val);
+        fail_jump_func(relocs, out_code, (int32_t)p_j.u64.val);
 
         *code_i_ptr = code_i_2 + ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_ZERO;
         break;
@@ -889,8 +931,7 @@ static void check_cmp_jump(Array<size_t>& instruction_offsets,
 
         cmp(out_code, p_e.val1, p_e.val2);
 
-        instruction_offsets.insert(out_code.size);
-        success_jump_func(out_code, (int32_t)p_j.u64.val);
+        success_jump_func(relocs, out_code, (int32_t)p_j.u64.val);
 
         *code_i_ptr = code_i_2 + ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
         break;
@@ -914,7 +955,7 @@ static void check_cmp_jump(Array<size_t>& instruction_offsets,
   }
 }
 
-static void check_for_jumps(Array<size_t>& instruction_offsets, Array<uint8_t>& out_code, uint8_t val, const uint8_t** code_i_ptr, const uint8_t* end) {
+static void check_for_jumps(Array<Relocation>& relocs, Array<uint8_t>& out_code, uint8_t val, const uint8_t** code_i_ptr, const uint8_t* end) {
 
   const uint8_t* code_i = *code_i_ptr;
 
@@ -930,9 +971,7 @@ static void check_for_jumps(Array<size_t>& instruction_offsets, Array<uint8_t>& 
           cmp(out_code, p.val, (int32_t)0);
         }
 
-
-        instruction_offsets.insert(out_code.size);
-        jump_zero(out_code, (int32_t)p.u64.val);
+        jump_zero(relocs, out_code, (int32_t)p.u64.val);
 
         *code_i_ptr = code_i + ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
         break;
@@ -944,8 +983,7 @@ static void check_for_jumps(Array<size_t>& instruction_offsets, Array<uint8_t>& 
           cmp(out_code, p.val, (int32_t)0);
         }
 
-        instruction_offsets.insert(out_code.size);
-        jump_not_equal(out_code, (int32_t)p.u64.val);
+        jump_not_equal(relocs, out_code, (int32_t)p.u64.val);
 
         *code_i_ptr = code_i + ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
         break;
@@ -961,7 +999,7 @@ void x86_64_backend_code_block(Compiler* const comp,
                                Array<uint8_t>& out_code,
                                const CodeBlock* code,
                                size_t* label_indexes,
-                               Array<size_t>& instruction_offsets) {
+                               Array<Relocation>& relocs) {
   auto code_i = code->code.begin();
   const auto code_end = code->code.end();
 
@@ -988,6 +1026,20 @@ void x86_64_backend_code_block(Compiler* const comp,
           code_i += ByteCode::SIZE_OF::COPY_R8_TO_R8;
           break;
         }
+      case ByteCode::LOAD_GLOBAL_MEM: {
+          const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
+          const Global* glob = (const Global*)p.u64.vptr;
+
+          assert(glob->constant_value.ptr == nullptr);
+          assert( glob->data_index != 0);
+
+          X64::mov(out_code, X64::R{ p.val }, glob->data_index);
+
+          relocs.insert({RELOCATION_TYPE::U64_DATA_OFFSET, out_code.size - 8, out_code.size});
+
+          code_i += ByteCode::SIZE_OF::SET_R64_TO_64;
+          break;
+        }
       case ByteCode::SET_R64_TO_64: {
           const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
           X64::mov(out_code, X64::R{ p.val }, p.u64);
@@ -1011,7 +1063,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::ADD_R64S;
 
-          check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
+          check_for_jumps(relocs, out_code, p.val2, &code_i, code_end);
           break;
         }
       case ByteCode::SUB_R64S: {
@@ -1021,7 +1073,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::SUB_R64S;
 
-          check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
+          check_for_jumps(relocs, out_code, p.val2, &code_i, code_end);
           break;
         }
       case ByteCode::MUL_R64S: {
@@ -1036,7 +1088,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::MUL_R64S;
 
-          check_for_jumps(instruction_offsets, out_code, p.val2, &code_i, code_end);
+          check_for_jumps(relocs, out_code, p.val2, &code_i, code_end);
           break;
         }
       case ByteCode::DIV_RU64S: {
@@ -1054,7 +1106,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::DIV_RU64S;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::DIV_RI64S: {
@@ -1073,7 +1125,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::DIV_RI64S;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::SHIFT_L_BY_R8_R64: {
@@ -1088,7 +1140,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::SHIFT_L_BY_R8_R64;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::SHIFT_R_BY_R8_RU64: {
@@ -1103,7 +1155,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RU64;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::SHIFT_R_BY_R8_RI64: {
@@ -1118,7 +1170,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RI64;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::OR_R64S: {
@@ -1131,7 +1183,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::OR_R64S;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::XOR_R64S: {
@@ -1144,7 +1196,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::XOR_R64S;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::AND_R64S: {
@@ -1157,31 +1209,31 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::AND_R64S;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::EQ_R64S: {
-          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+          check_cmp_jump(relocs, out_code, &code_i, code_end,
                          jump_equal, jump_not_equal, sete);
           break;
         }
       case ByteCode::LESS_U64S: {
-          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+          check_cmp_jump(relocs, out_code, &code_i, code_end,
                          jump_below, jump_not_below, setl);
           break;
         }
       case ByteCode::GREAT_U64S: {
-          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+          check_cmp_jump(relocs, out_code, &code_i, code_end,
                          jump_above, jump_not_above, setg);
           break;
         }
       case ByteCode::LESS_I64S: {
-          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+          check_cmp_jump(relocs, out_code, &code_i, code_end,
                          jump_lesser, jump_not_lesser, setl);
           break;
         }
       case ByteCode::GREAT_I64S: {
-          check_cmp_jump(instruction_offsets, out_code, &code_i, code_end,
+          check_cmp_jump(relocs, out_code, &code_i, code_end,
                          jump_greater, jump_not_greater, setg);
           break;
         }
@@ -1194,7 +1246,7 @@ void x86_64_backend_code_block(Compiler* const comp,
 
           code_i += ByteCode::SIZE_OF::NEG_R64;
 
-          check_for_jumps(instruction_offsets, out_code, 0, &code_i, code_end);
+          check_for_jumps(relocs, out_code, 0, &code_i, code_end);
           break;
         }
       case ByteCode::PUSH_R64: {
@@ -1360,9 +1412,8 @@ void x86_64_backend_code_block(Compiler* const comp,
       case ByteCode::CALL: {
           const auto p = ByteCode::PARSE::CALL(code_i);
           const Function* func = p.u64;
-          instruction_offsets.insert(out_code.size);
           //Switch to a code label rather than func ptr
-          call_near(out_code, (int32_t)func->code_block.label);
+          call_near(relocs, out_code, (int32_t)func->code_block.label);
 
 
           code_i += ByteCode::SIZE_OF::CALL;
@@ -1372,8 +1423,7 @@ void x86_64_backend_code_block(Compiler* const comp,
           const auto p = ByteCode::PARSE::CALL_LABEL(code_i);
           const u64 label = p.u64;
 
-          instruction_offsets.insert(out_code.size);
-          call_near(out_code, (int32_t)label);
+          call_near(relocs, out_code, (int32_t)label);
 
           code_i += ByteCode::SIZE_OF::CALL_LABEL;
           break;
@@ -1402,8 +1452,7 @@ void x86_64_backend_code_block(Compiler* const comp,
             next += ByteCode::SIZE_OF::LABEL;
           }
 
-          instruction_offsets.insert(out_code.size);
-          jump_near(out_code, (int32_t)p_j.u64.val);
+          jump_near(relocs, out_code, (int32_t)p_j.u64.val);
 
         SKIP_JUMP:
           break;
@@ -1414,8 +1463,7 @@ void x86_64_backend_code_block(Compiler* const comp,
           //need to recompare
           cmp(out_code, p.val, (int32_t)0);
 
-          instruction_offsets.insert(out_code.size);
-          jump_zero(out_code, (int32_t)p.u64.val);
+          jump_zero(relocs, out_code, (int32_t)p.u64.val);
 
           code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
           break;
@@ -1426,8 +1474,7 @@ void x86_64_backend_code_block(Compiler* const comp,
           //need to recompare
           cmp(out_code, p.val, (int32_t)0);
 
-          instruction_offsets.insert(out_code.size);
-          jump_not_equal(out_code, (int32_t)p.u64.val);
+          jump_not_equal(relocs, out_code, (int32_t)p.u64.val);
 
           code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED_IF_VAL_NOT_ZERO;
           break;
@@ -1444,17 +1491,17 @@ void x86_64_backend_code_block(Compiler* const comp,
   }
 }
 
-void x86_64_backend_fix_jump(uint8_t* code, size_t index, size_t* label_indexes) {
-  if (code[index] == 0x0F) index++;
-
-  //jumps are all from the end of the instruction
-  //all jumps are a op + imm32 (so far)
-
-  const uint64_t j_index = x32_from_bytes(code + index + 1);
-  const int32_t jump = (int32_t)label_indexes[j_index] - (int32_t)(index + 1 + sizeof(int32_t));
-
-  x32_to_bytes(jump, code + index + 1);
-}
+//void x86_64_backend_fix_jump(uint8_t* code, const Relocation* reloc, size_t* label_indexes) {
+//  if (code[index] == 0x0F) index++;
+//
+//  //jumps are all from the end of the instruction
+//  //all jumps are a op + imm32 (so far)
+//
+//  const uint64_t j_index = x32_from_bytes(code + index + 1);
+//  const int32_t jump = (int32_t)label_indexes[j_index] - (int32_t)(index + 1 + sizeof(int32_t));
+//
+//  x32_to_bytes(jump, code + index + 1);
+//}
 
 struct RegisterNames {
   OwnedPtr<char> r;
@@ -1521,7 +1568,6 @@ const char* b16_reg_name(uint8_t reg) {
 
   return "INVALID REGISTER";
 }
-
 
 const char* b32_reg_name(uint8_t reg) {
   switch (reg) {
@@ -1741,7 +1787,7 @@ static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_addr
   else {
     ops->rm_name = x86_64_reg_name_from_num;
   }
-  
+
   if (rex_w) {
     ops->r_name = x86_64_reg_name_from_num;
     ops->mem_size = "QWORD PTR";

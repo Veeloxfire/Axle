@@ -172,9 +172,11 @@ void TypeCreator::add_type_to_namespace(const Structure* s, const InternString* 
   }
 
   Global* glob = comp->globals.insert();
-  glob->name = name;
-  glob->type = meta_struct;//meta type for all types
-  glob->constant_value = (void*)s;
+  glob->decl.name = name;
+  glob->decl.type = meta_struct;//meta type for all types
+  glob->constant_value.size = 8;
+  glob->constant_value.ptr = comp->constants.alloc_no_construct(glob->constant_value.size);
+  memcpy_ts((const Structure**)glob->constant_value.ptr, 1, &s, 1);
 
   el->globals.insert(glob);
 }
@@ -409,9 +411,11 @@ EnumValue* TypeCreator::new_enum_value(const Span& span,
   }
   else {
     Global* glob = comp->globals.insert();
-    glob->type = enum_s;
-    glob->name = name;
-    glob->constant_value = (void*)val;
+    glob->decl.type = enum_s;
+    glob->decl.name = name;
+    glob->constant_value.size = 8;
+    glob->constant_value.ptr = comp->constants.alloc_no_construct(glob->constant_value.size);
+    memcpy_ts((EnumValue**)glob->constant_value.ptr, 1, &val, 1);
 
     el->globals.insert(glob);
   }

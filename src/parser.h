@@ -47,8 +47,7 @@ MODIFY(Full_Stop, ".")
 
 #define AXLE_TOKEN_INTRINSICS \
 MODIFY(Import, "#import") \
-MODIFY(Stdlib, "#stdlib") \
-MODIFY(DLLHeader, "#dll_header") \
+MODIFY(Std, "#std") \
 MODIFY(Convention, "#conv") \
 
 #define AXLE_TOKEN_MODIFY \
@@ -109,8 +108,8 @@ struct Lexer {
 };
 
 struct TokenStream {
-  const Token* i;
-  const Token* end;
+  Token* i;
+  Token* end;
 };
 
 struct Parser {
