@@ -1,13 +1,6 @@
-test_glob : u64 = 2;
-
-func :: (a: u64) -> void {
-  test_glob = test_glob + a;
-}
+#import "util.axl";
 
 main :: () -> u64 {
-  test_glob = 3;
-  func(5);
-
-  return test_glob;
+  return add(1, 2);
 }
 

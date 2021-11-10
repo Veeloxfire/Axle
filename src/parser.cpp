@@ -16,15 +16,6 @@ TokenTypeString token_type_string(AxleTokenType t) {
   return { "UNKNOWN TOKEN TYPE", sizeof("UNKNOWN TOKEN TYPE") };
 }
 
-constexpr KeywordPair intrinsics[] ={
-#define MODIFY(n, str) {str, AxleTokenType:: ## n},
-  AXLE_TOKEN_INTRINSICS
-#undef MODIFY
-};
-
-
-constexpr size_t num_intrinsics = sizeof(intrinsics) / sizeof(KeywordPair);
-
 constexpr KeywordPair keywords[] ={
 #define MODIFY(n, str) {str, AxleTokenType:: ## n},
   AXLE_TOKEN_KEYWORDS
@@ -280,41 +271,6 @@ static Token lex_identifier(Lexer* const lex) {
   return ident;
 }
 
-static Token lex_intrinsic_identifier(Lexer* const lex) {
-  const char* const name_base = lex->top;
-
-  //First is '#'
-  do {
-    lex->top++;
-    lex->curr_pos.character++;
-    //Rest only be character
-  } while (is_identifier_char(lex->top[0]));
-
-  const size_t ident_len = lex->top - name_base;
-
-  Token ident ={};
-  ident.type = AxleTokenType::Identifier;
-  ident.string = lex->strings->intern(name_base, ident_len);
-
-
-  for (size_t i = 0; i < num_intrinsics; i++) {
-    const KeywordPair& pair = intrinsics[i];
-
-    if (pair.size == ident_len
-        && memcmp_ts(pair.keyword, ident.string->string, ident_len) == 0) {
-      //Is keyword
-      ident.type = pair.type;
-      //Exit early
-      return ident;
-    }
-  }
-
-  const auto message = format("'{}' in not a valid compiler intrinsic", ident.string);
-
-  //Error
-  return error_token(lex, message.ptr);
-}
-
 static Token lex_number(Lexer* const lex) {
   const char* const number_base = lex->top;
 
@@ -450,6 +406,32 @@ static Token lex_string(Lexer* const lex) {
   }
 }
 
+static Token lex_intrinsic(Lexer* const lex) {
+  assert(lex->top[0] == '#');
+
+  lex->top++;
+  lex->curr_pos.character++;
+
+  if (!is_identifier_char(lex->top[0])) {
+    return error_token(lex, "'#' must be accompanied by an identifier");
+  }
+
+  const char* const name_base = lex->top;
+
+  do {
+    lex->top++;
+    lex->curr_pos.character++;
+  } while (is_identifier_char(lex->top[0]) || is_any_digit(lex->top[0]));
+
+  const size_t ident_len = lex->top - name_base;
+
+  Token ident ={};
+  ident.type = AxleTokenType::Intrinsic;
+  ident.string = lex->strings->intern(name_base, ident_len);
+
+  return ident;
+}
+
 static Token lex_unpositioned_token(Lexer* const lex) {
   const char c = lex->top[0];
 
@@ -459,14 +441,14 @@ static Token lex_unpositioned_token(Lexer* const lex) {
   else if (is_dec_number(c)) {
     return lex_number(lex);
   }
-  else if (c == '#') {
-    return lex_intrinsic_identifier(lex);
-  }
   else if (c == '"') {
     return lex_string(lex);
   }
   else if (c == '\'') {
     return lex_char(lex);
+  }
+  else if (c == '#') {
+    return lex_intrinsic(lex);
   }
   else if (c == '\0') {
     // \0 is the end of file
@@ -1459,6 +1441,82 @@ static void parse_type(Compiler* const comp, Parser* const parser, ASTType* cons
   DEFER(&) { set_span_end(parser->prev, type->span); };
 
   switch (parser->current.type) {
+    case AxleTokenType::Left_Bracket: {
+        //Lambda or tuple signature
+        //Tuple = (ty, ty, etc)
+        //Lambda = (ty, ty, etc) -> ty
+        //Can parse as if it were a tuple and then convert to lambda
+
+        advance(comp, parser);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        Array<ASTType> args ={};
+
+        while (true) {
+          args.insert_uninit(1);
+          ASTType* ty = args.back();
+
+          parse_type(comp, parser, ty);
+          if (comp->is_panic()) {
+            return;
+          }
+
+          if (parser->current.type == AxleTokenType::Right_Bracket) {
+            break;
+          }
+          else if (parser->current.type != AxleTokenType::Comma) {
+            comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+                               "Invalid token type '{}' in type list", parser->current.type);
+            return;
+          }
+
+          assert(parser->current.type == AxleTokenType::Comma);
+        }
+
+        assert(parser->current.type == AxleTokenType::Right_Bracket);
+        advance(comp, parser);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        if (parser->current.type == AxleTokenType::Sub
+            && parser->next.type == AxleTokenType::Greater) {
+          if (parser->next.consumed_whitespace) {
+            comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+                               "Expected -> or nothing after type\n"
+                               "Found we the compiler thinks is '->' but the characters are separated");
+            return;
+          }
+
+          advance(comp, parser);
+          if (comp->is_panic()) {
+            return;
+          }
+          advance(comp, parser);
+          if (comp->is_panic()) {
+            return;
+          }
+
+          args.insert_uninit(1);
+          ASTType* ty = args.back();
+          
+          parse_type(comp, parser, ty);
+          if (comp->is_panic()) {
+            return;
+          }
+
+          type->set_union(TYPE_TYPE::LAMBDA);
+          type->lambda.types = std::move(args);
+        }
+        else {
+          type->set_union(TYPE_TYPE::TUPLE);
+          type->tuple.types = std::move(args);
+        }
+
+        break;
+      }
     case AxleTokenType::Identifier: {
         type->set_union(TYPE_TYPE::NORMAL);
         type->name = parser->current.string;
@@ -1582,7 +1640,7 @@ static void parse_decl(Compiler* const comp, Parser* const parser, ASTDecl* cons
   else {
     comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Expected '{}' or '{}' but found '{}'",
-                       AxleTokenType::Equals,  AxleTokenType::Colon, parser->current.type);
+                       AxleTokenType::Equals, AxleTokenType::Colon, parser->current.type);
     return;
   }
 
@@ -1758,7 +1816,6 @@ static void parse_statement(Compiler* const comp, Parser* const parser, ASTState
       }
   }
 }
-
 
 static void parse_block(Compiler* const comp, Parser* const parser, ASTBlock* const block) {
   expect(comp, parser, AxleTokenType::Left_Brace);
@@ -1945,52 +2002,16 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
        !comp->is_panic() && current != AxleTokenType::End;
        current = parser->current.type)
   {
-    if (parser->current.type == AxleTokenType::Import) {
-      //Import
+    if (parser->current.type == AxleTokenType::Intrinsic) {
+      if (parser->current.string != comp->intrinsics.import) {
+        comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+                           "Intrinsic '#{}' is not valid here", comp->intrinsics.import);
+        return;
+      }
+
+            //Import
       file->imports.insert_uninit(1);
       ASTImport* imp = file->imports.back();
-
-      advance(comp, parser);
-      if (comp->is_panic()) {
-        return;
-      }
-
-      switch (parser->current.type) {
-        case AxleTokenType::Std: {
-            imp->std = true;
-            expect(comp, parser, AxleTokenType::Left_Bracket);
-            if (comp->is_panic()) {
-              return;
-            }
-
-            if (parser->current.type != AxleTokenType::String) {
-              comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                                 "invalid std relative path");
-            }
-            imp->relative_path = parser->current.string;
-            advance(comp, parser);
-            if (comp->is_panic()) {
-              return;
-            }
-
-            expect(comp, parser, AxleTokenType::Right_Bracket);
-            break;
-          }
-        case AxleTokenType::String: {
-            imp->relative_path = parser->current.string;
-            break;
-          }
-        
-        default: {
-            comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                               "Invalid token after #import statement");
-            return;
-          }
-      }
-
-      if (comp->is_panic()) {
-        return;
-      }
 
       //Load the span
       set_span_start(parser->current, imp->span);
@@ -2002,7 +2023,40 @@ void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file)
       if (comp->is_panic()) {
         return;
       }
-      expect(comp, parser, AxleTokenType::Semicolon);
+
+      parse_expression(comp, parser, &imp->expr_location);
+      if (comp->is_panic()) {
+        return;
+      }
+
+      if (parser->current.type == AxleTokenType::Left_Brace) {
+        advance(comp, parser);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        //All declarations
+        while (parser->current.type == AxleTokenType::Identifier) {
+          imp->imports.insert_uninit(1);
+          ASTDecl* decl = imp->imports.back();
+
+          parse_decl(comp, parser, decl);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        expect(comp, parser, AxleTokenType::Right_Brace);
+        if (comp->is_panic()) {
+          return;
+        }
+      }
+      else {
+        expect(comp, parser, AxleTokenType::Semicolon);
+        if (comp->is_panic()) {
+          return;
+        }
+      }
     }
     else if (parser->current.type == AxleTokenType::Identifier
              && parser->next.type == AxleTokenType::Colon) {
@@ -2316,13 +2370,8 @@ static void print_function_sig(Printer* const printer, const ASTFuncSig* sig) {
   IO::print(' ');
 }
 
-void print_ast(const ASTFile* file) {
+void print_ast(const Compiler* comp, const ASTFile* file) {
   Printer printer ={};
-
-  //Header
-  if (file->header.is_dll_header) {
-    printf("#dll_header \"%s\"\n\n", file->header.dll_header.relative_path->string);
-  }
 
   //Imports
   {
@@ -2330,12 +2379,15 @@ void print_ast(const ASTFile* file) {
     const auto end = file->imports.end();
 
     for (; i < end; i++) {
-      if (i->std) {
-        printf("#stdlib \"%s\";\n", i->relative_path->string);
+      IO::print('#');
+      IO::print(comp->intrinsics.import->string);
+      IO::print(' ');
+      print_ast_expression(&printer, &i->expr_location);
+
+      if (i->imports.size == 0) {
+        IO::print(';');
       }
-      else {
-        printf("#import \"%s\";\n", i->relative_path->string);
-      }
+
     }
 
     if (file->imports.size > 0) {

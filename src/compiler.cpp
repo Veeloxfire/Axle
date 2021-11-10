@@ -16,6 +16,16 @@ Function* Compiler::new_function() {
   return func;
 }
 
+ImportUnit* Compiler::new_import_unit(NamespaceIndex ns) {
+  ImportUnit* unit = import_units.allocate();
+  unit->type  = COMPILATION_TYPE::IMPORT;
+  unit->stage = IMPORT_COMP_STAGE::UNTYPED;
+  unit->available_names = ns;
+
+  to_compile.insert(unit);
+  return unit;
+}
+
 ConstantExprUnit* Compiler::new_const_expr_unit(NamespaceIndex ns) {
   ConstantExprUnit* unit = const_expr_units.allocate();
   unit->type  = COMPILATION_TYPE::CONST_EXPR;
@@ -204,8 +214,11 @@ Local* State::find_local(const InternString* i_s) {
   return nullptr;
 }
 
+void StackState::require_call_alignment(u64 req_align) {
+  call_alignment = lowest_common_multiple(req_align, call_alignment);
+}
 
-int32_t StackState::pass_stack_local(uint64_t size, uint64_t alignment) {
+i32 StackState::pass_stack_local(u64 size, u64 alignment) {
   const uint64_t mod_align = current_passed % alignment;
 
   if (mod_align > 0) {
@@ -220,7 +233,7 @@ int32_t StackState::pass_stack_local(uint64_t size, uint64_t alignment) {
   return -(int32_t)current_passed;
 }
 
-int32_t StackState::next_stack_local(uint64_t size, uint64_t alignment) {
+i32 StackState::next_stack_local(u64 size, u64 alignment) {
   const uint64_t mod_align = current % alignment;
 
   if (mod_align > 0) {
@@ -366,7 +379,7 @@ const Structure* find_or_make_tuple_literal(Compiler* const comp, Context* const
     for (; i < end; i++) {
       const Structure* s = *i;
       if (s->type == STRUCTURE_TYPE::TUPLE_LITERAL) {
-        const TupleLiteralStructure* tls = static_cast<const TupleLiteralStructure*>(s);
+        const TupleStructure* tls = static_cast<const TupleStructure*>(s);
 
         //Not same size
         if (els.size != tls->elements.size) { continue; }
@@ -495,6 +508,18 @@ void compile_type(Compiler* const comp,
   }
 
   switch (type->type_type) {
+    case TYPE_TYPE::LAMBDA: {
+        FOR_MUT(type->lambda.types, i) {
+          compile_type(comp, context, i);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        find_or_make_tuple_literal()
+
+        break;
+      }
     case TYPE_TYPE::NORMAL: {
         const NamedElement* name = comp->services.names->find_name(context->current_namespace, type->name);
 
@@ -1935,7 +1960,7 @@ void compile_type_of_expression(Compiler* const comp,
 
         Local* const loc = state->find_local(name);
 
-        const Decl* decl = nullptr; 
+        const Decl* decl = nullptr;
         if (loc != nullptr) {
           expr->set_union(EXPRESSION_TYPE::LOCAL);
           expr->local = loc - state->all_locals.data;
@@ -3269,6 +3294,7 @@ static void compile_function_call(Compiler* const comp,
   DEFER(&) { state->stack.current_passed = save_stack_params; };
 
   state->made_call = true;
+  state->stack.require_call_alignment(16);//TODO: Actually work out the alignment
 
   const CallingConvention* convention = call->sig->calling_convention;
 
@@ -4333,10 +4359,25 @@ static void map_values(const System* sys,
   }
 
   //Finally allocate the stack
-  const uint64_t stack_needed = state->stack.max
+  uint64_t stack_needed = state->stack.max
     + ((uint64_t)state->made_call * conv->shadow_space_size)
     + state->stack.max_passed
     + (-base_pointer_offset);
+
+  //Branch modifies "stack_needed"
+  if (state->made_call) {
+    //Need to align to the call border
+    u64 aligned_stack = ceil_to_n<u64>(stack_needed, state->stack.call_alignment);
+
+    //The call instruction will push 8 bytes onto the stack anyway so need to fix that
+    if ((aligned_stack - 8) > stack_needed) {
+      stack_needed = (aligned_stack - 8);
+    }
+    else {
+      stack_needed = ceil_to_n<u64>(stack_needed + 8, state->stack.call_alignment) - 8;
+    }
+  }
+
 
   if (stack_needed > 0) {
     ByteCode::EMIT::ALLOCATE_STACK(temp, stack_needed);
@@ -4818,12 +4859,12 @@ bool test_is_child(const CallingConvention* convention, const ValueTree& tree,
   //cant merge values that cross function calls with a volatile register
 
   if ((possible_child.crosses_call
-      && possible_parent.value_type == ValueType::FIXED
-      && convention->is_volatile(possible_parent.reg))
+       && possible_parent.value_type == ValueType::FIXED
+       && convention->is_volatile(possible_parent.reg))
       ||
       (possible_parent.crosses_call
-      && possible_child.value_type == ValueType::FIXED
-      && convention->is_volatile(possible_child.reg))) {
+       && possible_child.value_type == ValueType::FIXED
+       && convention->is_volatile(possible_child.reg))) {
     return false;
   }
 
@@ -5389,7 +5430,89 @@ void compile_untyped_structure_declaration(Compiler* comp, Context* context, Unt
   }
 }
 
-void compile_untyped_global(Compiler* comp, Context* context, State* state, ASTDecl* decl, Global* global) {
+void compile_import_expression_type(Compiler* comp, Context* context, State* state,
+                                    ASTExpression* expr) {
+  compile_type_of_expression(comp, context, state, expr, nullptr);
+  if (comp->is_panic()) { return; }
+
+  if (expr->type->type != STRUCTURE_TYPE::FIXED_ARRAY) {
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                       "#{} expression must be a character array\n"
+                       "Instead found: {}",
+                       comp->intrinsics.import, expr->type->name);
+    return;
+  }
+
+  const ArrayStructure* arr = (const ArrayStructure*)expr->type;
+
+  if (arr->base != comp->services.types->s_ascii) {
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                       "#{} expression must be a character array\n"
+                       "Expected base type: {}\n"
+                       "Instead found: {}",
+                       comp->intrinsics.import, comp->services.types->s_ascii->name, arr->base->name);
+    return;
+  }
+
+  if (!expr->comptime_eval) {
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                       "#{} expression must be a compile time constant",
+                       comp->intrinsics.import);
+    return;
+  }
+}
+
+static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp, NamespaceIndex import_to) {
+ 
+  const char* path = nullptr;
+
+  if (already_const_type(imp->expr_location.expr_type)) {
+    assert(imp->expr_location.expr_type == EXPRESSION_TYPE::ASCII_STRING);
+
+    path = imp->expr_location.ascii_string->string;
+  }
+  else {
+    assert(imp->expr_location.const_val != nullptr);
+
+    path = (const char*)imp->expr_location.const_val;
+  }
+
+  assert(path != nullptr);
+
+  Namespace* ns = comp->services.names->get_raw_namespace(import_to);
+
+  FileLocation loc = parse_file_location(ns->source_file.directory->string, path,
+                                         comp->services.strings);
+
+  if (imp->expr_location.const_val != nullptr) {
+    comp->constants.free_no_destruct(imp->expr_location.const_val);
+    imp->expr_location.const_val = nullptr;
+  }
+
+  const auto is_correct_file =[&loc](const ASTFile* f) {
+    return f->file_loc == loc;
+  };
+
+  const ASTFile* imported_file = comp->parsed_files.find_if(is_correct_file);
+
+  if (imported_file) {
+    ns = comp->services.names->get_raw_namespace(import_to);
+    ns->imported.insert(imported_file->namespace_index);
+  }
+  else {
+    FileImport file_import ={};
+    file_import.file_loc = std::move(loc);
+    file_import.ns_index = comp->services.names->new_namespace();
+    file_import.span = imp->span;
+
+    ns = comp->services.names->get_raw_namespace(import_to);
+    ns->imported.insert(file_import.ns_index);
+
+    comp->services.file_loader->unparsed_files.insert(std::move(file_import));
+  }
+}
+
+static void compile_untyped_global(Compiler* comp, Context* context, State* state, ASTDecl* decl, Global* global) {
   compile_type_of_decl(comp, context, state, decl);
   if (comp->is_panic()) {
     return;
@@ -5478,44 +5601,7 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
   el->globals.insert(global);
 }
 
-void compile_new_composite_structure(Compiler* comp, Context* context, ASTStructBody* struct_body) {
-  TypeCreator type_creator ={};
-  type_creator.comp = comp;
-  type_creator.current_namespace = context->current_namespace;
-
-  CompositeStructure* cmp_s = type_creator.new_composite_type(struct_body->span, comp->services.strings->intern("anoymous struct"));
-
-  uint32_t current_size = 0;
-  uint32_t current_alignment = 0;
-
-  auto i = struct_body->elements.begin();
-  auto end = struct_body->elements.end();
-
-  for (; i < end; i++) {
-    cmp_s->elements.insert_uninit(1);
-    auto* b = cmp_s->elements.back();
-
-    b->type = i->type.type;
-    b->name = i->name;
-    b->offset = current_size;
-
-    uint32_t this_align = b->type->alignment();
-
-    current_size = (uint32_t)ceil_to_n(current_size, this_align);
-    current_size += b->type->size();
-
-    current_alignment = larger(this_align, current_alignment);
-  }
-
-  cmp_s->declaration = struct_body;
-  cmp_s->cached_size = current_size;
-  cmp_s->cached_alignment = current_alignment;
-
-  struct_body->type = cmp_s;
-}
-
-
-ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp) {
+void compile_current_unparsed_files(Compiler* const comp) {
   while (comp->services.file_loader->unparsed_files.size > 0) {
     //still have files to parse
 
@@ -5525,7 +5611,7 @@ ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp) {
     const InternString* full_path = file_import->file_loc.full_name;
 
     if (comp->print_options.file_loads) {
-      printf("Loading file \"%s\" ...\n", full_path->string);
+      IO::print("Loading file \"", full_path->string, "\" ...\n");
     }
 
     //Just a sanity check - should alread have been set
@@ -5539,7 +5625,7 @@ ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp) {
         comp->report_error(ERROR_CODE::FILE_ERROR, comp->services.file_loader->unparsed_files.back()->span,
                            "File '{}' could not be opened, perhaps it does not exist",
                            full_path);
-        return comp->services.errors->print_all();
+        return;
       }
 
       //Loaded file can pop of the file stack thing
@@ -5551,7 +5637,7 @@ ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp) {
 
       // ^ Can error (in the lexing)
       if (comp->is_panic()) {
-        return comp->services.errors->print_all();
+        return;
       }
 
       //Parse
@@ -5567,40 +5653,22 @@ ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp) {
 
       //Test for errors
       if (comp->is_panic()) {
-        return comp->services.errors->print_all();
+        return;
       }
 
       //Should no longer be needed now - can free the file
       text_source.free_no_destruct();
 
       assert(comp->services.parser->current.type != AxleTokenType::Error);
-      //if (parser.current.type == AxleTokenType::Error) {
-      //  //Reporting parse errors
-
-      //  Span span ={};
-      //  span.full_path = parser.current.pos.full_path;
-
-      //  span.char_start = parser.current.pos.character;
-      //  span.char_end = span.char_start + 1;
-
-      //  span.line_start = parser.current.pos.line;
-      //  span.line_end = span.line_start;
-
-      //  comp->report_error(ERROR_CODE::SYNTAX_ERROR, span,
-      //                     "Parse Error: \"{}\"",
-      //                     parser.current.string->string);
-      //  return comp->errors.print_all();
-      //}
 
       if (comp->print_options.ast) {
         IO::print("\n=== Print Parsed AST ===\n\n");
-        print_ast(ast_file);
+        print_ast(comp, ast_file);
         IO::print("\n========================\n\n");
       }
 
-      //This may load new files onto the unparsed files stack
       if (comp->is_panic()) {
-        return comp->services.errors->print_all();
+        return;
       }
       process_parsed_file(comp, ast_file);
     }
@@ -5608,149 +5676,23 @@ ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp) {
       comp->report_error(ERROR_CODE::FILE_ERROR, file_import->span,
                          "'{}' is not a loadable file extension",
                          file_import->file_loc.extension);
-      return comp->services.errors->print_all();
+      return;
     }
-  }
-
-  //Should have no new files
-  comp->services.file_loader->unparsed_files.free();
-
-  return ERROR_CODE::NO_ERRORS;
-}
-
-void compile_valid_convention_combo(Compiler* comp,
-                                    const Span& span,
-                                    const CallingConvention* conv,
-                                    const CallingConvention** fill) {
-  bool x86_64 = conv == &convention_microsoft_x64
-    && comp->build_options.endpoint_system == &system_x86_64;
-
-  //bool stdcall = conv == &convention_stdcall
-  //  && comp->build_options.system == &system_x86_64;
-
-  bool vm = conv == &convention_vm
-    && comp->build_options.endpoint_system == &system_vm;
-
-  if (true) {
-    *fill = conv;
-  }
-  else {
-    //comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-    //                   "Calling convention '{}' is not valid with system '{}'",
-    //                   conv->name, comp->build_options.system->name);
-  }
-}
-
-void compile_calling_convention_for_function(Compiler* const comp,
-                                             const Span& span,
-                                             const InternString* conv_name,
-                                             const CallingConvention** fill) {
-
-
-  if (conv_name == comp->system_names.conv_x64) {
-    compile_valid_convention_combo(comp, span, &convention_microsoft_x64, fill);
-  }
-  else if (conv_name == comp->system_names.conv_stdcall) {
-    compile_valid_convention_combo(comp, span, &convention_stdcall, fill);
-  }
-  else if (conv_name == comp->system_names.conv_vm) {
-    compile_valid_convention_combo(comp, span, &convention_vm, fill);
-  }
-  else {
-    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-                       "Calling convention '{}' does not exist",
-                       conv_name);
   }
 }
 
 void process_parsed_file(Compiler* const comp, ASTFile* const file) {
-
   Namespace* ns = comp->services.names->get_raw_namespace(file->namespace_index);
 
-  ASTFileHeader& header = file->header;
-
-  if (header.is_dll_header) {
-    header.dll_header.loc = parse_file_location(file->file_loc.directory->string,
-                                                header.dll_header.relative_path->string,
-                                                comp->services.strings);
-
-    if (header.dll_header.loc.extension != comp->services.file_loader->dll) {
-    //.dll is the only valid extension
-      comp->report_error(ERROR_CODE::FILE_ERROR, header.dll_header.span,
-                         "#dll_header extension was invalid\n"
-                         "Expected: '.{}'\n"
-                         "Found:    '.{}'",
-                         comp->services.file_loader->dll, header.dll_header.loc.extension);
-      return;
-    }
-
-    comp->dlls_import.insert_uninit(1);
-    ImportedDll* dll_file = comp->dlls_import.back();
-
-    dll_file->span = header.dll_header.span;
-    dll_file->name = header.dll_header.loc.full_name;
-  }
-
+  ns->source_file = file->file_loc;
 
   {
     auto i = file->imports.mut_begin();
     const auto end = file->imports.mut_end();
 
     for (; i < end; i++) {
-      if (i->std) {
-        i->loc = parse_file_location(comp->build_options.std_lib_folder->string,
-                                     i->relative_path->string,
-                                     comp->services.strings);
-      }
-      else {
-        i->loc = parse_file_location(file->file_loc.directory->string,
-                                     i->relative_path->string,
-                                     comp->services.strings);
-      }
-
-      //Check file extensions
-      if (i->loc.extension != comp->services.file_loader->axl
-          && i->loc.extension != nullptr) {
-        comp->report_error(ERROR_CODE::FILE_ERROR, i->span,
-                           "Import extension was invalid\n"
-                           "Expected no extension or '.{}'\n"
-                           "Found '.{}'",
-                           comp->services.file_loader->axl, i->loc.extension);
-        return;
-      }
-      else if (i->loc.extension == nullptr) {
-        comp->report_error(ERROR_CODE::FILE_ERROR, i->span,
-                           "File did not have an extension");
-      }
-
-      const auto is_correct_file =[loc = &i->loc](const ASTFile* f) {
-        return f->file_loc == *loc;
-      };
-
-      const ASTFile* import_file = comp->parsed_files.find_if(is_correct_file);
-
-      //Do we need to make a new file?
-      if (import_file == nullptr) {
-        comp->services.file_loader->unparsed_files.insert_uninit(1);
-        FileImport* new_file = comp->services.file_loader->unparsed_files.back();
-
-        //Set the namespace
-        NamespaceIndex new_index = comp->services.names->new_namespace();
-
-        //Reset the namespace because it gets invalidated when we make a new one in the array
-        ns = comp->services.names->get_raw_namespace(file->namespace_index);
-
-        new_file->file_loc = i->loc;
-        new_file->span = i->span;
-
-        new_file->ns_index = new_index;
-
-        ns->imported.insert(new_file->ns_index);
-      }
-      else {
-        //Import name
-        ns->imported.insert(import_file->namespace_index);
-      }
+      ImportUnit* imp = comp->new_import_unit(file->namespace_index);
+      imp->import_ast = i;
     }
   }
 
@@ -5847,13 +5789,25 @@ void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
     case COMPILATION_TYPE::GLOBAL:
       comp->global_units.free((const GlobalUnit*)unit);
       break;
+    case COMPILATION_TYPE::IMPORT:
+      comp->import_units.free((const ImportUnit*)unit);
+      break;
+    default:
+      INVALID_CODE_PATH("Invalid compilation type");
   }
 }
 
 ERROR_CODE compile_all(Compiler* const comp) {
-  while (comp->to_compile.size > 0) {
+  while (comp->is_compiling()) {
     //Compile waiting
     {
+      if (comp->services.file_loader->unparsed_files.size > 0) {
+        compile_current_unparsed_files(comp);
+        if (comp->is_panic()) {
+          return comp->services.errors->print_all();
+        }
+      }
+
       Array<CompilationUnit*> to_compile = std::move(comp->to_compile);
 
       auto i = to_compile.mut_begin();
@@ -5871,6 +5825,65 @@ ERROR_CODE compile_all(Compiler* const comp) {
         context.calling_convention = nullptr;
 
         switch (comp_u->type) {
+          case COMPILATION_TYPE::IMPORT: {
+              ImportUnit* const unit = (ImportUnit*)comp_u;
+
+              switch (unit->stage) {
+                case IMPORT_COMP_STAGE::UNTYPED: {
+                    compile_import_expression_type(comp, &context, &unit->state,
+                                                   &unit->import_ast->expr_location);
+                    if (comp->is_panic()) {
+                      if (comp->is_fatal()) {
+                        return comp->services.errors->print_all();
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
+                    }
+                    else {
+                      unit->stage = IMPORT_COMP_STAGE::UNPARSED;
+
+                      //Only called if this isnt already a constant literal
+                      if (can_compile_const_value(&unit->import_ast->expr_location)) {
+                        ConstantExprUnit* const_u = comp->new_const_expr_unit(unit->available_names);
+
+                        const_u->expr = &unit->import_ast->expr_location;
+                        const_u->state = std::move(unit->state);
+
+                        const_u->cast_to = nullptr;
+
+                        comp->set_dep(&context, const_u);
+                        assert(comp->is_panic() && !comp->is_fatal());
+                        comp->reset_panic();
+                        
+                        //dont redo this one straight away as it has a dependency
+                      }
+                      else {
+                        //redo this one straight away as already loaded
+                        i--;
+                      }
+
+                    }
+                    break;
+                  }
+                case IMPORT_COMP_STAGE::UNPARSED: {
+                    compile_import_file(comp, &context, unit->import_ast, unit->available_names);
+                    if (comp->is_panic()) {
+                      if (comp->is_fatal()) {
+                        return comp->services.errors->print_all();
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
+                    }
+
+                    close_compilation_unit(comp, comp_u);
+                    break;
+                  }
+              }
+
+              break;
+            }
           case COMPILATION_TYPE::GLOBAL: {
               GlobalUnit* const unit = (GlobalUnit*)comp_u;
 
@@ -6256,7 +6269,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
       }
     }
 
-    if (comp->to_compile.size == 0) {
+    if (!comp->is_compiling()) {
       //Wait for there to be no compiling to check unfound deps - best chance they exist
 
       if (comp->unfound_deps.unfound.size > 0) {
@@ -6269,7 +6282,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
           //Success!
           comp->to_compile.insert(dep.unit_waiting);
           return true;
-        });
+                                             });
 
         if (num_deps == comp->unfound_deps.unfound.size) {
           //All dependencies are still unfound
@@ -6456,6 +6469,11 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
   s_bool->enum_values.shrink();
 
 
+  //Intrinsics
+#define MOD(n) comp->intrinsics. ## n = strings->intern(#n);
+  INTRINSIC_MODS;
+#undef MOD
+
   //File extensions
   comp->services.file_loader->axl = strings->intern("axl");
   comp->services.file_loader->dll = strings->intern("dll");
@@ -6551,6 +6569,10 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
 }
 
 void build_data_section_for_exec(Program* prog, Compiler* const comp) {
+
+}
+
+void build_data_section_for_vm(Program* prog, Compiler* const comp) {
   InternHashTable<size_t> loaded_strings ={};
 
   Array<uint8_t> data ={};

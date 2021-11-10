@@ -119,17 +119,17 @@ int compile_file(const APIOptions& options,
 
     compiler.services.file_loader->unparsed_files.insert(FileImport{ loc, ns_index, Span{} });//use null span
 
-    //Parsing/loading
-    ERROR_CODE ret = parse_all_unparsed_files_with_imports(&compiler);
-    if (ret != ERROR_CODE::NO_ERRORS) {
-      std::cerr << "Parsing was not completed due to an error!\nError Code '"
-        << error_code_string(ret)
-        << "'\n";
-      return 1;
-    }
+    ////Parsing/loading
+    //ERROR_CODE ret = parse_all_unparsed_files_with_imports(&compiler);
+    //if (ret != ERROR_CODE::NO_ERRORS) {
+    //  std::cerr << "Parsing was not completed due to an error!\nError Code '"
+    //    << error_code_string(ret)
+    //    << "'\n";
+    //  return 1;
+    //}
 
     //Compilation
-    ret = compile_all(&compiler);
+    ERROR_CODE ret = compile_all(&compiler);
     if (ret != ERROR_CODE::NO_ERRORS) {
       std::cerr << "Compilation was not completed due to an error!\nError Code '"
         << error_code_string(ret)
@@ -144,7 +144,7 @@ int compile_file(const APIOptions& options,
   }
 
   //Backend
-  build_data_section_for_exec(out_program, &compiler);
+  build_data_section_for_vm(out_program, &compiler);
   
   compile_backend(out_program, &compiler, compiler.build_options.endpoint_system);
   if (compiler.is_panic()) {

@@ -23,10 +23,6 @@ struct ASTName {
   const Structure* type = nullptr;
 };
 
-enum struct TYPE_TYPE {
-  NORMAL, ARRAY, PTR
-};
-
 struct ASTArrayType {
   ASTType* base = nullptr;
   ASTExpression* expr = nullptr;
@@ -45,6 +41,28 @@ struct ASTPtrType {
   }
 };
 
+struct ASTLambdaType {
+  //Last one is the return type
+  Array<ASTType> types ={};
+};
+
+struct ASTTupleType {
+  Array<ASTType> types ={};
+};
+
+#define TYPE_TYPE_MOD \
+MOD(NORMAL, name) \
+MOD(ARRAY, arr) \
+MOD(PTR, ptr) \
+MOD(TUPLE, tuple) \
+MOD(LAMBDA, lambda)
+
+enum struct TYPE_TYPE {
+#define MOD(name, t) name,
+  TYPE_TYPE_MOD
+#undef MOD
+};
+
 struct ASTType {
   TYPE_TYPE type_type;
   Span span;
@@ -53,6 +71,8 @@ struct ASTType {
     const InternString* name ={};
     ASTArrayType arr;
     ASTPtrType ptr;
+    ASTTupleType tuple;
+    ASTLambdaType lambda;
   };
 
   const Structure* type = nullptr;
@@ -161,6 +181,10 @@ struct StructExpr {
   }
 };
 
+struct CompIntrinsicExpr {
+  const InternString* name;
+};
+
 #define EXPRESSION_TYPE_MODIFY \
 MODIFY(CAST, cast) \
 MODIFY(UNARY_OPERATOR, un_op) \
@@ -179,7 +203,8 @@ MODIFY(INDEX, index) \
 MODIFY(NULLPTR, _dummy) \
 MODIFY(MEMBER, member) \
 MODIFY(LAMBDA, lambda) \
-MODIFY(STRUCT, struct_body)
+MODIFY(STRUCT, struct_body) \
+MODIFY(COMP_INTRINSIC, comp_intrinsic)
 
 enum struct EXPRESSION_TYPE : uint8_t {
   UNKNOWN = 0,
@@ -222,6 +247,7 @@ struct ASTExpression {
     MemberAccessExpr member;
     LambdaExpr lambda;
     StructExpr struct_body;
+    CompIntrinsicExpr comp_intrinsic;
   };
 
   ASTExpression() = default;
@@ -375,28 +401,17 @@ struct ASTStatement {
 };
 
 struct ASTImport {
-  bool std = false;
-  const InternString* relative_path = nullptr;
+  ASTExpression expr_location;
+
+  //If empty then import all
+  Array<ASTDecl> imports;
 
   Span span ={};
-
-  FileLocation loc ={};
-};
-
-enum struct FILE_TYPE : uint8_t {
-  NONE, SOURCE, DLL_HEADER
-};
-
-struct ASTFileHeader {
-  bool is_dll_header;
-  ASTImport dll_header;
 };
 
 struct ASTFile {
   FileLocation file_loc ={};
   NamespaceIndex namespace_index = {};
-
-  ASTFileHeader header = {};
 
   Array<ASTImport> imports = {};
   Array<ASTDecl> decls = {};
@@ -413,5 +428,5 @@ struct Printer {
   void newline() const;
 };
 
-void print_ast(const ASTFile* file);
+void print_ast(const Compiler* comp, const ASTFile* file);
 void print_ast_expression(Printer* printer, const ASTExpression* expr);

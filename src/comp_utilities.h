@@ -5,9 +5,7 @@
 struct Compiler;
 struct Context;
 struct State;
-struct Structure;
 struct CodeBlock;
-struct Types;
 struct ASTExpression;
 struct Local;
 struct Global;

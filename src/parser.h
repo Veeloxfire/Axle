@@ -45,22 +45,17 @@ MODIFY(Semicolon, ";") \
 MODIFY(Colon, ":") \
 MODIFY(Full_Stop, ".")
 
-#define AXLE_TOKEN_INTRINSICS \
-MODIFY(Import, "#import") \
-MODIFY(Std, "#std") \
-MODIFY(Convention, "#conv") \
-
 #define AXLE_TOKEN_MODIFY \
 MODIFY(Error, "") \
 MODIFY(End, "") \
 MODIFY(Identifier, "") \
+MODIFY(Intrinsic, "") \
 MODIFY(Number, "") \
 MODIFY(String, "") \
 MODIFY(Character, "") \
 AXLE_TOKEN_KEYWORDS \
 AXLE_TOKEN_OPERATORS \
 AXLE_TOKEN_STRUCTURAL \
-AXLE_TOKEN_INTRINSICS
 
 
 //Error is for reporting lexing errors and should never been seen in the parser

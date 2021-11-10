@@ -19,61 +19,72 @@ struct ASTStructBody;
 
 #define FLAGS_DECL(num) (1 << num)
 
-enum struct META_TYPE : u8 {
+enum struct META_FLAGS : u8 {
   NORMAL   = 0,
-  COMPTIME = FLAGS_DECL(1),
+  LITERAL  = FLAGS_DECL(1),
   CONST    = FLAGS_DECL(2),
 };
 
-constexpr auto operator|(META_TYPE t, u8 u) -> u8 {
+inline constexpr auto operator|(META_FLAGS t, u8 u) -> u8 {
   return u | ((u8)t);
 }
 
-constexpr auto operator|(u8 u, META_TYPE t) -> u8 {
+inline constexpr auto operator|(u8 u, META_FLAGS t) -> u8 {
   return u | ((u8)t);
 }
 
-constexpr auto operator|=(u8& u, META_TYPE t) -> u8& {
+inline constexpr auto operator|(META_FLAGS u, META_FLAGS t) -> u8 {
+  return (u8)u | (u8)t;
+}
+
+inline constexpr auto operator|=(u8& u, META_FLAGS t) -> u8& {
   u |= ((u8)t);
   return u;
 }
 
-constexpr auto operator&(META_TYPE t, u8 u) -> u8 {
+inline constexpr auto operator&(META_FLAGS u, META_FLAGS t) -> u8 {
+  return (u8)u & (u8)t;
+}
+
+inline constexpr auto operator&(META_FLAGS t, u8 u) -> u8 {
   return u & ((u8)t);
 }
 
-constexpr auto operator&(u8 u, META_TYPE t) -> u8 {
+inline constexpr auto operator&(u8 u, META_FLAGS t) -> u8 {
   return u & ((u8)t);
 }
 
-constexpr auto operator&=(u8& u, META_TYPE t) -> u8& {
+inline constexpr auto operator&=(u8& u, META_FLAGS t) -> u8& {
   u &= ((u8)t);
   return u;
 }
 
-enum struct STRUCTURE_TYPE : uint8_t {
-  VOID = 0,
-  STRUCT,//Meta type for other types
-  INTEGER,
-  POINTER,
-  SIMPLE_LITERAL,
-  COMPOSITE,
-  ENUM,
-  FIXED_ARRAY,
-  ASCII_CHAR,
-  TUPLE_LITERAL,
-  LAMBDA,
+struct Type {
+  u8 meta_flags;
+  const Structure* base_structure;
 };
 
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;
 
+enum struct STRUCTURE_TYPE : u8 {
+  VOID = 0,
+  BOOL,
+  INTEGER,
+  POINTER,
+  COMPOSITE,
+  ENUM,
+  FIXED_ARRAY,
+  ASCII_CHAR,
+  TUPLE,
+  LAMBDA,
+};
 
 struct Structure {
   STRUCTURE_TYPE type = STRUCTURE_TYPE::VOID;
   const InternString* name = nullptr;
 
-  uint32_t size() const;
-  uint32_t alignment() const;
+  u32 size;//bytes
+  u32 alignment;//bytes
 };
 
 struct PointerStructure : public Structure {
@@ -91,7 +102,6 @@ struct ArrayStructure : public Structure {
 
 struct IntegerStructure : public Structure {
   bool is_signed = false;
-  uint32_t bytes = 0;
 };
 
 struct EnumStructure;
@@ -107,23 +117,12 @@ struct EnumStructure : public Structure {
   Array<const EnumValue*> enum_values ={};
 };
 
-enum struct SIMPLE_LITERAL_TYPE {
-  INTEGER, SIGNED_INTEGER, EMPTY_ARR, POINTER, STRUCT_INIT
-};
-
-struct SimpleLiteralStructure : public Structure {
-  SIMPLE_LITERAL_TYPE literal_type = SIMPLE_LITERAL_TYPE::INTEGER;
-};
-
 struct TupleElement {
   uint32_t offset = 0;
   const Structure* type = nullptr;
 };
 
-struct TupleLiteralStructure : public Structure {
-  uint32_t cached_size = 0;
-  uint32_t cached_alignment = 0;
-
+struct TupleStructure : public Structure {
   Array<TupleElement> elements ={};
 };
 
@@ -136,8 +135,6 @@ struct StructElement {
 struct CompositeStructure : public Structure {
   const ASTStructBody* declaration = nullptr;
 
-  uint32_t cached_size = 0;
-  uint32_t cached_alignment = 0;
   Array<StructElement> elements ={};
 };
 
@@ -169,33 +166,16 @@ struct Function {
 
   FunctionSignature signature ={};
   CompilationUnit* compilation_unit = nullptr;
-  
+
   FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
 
   size_t data_index = 0;
   CodeBlock code_block;
 };
 
-constexpr bool is_negatable(const Structure* s) {
-  const bool signed_int = s->type == STRUCTURE_TYPE::INTEGER &&
-    static_cast<const IntegerStructure*>(s)->is_signed;
-  const bool int_lit = s->type == STRUCTURE_TYPE::SIMPLE_LITERAL &&
-    static_cast<const SimpleLiteralStructure*>(s)->literal_type == SIMPLE_LITERAL_TYPE::INTEGER;
 
-  return signed_int || int_lit;
-}
-
-constexpr bool is_numeric_type(const Structure* s) {
-  const bool int_lit = s->type == STRUCTURE_TYPE::SIMPLE_LITERAL &&
-    static_cast<const SimpleLiteralStructure*>(s)->literal_type == SIMPLE_LITERAL_TYPE::INTEGER;
-
-
-  return s->type == STRUCTURE_TYPE::INTEGER || int_lit;
-}
-
-struct Types {
-  static FreelistBlockAllocator<SimpleLiteralStructure> simple_literal_structures;
-  static FreelistBlockAllocator<TupleLiteralStructure> tuple_literal_structures;
+struct Structures {
+  static FreelistBlockAllocator<TupleStructure> tuple_structures;
   static FreelistBlockAllocator<IntegerStructure> int_structures;
   static FreelistBlockAllocator<CompositeStructure> composite_structures;
   static FreelistBlockAllocator<EnumStructure> enum_structures;
@@ -230,32 +210,30 @@ struct Types {
   Array<const EnumValue*> enums;
   Array<const Structure*> structures;
 
-  ~Types();
+  ~Structures();
 
-  constexpr bool is_logical_type(const Structure* s) const {
-    return s == s_bool || is_numeric_type(s);
-  }
+  //Returns nullptr for types that dont have a signed version or are already signed
+  const Structure* get_signed_of(const Structure* s);
 };
 
-struct TypeCreator {
+struct StructCreator {
   Compiler* comp;
   const Structure* meta_struct;
   NamespaceIndex current_namespace;
 
   void add_type_to_namespace(const Structure* s, const InternString* name, const Span& span);
 
-
-  SimpleLiteralStructure* new_simple_literal_type(const Span& span,
-                                                  const InternString* name);
-
-  TupleLiteralStructure* new_tuple_literal_type(const Span& span,
-                                                Array<const Structure*>&& types);
+  TupleStructure* new_tuple_type(const Span& span,
+                                 Array<const Structure*>&& types);
 
   IntegerStructure* new_int_type(const Span& span,
                                  const InternString* name);
 
   CompositeStructure* new_composite_type(const Span& span,
                                          const InternString* name);
+
+  CompositeStructure* new_composite_type(const InternString* name,
+                                         const ASTStructBody* ast_struct);
 
   EnumStructure* new_enum_type(const Span& span,
                                const InternString* name);
@@ -271,71 +249,14 @@ struct TypeCreator {
                                      const Structure* base);
 
   SignatureStructure* new_lambda_type(const Span& span,
-                                    const CallingConvention* conv,
-                                    Array<const Structure*>&& params,
-                                    const Structure* ret_type);
+                                      const CallingConvention* conv,
+                                      Array<const Structure*>&& params,
+                                      const Structure* ret_type);
 
   EnumValue* new_enum_value(const Span& span,
                             EnumStructure* enum_s,
                             const InternString* name);
 };
-
-
-//Can cast without any value modification or checks
-constexpr bool can_implicit_cast(const Structure* from, const Structure* to) {
-  if (from == to) return true;
-  else if (from->type == STRUCTURE_TYPE::ASCII_CHAR) {
-    return to->type == STRUCTURE_TYPE::INTEGER
-      && ((const IntegerStructure*)to)->bytes == 1
-      && !((const IntegerStructure*)to)->is_signed;
-  }
-  else if (from->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
-    //both literals
-    const SimpleLiteralStructure* f_ls = (const SimpleLiteralStructure*)from;
-
-    if (to->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
-      const SimpleLiteralStructure* t_ls = (const SimpleLiteralStructure*)to;
-
-      //can cast unsigned literal to signed literal
-      return f_ls->literal_type == SIMPLE_LITERAL_TYPE::INTEGER
-        && t_ls->literal_type == SIMPLE_LITERAL_TYPE::SIGNED_INTEGER;
-    }
-    else if (to->type == STRUCTURE_TYPE::POINTER) {
-      //Can cast a pointer literal (e.g. nullptr) to any pointer type
-      return f_ls->literal_type == SIMPLE_LITERAL_TYPE::POINTER;
-    }
-  }
-  else if (from->type == STRUCTURE_TYPE::TUPLE_LITERAL
-           && to->type == STRUCTURE_TYPE::COMPOSITE) {
-    const TupleLiteralStructure* f_ts = (const TupleLiteralStructure*)from;
-    const CompositeStructure* t_cs = (const CompositeStructure*)to;
-
-    //Size same?
-    if(f_ts->elements.size != t_cs->elements.size) { return false;}
-
-    auto f_i = f_ts->elements.begin();
-    auto t_i = t_cs->elements.begin();
-    const auto f_end = f_ts->elements.end();
-
-    for (; f_i < f_end; f_i++, t_i++) {
-      //Must be implicit type and offset
-      if(f_i->offset != t_i->offset || !can_implicit_cast(f_i->type, t_i->type)) { 
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-
-  return false;
-}
-
-//Can cast with modification that can only be done at compile time
-bool can_comptime_cast(const Structure* from, const Structure* to);
-
-//Returns nullptr for types that dont have a signed version or are already signed
-const Structure* get_signed_type_of(const Types* types, const Structure* s);
 
 namespace CASTS {
   RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
@@ -346,6 +267,16 @@ namespace CASTS {
 }
 
 namespace TYPE_TESTS {
+  //Can cast without any value modification or checks
+  bool can_implicit_cast(const Structure* from, const Structure* to);
+  
+  //Can cast with modification that can only be done at compile time
+  bool can_comptime_cast(const Structure* from, const Structure* to);
+
+  bool is_negatable(const Structure* s);
+  bool is_logical(const Structure* s);
+  bool is_numeric(const Structure* s);
+
   bool is_literal(const Structure*);
   bool is_array(const Structure*);
   bool is_pointer(const Structure*);

@@ -1,16 +1,8 @@
 
 #import #build_opts.kernel32_path {
-  GetStdHandle : $dynamic (nStdHandle: i32) -> u64;
-  GetProcessHeap : $dynamic () -> u64;
+  GetStdHandle : (nStdHandle: i32) -> u64;
+  GetProcessHeap : () -> u64;
   
-  HeapAlloc : $dynamic (handle: u64, flags: u32, bytes: u64) -> *void;
-  HeapFree : $dynamic (hHeap: u64, dwFlags: u32, lpMem: *void) -> u64;
-}
-
-
-//function WriteConsoleA(u64   hConsoleOutput,
-//                       *void lpBuffer,
-//                       u32   nNumberOfCharsToWrite,
-//                       *u32  lpNumberOfCharsWritten,
-//                       *void lpReserved)
-//                       -> i32;
+  HeapAlloc: (handle: u64, flags: u32, bytes: u64) -> *void;
+  HeapFree: (hHeap: u64, dwFlags: u32, lpMem: *void) -> u64;
+} 

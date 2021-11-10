@@ -139,14 +139,17 @@ struct ValueTree {
 };
 
 struct StackState {
-  uint64_t current = 0;
-  uint64_t max = 0;
+  u64 current = 0;
+  u64 max = 0;
 
-  uint64_t current_passed = 0;
-  uint64_t max_passed = 0;
+  u64 current_passed = 0;
+  u64 max_passed = 0;
 
-  int32_t pass_stack_local(uint64_t size, uint64_t alignment);
-  int32_t next_stack_local(uint64_t size, uint64_t alignment);
+  u64 call_alignment = 1;
+
+  i32 pass_stack_local(u64 size, u64 alignment);
+  i32 next_stack_local(u64 size, u64 alignment);
+  void require_call_alignment(u64 req_align);
 };
 
 struct Decl {
@@ -261,7 +264,7 @@ struct Global {
 };
 
 enum struct COMPILATION_TYPE : uint8_t {
-  NONE, STRUCTURE, FUNCTION, SIGNATURE, CONST_EXPR, GLOBAL
+  NONE, STRUCTURE, FUNCTION, SIGNATURE, CONST_EXPR, GLOBAL, IMPORT
 };
 
 enum struct STRUCTURE_COMP_STAGE : uint8_t {
@@ -284,6 +287,10 @@ enum struct FUNCTION_COMP_STAGE : uint8_t {
   UNINIT, UNTYPED_BODY, TYPED_BODY, FINISHED
 };
 
+enum struct IMPORT_COMP_STAGE : u8 {
+  UNTYPED, UNPARSED, FINISHED
+};
+
 struct CompilationUnit {
   COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
 
@@ -294,6 +301,14 @@ struct CompilationUnit {
   Array<CompilationUnit*> dependency_of ={};
 
   NamespaceIndex available_names ={};
+};
+
+struct ImportUnit : public CompilationUnit {
+  IMPORT_COMP_STAGE stage = IMPORT_COMP_STAGE::UNTYPED;
+
+  State state ={};
+
+  ASTImport* import_ast;
 };
 
 struct SignatureUnit : public CompilationUnit {
@@ -392,6 +407,17 @@ struct ImportedDll {
   Array<SingleDllImport> imports ={};
 };
 
+
+#define INTRINSIC_MODS \
+MOD(import) \
+MOD(build_options) \
+
+struct Intrinsics {
+#define MOD(n) const InternString* n = nullptr;
+  INTRINSIC_MODS;
+#undef MOD
+};
+
 struct SystemsAndConventionNames {
   const InternString* sys_vm      = nullptr;
   const InternString* sys_x86_64  = nullptr;
@@ -402,6 +428,8 @@ struct SystemsAndConventionNames {
 };
 
 struct BuildOptions {
+  u32 ptr_size = 8;
+
   const InternString* file_name   = nullptr;
   const InternString* entry_point = nullptr;
   const InternString* output_file = nullptr;
@@ -430,7 +458,7 @@ struct Services {
   Errors* errors = nullptr;
   NamesHandler* names = nullptr;
   FileLoader* file_loader = nullptr;
-  Types* types = nullptr;
+  Structures* structures = nullptr;
   StringInterner* strings = nullptr;
 };
 
@@ -440,6 +468,7 @@ struct Compiler {
   APIOptimizationOptions optimization_options ={};
 
   SystemsAndConventionNames system_names ={};
+  Intrinsics intrinsics ={};
 
   Services services;
 
@@ -455,6 +484,7 @@ struct Compiler {
   FreelistBlockAllocator<SignatureUnit> signature_units ={};
   FreelistBlockAllocator<StructureUnit> structure_units ={};
   FreelistBlockAllocator<FunctionUnit> function_units ={};
+  FreelistBlockAllocator<ImportUnit> import_units ={};
   FreelistBlockAllocator<ConstantExprUnit> const_expr_units ={};
   FreelistBlockAllocator<GlobalUnit> global_units ={};
 
@@ -469,15 +499,21 @@ struct Compiler {
 
   Function* new_function();
 
+  ImportUnit* new_import_unit(NamespaceIndex ns);
   ConstantExprUnit* new_const_expr_unit(NamespaceIndex ns);
   FunctionUnit* new_function_unit(NamespaceIndex ns);
   SignatureUnit* new_signature_unit(NamespaceIndex ns);
   StructureUnit* new_structure_unit(NamespaceIndex ns);
   GlobalUnit* new_global_unit(NamespaceIndex ns);
 
-  constexpr bool is_panic() const { return services.errors->panic || unfound_deps.panic; }
-  constexpr bool is_fatal() const { return services.errors->panic; }
-  constexpr void reset_panic() { services.errors->panic = false; unfound_deps.panic = false; }
+  inline constexpr bool is_panic() const { return services.errors->panic || unfound_deps.panic; }
+  inline constexpr bool is_fatal() const { return services.errors->panic; }
+  inline constexpr void reset_panic() { services.errors->panic = false; unfound_deps.panic = false; }
+
+  inline constexpr bool is_compiling() const {
+    return to_compile.size > 0
+      || services.file_loader->unparsed_files.size > 0;
+  }
 
   template<typename ... T>
   void report_error(ERROR_CODE code, const Span& span, const char* f_message, T&& ... ts) {
@@ -486,7 +522,7 @@ struct Compiler {
     services.errors->panic = true;
   }
 
-  void set_unfound_name(Context* context, const InternString* name, NamespaceIndex ns,  const Span& span);
+  void set_unfound_name(Context* context, const InternString* name, NamespaceIndex ns, const Span& span);
   void set_dep(Context* context, CompilationUnit* unit);
 };
 
@@ -505,8 +541,6 @@ void compile_type_of_expression(Compiler* const comp,
                                 State* const state,
                                 ASTExpression* const expr,
                                 const TypeHint* const hint);
-
-ERROR_CODE parse_all_unparsed_files_with_imports(Compiler* const comp);
 
 void process_parsed_file(Compiler* const comp, ASTFile* const func);
 
@@ -541,4 +575,4 @@ const Structure* find_or_make_tuple_literal(Compiler* const comp,
                                             const Span& span,
                                             Array<const Structure*>&& elements);
 
-void build_data_section_for_exec(Program* prog, Compiler* const comp);
+void build_data_section_for_vm(Program* prog, Compiler* const comp);

@@ -23,7 +23,7 @@ void ASTExpression::move_from(ASTExpression&& a) noexcept {
 
       EXPRESSION_TYPE_MODIFY
 
-    #undef MODIFY
+      #undef MODIFY
   }
 }
 
@@ -101,29 +101,17 @@ void ASTType::set_union(TYPE_TYPE ty) {
   type_type = ty;
 
   switch (type_type) {
-    case TYPE_TYPE::PTR: {
-        default_init(&ptr);
-        break;
-      }
-    case TYPE_TYPE::ARRAY: {
-        default_init(&arr);
-        break;
-      }
-    case TYPE_TYPE::NORMAL: break;
+  #define MOD(TYTY, name) case JOIN(TYPE_TYPE::, TYTY): default_init(&name); break;
+    TYPE_TYPE_MOD;
+  #undef MOD
   }
 }
 
 void ASTType::destruct_union() {
   switch (type_type) {
-    case TYPE_TYPE::PTR: {
-        ptr.~ASTPtrType();
-        break;
-      }
-    case TYPE_TYPE::ARRAY: {
-        arr.~ASTArrayType();
-        break;
-      }
-    case TYPE_TYPE::NORMAL: break;
+  #define MOD(TYTY, name) case JOIN(TYPE_TYPE::, TYTY): destruct_single(&name); break;
+    TYPE_TYPE_MOD;
+  #undef MOD
   }
 }
 

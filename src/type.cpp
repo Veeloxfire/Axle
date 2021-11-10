@@ -1,168 +1,35 @@
-#include "type.h"
 #include "compiler.h"
 #include "format.h"
 
-FreelistBlockAllocator<SimpleLiteralStructure> Types::simple_literal_structures ={};
-FreelistBlockAllocator<TupleLiteralStructure> Types::tuple_literal_structures ={};
-FreelistBlockAllocator<IntegerStructure> Types::int_structures ={};
-FreelistBlockAllocator<CompositeStructure> Types::composite_structures ={};
-FreelistBlockAllocator<EnumStructure> Types::enum_structures ={};
-FreelistBlockAllocator<Structure> Types::base_structures ={};
-FreelistBlockAllocator<EnumValue> Types::enum_values ={};
-FreelistBlockAllocator<ArrayStructure> Types::array_structures ={};
-FreelistBlockAllocator<PointerStructure> Types::pointer_structures ={};
-FreelistBlockAllocator<SignatureStructure> Types::lambda_structures ={};
+#include "type.h"
+#include "structures.h"
 
-uint32_t Structure::size() const {
-  switch (type) {
-    case STRUCTURE_TYPE::ASCII_CHAR: return 1;
-    case STRUCTURE_TYPE::POINTER: return 8;
-    case STRUCTURE_TYPE::COMPOSITE: return static_cast<const CompositeStructure*>(this)->cached_size;
-    case STRUCTURE_TYPE::TUPLE_LITERAL: return static_cast<const TupleLiteralStructure*>(this)->cached_size;
-    case STRUCTURE_TYPE::INTEGER: return static_cast<const IntegerStructure*>(this)->bytes;
-    case STRUCTURE_TYPE::ENUM: return static_cast<const EnumStructure*>(this)->base->bytes;
-    case STRUCTURE_TYPE::FIXED_ARRAY: {
-        const ArrayStructure* const fa = static_cast<const ArrayStructure*>(this);
-        return fa->base->size() * (uint32_t)fa->length;
-      }
-    case STRUCTURE_TYPE::SIMPLE_LITERAL: {
-        const SimpleLiteralStructure* const ls = static_cast<const SimpleLiteralStructure*>(this);
+FreelistBlockAllocator<IntegerStructure> Structures::int_structures ={};
+FreelistBlockAllocator<CompositeStructure> Structures::composite_structures ={};
+FreelistBlockAllocator<EnumStructure> Structures::enum_structures ={};
+FreelistBlockAllocator<Structure> Structures::base_structures ={};
+FreelistBlockAllocator<EnumValue> Structures::enum_values ={};
+FreelistBlockAllocator<ArrayStructure> Structures::array_structures ={};
+FreelistBlockAllocator<PointerStructure> Structures::pointer_structures ={};
+FreelistBlockAllocator<SignatureStructure> Structures::lambda_structures ={};
 
-        switch (ls->literal_type) {
-          case SIMPLE_LITERAL_TYPE::INTEGER:
-          case SIMPLE_LITERAL_TYPE::SIGNED_INTEGER: return 8;
-          case SIMPLE_LITERAL_TYPE::EMPTY_ARR: return 0;
-          case SIMPLE_LITERAL_TYPE::POINTER: return 8;
-        }
-
-        break;
-      }
-    case STRUCTURE_TYPE::VOID: return 0;
-    case STRUCTURE_TYPE::LAMBDA: return 8;
-    case STRUCTURE_TYPE::STRUCT: return 8;
-  }
-
-  assert(false);
-  return (uint32_t)-1;
-}
-
-uint32_t Structure::alignment() const {
-  switch (type) {
-    case STRUCTURE_TYPE::ASCII_CHAR: return 1;
-    case STRUCTURE_TYPE::POINTER: return 8;
-    case STRUCTURE_TYPE::COMPOSITE: return static_cast<const CompositeStructure*>(this)->cached_alignment;
-    case STRUCTURE_TYPE::TUPLE_LITERAL: return static_cast<const TupleLiteralStructure*>(this)->cached_alignment;
-    case STRUCTURE_TYPE::INTEGER: return static_cast<const IntegerStructure*>(this)->bytes;
-    case STRUCTURE_TYPE::ENUM: return static_cast<const EnumStructure*>(this)->base->bytes;
-    case STRUCTURE_TYPE::FIXED_ARRAY: return static_cast<const ArrayStructure*>(this)->base->alignment();
-    case STRUCTURE_TYPE::SIMPLE_LITERAL: {
-        const SimpleLiteralStructure* ls = static_cast<const SimpleLiteralStructure*>(this);
-
-        switch (ls->literal_type) {
-          case SIMPLE_LITERAL_TYPE::INTEGER:
-          case SIMPLE_LITERAL_TYPE::SIGNED_INTEGER: return 8;
-          case SIMPLE_LITERAL_TYPE::EMPTY_ARR: return 0;
-          case SIMPLE_LITERAL_TYPE::POINTER: return 8;
-        }
-
-        break;
-      }
-    case STRUCTURE_TYPE::VOID: return 0;
-    case STRUCTURE_TYPE::LAMBDA: return 8;
-  }
-
-  assert(false);
-  return (uint32_t)-1;
-}
-
-bool can_comptime_cast(const Structure* from, const Structure* to) {
-  if (can_implicit_cast(from, to)) return true;
-
-  switch (from->type) {
-    case STRUCTURE_TYPE::FIXED_ARRAY: {
-        if (to->type == STRUCTURE_TYPE::FIXED_ARRAY) {
-          const ArrayStructure* arr_f = (const ArrayStructure*)from;
-          const ArrayStructure* arr_t = (const ArrayStructure*)to;
-
-          return arr_f->length == arr_t->length && can_comptime_cast(arr_f->base, arr_t->base);
-        }
-        else {
-          return false;
-        }
-      }
-    case STRUCTURE_TYPE::SIMPLE_LITERAL: {
-        const SimpleLiteralStructure* const from_lit = (const SimpleLiteralStructure*)from;
-
-        switch (from_lit->literal_type) {
-          case SIMPLE_LITERAL_TYPE::INTEGER:
-            //Signed/Size checks will be done later
-            return to->type == STRUCTURE_TYPE::INTEGER;
-          case SIMPLE_LITERAL_TYPE::SIGNED_INTEGER:
-            //Signed/Size checks will be done later
-            return to->type == STRUCTURE_TYPE::INTEGER
-              && static_cast<const IntegerStructure*>(to)->is_signed;
-
-          case SIMPLE_LITERAL_TYPE::EMPTY_ARR://cast to any array
-            return to->type == STRUCTURE_TYPE::FIXED_ARRAY;
-        }
-
-        return false;
-      }
-    case STRUCTURE_TYPE::TUPLE_LITERAL: {
-        const TupleLiteralStructure* f_ts = (const TupleLiteralStructure*)from;
-        if (to->type == STRUCTURE_TYPE::COMPOSITE) {
-          const CompositeStructure* t_cs = (const CompositeStructure*)to;
-
-          //Size same?
-          if (f_ts->elements.size != t_cs->elements.size) { return false; }
-
-          auto f_i = f_ts->elements.begin();
-          auto t_i = t_cs->elements.begin();
-          const auto f_end = f_ts->elements.end();
-
-          for (; f_i < f_end; f_i++, t_i++) {
-            //Must be comptime type and offset
-            if (!can_comptime_cast(f_i->type, t_i->type)
-                || f_i->offset != t_i->offset) {
-              return false;
-            }
-          }
-
-          return true;
-        }
-
-        return false;
-      }
-    default:
-      return false;
-  }
-}
-
-const Structure* get_signed_type_of(const Types* types, const Structure* s) {
+const Structure* Structures::get_signed_of(const Structure* s) {
   if (s->type == STRUCTURE_TYPE::INTEGER) {
     const IntegerStructure* is = (const IntegerStructure*)s;
 
-    switch (is->bytes) {
-      case 1: return types->s_i8;
+    switch (is->size) {
+      case 1: return s_i8;
         //case 2: return types->s_i16;
-      case 4: return types->s_i32;
-      case 8: return types->s_i64;
+      case 4: return s_i32;
+      case 8: return s_i64;
       default: return nullptr;
-    }
-  }
-  else if (s->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
-    const SimpleLiteralStructure* sls = (const SimpleLiteralStructure*)s;
-
-    if (sls->literal_type == SIMPLE_LITERAL_TYPE::INTEGER
-        || sls->literal_type == SIMPLE_LITERAL_TYPE::SIGNED_INTEGER) {
-      return types->s_sint_lit;
     }
   }
 
   return nullptr;
 }
 
-void TypeCreator::add_type_to_namespace(const Structure* s, const InternString* name, const Span& span) {
+void StructCreator::add_type_to_namespace(const Structure* s, const InternString* name, const Span& span) {
   NamedElement* el = comp->services.names->create_name(current_namespace, name);
   if (el == nullptr) {
     comp->report_error(ERROR_CODE::NAME_ERROR, span,
@@ -181,24 +48,12 @@ void TypeCreator::add_type_to_namespace(const Structure* s, const InternString* 
   el->globals.insert(glob);
 }
 
-SimpleLiteralStructure* TypeCreator::new_simple_literal_type(const Span& span,
-                                                             const InternString* name) {
-  SimpleLiteralStructure* const type = comp->services.types->simple_literal_structures.allocate();
-  type->type = STRUCTURE_TYPE::SIMPLE_LITERAL;
-  type->name = name;
 
-  comp->services.types->structures.insert(type);
+TupleStructure* StructCreator::new_tuple_type(const Span& span,
+                                              Array<const Structure*>&& types) {
+  TupleStructure* const type = comp->services.structures->tuple_structures.allocate();
 
-  add_type_to_namespace((const Structure*)type, name, span);
-
-  return type;
-}
-
-TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
-                                                           Array<const Structure*>&& types) {
-  TupleLiteralStructure* const type = comp->services.types->tuple_literal_structures.allocate();
-
-  type->type = STRUCTURE_TYPE::TUPLE_LITERAL;
+  type->type = STRUCTURE_TYPE::TUPLE;
 
   //Load the name
   {
@@ -220,13 +75,11 @@ TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
 
       tup_el->type = *i;
       tup_el->offset = current_size;
-      uint32_t align = (*i)->alignment();
-      uint32_t size = (*i)->size();
 
-      current_size = ceil_to_n(current_size, align);
-      current_size += size;
+      current_size = ceil_to_n(current_size, (*i)->alignment);
+      current_size += (*i)->size;
 
-      current_align = larger(align, current_align);
+      current_align = larger((*i)->alignment, current_align);
 
       i++;
 
@@ -237,13 +90,11 @@ TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
 
         tup_el->type = *i;
         tup_el->offset = current_size;
-        align = (*i)->alignment();
-        size = (*i)->size();
 
-        current_size = ceil_to_n(current_size, align);
-        current_size += size;
+        current_size = ceil_to_n(current_size, (*i)->alignment);
+        current_size += (*i)->size;
 
-        current_align = larger(align, current_align);
+        current_align = larger((*i)->alignment, current_align);
       }
 
       format_to_array(name, ")");
@@ -254,12 +105,12 @@ TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
 
     name.insert('\n');
 
-    type->cached_size = current_size;
-    type->cached_alignment = current_align;
+    type->size = current_size;
+    type->alignment = current_align;
     type->name = comp->services.strings->intern(name.data);
   }
 
-  comp->services.types->structures.insert(type);
+  comp->services.structures->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, type->name, span);
 
@@ -267,15 +118,17 @@ TupleLiteralStructure* TypeCreator::new_tuple_literal_type(const Span& span,
 }
 
 
-SignatureStructure* TypeCreator::new_lambda_type(const Span& span,
-                                                 const CallingConvention* conv,
-                                                 Array<const Structure*>&& params,
-                                                 const Structure* ret_type) {
-  SignatureStructure* type = comp->services.types->lambda_structures.allocate();
+SignatureStructure* StructCreator::new_lambda_type(const Span& span,
+                                                   const CallingConvention* conv,
+                                                   Array<const Structure*>&& params,
+                                                   const Structure* ret_type) {
+  SignatureStructure* type = comp->services.structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
   type->parameter_types = std::move(params);
   type->return_type = ret_type;
   type->calling_convention = conv;
+  type->size = comp->build_options.ptr_size;
+  type->alignment = comp->build_options.ptr_size;
 
   {
     Array<char> name ={};
@@ -300,7 +153,7 @@ SignatureStructure* TypeCreator::new_lambda_type(const Span& span,
     type->name = comp->services.strings->intern(name.data);
   }
 
-  comp->services.types->structures.insert(type);
+  comp->services.structures->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, type->name, span);
 
@@ -308,30 +161,36 @@ SignatureStructure* TypeCreator::new_lambda_type(const Span& span,
 }
 
 
-IntegerStructure* TypeCreator::new_int_type(const Span& span,
-                                            const InternString* name) {
-  IntegerStructure* const type = comp->services.types->int_structures.allocate();
+IntegerStructure* StructCreator::new_int_type(const Span& span, const InternString* name,
+                                              bool is_signed, u32 size) {
+  IntegerStructure* const type = comp->services.structures->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
   type->name = name;
+  type->size = size;
+  type->alignment = size;//TODO: this could be lower?
 
-  comp->services.types->structures.insert(type);
+  comp->services.structures->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
 }
 
-CompositeStructure* TypeCreator::new_composite_type(const Span& span,
-                                                    const InternString* name) {
-  CompositeStructure* const type = comp->services.types->composite_structures.allocate();
+CompositeStructure* StructCreator::new_composite_type(const Span& span,
+                                                      const InternString* name) {
+  CompositeStructure* const type = comp->services.structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
   type->name = name;
 
-  comp->services.types->structures.insert(type);
+  comp->services.structures->structures.insert(type);
 
   add_type_to_namespace((const Structure*)type, name, span);
 
   return type;
+}
+
+CompositeStructure* StructCreator::new_anonymous_composite_type(const ASTStructBody* ast_struct) {
+  CompositeStructure* cmp_s = new_composite_type(ast_struct->span, ast_struct->)
 }
 
 EnumStructure* TypeCreator::new_enum_type(const Span& span,
@@ -545,6 +404,136 @@ RuntimeValue CASTS::no_op(Compiler* const comp,
   return *val;
 }
 
+//Can cast without any value modification or checks
+bool TYPE_TESTS::can_implicit_cast(const Structure* from, const Structure* to) {
+  if (from == to) return true;
+  else if (from->type == STRUCTURE_TYPE::ASCII_CHAR) {
+    return to->type == STRUCTURE_TYPE::INTEGER
+      && ((const IntegerStructure*)to)->bytes == 1
+      && !((const IntegerStructure*)to)->is_signed;
+  }
+  else if (from->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
+    //both literals
+    const SimpleLiteralStructure* f_ls = (const SimpleLiteralStructure*)from;
+
+    if (to->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
+      const SimpleLiteralStructure* t_ls = (const SimpleLiteralStructure*)to;
+
+      //can cast unsigned literal to signed literal
+      return f_ls->literal_type == SIMPLE_LITERAL_TYPE::INTEGER
+        && t_ls->literal_type == SIMPLE_LITERAL_TYPE::SIGNED_INTEGER;
+    }
+    else if (to->type == STRUCTURE_TYPE::POINTER) {
+      //Can cast a pointer literal (e.g. nullptr) to any pointer type
+      return f_ls->literal_type == SIMPLE_LITERAL_TYPE::POINTER;
+    }
+  }
+  else if (from->type == STRUCTURE_TYPE::TUPLE_LITERAL
+           && to->type == STRUCTURE_TYPE::COMPOSITE) {
+    const TupleStructure* f_ts = (const TupleStructure*)from;
+    const CompositeStructure* t_cs = (const CompositeStructure*)to;
+
+    //Size same?
+    if (f_ts->elements.size != t_cs->elements.size) { return false; }
+
+    auto f_i = f_ts->elements.begin();
+    auto t_i = t_cs->elements.begin();
+    const auto f_end = f_ts->elements.end();
+
+    for (; f_i < f_end; f_i++, t_i++) {
+      //Must be implicit type and offset
+      if (f_i->offset != t_i->offset || !can_implicit_cast(f_i->type, t_i->type)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+
+  return false;
+}
+
+bool TYPE_TESTS::can_comptime_cast(const Structure* from, const Structure* to) {
+  if (can_implicit_cast(from, to)) return true;
+
+  switch (from->type) {
+    case STRUCTURE_TYPE::FIXED_ARRAY: {
+        if (to->type == STRUCTURE_TYPE::FIXED_ARRAY) {
+          const ArrayStructure* arr_f = (const ArrayStructure*)from;
+          const ArrayStructure* arr_t = (const ArrayStructure*)to;
+
+          return arr_f->length == arr_t->length && can_comptime_cast(arr_f->base, arr_t->base);
+        }
+        else {
+          return false;
+        }
+      }
+    case STRUCTURE_TYPE::SIMPLE_LITERAL: {
+        const SimpleLiteralStructure* const from_lit = (const SimpleLiteralStructure*)from;
+
+        switch (from_lit->literal_type) {
+          case SIMPLE_LITERAL_TYPE::INTEGER:
+            //Signed/Size checks will be done later
+            return to->type == STRUCTURE_TYPE::INTEGER;
+          case SIMPLE_LITERAL_TYPE::SIGNED_INTEGER:
+            //Signed/Size checks will be done later
+            return to->type == STRUCTURE_TYPE::INTEGER
+              && static_cast<const IntegerStructure*>(to)->is_signed;
+
+          case SIMPLE_LITERAL_TYPE::EMPTY_ARR://cast to any array
+            return to->type == STRUCTURE_TYPE::FIXED_ARRAY;
+        }
+
+        return false;
+      }
+    case STRUCTURE_TYPE::TUPLE_LITERAL: {
+        const TupleLiteralStructure* f_ts = (const TupleLiteralStructure*)from;
+        if (to->type == STRUCTURE_TYPE::COMPOSITE) {
+          const CompositeStructure* t_cs = (const CompositeStructure*)to;
+
+          //Size same?
+          if (f_ts->elements.size != t_cs->elements.size) { return false; }
+
+          auto f_i = f_ts->elements.begin();
+          auto t_i = t_cs->elements.begin();
+          const auto f_end = f_ts->elements.end();
+
+          for (; f_i < f_end; f_i++, t_i++) {
+            //Must be comptime type and offset
+            if (!can_comptime_cast(f_i->type, t_i->type)
+                || f_i->offset != t_i->offset) {
+              return false;
+            }
+          }
+
+          return true;
+        }
+
+        return false;
+      }
+    default:
+      return false;
+  }
+}
+
+bool TYPE_TESTS::is_negatable(const Structure* s) {
+  const bool signed_int = s->type == STRUCTURE_TYPE::INTEGER &&
+    static_cast<const IntegerStructure*>(s)->is_signed;
+  const bool int_lit = s->type == STRUCTURE_TYPE::SIMPLE_LITERAL &&
+    static_cast<const SimpleLiteralStructure*>(s)->literal_type == SIMPLE_LITERAL_TYPE::INTEGER;
+
+  return signed_int || int_lit;
+}
+
+bool TYPE_TESTS::is_numeric(const Structure* s) {
+  const bool int_lit = s->type == STRUCTURE_TYPE::SIMPLE_LITERAL &&
+    static_cast<const SimpleLiteralStructure*>(s)->literal_type == SIMPLE_LITERAL_TYPE::INTEGER;
+
+
+  return s->type == STRUCTURE_TYPE::INTEGER || int_lit;
+}
+
 bool TYPE_TESTS::is_pointer(const Structure* s) {
   return s->type == STRUCTURE_TYPE::POINTER;
 }
@@ -563,7 +552,7 @@ bool TYPE_TESTS::is_int(const Structure* s) {
   return s->type == STRUCTURE_TYPE::INTEGER
     || (s->type == STRUCTURE_TYPE::SIMPLE_LITERAL &&
         (((const SimpleLiteralStructure*)s)->literal_type == SIMPLE_LITERAL_TYPE::INTEGER
-        || ((const SimpleLiteralStructure*)s)->literal_type == SIMPLE_LITERAL_TYPE::SIGNED_INTEGER));
+         || ((const SimpleLiteralStructure*)s)->literal_type == SIMPLE_LITERAL_TYPE::SIGNED_INTEGER));
 }
 
 bool TYPE_TESTS::is_signed_int(const Structure* s) {

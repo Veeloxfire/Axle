@@ -12,7 +12,41 @@
 #define JOIN2(a, b) a ## b
 #define JOIN(a, b) JOIN2(a, b)
 
+#define INVALID_CODE_PATH(reason) assert((reason, false))
+
+#define FOR(name, it) \
+for(auto it = name.begin(), __end ## __LINE__ = name.end(); \
+it < __end ## __LINE__; it++)
+
+#define FOR_MUT(name, it) \
+for(auto it = name.mut_begin(), __end ## __LINE__ = name.mut_end(); \
+it < __end ## __LINE__; it++)
+
 constexpr inline u64 MAX_DECIMAL_U64_DIGITS = sizeof("9223372036854775807") - 1;
+
+constexpr u64 greatest_common_divisor(u64 v1, u64 v2) {
+  //Swap to be the correct way around
+  if (v1 > v2) {
+    const u64 temp = v1;
+    v1 = v2;
+    v2 = temp;
+  }
+
+  while (v2 != 0) {
+    const u64 temp = v1 % v2;
+    v1 = v2;
+    v2 = temp;
+  }
+
+  return v1;
+}
+
+constexpr u64 lowest_common_multiple(u64 v1, u64 v2) {
+  const u64 gcd = greatest_common_divisor(v1, v2);
+
+  return (v1 * v2) / gcd;
+}
+
 
 constexpr inline u64 FNV1_HASH_BASE = 0xcbf29ce484222325;
 constexpr inline u64 FNV1_HASH_PRIME = 0x100000001b3;
@@ -1671,6 +1705,20 @@ namespace IO {
   void err_print(const char* string);
   void err_print(const OwnedPtr<char>& string);
   void err_print(const char c);
+
+  template<typename U, typename V, typename ... T>
+  void print(U&& u, V&& v, T&& ... t) {
+    print(std::forward<U>(u));
+    print(std::forward<V>(v));
+    (print(std::forward<T>(t)), ...);
+  }
+
+  template<typename U, typename V, typename ... T>
+  void err_print(U&& u, V&& v, T&& ... t) {
+    err_print(std::forward<U>(u));
+    err_print(std::forward<V>(v));
+    (err_print(std::forward<T>(t)), ...);
+  }
 }
 
 #define DO_NOTHING ((void)0)

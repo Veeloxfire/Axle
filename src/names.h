@@ -3,6 +3,7 @@
 #include "comp_utilities.h"
 #include "strings.h"
 #include "type.h"
+#include "files.h"
 
 struct Global;
 struct ASTDecl;
@@ -17,6 +18,7 @@ struct NamedElement {
 struct Namespace {
   bool is_sub_namespace = false;
   NamespaceIndex inside ={};
+  FileLocation source_file ={};
 
   InternHashTable<NamedElement> names ={};
   Array<NamespaceIndex> imported ={};
