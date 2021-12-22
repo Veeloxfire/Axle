@@ -293,6 +293,10 @@ size_t CallingConvention::num_reg_parameters(size_t parameters) const {
   return smaller(parameters, (size_t)num_parameter_registers);
 }
 
-bool register_passed_as_pointer(const Structure* type) {
-  return type->size() > 8;
+bool register_passed_as_pointer(const Structure* s) {
+  return s->size > 8;
+}
+
+bool register_passed_as_pointer(const Type& t) {
+  return register_passed_as_pointer(t.structure);
 }

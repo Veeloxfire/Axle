@@ -83,7 +83,8 @@ int compile_file(const APIOptions& options,
 
   //Setup
   StringInterner strings ={};
-  Types types ={};
+  BuiltinTypes builtin_types ={};
+  Structures structures ={};
   Lexer lexer ={};
   Parser parser ={};
   VM vm = {};
@@ -99,7 +100,8 @@ int compile_file(const APIOptions& options,
   compiler.services.errors = &errors;
   compiler.services.names = &names;
   compiler.services.file_loader = &file_loader;
-  compiler.services.types = &types;
+  compiler.services.builtin_types = &builtin_types;
+  compiler.services.structures = &structures;
   compiler.services.strings = &strings;
 
   //Load the builtin types

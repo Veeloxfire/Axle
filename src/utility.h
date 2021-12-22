@@ -12,15 +12,13 @@
 #define JOIN2(a, b) a ## b
 #define JOIN(a, b) JOIN2(a, b)
 
-#define INVALID_CODE_PATH(reason) assert((reason, false))
-
 #define FOR(name, it) \
-for(auto it = name.begin(), __end ## __LINE__ = name.end(); \
-it < __end ## __LINE__; it++)
+for(auto it = (name).begin(), JOIN(__end, __LINE__) = (name).end(); \
+it < JOIN(__end, __LINE__); it++)
 
 #define FOR_MUT(name, it) \
-for(auto it = name.mut_begin(), __end ## __LINE__ = name.mut_end(); \
-it < __end ## __LINE__; it++)
+for(auto it = (name).mut_begin(), JOIN(__end, __LINE__) = (name).mut_end(); \
+it < JOIN(__end, __LINE__); it++)
 
 constexpr inline u64 MAX_DECIMAL_U64_DIGITS = sizeof("9223372036854775807") - 1;
 
@@ -192,8 +190,7 @@ constexpr size_t ceil_div(size_t x, size_t y) noexcept {
 //Log 2 for uniform random 64 bit number
 constexpr inline uint64_t log_2(uint64_t v) {
   if (v == 0) {
-    throw std::exception("MATH ERROR! Cannot log of 0");
-    return 0;
+    INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
   uint64_t max = 63;
@@ -212,9 +209,13 @@ constexpr inline uint64_t log_2(uint64_t v) {
   return max;
 }
 
+constexpr inline uint64_t pow_16(uint64_t v) {
+  return 1ull << (8ull * v);
+}
+
 constexpr inline uint64_t pow_10(uint64_t v) {
   if (v > 19) {
-    throw std::exception("Power too high!");
+    INVALID_CODE_PATH("Power too high!");
     return 0;
   }
 
@@ -246,8 +247,7 @@ constexpr inline uint64_t pow_10(uint64_t v) {
 
 constexpr inline uint64_t log_10_floor(uint64_t v) {
   if (v == 0) {
-    throw std::exception("MATH ERROR! Cannot log of 0");
-    return 0;
+    INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
   //Max uint64_t = 18446744073709551615
@@ -275,8 +275,7 @@ constexpr inline uint64_t log_10_floor(uint64_t v) {
 //Floors the output
 constexpr inline uint64_t small_log_2_floor(uint64_t v) {
   if (v == 0) {
-    throw std::exception("MATH ERROR! Cannot log of 0");
-    return 0;
+    INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
   uint64_t min = 0;
@@ -290,8 +289,7 @@ constexpr inline uint64_t small_log_2_floor(uint64_t v) {
 
 constexpr inline uint64_t small_log_2_ceil(uint64_t v) {
   if (v == 0) {
-    throw std::exception("MATH ERROR! Cannot log of 0");
-    return 0;
+    INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
   uint8_t found1 = 0;//max value of 1
@@ -449,6 +447,7 @@ struct Array {
 
     for (size_t i = 0; i < size; i++) {
       if (lambda(data[i])) {
+        destruct_single(data + i);
         num_removed++;
       }
       else {
@@ -613,6 +612,13 @@ struct Array {
     size += arr.size;
 
     arr.free();
+  }
+
+  void concat(const T* arr, size_t N) noexcept {
+    reserve_extra(N);
+    memcpy_ts(data + size, (capacity - size), arr, N);
+
+    size += N;
   }
 };
 
@@ -1006,6 +1012,11 @@ struct ArenaAllocator {
 
   uint8_t* alloc_no_construct(size_t bytes);
   void free_no_destruct(void* val);
+
+  template<typename T>
+  inline uint8_t* alloc_no_construct() {
+    return alloc_no_construct(sizeof(T));
+  }
 };
 
 struct BumpAllocator {
@@ -1049,9 +1060,9 @@ struct FreelistBlockAllocator {
   struct BLOCK {
     constexpr static size_t BLOCK_SIZE = 32;
 
-    size_t filled = 0;
-    BLOCK* prev = nullptr;
 
+    //size_t filled = 0;
+    BLOCK* prev = nullptr;
     Element data[BLOCK_SIZE] ={};
   };
 
@@ -1162,7 +1173,9 @@ struct FreelistBlockAllocator {
 
 
   void free(const T* t) {
-    assert(_debug_valid_free_ptr(t));
+    ASSERT(_debug_valid_free_ptr(t));
+
+    destruct_single(t);
 
     Element* new_e = (Element*)t;
     new_e->el.~T();
@@ -1320,7 +1333,7 @@ struct Queue {
   }
 
   T dequeue() {
-    assert(!is_empty());
+    ASSERT(!is_empty());
 
     //Cannot be empty so no need to check for that
     T ret = std::move(front->data[front->front_offset]);
@@ -1665,6 +1678,14 @@ struct MEMBER {
 };
 
 
+template<typename T>
+using DESTRUCTOR = FUNCTION_PTR<void, T>;
+
+template<typename T>
+constexpr inline DESTRUCTOR<T> get_destructor() {
+  return &destruct_single<T>;
+}
+
 
 template<typename T>
 constexpr inline T square(T t) { return t * t; }
@@ -1750,5 +1771,5 @@ constexpr bool slow_string_eq(const char* str1, const char* str2) {
 #ifdef NDEBUG
 #define assert_if(cond, expr) ((void)0)
 #else
-#define assert_if(cond, expression) if(cond) assert(expression)
+#define assert_if(cond, expression) if(cond) ASSERT(expression)
 #endif

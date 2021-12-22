@@ -1,6 +1,7 @@
 #pragma once
 #include "utility.h"
 #include "comp_utilities.h"
+#include "type.h"
 
 struct TypeHint;
 
@@ -10,7 +11,7 @@ enum struct MainOp : uint8_t {
 
 struct BinOpEmitInfo {
   MainOp main_op;
-  const Structure* main_type;
+  Type main_type;
 };
 
 struct BinOpArgs {
@@ -162,6 +163,8 @@ void compile_binary_operator(Compiler* comp,
 
 //Overload for unary operators
 void compile_unary_operator(Compiler* comp,
+                            Context* context,
+                            State* state,
                             ASTExpression* expr,
                             const UnaryOpOptions& op);
 

@@ -155,9 +155,9 @@ struct StackState {
 struct Decl {
   ASTDecl* source = nullptr;
 
-  u8 meta_type = (u8)META_TYPE::NORMAL;
   const InternString* name ={};
-  const Structure* type = nullptr;
+  META_FLAGS meta_flags ={};
+  Type type ={};
 };
 
 struct MemValue {
@@ -216,13 +216,13 @@ void init_state_regs(const CallingConvention* convention, State* state);
 
 //Type hint type
 enum struct THT : uint8_t {
-  EXACT, BASE, BASE_HINT
+  EXACT, IMPLICIT, BASE, BASE_HINT
 };
 
 struct TypeHint {
   THT tht = THT::EXACT;
   union {
-    const Structure* type = nullptr;
+    Type type ={};
     const TypeHint* other_hint;
   };
 };
@@ -349,32 +349,39 @@ struct ConstantExprUnit : public CompilationUnit {
   EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::UNTYPED;
 
   ASTExpression* expr = nullptr;
-  const Structure* cast_to = nullptr;
+  Type cast_to ={};
 
   State state ={};
 };
 
 struct CallSignature {
   const InternString* name = nullptr;
-  Array<const Structure*> arguments ={};
+  Array<TypeAndFlags> arguments ={};
 };
 
 struct OverloadSet {
   bool complete_match = false;
   Array<const SignatureStructure*> valid_overloads ={};
+
+  usize num_options_checked = 0;
 };
 
 
 struct UnknownName {
+  bool all_names = false;
   const InternString* ident = nullptr;
   NamespaceIndex namespace_index ={};
+  usize num_knowns = 0;
+  usize num_unknowns = 0;
 };
 
 
 struct UnfoundDep {
-  CompilationUnit* unit_waiting ={};
-  Span span ={};
   UnknownName name ={};
+  CompilationUnit* unit_waiting ={};
+  
+  //Used if the dependency isnt found
+  ErrorMessage as_error={};
 };
 
 struct UnfoundDependencies {
@@ -459,6 +466,7 @@ struct Services {
   NamesHandler* names = nullptr;
   FileLoader* file_loader = nullptr;
   Structures* structures = nullptr;
+  BuiltinTypes* builtin_types = nullptr;
   StringInterner* strings = nullptr;
 };
 
@@ -522,7 +530,23 @@ struct Compiler {
     services.errors->panic = true;
   }
 
-  void set_unfound_name(Context* context, const InternString* name, NamespaceIndex ns, const Span& span);
+  template<typename ... T>
+  void set_unfound_name(Context* context, UnknownName&& name,
+                        ERROR_CODE code, const Span& span,
+                        const char* f_message, T&& ... ts) {
+    ASSERT(name.ident != nullptr);
+    unfound_deps.panic = true;
+
+    unfound_deps.unfound.insert_uninit(1);
+    UnfoundDep* dep = unfound_deps.unfound.back();
+
+    dep->name = std::move(name);
+    dep->unit_waiting = context->current_unit;
+    dep->as_error.type = code;
+    dep->as_error.span = span;
+    dep->as_error.message = format(f_message, std::forward<T>(ts)...);
+  }
+
   void set_dep(Context* context, CompilationUnit* unit);
 };
 
@@ -542,6 +566,11 @@ void compile_type_of_expression(Compiler* const comp,
                                 ASTExpression* const expr,
                                 const TypeHint* const hint);
 
+void cast_operator_type(Compiler* const comp,
+                        Context* const context,
+                        State* const state,
+                        ASTExpression* const expr);
+
 void process_parsed_file(Compiler* const comp, ASTFile* const func);
 
 void print_compiled_functions(const Compiler* comp);
@@ -559,20 +588,17 @@ void copy_runtime_to_runtime(Compiler* const comp,
                              const RuntimeValue* from,
                              RuntimeValue* to);
 
-const Structure* find_or_make_array_type(Compiler* const comp,
+const Structure* find_or_make_array_structure(Compiler* const comp,
                                          Context* context,
-                                         const Span& span,
-                                         const Structure* base,
+                                         const Type& base,
                                          size_t length);
 
-const Structure* find_or_make_pointer_type(Compiler* const comp,
+const Structure* find_or_make_pointer_structure(Compiler* const comp,
                                            Context* context,
-                                           const Span& span,
-                                           const Structure* base);
+                                           const Type& base);
 
-const Structure* find_or_make_tuple_literal(Compiler* const comp,
+const Structure* find_or_make_tuple_structure(Compiler* const comp,
                                             Context* context,
-                                            const Span& span,
-                                            Array<const Structure*>&& elements);
+                                            Array<Type>&& elements);
 
 void build_data_section_for_vm(Program* prog, Compiler* const comp);

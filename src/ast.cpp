@@ -1,11 +1,11 @@
 #include "ast.h"
 
 void ASTExpression::move_from(ASTExpression&& a) noexcept {
-  type = std::exchange(a.type, nullptr);
+  type = std::exchange(a.type, Type{});
 
   makes_call = std::exchange(a.makes_call, false);
   call_leaf = std::exchange(a.call_leaf, false);
-  comptime_eval = std::exchange(a.comptime_eval, false);
+  meta_flags = std::exchange(a.meta_flags, 0);
 
   const_val = std::exchange(a.const_val, nullptr);
   span = std::exchange(a.span, {});
@@ -112,6 +112,25 @@ void ASTType::destruct_union() {
   #define MOD(TYTY, name) case JOIN(TYPE_TYPE::, TYTY): destruct_single(&name); break;
     TYPE_TYPE_MOD;
   #undef MOD
+  }
+}
+
+void ASTType::move_from(ASTType&& a) noexcept {
+  type = std::exchange(a.type, Type{});
+  span = std::exchange(a.span, {});
+  type_type = std::exchange(a.type_type, TYPE_TYPE::UNKNOWN);
+
+  switch (type_type)
+  {
+    case TYPE_TYPE::UNKNOWN: break;
+
+    #define MOD(name, expr_name) \
+    case TYPE_TYPE:: ## name: expr_name = std::move(a. ## expr_name); \
+    break;
+
+    TYPE_TYPE_MOD
+
+      #undef MOD
   }
 }
 

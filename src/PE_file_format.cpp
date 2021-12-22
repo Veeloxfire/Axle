@@ -203,7 +203,7 @@ static void import_names_to_bytes(VA va, Array<ImportNameEntry>& import_names, A
 ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const char* file_name) {
 
   if (pe_file->imports != nullptr) {
-    assert(pe_file->constants != nullptr);
+    ASSERT(pe_file->constants != nullptr);
   }
 
   uint32_t TIME = time(0) & 0x0000000000000000FFFFFFFFFFFFFFFF;
@@ -295,8 +295,8 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
       section_VA += round_to_section_alignment(important_vals.imports_raw_size);
     }
 
-    assert(section_RVA % FILE_ALIGNMENT == 0);
-    assert(section_VA % PAGE_SIZE == 0);
+    ASSERT(section_RVA % FILE_ALIGNMENT == 0);
+    ASSERT(section_VA % PAGE_SIZE == 0);
 
     important_vals.size_of_image = section_VA;
   }
@@ -556,7 +556,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
 
     FILES::write(out, import_names.data, import_names.size);
 
-    size_t padding = round_to_file_alignment(important_vals.imports_raw_size) - important_vals.imports_raw_size;
+    size_t padding = (size_t)round_to_file_alignment(important_vals.imports_raw_size) - (size_t)important_vals.imports_raw_size;
     FILES::write_padding_bytes(out, '\0', padding);
   }
 

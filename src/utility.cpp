@@ -13,7 +13,7 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
   //Should otherwise all be combined
   //Just need to find if this is after a free space or before a free space
 
-  assert(!_debug_freelist_loops());
+  ASSERT(!_debug_freelist_loops());
 
   FreeList* prev = nullptr;
   FreeList* fl = free_list;
@@ -23,7 +23,7 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
     return;
   }
 
-  assert(fl->next != fl);
+  ASSERT(fl->next != fl);
 
   bool found_before = false;
   bool found_after = false;
@@ -82,7 +82,7 @@ void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
   }
   free_list = new_fl;
 
-  assert(free_list->next != free_list);
+  ASSERT(free_list->next != free_list);
 }
 
 bool ArenaAllocator::_debug_freelist_loops() const {
@@ -114,7 +114,7 @@ bool ArenaAllocator::_debug_valid_free_pointer(void* ptr) const {
 }
 
 uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
-  assert(!_debug_freelist_loops());
+  ASSERT(!_debug_freelist_loops());
 
   size_t req_size = ceil_div(bytes, 8);
 
@@ -122,7 +122,7 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
   FreeList* fl = (FreeList*)free_list;
 
   if (bytes > Block::BLOCK_SIZE - 1) {
-    throw std::exception("Arena allocator does not have enough space");
+    INVALID_CODE_PATH("Arena allocator block does not have enough space");
   }
 
   //Find free space
@@ -176,13 +176,13 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
   //How much data to free
   *used_space = req_size;
 
-  assert(!_debug_freelist_loops());
+  ASSERT(!_debug_freelist_loops());
   return (uint8_t*)current_alloc;
 }
 
 void ArenaAllocator::free_no_destruct(void* val) {
-  assert(!_debug_freelist_loops());
-  assert(_debug_valid_free_pointer(val));
+  ASSERT(!_debug_freelist_loops());
+  ASSERT(_debug_valid_free_pointer(val));
 
   uint64_t* ptr = (uint64_t*)val;
 
@@ -228,8 +228,8 @@ void SquareBitMatrix::free() {
 }
 
 bool SquareBitMatrix::test_a_intersects_b(size_t a, size_t b) const {
-  assert(a < side_length);
-  assert(b < side_length);
+  ASSERT(a < side_length);
+  ASSERT(b < side_length);
 
   const size_t bytes_per_val = bytes_per_val_per_side(side_length);
   const uint8_t* a_data = data + bytes_per_val * a;
@@ -237,14 +237,14 @@ bool SquareBitMatrix::test_a_intersects_b(size_t a, size_t b) const {
   const size_t b_mod8 = b % 8;
   const size_t b_div8 = b / 8;
 
-  assert(a_data + b_div8 < data + capacity);
+  ASSERT(a_data + b_div8 < data + capacity);
 
   return (a_data[b_div8] & (1 << b_mod8)) > 0;
 }
 
 void SquareBitMatrix::set_a_intersects_b(size_t a, size_t b) {
-  assert(a < side_length);
-  assert(b < side_length);
+  ASSERT(a < side_length);
+  ASSERT(b < side_length);
 
   const size_t bytes_per_val = bytes_per_val_per_side(side_length);
   uint8_t* a_data = data + bytes_per_val * a;
@@ -252,14 +252,14 @@ void SquareBitMatrix::set_a_intersects_b(size_t a, size_t b) {
   const size_t b_mod8 = b % 8;
   const size_t b_div8 = b / 8;
 
-  assert(a_data + b_div8 < data + capacity);
+  ASSERT(a_data + b_div8 < data + capacity);
 
   a_data[b_div8] |= (uint8_t)(1 << b_mod8);
 }
 
 void SquareBitMatrix::remove_a_intersects_b(size_t a, size_t b) {
-  assert(a < side_length);
-  assert(b < side_length);
+  ASSERT(a < side_length);
+  ASSERT(b < side_length);
 
   const size_t bytes_per_val = bytes_per_val_per_side(side_length);
   uint8_t* a_data = data + bytes_per_val * a;
@@ -267,7 +267,7 @@ void SquareBitMatrix::remove_a_intersects_b(size_t a, size_t b) {
   const size_t b_mod8 = b % 8;
   const size_t b_div8 = b / 8;
 
-  assert(a_data + b_div8 < data + capacity);
+  ASSERT(a_data + b_div8 < data + capacity);
 
   a_data[b_div8] &= ~(uint8_t)(1 << b_mod8);
 }
@@ -346,7 +346,7 @@ void BumpAllocator::new_block() {
 }
 
 uint8_t* BumpAllocator::allocate_no_construct(size_t bytes) {
-  assert(bytes < BLOCK::BLOCK_SIZE);
+  ASSERT(bytes < BLOCK::BLOCK_SIZE);
 
   if (top->filled + bytes > BLOCK::BLOCK_SIZE) {
     new_block();

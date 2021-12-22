@@ -12,7 +12,7 @@ struct ASTStatement;
 struct ASTLambda;
 struct ASTStructBody;
 
-struct Structure;
+struct Type;
 struct Function;
 struct EnumValue;
 struct State;
@@ -20,7 +20,6 @@ struct Global;
 
 struct ASTName {
   const InternString* name ={};
-  const Structure* type = nullptr;
 };
 
 struct ASTArrayType {
@@ -58,24 +57,40 @@ MOD(TUPLE, tuple) \
 MOD(LAMBDA, lambda)
 
 enum struct TYPE_TYPE {
+  UNKNOWN = 0,
+
 #define MOD(name, t) name,
   TYPE_TYPE_MOD
 #undef MOD
 };
 
 struct ASTType {
-  TYPE_TYPE type_type;
-  Span span;
+  TYPE_TYPE type_type = TYPE_TYPE::UNKNOWN;
+  Type type ={};
+  Span span ={};
 
   union {
-    const InternString* name ={};
+    char _dummy = '\0';
+    const InternString* name;
     ASTArrayType arr;
     ASTPtrType ptr;
     ASTTupleType tuple;
     ASTLambdaType lambda;
   };
 
-  const Structure* type = nullptr;
+  ASTType() = default;
+
+  ASTType(ASTType&& a) noexcept {
+    move_from(std::move(a));
+  }
+
+  ASTType& operator=(ASTType&& a) noexcept {
+    this->~ASTType();
+    move_from(std::move(a));
+    return *this;
+  }
+
+  void move_from(ASTType&&) noexcept;
 
   void set_union(TYPE_TYPE);
   void destruct_union();
@@ -129,6 +144,13 @@ struct CastExpr {
   ASTType type;
   ASTExpression* expr = nullptr;
   CAST_FUNCTION emit = nullptr;
+
+  inline CastExpr& operator=(CastExpr&& c) noexcept {
+    type = std::move(c.type);
+    expr = std::exchange(c.expr, nullptr);
+    emit = std::exchange(c.emit, nullptr);
+    return *this;
+  }
 
   ~CastExpr() {
     free_destruct_single(expr);
@@ -214,14 +236,13 @@ enum struct EXPRESSION_TYPE : uint8_t {
 };
 
 struct ASTExpression {
-  const Structure* type = nullptr;
-
   uint8_t valid_rvts = ALL_RVTS;
 
-  bool assignable = false;
   bool makes_call = false;
   bool call_leaf = false;
-  bool comptime_eval = false;
+
+  META_FLAGS meta_flags;
+  Type type;
 
   uint8_t* const_val = nullptr;
 
@@ -293,34 +314,34 @@ struct ASTBlock {
 struct ASTDecl {
   const InternString* name = nullptr;
   bool compile_time_const = false;
-  const Structure* structure = nullptr;
+  Type type ={};
 
   //Only used in locals
   size_t local_index = 0;
 
-  ASTType* type ={};
+  ASTType* type_ast ={};
   ASTExpression* expr ={};
 
   Span span ={};
 
   ~ASTDecl() {
-    free_destruct_single(type);
+    free_destruct_single(type_ast);
     free_destruct_single(expr);
   }
 };
 
 struct ASTFuncSig {
-  FunctionSignature* sig;
-  const CallingConvention* convention;
+  FunctionSignature* sig = nullptr;
+  const CallingConvention* convention = nullptr;
 
-  ASTType return_type;
-  Array<ASTDecl> parameters;
+  ASTType return_type ={};
+  Array<ASTDecl> parameters ={};
 
   Span signature_span ={};
 };
 
 struct ASTLambda {
-  Function* function;
+  Function* function = nullptr;
 
   ASTFuncSig sig ={};
   ASTBlock body ={};
@@ -333,7 +354,7 @@ struct ASTTypedName {
 
 struct ASTStructBody {
   CompilationUnit* compilation_unit;
-  const Structure* type;
+  Type type{};
   Span span ={};
   Array<ASTTypedName> elements = {};
 };

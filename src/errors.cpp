@@ -166,7 +166,7 @@ ERROR_CODE Errors::print_all() const {
       }
 
       OwnedPtr<const char>* ptr_ptr = files.get_val(i->span.full_path);
-      assert(ptr_ptr != nullptr);
+      ASSERT(ptr_ptr != nullptr);
 
       const char* source = ptr_ptr->ptr;
       OwnedPtr<char> string = load_span_from_source(span, source);

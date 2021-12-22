@@ -19,7 +19,7 @@ static void relocation_fix(uint8_t* code,
       }
     case RELOCATION_TYPE::U64_DATA_OFFSET: {
         //Shouldnt be using non-const globals if we have no data
-        assert(data_base != nullptr);
+        ASSERT(data_base != nullptr);
         const u64 offset = x64_from_bytes(ptr);
         x64_to_bytes(data_base + offset, ptr);
         break;
@@ -30,8 +30,7 @@ static void relocation_fix(uint8_t* code,
         break;
       }
     default: {
-        //Should not be here
-        assert(false);
+        INVALID_CODE_PATH("Relocation type not supported");
       }
   }
 }
@@ -248,13 +247,13 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
       for (; i < end; i++) {
         const Global* g = *i;
 
-        if (g->decl.type->type != STRUCTURE_TYPE::LAMBDA) {
+        if (g->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
           continue;
         }
 
-        const SignatureStructure* sig = (const SignatureStructure*)g->decl.type;
+        const auto* sig = g->decl.type.unchecked_base<SignatureStructure>();
 
-        if (!(sig->parameter_types.size == 0 && sig->return_type == comp->services.types->s_u64)) {
+        if (!(sig->parameter_types.size == 0 && sig->return_type == comp->services.builtin_types->t_u64)) {
           continue;
         }
 
@@ -325,7 +324,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
         }
       }
       else {
-        assert(false);
+        INVALID_CODE_PATH("Function type not supported");
       }
 
     }
@@ -393,7 +392,7 @@ void X64::mov(Array<uint8_t>& arr,
 
 static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte) {
   if (!sib.use_base) {
-    assert(!sib.use_index);//Must use both if using index
+    ASSERT(!sib.use_index);//Must use both if using index
 
     if (!sib.use_index) {
       arr.insert(0b00'000'000 | mod_byte);
@@ -407,7 +406,7 @@ static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte)
       arr.size += 4;
     }
     else {
-      assert(sib.index != RSP.REG);//Not a valid code unfortunately
+      ASSERT(sib.index != RSP.REG);//Not a valid code unfortunately
 
       arr.insert(0b00'000'000 | mod_byte);
       arr.insert(X64::sib(sib.scale, sib.index, RBP.REG));
@@ -559,7 +558,7 @@ X64::RM X64::rm_from_mem_complex(const MemComplex& mem) {
     rm.r = RSP.REG;
     rm.use_sib = true;
 
-    assert((mem.base & 0b111) != RSP.REG);//Not possible in x86 architecture
+    ASSERT((mem.base & 0b111) != RSP.REG);//Not possible in x86 architecture
 
 
     rm.sib.use_base = true;
@@ -1030,8 +1029,8 @@ void x86_64_backend_code_block(Compiler* const comp,
           const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
           const Global* glob = (const Global*)p.u64.vptr;
 
-          assert(glob->constant_value.ptr == nullptr);
-          assert( glob->data_index != 0);
+          ASSERT(glob->constant_value.ptr == nullptr);
+          ASSERT( glob->data_index != 0);
 
           X64::mov(out_code, X64::R{ p.val }, glob->data_index);
 
@@ -1094,7 +1093,7 @@ void x86_64_backend_code_block(Compiler* const comp,
       case ByteCode::DIV_RU64S: {
           const auto p = ByteCode::PARSE::DIV_RU64S(code_i);
 
-          assert(p.val2 == RAX.REG);
+          ASSERT(p.val2 == RAX.REG);
 
           //Set RDX to 0
           X64::mov(out_code, X64::R{ RDX.REG }, 0ull);
@@ -1112,7 +1111,7 @@ void x86_64_backend_code_block(Compiler* const comp,
       case ByteCode::DIV_RI64S: {
           const auto p = ByteCode::PARSE::DIV_RI64S(code_i);
 
-          assert(p.val2 == RAX.REG);
+          ASSERT(p.val2 == RAX.REG);
 
           //Sign extend to RDX
           out_code.insert(X64::REX_W);
@@ -1131,7 +1130,7 @@ void x86_64_backend_code_block(Compiler* const comp,
       case ByteCode::SHIFT_L_BY_R8_R64: {
           const auto p = ByteCode::PARSE::SHIFT_L_BY_R8_R64(code_i);
 
-          assert(p.val1 == RCX.REG);
+          ASSERT(p.val1 == RCX.REG);
 
           out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
           out_code.insert(X64::SAL_R_BY_CL);
@@ -1146,7 +1145,7 @@ void x86_64_backend_code_block(Compiler* const comp,
       case ByteCode::SHIFT_R_BY_R8_RU64: {
           const auto p = ByteCode::PARSE::SHIFT_R_BY_R8_RU64(code_i);
 
-          assert(p.val1 == RCX.REG);
+          ASSERT(p.val1 == RCX.REG);
 
           out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
           out_code.insert(X64::SHR_R_BY_CL);
@@ -1161,7 +1160,7 @@ void x86_64_backend_code_block(Compiler* const comp,
       case ByteCode::SHIFT_R_BY_R8_RI64: {
           const auto p = ByteCode::PARSE::SHIFT_R_BY_R8_RI64(code_i);
 
-          assert(p.val1 == RCX.REG);
+          ASSERT(p.val1 == RCX.REG);
 
           out_code.insert(X64::REX_W | X64::rex_rm(p.val2));
           out_code.insert(X64::SAR_R_BY_CL);
@@ -1720,7 +1719,7 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
             }
         }
 
-        throw std::exception("Internal error, should not be here");
+        INVALID_CODE_PATH("Internal error. Unrecognised assembly code register format");
       }
     case RBP.REG: {
         if (address_mode == 0b00) {
@@ -1759,11 +1758,11 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
             }
         }
 
-        throw std::exception("Internal error, should not be here");
+        INVALID_CODE_PATH("Internal error. Unrecognised assembly code register format");
       }
   }
 
-  throw std::exception("Internal error, should not be here");
+  INVALID_CODE_PATH("Internal error. Unrecognised assembly code register format");
 }
 
 static OwnedPtr<char> r_reg_string(x86PrintOptions* p_opts,

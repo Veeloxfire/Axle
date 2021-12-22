@@ -145,13 +145,37 @@ static void load_unsigned(Array<char>& res, uint64_t u64) {
   }
 }
 
+static void load_unsigned_hex(Array<char>& res, uint64_t u) {
+  constexpr size_t LEN = 16;
+  
+  char string_res[2 + LEN] ={
+    '0', 'x',
+    '0', '0', '0', '0', '0', '0', '0', '0',
+    '0', '0', '0', '0', '0', '0', '0', '0' 
+  };
+
+  for (u32 i = 0; i < LEN; i++) {
+    u8 digit = u & 0xF;
+    u >>= 4;
+
+    if (digit >= 10) {
+      ASSERT(digit < 16);
+      string_res[((LEN - 1) - i) + 2] = ('A' + (digit - 10));
+    }
+    else {
+      string_res[((LEN - 1) - i) + 2] = ('0' + digit);
+    }
+  }
+
+  res.concat(string_res, LEN + 2);
+}
+
 void load_string(Array<char>& res, PrintPtr ptr) {
   if (ptr.ptr == nullptr) {
-    load_string(res, "null");
+    load_string(res, "nullptr");
   }
   else {
-
-    load_unsigned(res, (uintptr_t)ptr.ptr);
+    load_unsigned_hex(res, (uintptr_t)ptr.ptr);
   }
 }
 
@@ -213,11 +237,11 @@ void load_string(Array<char>& res, PrintCallSignature p_call) {
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      load_string(res, i->type->name);
+      load_string(res, i->type.name);
       load_string(res, ", ");
     }
 
-    load_string(res, i->type->name);
+    load_string(res, i->type.name);
   }
 
   load_string(res, ')');
@@ -237,15 +261,15 @@ void load_string(Array<char>& res, PrintSignatureType p_sig) {
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      load_string(res, (*i)->name);
+      load_string(res, i->name);
       load_string(res, ", ");
     }
 
-    load_string(res, (*i)->name);
+    load_string(res, i->name);
   }
 
   load_string(res, ") -> ");
-  load_string(res, sig->return_type->name);
+  load_string(res, sig->return_type.name);
 }
 
 void load_string(Array<char>& res, const CallSignature& call_sig) {
@@ -258,11 +282,11 @@ void load_string(Array<char>& res, const CallSignature& call_sig) {
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      load_string(res, (*i)->name->string);
+      load_string(res, i->type.name->string);
       load_string(res, ", ");
     }
 
-    load_string(res, (*i)->name->string);
+    load_string(res, i->type.name->string);
   }
 
   res.insert(')');

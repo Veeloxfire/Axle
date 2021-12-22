@@ -78,10 +78,10 @@ constexpr static u64 num_dec_digits(const char* str) {
 }
 
 static u64 parse_hex_uint(const char* digits, const u64 len) {
-  assert(0 < len && len <= 64);
+  ASSERT(0 < len && len <= 64);
 
   const auto get_digit = [](const char c) -> u8 {
-    assert(is_hex_number(c));
+    ASSERT(is_hex_number(c));
 
     if ('0' <= c && c <= '9') {
       return c - '0';
@@ -102,7 +102,7 @@ static u64 parse_hex_uint(const char* digits, const u64 len) {
   u64 result = 0;
   for (u64 digit = 0; digit < len; digit++) {
     u64 digit_val = get_digit(digits[len - digit - 1]);
-    assert(digit_val <= 0xF);
+    ASSERT(digit_val <= 0xF);
     digit_val *= shift;
 
     shift *= base;
@@ -113,10 +113,10 @@ static u64 parse_hex_uint(const char* digits, const u64 len) {
 }
 
 static u64 parse_dec_uint(const char* digits, const u64 len) {
-  assert(0 < len && len <= MAX_DECIMAL_U64_DIGITS);
+  ASSERT(0 < len && len <= MAX_DECIMAL_U64_DIGITS);
 
   const auto get_digit = [](const char c) -> u8 {
-    assert(is_dec_number(c));
+    ASSERT(is_dec_number(c));
     return c - '0';
   };
 
@@ -125,7 +125,7 @@ static u64 parse_dec_uint(const char* digits, const u64 len) {
   u64 result = 0;
   for (u64 digit = 0; digit < len; digit++) {
     u64 digit_val = get_digit(digits[len - digit - 1]);
-    assert(digit_val <= 9);
+    ASSERT(digit_val <= 9);
     digit_val *= shift;
 
     shift *= base;
@@ -407,7 +407,7 @@ static Token lex_string(Lexer* const lex) {
 }
 
 static Token lex_intrinsic(Lexer* const lex) {
-  assert(lex->top[0] == '#');
+  ASSERT(lex->top[0] == '#');
 
   lex->top++;
   lex->curr_pos.character++;
@@ -557,7 +557,7 @@ static void advance(Compiler* const comp, Parser* parser) {
     }
 
     parser->next = *parser->stream.i;
-    assert(parser->next.type != AxleTokenType::Error);
+    ASSERT(parser->next.type != AxleTokenType::Error);
 
     parser->stream.i++;
   }
@@ -580,7 +580,7 @@ void set_span_start(const Token& token, Span& span) {
 }
 
 void set_span_end(const Token& token, Span& span) {
-  assert(span.full_path == token.pos.full_path);
+  ASSERT(span.full_path == token.pos.full_path);
 
   span.char_end = token.pos.character + token.string->len;
   span.line_end = token.pos.line;
@@ -620,7 +620,7 @@ void reset_parser(Compiler* const comp,
   }
 
   parser->current = *parser->stream.i;
-  assert(parser->current.type != AxleTokenType::Error);
+  ASSERT(parser->current.type != AxleTokenType::Error);
   parser->stream.i++;
 
   if (parser->current.type == AxleTokenType::End && parser->stream.i < parser->stream.end) {
@@ -635,7 +635,7 @@ void reset_parser(Compiler* const comp,
   }
 
   parser->next    = *parser->stream.i;
-  assert(parser->next.type != AxleTokenType::Error);
+  ASSERT(parser->next.type != AxleTokenType::Error);
 
   check_valid_stream(comp, parser);
   if (comp->is_panic()) {
@@ -766,7 +766,7 @@ static BINARY_OPERATOR parse_binary_operator(Compiler* const comp, Parser* const
 }
 
 static void reset_bin_op_span(ASTExpression* expr) {
-  assert(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
+  ASSERT(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
 
   expr->span.full_path = expr->bin_op.left->span.full_path;
   expr->span.char_start = expr->bin_op.left->span.char_start;
@@ -868,7 +868,7 @@ static void parse_binary_operators(Compiler* const comp, Parser* const parser, B
     auto temp = parse_binary_precidence(comp, parser, 0 /* <- will always be lowest precidence*/, &temp_base);
 
     //Should always return nullptr
-    assert(temp == nullptr);
+    ASSERT(temp == nullptr);
   }
 
   reset_bin_op_span(temp_base);
@@ -900,81 +900,63 @@ static void parse_expression(Compiler* const comp, Parser* const parser, ASTExpr
   parse_inner_expression(comp, parser, expr);
 }
 
-static const Token* step_scope(const Token* tok, const Token* end);
-static const Token* step_brackets(const Token* tok, const Token* end);
-static const Token* step_squares(const Token* tok, const Token* end);
+static const Token* step_scope(Compiler* comp, const Token* tok, const Token* end);
+static const Token* step_brackets(Compiler* comp, const Token* tok, const Token* end);
+static const Token* step_squares(Compiler* comp, const Token* tok, const Token* end);
 
-static const Token* step_squares(const Token* tok, const Token* end) {
-  assert(tok->type == AxleTokenType::Left_Square);
+static void mismatched_brackets_error(Compiler* comp, const Token* start, const Token* last, const char* message) {
+  Span span{};
+  set_span_start(*start, span);
+  set_span_end(*last, span);
 
-  tok++;
-
-  while (tok < end) {
-    switch (tok->type) {
-      case AxleTokenType::Left_Square: {
-          tok = step_squares(tok, end);
-          break;
-        }
-      case AxleTokenType::Right_Square: {
-          tok++;
-          return tok;
-        }
-      case AxleTokenType::Left_Brace: {
-          tok = step_scope(tok, end);
-          break;
-        }
-      case AxleTokenType::Right_Brace: {
-          assert(false);
-          break;
-        }
-      case AxleTokenType::Left_Bracket: {
-          tok = step_brackets(tok, end);
-          break;
-        }
-      case AxleTokenType::Right_Bracket: {
-          assert(false);
-          break;
-        }
-      default: {
-          tok++;
-          break;
-        }
-    }
-  }
-
-  return tok;
+  comp->report_error(ERROR_CODE::SYNTAX_ERROR, span,
+                     message);
 }
 
-static const Token* step_brackets(const Token* tok, const Token* end) {
-  assert(tok->type == AxleTokenType::Left_Bracket);
+
+static const Token* step_squares(Compiler* comp, const Token* tok, const Token* end) {
+  ASSERT(tok->type == AxleTokenType::Left_Square);
+
+  const Token* start = tok;
+  const Token* last = tok;
 
   tok++;
 
   while (tok < end) {
+    last = tok;
     switch (tok->type) {
       case AxleTokenType::Left_Square: {
-          tok = step_squares(tok, end);
+          tok = step_squares(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
           break;
         }
       case AxleTokenType::Right_Square: {
-          assert(false);
-          break;
+          tok++;
+          return tok;
         }
       case AxleTokenType::Left_Brace: {
-          tok = step_scope(tok, end);
+          tok = step_scope(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
           break;
         }
       case AxleTokenType::Right_Brace: {
-          assert(false);
-          break;
+          mismatched_brackets_error(comp, start, last, "Mismatched square brackets");
+          return nullptr;
         }
       case AxleTokenType::Left_Bracket: {
-          tok = step_brackets(tok, end);
+          tok = step_brackets(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
           break;
         }
       case AxleTokenType::Right_Bracket: {
-          tok++;
-          return tok;
+          mismatched_brackets_error(comp, start, last, "Mismatched square brackets");
+          return nullptr;
         }
       default: {
           tok++;
@@ -983,34 +965,47 @@ static const Token* step_brackets(const Token* tok, const Token* end) {
     }
   }
 
-  return tok;
+  mismatched_brackets_error(comp, start, last, "Mismatched square brackes");
+  return nullptr;
 }
 
-static const Token* step_scope(const Token* tok, const Token* end) {
-  assert(tok->type == AxleTokenType::Left_Brace);
+static const Token* step_brackets(Compiler* comp, const Token* tok, const Token* end) {
+  ASSERT(tok->type == AxleTokenType::Left_Bracket);
 
+  const Token* start = tok;
+  const Token* last = tok;
   tok++;
 
   while (tok < end) {
+    last = tok;
     switch (tok->type) {
       case AxleTokenType::Left_Square: {
-          tok = step_squares(tok, end);
+          tok = step_squares(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
           break;
         }
       case AxleTokenType::Right_Square: {
-          assert(false);
-          break;
+          mismatched_brackets_error(comp, start, last, "Mismatched brackets");
+          return nullptr;
         }
       case AxleTokenType::Left_Brace: {
-          tok = step_scope(tok, end);
+          tok = step_scope(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
           break;
         }
       case AxleTokenType::Right_Brace: {
-          assert(false);
-          break;
+          mismatched_brackets_error(comp, start, last, "Mismatched brackets");
+          return nullptr;
         }
       case AxleTokenType::Left_Bracket: {
-          tok = step_brackets(tok, end);
+          tok = step_brackets(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
           break;
         }
       case AxleTokenType::Right_Bracket: {
@@ -1024,7 +1019,62 @@ static const Token* step_scope(const Token* tok, const Token* end) {
     }
   }
 
-  return tok;
+  mismatched_brackets_error(comp, start, last, "Mismatched brackets");
+  return nullptr;
+}
+
+static const Token* step_scope(Compiler* comp, const Token* tok, const Token* end) {
+  ASSERT(tok->type == AxleTokenType::Left_Brace);
+
+  const Token* start = tok;
+  const Token* last = tok;
+  tok++;
+
+  while (tok < end) {
+    last = tok;
+    switch (tok->type) {
+      case AxleTokenType::Left_Square: {
+          tok = step_squares(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
+          break;
+        }
+      case AxleTokenType::Right_Square: {
+          mismatched_brackets_error(comp, start, last, "Mismatched braces");
+          return nullptr;
+        }
+      case AxleTokenType::Left_Brace: {
+          tok = step_scope(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
+          break;
+        }
+      case AxleTokenType::Right_Brace: {
+          mismatched_brackets_error(comp, start, last, "Mismatched braces");
+          return nullptr;
+        }
+      case AxleTokenType::Left_Bracket: {
+          tok = step_brackets(comp, tok, end);
+          if (comp->is_panic()) {
+            return nullptr;
+          }
+          break;
+        }
+      case AxleTokenType::Right_Bracket: {
+          tok++;
+          return tok;
+        }
+      default: {
+          tok++;
+          break;
+        }
+    }
+  }
+
+  mismatched_brackets_error(comp, start, last, "Mismatched braces");
+  return nullptr;
 }
 
 static void parse_structure(Compiler* const comp, Parser* const parser, ASTStructBody* const struct_decl);
@@ -1251,14 +1301,15 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
     case AxleTokenType::Left_Bracket: {
         //Function or expression
 
-        constexpr auto parser_is_func = [](const Token* tokens, const Token* end)->bool {
-          const Token* new_tok = step_brackets(tokens, end);
+        constexpr auto parser_is_func = [](Compiler* comp,
+                                           const Token* tokens, const Token* end)->bool {
+          const Token* new_tok = step_brackets(comp, tokens, end);
           return (new_tok + 1) < end
             && new_tok->type == AxleTokenType::Sub
             && (new_tok + 1)->type == AxleTokenType::Greater;
         };
 
-        const bool is_func = parser_is_func(parser->stream.i - 2, parser->stream.end);
+        const bool is_func = parser_is_func(comp, parser->stream.i - 2, parser->stream.end);
 
         if (is_func) {
           expr->set_union(EXPRESSION_TYPE::LAMBDA);
@@ -1472,10 +1523,10 @@ static void parse_type(Compiler* const comp, Parser* const parser, ASTType* cons
             return;
           }
 
-          assert(parser->current.type == AxleTokenType::Comma);
+          ASSERT(parser->current.type == AxleTokenType::Comma);
         }
 
-        assert(parser->current.type == AxleTokenType::Right_Bracket);
+        ASSERT(parser->current.type == AxleTokenType::Right_Bracket);
         advance(comp, parser);
         if (comp->is_panic()) {
           return;
@@ -1621,9 +1672,9 @@ static void parse_decl(Compiler* const comp, Parser* const parser, ASTDecl* cons
 
   //Explicit type??
   if (parser->current.type != AxleTokenType::Equals && parser->current.type != AxleTokenType::Colon) {
-    decl->type = allocate_default<ASTType>();
+    decl->type_ast = allocate_default<ASTType>();
 
-    parse_type(comp, parser, decl->type);
+    parse_type(comp, parser, decl->type_ast);
     if (comp->is_panic()) {
       return;
     }
@@ -1857,9 +1908,9 @@ static void parse_function_signature(Compiler* const comp, Parser* const parser,
       sig->parameters.insert_uninit(1);
       ASTDecl* param = sig->parameters.back();
       param->expr = nullptr;
-      param->type = allocate_default<ASTType>();
+      param->type_ast = allocate_default<ASTType>();
 
-      parse_typed_name(comp, parser, param->type, &param->name);
+      parse_typed_name(comp, parser, param->type_ast, &param->name);
 
       if (parser->current.type == AxleTokenType::Right_Bracket) {
         break;
@@ -2205,6 +2256,10 @@ void print_ast_expression(Printer* const printer, const ASTExpression* expr) {
         IO::print(')');
         break;
       }
+    case EXPRESSION_TYPE::GLOBAL:
+    case EXPRESSION_TYPE::LOCAL:
+      IO::print("$named variable$");
+      break;
     case EXPRESSION_TYPE::NAME:
       printf("%s", expr->name->string);
       break;
@@ -2242,9 +2297,9 @@ void print_ast_expression(Printer* const printer, const ASTExpression* expr) {
 }
 
 static void print_ast_decl(Printer* const printer, const ASTDecl* decl) {
-  if (decl->type != nullptr && decl->expr != nullptr) {
+  if (decl->type_ast != nullptr && decl->expr != nullptr) {
     printf("%s: ", decl->name->string);
-    print_type(printer, decl->type);
+    print_type(printer, decl->type_ast);
 
     if (decl->compile_time_const) {
       IO::print(" : ");
@@ -2264,12 +2319,12 @@ static void print_ast_decl(Printer* const printer, const ASTDecl* decl) {
 
     print_ast_expression(printer, decl->expr);
   }
-  else if (decl->type != nullptr) {
+  else if (decl->type_ast != nullptr) {
     printf("%s: ", decl->name->string);
-    print_type(printer, decl->type);
+    print_type(printer, decl->type_ast);
   }
   else {
-    assert(false);//shouldnt be possible to be here
+    INVALID_CODE_PATH("Declaration had no expression or type");
   }
 }
 

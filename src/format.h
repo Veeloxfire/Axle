@@ -72,8 +72,7 @@ Formatter& operator<<(Formatter& f, const T& t) {
 
   while (true) {
     if (f.format_string[0] == '\0') {
-      throw std::exception("Invalid format");
-      break;
+      INVALID_CODE_PATH("Invalid format");
     }
     else if (f.format_string[0] == '{' && f.format_string[1] == '}') {
       const size_t num_chars = f.format_string - string;
@@ -115,7 +114,7 @@ void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
 
   while (true) {
     if (format[0] == '{' && format[1] == '}') {
-      throw std::exception("Invalid format");
+      INVALID_CODE_PATH("Invalid format");
       break;
     }
     else if (format[0] == '\0') {
@@ -144,7 +143,16 @@ OwnedPtr<char> format(const char* format, const T& ... ts) {
 
   result.shrink();
   return result;
+}
 
+template<typename ... T>
+void format_print(const char* format, const T& ... ts) {
+  Array<char> result ={};
+
+  format_to_array(result, format, ts...);
+  result.insert('\0');
+
+  IO::print(result.data);
 }
 
 OwnedPtr<char> format_type_set(const char* format, size_t prepend_spaces, size_t max_width);

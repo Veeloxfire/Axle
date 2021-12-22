@@ -6,7 +6,7 @@
 #include "names.h"
 #include "errors.h"
 
-struct Structure;
+//struct Type;
 struct State;
 struct Function;
 struct CompilationUnit;
@@ -17,135 +17,212 @@ struct ASTFuncSig;
 struct ASTLambda;
 struct ASTStructBody;
 
+
+using META_FLAGS = u8;
+
 #define FLAGS_DECL(num) (1 << num)
-
-enum struct META_FLAGS : u8 {
-  NORMAL   = 0,
-  LITERAL  = FLAGS_DECL(1),
-  CONST    = FLAGS_DECL(2),
+enum struct META_FLAG : META_FLAGS {
+  CONST      = FLAGS_DECL(1),
+  COMPTIME   = FLAGS_DECL(2),
+  LITERAL    = FLAGS_DECL(3),
+  ASSIGNABLE = FLAGS_DECL(4),
 };
+#undef FLAGS_DECL
 
-inline constexpr auto operator|(META_FLAGS t, u8 u) -> u8 {
-  return u | ((u8)t);
+/*
+  WARNING: For the following functions be careful of
+  META_FLAG vs META_FLAGS (notice the trailing s)
+*/
+
+inline constexpr auto operator~(META_FLAG t) -> META_FLAGS {
+  return ~(META_FLAGS)t;
 }
 
-inline constexpr auto operator|(u8 u, META_FLAGS t) -> u8 {
-  return u | ((u8)t);
+inline constexpr auto operator|(META_FLAG t, META_FLAGS u) -> META_FLAGS {
+  return u | ((META_FLAGS)t);
 }
 
-inline constexpr auto operator|(META_FLAGS u, META_FLAGS t) -> u8 {
-  return (u8)u | (u8)t;
+inline constexpr auto operator|(META_FLAGS u, META_FLAG t) -> META_FLAGS {
+  return u | ((META_FLAGS)t);
 }
 
-inline constexpr auto operator|=(u8& u, META_FLAGS t) -> u8& {
-  u |= ((u8)t);
+inline constexpr auto operator|(META_FLAG u, META_FLAG t) -> META_FLAGS {
+  return (META_FLAGS)u | (META_FLAGS)t;
+}
+
+inline constexpr auto operator|=(META_FLAGS& u, META_FLAG t) -> META_FLAGS& {
+  u |= ((META_FLAGS)t);
   return u;
 }
 
-inline constexpr auto operator&(META_FLAGS u, META_FLAGS t) -> u8 {
-  return (u8)u & (u8)t;
+inline constexpr auto operator&(META_FLAG u, META_FLAG t) -> META_FLAGS {
+  return (META_FLAGS)u & (META_FLAGS)t;
 }
 
-inline constexpr auto operator&(META_FLAGS t, u8 u) -> u8 {
-  return u & ((u8)t);
+inline constexpr auto operator&(META_FLAG t, META_FLAGS u) -> META_FLAGS {
+  return u & ((META_FLAGS)t);
 }
 
-inline constexpr auto operator&(u8 u, META_FLAGS t) -> u8 {
-  return u & ((u8)t);
+inline constexpr auto operator&(META_FLAGS u, META_FLAG t) -> META_FLAGS {
+  return u & ((META_FLAGS)t);
 }
 
-inline constexpr auto operator&=(u8& u, META_FLAGS t) -> u8& {
-  u &= ((u8)t);
+inline constexpr auto operator&=(META_FLAGS& u, META_FLAG t) -> META_FLAGS& {
+  u &= ((META_FLAGS)t);
   return u;
 }
-
-struct Type {
-  u8 meta_flags;
-  const Structure* base_structure;
-};
 
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;
 
 enum struct STRUCTURE_TYPE : u8 {
   VOID = 0,
-  BOOL,
+  TYPE,
   INTEGER,
   POINTER,
-  COMPOSITE,
-  ENUM,
-  FIXED_ARRAY,
   ASCII_CHAR,
+  ENUM,
+  COMPOSITE,
+  FIXED_ARRAY,
   TUPLE,
   LAMBDA,
 };
 
 struct Structure {
   STRUCTURE_TYPE type = STRUCTURE_TYPE::VOID;
-  const InternString* name = nullptr;
+  const InternString* struct_name;
 
   u32 size;//bytes
   u32 alignment;//bytes
 };
 
-struct PointerStructure : public Structure {
-  const Structure* base = nullptr;
+struct Type {
+  const InternString* name;
+  const Structure* structure;
 
-  static OwnedPtr<char> gen_name(const Structure* base);
+  inline constexpr bool operator==(const Type& n) const {
+    return (name == n.name) && (structure == n.structure);
+  }
+
+  inline constexpr bool operator!=(const Type& n) const {
+    return (name != n.name) || (structure != n.structure);
+  }
+
+  /// Helper functions ///
+
+  inline constexpr STRUCTURE_TYPE struct_type() const {
+    return structure->type;
+  }
+
+  //inline constexpr const Structure* structure() const {
+  //  return named_struct.structure;
+  //}
+
+  template<typename T>
+  inline constexpr const T* unchecked_base() const {
+    return static_cast<const T*>(structure);
+  }
+
+  template<typename T>
+  inline constexpr T* unchecked_base_mut() const {
+    return static_cast<T*>(structure);
+  }
+
+  template<typename T>
+  inline constexpr const T* extract_base() const {
+    if (T::expected_type_enum == struct_type()) {
+      return static_cast<const T*>(structure);
+    }
+    else {
+      return nullptr;
+    }
+  }
+
+  bool inline constexpr is_valid() const {
+    return structure != nullptr;
+  }
+};
+
+constexpr Type to_type(const Structure* s) {
+  return { s->struct_name, s };
+}
+
+struct TypeAndFlags {
+  META_FLAGS flags;
+  Type type;
+};
+
+struct PointerStructure : public Structure {
+  Type base ={};
+
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::POINTER;
+  static OwnedPtr<char> gen_name(const Type& nt);
 };
 
 struct ArrayStructure : public Structure {
-  const Structure* base = nullptr;
+  Type base ={};
   size_t length = 0;
 
-  static OwnedPtr<char> gen_name(const Structure* base, size_t length);
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::FIXED_ARRAY;
+  static OwnedPtr<char> gen_name(const Type& nt, size_t length);
 };
 
 struct IntegerStructure : public Structure {
   bool is_signed = false;
+
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::INTEGER;
 };
 
 struct EnumStructure;
 
 struct EnumValue {
-  const EnumStructure* type = nullptr;
+  Type type ={};
   const InternString* name = nullptr;
   uint64_t representation = 0;
 };
 
 struct EnumStructure : public Structure {
-  const IntegerStructure* base = nullptr;
+  Type base ={};
   Array<const EnumValue*> enum_values ={};
+
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::ENUM;
+  static OwnedPtr<char> gen_name(const Type& nt);
 };
 
 struct TupleElement {
   uint32_t offset = 0;
-  const Structure* type = nullptr;
+  Type type ={};
 };
 
 struct TupleStructure : public Structure {
   Array<TupleElement> elements ={};
+
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::TUPLE;
 };
 
 struct StructElement {
   const InternString* name ={};
   uint32_t offset = 0;
-  const Structure* type = nullptr;
+  Type type ={};
 };
 
 struct CompositeStructure : public Structure {
   const ASTStructBody* declaration = nullptr;
 
   Array<StructElement> elements ={};
+
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::COMPOSITE;
 };
 
 struct SignatureStructure : public Structure {
   const CallingConvention* calling_convention = nullptr;
 
-  Array<const Structure*> parameter_types ={};
-  const Structure* return_type = nullptr;
+  Array<Type> parameter_types ={};
+  Type return_type ={};
 
   bool return_via_addres = false;
-  Array<const Structure*> actual_parameter_types ={};
+  Array<Type> actual_parameter_types ={};
+
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::LAMBDA;
 };
 
 struct FunctionSignature {
@@ -173,90 +250,62 @@ struct Function {
   CodeBlock code_block;
 };
 
+struct BuiltinTypes {
+  Type t_bool ={};
 
-struct Structures {
-  static FreelistBlockAllocator<TupleStructure> tuple_structures;
-  static FreelistBlockAllocator<IntegerStructure> int_structures;
-  static FreelistBlockAllocator<CompositeStructure> composite_structures;
-  static FreelistBlockAllocator<EnumStructure> enum_structures;
-  static FreelistBlockAllocator<Structure> base_structures;
-  static FreelistBlockAllocator<ArrayStructure> array_structures;
-  static FreelistBlockAllocator<PointerStructure> pointer_structures;
-  static FreelistBlockAllocator<SignatureStructure> lambda_structures;
-  static FreelistBlockAllocator<EnumValue> enum_values;
+  Type t_u8   ={};
+  Type t_i8   ={};
+  Type t_u32  ={};
+  Type t_i32  ={};
+  Type t_u64  ={};
+  Type t_i64  ={};
 
-  const Structure* s_bool = nullptr;
-
-  const Structure* s_u8   = nullptr;
-  const Structure* s_i8   = nullptr;
-  const Structure* s_u32  = nullptr;
-  const Structure* s_i32  = nullptr;
-  const Structure* s_u64  = nullptr;
-  const Structure* s_i64  = nullptr;
-
-  const Structure* s_int_lit = nullptr;
-  const Structure* s_sint_lit = nullptr;
-  const Structure* s_empty_arr = nullptr;
-  const Structure* s_lit_ptr = nullptr;
-
-  const Structure* s_struct = nullptr;
-  const Structure* s_void = nullptr;
-  const Structure* s_void_ptr = nullptr;
-  const Structure* s_ascii = nullptr;
+  Type t_type ={};
+  Type t_void ={};
+  Type t_void_ptr ={};
+  Type t_ascii ={};
 
   const EnumValue* e_false = nullptr;
   const EnumValue* e_true  = nullptr;
+
+  //Returns nullptr for types that dont have a signed version or are already signed
+  Type get_signed_of(const Type& ty);
+};
+
+struct Structures {
+  FreelistBlockAllocator<TupleStructure> tuple_structures;
+  FreelistBlockAllocator<IntegerStructure> int_structures;
+  FreelistBlockAllocator<CompositeStructure> composite_structures;
+  FreelistBlockAllocator<EnumStructure> enum_structures;
+  FreelistBlockAllocator<Structure> base_structures;
+  FreelistBlockAllocator<ArrayStructure> array_structures;
+  FreelistBlockAllocator<PointerStructure> pointer_structures;
+  FreelistBlockAllocator<SignatureStructure> lambda_structures;
+  FreelistBlockAllocator<EnumValue> enum_values;
 
   Array<const EnumValue*> enums;
   Array<const Structure*> structures;
 
   ~Structures();
-
-  //Returns nullptr for types that dont have a signed version or are already signed
-  const Structure* get_signed_of(const Structure* s);
 };
 
-struct StructCreator {
-  Compiler* comp;
-  const Structure* meta_struct;
-  NamespaceIndex current_namespace;
-
-  void add_type_to_namespace(const Structure* s, const InternString* name, const Span& span);
-
-  TupleStructure* new_tuple_type(const Span& span,
-                                 Array<const Structure*>&& types);
-
-  IntegerStructure* new_int_type(const Span& span,
-                                 const InternString* name);
-
-  CompositeStructure* new_composite_type(const Span& span,
-                                         const InternString* name);
-
-  CompositeStructure* new_composite_type(const InternString* name,
-                                         const ASTStructBody* ast_struct);
-
-  EnumStructure* new_enum_type(const Span& span,
-                               const InternString* name);
-
-  Structure* new_base_type(const Span& span,
-                           const InternString* name);
-
-  ArrayStructure* new_array_type(const Span& span,
-                                 const Structure* base,
-                                 size_t length);
-
-  PointerStructure* new_pointer_type(const Span& span,
-                                     const Structure* base);
-
-  SignatureStructure* new_lambda_type(const Span& span,
-                                      const CallingConvention* conv,
-                                      Array<const Structure*>&& params,
-                                      const Structure* ret_type);
-
-  EnumValue* new_enum_value(const Span& span,
+namespace STRUCTS {
+  TupleStructure* new_tuple_structure(Compiler* comp, Array<Type>&& types);
+  IntegerStructure* new_int_structure(Compiler* comp, const InternString* name);
+  CompositeStructure* new_composite_structure(Compiler* comp);
+  Structure* new_base_structure(Compiler* comp, const InternString* name);
+  ArrayStructure* new_array_structure(Compiler* comp, const Type& base,
+                                      size_t length);
+  PointerStructure* new_pointer_structure(Compiler* comp, const Type& base);
+  SignatureStructure* new_lambda_structure(Compiler* comp, const CallingConvention* conv,
+                                           Array<Type>&& params,
+                                           Type ret_type);
+  EnumStructure* new_enum_structure(Compiler* comp, const Type&);
+  EnumValue* new_enum_value(Compiler* comp,
                             EnumStructure* enum_s,
-                            const InternString* name);
-};
+                            const InternString* enum_name,
+                            const InternString* value_name);
+}
 
 namespace CASTS {
   RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
@@ -267,23 +316,28 @@ namespace CASTS {
 }
 
 namespace TYPE_TESTS {
-  //Can cast without any value modification or checks
-  bool can_implicit_cast(const Structure* from, const Structure* to);
-  
-  //Can cast with modification that can only be done at compile time
-  bool can_comptime_cast(const Structure* from, const Structure* to);
+  constexpr inline bool is_literal(META_FLAGS f) {
+    return TEST_MASK(f, META_FLAG::LITERAL);
+  }
+
+  constexpr inline bool match_sizes(const Structure* a, const Structure* b) {
+    return a->size == b->size && a->alignment == b->alignment;
+  }
+
+  //Check the casts with that can only be done at compile time
+  bool check_implicit_cast(META_FLAGS flags, const Type& from, const Type& to);
 
   bool is_negatable(const Structure* s);
-  bool is_logical(const Structure* s);
+  //bool is_logical(const Structure* s);
   bool is_numeric(const Structure* s);
 
-  bool is_literal(const Structure*);
   bool is_array(const Structure*);
   bool is_pointer(const Structure*);
   bool can_index(const Structure*);
 
   bool is_int(const Structure*);
   bool is_signed_int(const Structure*);
+  bool is_unsigned_int(const Structure*);
 
   bool is_64_bit_int(const Structure*);
   bool is_signed_64_bit_int(const Structure*);
@@ -292,4 +346,32 @@ namespace TYPE_TESTS {
   bool is_8_bit_int(const Structure*);
   bool is_signed_8_bit_int(const Structure*);
   bool is_unsigned_8_bit_int(const Structure*);
+
+  inline bool match_sizes(const Type& a, const Type& b) {
+    return match_sizes(a.structure, b.structure);
+  }
+
+  inline bool can_index(const Type& t) {
+    return can_index(t.structure);
+  }
+
+  inline bool is_pointer(const Type& t) {
+    return is_pointer(t.structure);
+  }
+
+  inline bool is_array(const Type& t) {
+    return is_array(t.structure);
+  }
+
+  inline bool is_int(const Type& t) {
+    return is_int(t.structure);
+  }
+
+  inline bool is_signed_int(const Type& t) {
+    return is_signed_int(t.structure);
+  }
+
+  inline bool is_unsigned_int(const Type& t) {
+    return is_unsigned_int(t.structure);
+  }
 }

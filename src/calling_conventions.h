@@ -11,6 +11,7 @@ struct REGISTER_CONSTANT;
 struct Compiler;
 struct Program;
 struct Structure;
+struct Type;
 struct State;
 struct CodeBlock;
 struct Relocation;
@@ -109,7 +110,8 @@ extern const CallingConvention convention_vm;
 extern const CallingConvention convention_microsoft_x64;
 extern const CallingConvention convention_stdcall;
 
-bool register_passed_as_pointer(const Structure* type);
+bool register_passed_as_pointer(const Structure* s);
+bool register_passed_as_pointer(const Type& t);
 
 struct CallingConvArgIterator {
   const CallingConvention* conv;

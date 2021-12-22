@@ -26,7 +26,7 @@ uint32_t Windows::run_exe(const char* name) {
     return ec;
   }
   else {
-    throw std::exception("Failed to create process");
+    INVALID_CODE_PATH("Failed to create process");
   }
 }
 
@@ -43,7 +43,7 @@ Array<Windows::ActiveDll> Windows::load_dlls(Program* prog) {
     ActiveDll* dll = dlls.back();
     dll->lib = LoadLibraryA(file.file_name);
 
-    assert(dll->lib != 0);
+    ASSERT(dll->lib != 0);
 
     for (DllImportFunction func = next_import(prog, &file);
          func.name != nullptr;
@@ -51,7 +51,7 @@ Array<Windows::ActiveDll> Windows::load_dlls(Program* prog) {
     
       auto proc_address = GetProcAddress(dll->lib, func.name);
 
-      assert(proc_address != nullptr);
+      ASSERT(proc_address != nullptr);
 
       //Load the functions
       x64_to_bytes(proc_address, func.load_to);
