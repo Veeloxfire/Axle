@@ -10,50 +10,20 @@
 #include "files.h"
 #include "PE_file_format.h"
 
-void NamedElement::set_union(NamedElementType ty) {
-  destruct_union();
-  type = ty;
-
-  switch (type) {
-  #define MODIFY(name, str, expr_name) \
-    case NamedElementType:: ## name: default_init(& expr_name); break;
-
-    N_E_T_MODS
-    #undef MODIFY
-  }
-}
-void NamedElement::destruct_union() {
-  switch (type) {
-  #define MODIFY(name, str, expr_name) \
-    case NamedElementType:: ## name: destruct_single(& expr_name); break;
-
-    N_E_T_MODS
-    #undef MODIFY
-  }
-}
-
-void NamedElement::move_from(NamedElement&& ne) {
-  type = std::exchange(ne.type, NamedElementType::NONE);
-
-  switch (type) {
-  #define MODIFY(name, str, expr_name) \
-    case NamedElementType:: ## name: expr_name = std::move(ne. ## expr_name); break;
-
-    N_E_T_MODS
-    #undef MODIFY
-  }
-}
-
 Function* Compiler::new_function() {
   Function* func =  functions.insert();
   func->func_type = FUNCTION_TYPE::DEFAULT;
   return func;
 }
 
-FunctionPointer* Compiler::new_function_pointer() {
-  FunctionPointer* func = function_pointers.insert();
-  func->func_type = FUNCTION_TYPE::POINTER;
-  return func;
+ImportUnit* Compiler::new_import_unit(NamespaceIndex ns) {
+  ImportUnit* unit = import_units.allocate();
+  unit->type  = COMPILATION_TYPE::IMPORT;
+  unit->stage = IMPORT_COMP_STAGE::UNTYPED;
+  unit->available_names = ns;
+
+  to_compile.insert(unit);
+  return unit;
 }
 
 ConstantExprUnit* Compiler::new_const_expr_unit(NamespaceIndex ns) {
@@ -106,37 +76,12 @@ GlobalUnit* Compiler::new_global_unit(NamespaceIndex ns) {
   return unit;
 }
 
-void Compiler::set_unfound_name(const InternString* name, NamespaceIndex ns, const Span& span) {
-  assert(name != nullptr);
+void Compiler::set_dep(Context* context, CompilationUnit* unit) {
+  ASSERT(unit != nullptr);
   unfound_deps.panic = true;
 
-  unfound_deps.unfound.insert_uninit(1);
-  UnfoundDep* dep = unfound_deps.unfound.back();
-
-  dep->set_union(UnfoundDepType::Name);
-  dep->name.ident = name;
-  dep->name.namespace_index = ns;
-  dep->unit_waiting = current_unit;
-  dep->span = span;
-}
-
-void Compiler::set_unfound_signature(CallSignature&& sig, const Span& span) {
-  unfound_deps.panic = true;
-
-  unfound_deps.unfound.insert_uninit(1);
-  UnfoundDep* dep = unfound_deps.unfound.back();
-
-  dep->set_union(UnfoundDepType::Function);
-  dep->signature = std::move(sig);
-  dep->unit_waiting = current_unit;
-  dep->span = span;
-}
-
-void Compiler::set_dep(CompilationUnit* unit) {
-  unfound_deps.panic = true;
-
-  current_unit->dependencies.insert(unit);
-  unit->dependency_of.insert(current_unit);
+  context->current_unit->dependencies.insert(unit);
+  unit->dependency_of.insert(context->current_unit);
 }
 
 Value* State::get_val(const ValueIndex& i) {
@@ -184,7 +129,7 @@ void State::use_value(const ValueIndex index, const ValueIndex related) {
 
   auto& val = *get_val(index);
 
-  assert(val.has_value);
+  ASSERT(val.has_value);
 
   val.last_uses.remove_if(Lambda{ &control_flow });
   val.last_uses.insert(
@@ -249,15 +194,18 @@ Local* State::find_local(const InternString* i_s) {
 
   for (; i < end; i++) {
     Local* l = all_locals.data + *i;
-    if (l->name == i_s) {
+    if (l->decl.name == i_s) {
       return l;
     }
   }
   return nullptr;
 }
 
+void StackState::require_call_alignment(u64 req_align) {
+  call_alignment = lowest_common_multiple(req_align, call_alignment);
+}
 
-int32_t StackState::pass_stack_local(uint64_t size, uint64_t alignment) {
+i32 StackState::pass_stack_local(u64 size, u64 alignment) {
   const uint64_t mod_align = current_passed % alignment;
 
   if (mod_align > 0) {
@@ -272,7 +220,7 @@ int32_t StackState::pass_stack_local(uint64_t size, uint64_t alignment) {
   return -(int32_t)current_passed;
 }
 
-int32_t StackState::next_stack_local(uint64_t size, uint64_t alignment) {
+i32 StackState::next_stack_local(u64 size, u64 alignment) {
   const uint64_t mod_align = current % alignment;
 
   if (mod_align > 0) {
@@ -342,64 +290,13 @@ void ValueTree::combine_intersection(const ValueIndex from, const ValueIndex to)
   }
 }
 
-void UnfoundDep::move_from(UnfoundDep&& dp) noexcept {
-  unit_waiting = std::move(dp.unit_waiting);
-  type = std::exchange(dp.type, UnfoundDepType::Unkown);
-
-  switch (type) {
-    case UnfoundDepType::Unkown: break;
-    case UnfoundDepType::Function: {
-        signature = std::move(dp.signature);
-        break;
-      }
-    case UnfoundDepType::Name: {
-        name = std::move(dp.name);
-        break;
-      }
-  }
-}
-
-void UnfoundDep::set_union(UnfoundDepType et) noexcept {
-  destruct_union();
-  type = et;
-  switch (type) {
-    case UnfoundDepType::Unkown: break;
-    case UnfoundDepType::Function: {
-        default_init(&signature);
-        break;
-      }
-    case UnfoundDepType::Name: {
-        default_init(&name);
-        break;
-      }
-  }
-}
-
-void UnfoundDep::destruct_union() noexcept {
-  switch (type) {
-    case UnfoundDepType::Unkown: break;
-    case UnfoundDepType::Function: {
-        signature.~CallSignature();
-        break;
-      }
-    case UnfoundDepType::Name: {
-        name.~UnknownName();
-        break;
-      }
-  }
-}
-
-UnfoundDep::~UnfoundDep() {
-  destruct_single(&unit_waiting);
-  destruct_union();
-}
-
-const Structure* find_or_make_array_type(Compiler* const comp, const Span& span, const Structure* base, size_t length) {
-  Types* types = comp->types;
+const Structure* find_or_make_array_structure(Compiler* const comp, Context* const context,
+                                              const Type& base, size_t length) {
+  Structures* structures = comp->services.structures;
 
   {
-    auto i = types->structures.begin();
-    const auto end = types->structures.end();
+    auto i = structures->structures.begin();
+    const auto end = structures->structures.end();
 
     for (; i < end; i++) {
       const Structure* s = *i;
@@ -416,15 +313,23 @@ const Structure* find_or_make_array_type(Compiler* const comp, const Span& span,
   }
 
   //Doesnt exist - need to make new type
-  return new_array_type(comp, span, base, length);
+  return STRUCTS::new_array_structure(comp, base, length);
 }
 
-const Structure* find_or_make_pointer_type(Compiler* const comp, const Span& span, const Structure* base) {
-  Types* types = comp->types;
+static ConstantVal copy_constant_value(Compiler* comp, ConstantVal val) {
+  u8* data = comp->constants.alloc_no_construct(val.size);
+
+  memcpy_ts(data, val.size, val.ptr, val.size);
+  return { data, val.size };
+}
+
+const Structure* find_or_make_pointer_structure(Compiler* const comp, Context* const context,
+                                                const Type& base) {
+  Structures* structures = comp->services.structures;
 
   {
-    auto i = types->structures.begin();
-    const auto end = types->structures.end();
+    auto i = structures->structures.begin();
+    const auto end = structures->structures.end();
 
     for (; i < end; i++) {
       const Structure* s = *i;
@@ -439,104 +344,252 @@ const Structure* find_or_make_pointer_type(Compiler* const comp, const Span& spa
     }
   }
 
+
+
   //Doesnt exist - need to make new type
-  return new_pointer_type(comp, span, base);
+  return STRUCTS::new_pointer_structure(comp, base);
 }
 
-const Structure* find_or_make_tuple_literal(Compiler* const comp, const Span& span, Array<const Structure*>&& els) {
-  Types* types = comp->types;
+const Structure* find_or_make_tuple_structure(Compiler* const comp, Context* const context,
+                                              Array<Type>&& els) {
 
+  Structures* structures = comp->services.structures;
+
+  auto i = structures->structures.begin();
+  const auto end = structures->structures.end();
+
+  for (; i < end; i++) {
+    const Structure* s = *i;
+    if (s->type == STRUCTURE_TYPE::TUPLE) {
+      const TupleStructure* tls = static_cast<const TupleStructure*>(s);
+
+      //Not same size
+      if (els.size != tls->elements.size) { continue; }
+
+      //empty
+      if (els.size == 0) { return s; }
+
+      auto el_i = els.begin();
+      auto tl_i = tls->elements.begin();
+
+      const auto el_end = els.end();
+
+      for (; el_i < el_end; tl_i++, el_i++) {
+        if (*el_i != tl_i->type) {
+          goto NOT_SAME;
+        }
+      }
+
+      return s;
+    }
+
+  NOT_SAME:
+    continue;
+  }
+
+
+
+  //Doesnt exist - need to make new type
+  return STRUCTS::new_tuple_structure(comp, std::move(els));
+}
+
+const SignatureStructure* find_or_make_lamdba_structure(Compiler* const comp, Context* const context,
+                                                        const CallingConvention* conv,
+                                                        Array<Type>&& params,
+                                                        Type ret_type) {
+  Structures* structures = comp->services.structures;
   {
-    auto i = types->structures.begin();
-    const auto end = types->structures.end();
+
+    auto i = structures->structures.begin();
+    auto end = structures->structures.end();
 
     for (; i < end; i++) {
       const Structure* s = *i;
-      if (s->type == STRUCTURE_TYPE::TUPLE_LITERAL) {
-        const TupleLiteralStructure* tls = static_cast<const TupleLiteralStructure*>(s);
+      if (s->type != STRUCTURE_TYPE::LAMBDA) { continue; }
 
-        //Not same size
-        if (els.size != tls->elements.size) { continue; }
+      const SignatureStructure* sig_struct = (const SignatureStructure*)s;
+      if (sig_struct->calling_convention != conv) { continue; }
+      if (sig_struct->return_type != ret_type) { continue; }
+      if (sig_struct->parameter_types.size != params.size) { continue; }
 
-        //empty
-        if (els.size == 0) { return s; }
+      {
+        auto p_i = sig_struct->parameter_types.begin();
+        auto p_end = sig_struct->parameter_types.end();
+        auto pin_i = params.begin();
 
-        auto el_i = els.begin();
-        auto tl_i = tls->elements.begin();
-
-        const auto el_end = els.end();
-
-        for (; el_i < el_end; tl_i++, el_i++) {
-          if (*el_i != tl_i->type) {
+        for (; p_i < p_end; p_i++, pin_i++) {
+          if (*p_i != *pin_i) {
             goto NOT_SAME;
           }
         }
-
-        return s;
       }
+
+      //Is same!
+      return sig_struct;
 
     NOT_SAME:
       continue;
     }
   }
 
-  //Doesnt exist - need to make new type
-  return new_tuple_literal_type(comp, span, std::move(els));
+
+  SignatureStructure* sig_struct = STRUCTS::new_lambda_structure(comp, conv, std::move(params), ret_type);
+
+  sig_struct->return_via_addres = register_passed_as_pointer(sig_struct->return_type.structure);
+  if (sig_struct->return_via_addres) {
+    sig_struct->actual_parameter_types.insert(
+      to_type(find_or_make_pointer_structure(comp, context, sig_struct->return_type))
+    );
+  }
+
+  {
+    auto i = sig_struct->parameter_types.begin();
+    const auto end = sig_struct->parameter_types.end();
+
+    size_t num_params = sig_struct->actual_parameter_types.size;
+    const CallingConvention* convention = sig_struct->calling_convention;
+
+    for (; i < end; i++) {
+      const bool too_big = register_passed_as_pointer(i->structure);
+      const bool as_ptr = (num_params < convention->num_parameter_registers
+                           || convention->stack_pass_type == STACK_PASS_TYPE::POINTER)
+        && too_big;
+
+      if (as_ptr) {
+        //Load as pointer
+        sig_struct->actual_parameter_types.insert(
+          to_type(find_or_make_pointer_structure(comp, context, *i))
+        );
+      }
+      else {
+        sig_struct->actual_parameter_types.insert(*i);
+      }
+
+      num_params++;
+    }
+  }
+
+  return sig_struct;
 }
 
 //Note: Recursive for array types
-void compile_type(Compiler* const comp, ASTType* type) {
-  if (type->type != nullptr) {
-    //Incase function re-called
+void compile_type(Compiler* const comp,
+                  Context* const context,
+                  ASTType* type) {
+  if (type->type.is_valid()) {
+    //Just in case function re-called
     return;
   }
 
   switch (type->type_type) {
+    case TYPE_TYPE::LAMBDA: {
+        FOR_MUT(type->lambda.types, i) {
+          compile_type(comp, context, i);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        Array<Type> args ={};
+
+        FOR(type->lambda.types, i) {
+          args.insert(i->type);
+        }
+
+        Type ret = *args.back();
+        args.pop();
+
+
+        const Structure* s = find_or_make_lamdba_structure(comp, context, comp->build_options.default_calling_convention, std::move(args), ret);
+
+        type->type.structure = s;
+        type->type.name = s->struct_name;
+
+        break;
+      }
     case TYPE_TYPE::NORMAL: {
-        const NamedElement* name = find_name(comp, comp->current_namespace, type->name);
+        const NamedElement* name = comp->services.names->find_name(context->current_namespace, type->name);
 
         if (name == nullptr) {
-          comp->set_unfound_name(type->name, comp->current_namespace, type->span);
+          UnknownName unknown ={};
+          unknown.all_names = false;
+          unknown.ident = type->name;
+          unknown.namespace_index = context->current_namespace;
+          unknown.num_knowns = name == 0;
+          unknown.num_unknowns = name == 0;
+
+          comp->set_unfound_name(context, std::move(unknown),
+                                 ERROR_CODE::NAME_ERROR, type->span,
+                                 "Could not find name '{}'", type->name);
+          return;
+        }
+        else if (name->unknowns > 0) {
+          UnknownName unknown ={};
+          unknown.all_names = false;
+          unknown.ident = type->name;
+          unknown.namespace_index = context->current_namespace;
+          unknown.num_knowns = name->globals.size;
+          unknown.num_unknowns = name->unknowns;
+
+          comp->set_unfound_name(context, std::move(unknown),
+                                 ERROR_CODE::NAME_ERROR, type->span,
+                                 "Could not resolve name '{}'\n"
+                                 "This name had multiple unknown dependencies",
+                                 type->name);
           return;
         }
         else {
-          if (name->type != NamedElementType::STRUCTURE) {
-            comp->report_error(CompileCode::NAME_ERROR, type->span,
-                               "Expected '{}' to be a structure but found a '{}'",
-                               type->name, name->type);
+          if (name->globals.size != 1) {
+            comp->report_error(ERROR_CODE::NAME_ERROR, type->span,
+                               "'{}' is an ambiguous name",
+                               type->name);
             return;
           }
 
-          type->type = name->structure;
+          const Global* global = name->globals.data[0];
+
+          if (global->decl.type.struct_type() != STRUCTURE_TYPE::TYPE) {
+            comp->report_error(ERROR_CODE::NAME_ERROR, type->span,
+                               "'{}' was not a type",
+                               type->name);
+            return;
+          }
+
+          if (global->constant_value.ptr == nullptr) {
+            comp->set_dep(context, global->compilation_unit);
+            return;
+          }
+
+          memcpy_ts(&type->type, 1, (const Type*)global->constant_value.ptr, 1);
         }
         break;
       }
     case TYPE_TYPE::ARRAY: {
-        compile_type(comp, type->arr.base);
+        compile_type(comp, context, type->arr.base);
         if (comp->is_panic()) {
           return;
         }
 
-        assert(type->arr.base->type != nullptr);
-        assert(type->arr.expr != nullptr);
+        ASSERT(type->arr.base->type.structure != nullptr);
+        ASSERT(type->arr.expr != nullptr);
 
         if (type->arr.expr->const_val == nullptr) {
-          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
 
           unit->type = COMPILATION_TYPE::CONST_EXPR;
           unit->stage = EXPR_COMP_STAGE::UNTYPED;
-          unit->available_names = comp->current_namespace;
+          unit->available_names = context->current_namespace;
           unit->expr = type->arr.expr;
-          unit->cast_to = nullptr;
+          unit->cast_to = comp->services.builtin_types->t_u64;
 
-          comp->set_dep(unit);
+          comp->set_dep(context, unit);
           return;
         }
         else {
           if (!TYPE_TESTS::is_int(type->arr.expr->type)) {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, type->arr.expr->span,
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, type->arr.expr->span,
                                "Expected an integer type value for array length\n"
-                               "Instead found: {}", type->arr.expr->type->name);
+                               "Instead found: {}", type->arr.expr->type.name);
             return;
           }
 
@@ -544,7 +597,7 @@ void compile_type(Compiler* const comp, ASTType* type) {
           if (TYPE_TESTS::is_signed_int(type->arr.expr->type)) {
             int64_t i_length = *(const int64_t*)type->arr.expr->const_val;
             if (i_length < 0) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, type->arr.expr->span,
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, type->arr.expr->span,
                                  "Length of array must positive\n"
                                  "Instead found: {}", i_length);
               return;
@@ -557,56 +610,66 @@ void compile_type(Compiler* const comp, ASTType* type) {
             length = *(const uint64_t*)type->arr.expr->const_val;
           }
 
-          type->type = find_or_make_array_type(comp, type->span, type->arr.base->type, length);
+          const Structure* s = find_or_make_array_structure(comp, context, type->arr.base->type, length);
+
+          type->type.name = s->struct_name;
+          type->type.structure = s;
           break;
         }
 
         break;
       }
     case TYPE_TYPE::PTR: {
-        compile_type(comp, type->ptr.base);
+        compile_type(comp, context, type->ptr.base);
         if (comp->is_panic()) {
           return;
         }
 
-        assert(type->ptr.base != nullptr);
+        ASSERT(type->ptr.base != nullptr);
 
-        type->type = find_or_make_pointer_type(comp, type->span, type->ptr.base->type);
+        const Structure* s = find_or_make_pointer_structure(comp, context, type->ptr.base->type);
+
+        type->type.name = s->struct_name;
+        type->type.structure = s;
         break;
       }
+    default:
+      comp->report_error(ERROR_CODE::INTERNAL_ERROR, type->span,
+                         "Invalid type union id '{}'", (int)type->type_type);
+      return;
   }
 
-  assert(type->type != nullptr);
+  ASSERT(type->type.name != nullptr);
+  ASSERT(type->type.structure != nullptr);
 }
 
-struct OverloadSet {
-  bool complete_match = false;
-  Array<FunctionBase*> valid_overloads ={};
-};
-
 static OverloadSet generate_overload_set(Compiler* const comp,
+                                         Context* const context,
+                                         State* const state,
+                                         const Span& span,
                                          const CallSignature* sig) {
-  Array<NamedElement*> names = find_all_names(comp, comp->current_namespace, sig->name);
+  Array<NamespaceElement> names = comp->services.names->find_all_names(context->current_namespace, sig->name);
 
   OverloadSet set ={};
 
-  const auto test_func = [&](FunctionBase* func) {
-    const FunctionSignature* signature = &func->signature;
+  const auto test_func = [&](const SignatureStructure* sig_struct) {
+    set.num_options_checked += 1;
 
     //Correct name and number of args
-    if (sig->arguments.size == signature->parameter_types.size) {
+    if (sig->arguments.size == sig_struct->parameter_types.size) {
       auto p_call = sig->arguments.begin();
       const auto end_call = sig->arguments.end();
 
-      auto p_func = signature->parameter_types.begin();
+      auto p_func = sig_struct->parameter_types.begin();
 
       bool requires_cast = false;
 
       while (p_call < end_call) {
-        if (*p_call == *p_func) {
+        if (p_call->type == *p_func) {
           //Do nothing
         }
-        else if (!set.complete_match && can_comptime_cast(*p_call, *p_func)) {
+        else if (!set.complete_match
+                 && TYPE_TESTS::check_implicit_cast(p_call->flags, p_call->type, *p_func)) {
           requires_cast = true;
         }
         else {
@@ -620,7 +683,7 @@ static OverloadSet generate_overload_set(Compiler* const comp,
 
       if (!set.complete_match && requires_cast) {
         //Insert possible overload
-        set.valid_overloads.insert(func);
+        set.valid_overloads.insert(sig_struct);
       }
       else {
         //Complete match
@@ -629,42 +692,69 @@ static OverloadSet generate_overload_set(Compiler* const comp,
           set.valid_overloads.clear();
         }
 
-        set.valid_overloads.insert(func);
+        set.valid_overloads.insert(sig_struct);
       }
     }
   };
 
-  auto n_i = names.begin();
-  const auto n_end = names.end();
-  for (; n_i < n_end; n_i++) {
-    const NamedElement* possible_func = *n_i;
-    if (possible_func->type == NamedElementType::OVERLOADS) {
-      auto f_i = possible_func->overloads.begin();
-      auto f_end = possible_func->overloads.end();
+  //Globals
+  {
+    auto n_i = names.begin();
+    const auto n_end = names.end();
+    for (; n_i < n_end; n_i++) {
+      const NamedElement* possible_func = n_i->named_element;
+      NamespaceIndex ns = n_i->ns_index;
 
+      if (possible_func->unknowns > 0) {
+        UnknownName unknown ={};
+        unknown.all_names = true;
+        unknown.ident = sig->name;
+        unknown.namespace_index = context->current_namespace;
+        unknown.num_knowns = possible_func->globals.size;
+        unknown.num_unknowns = possible_func->unknowns;
 
-      for (; f_i < f_end; f_i++) {
-        Function* const func = *f_i;
+        comp->set_unfound_name(context, std::move(unknown),
+                               ERROR_CODE::NAME_ERROR, span,
+                               "'{}' has several meanings\n"
+                               "Some of these had unresolved dependencies",
+                               sig->name);
+      }
 
-        //Could be valid function
-        if (func->signature.return_type == nullptr) {
-          comp->set_dep(func->compilation_unit);
-          return { false, {} };
+      if (possible_func->globals.size > 0) {
+        auto f_i = possible_func->globals.begin();
+        auto f_end = possible_func->globals.end();
+
+        for (; f_i < f_end; f_i++) {
+          const Global* global = *f_i;
+
+          if (global->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) { continue; }
+
+          const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
+
+          /*if (global->constant_value == nullptr) {
+            comp->set_dep(context, global->compilation_unit);
+            return {};
+          }*/
+
+          test_func(sig_struct);
         }
-
-        test_func(func);
       }
     }
-    else if (possible_func->type == NamedElementType::FUNCTION_POINTER) {
-      FunctionPointer* const func_ptr = possible_func->func_pointer;
+  }
 
-      //Could be valid function
-      if (func_ptr->signature.return_type == nullptr) {
-        comp->set_dep(func_ptr->compilation_unit);
-        return { false, {} };
+  //Locals
+  {
+    auto i = state->active_locals.begin();
+    const auto end = state->active_locals.end();
+
+    for (; i < end; i++) {
+      const Local* loc = state->all_locals.data + *i;
+
+      if (loc->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
+        const auto* sig_struct = loc->decl.type.unchecked_base<SignatureStructure>();
+        test_func(sig_struct);
       }
 
-      test_func(func_ptr);
     }
   }
 
@@ -672,9 +762,13 @@ static OverloadSet generate_overload_set(Compiler* const comp,
 }
 
 static void compile_find_function_call(Compiler* const comp,
+                                       Context* context,
+                                       State* const state,
                                        ASTExpression* const expr) {
-  assert(expr->expr_type == EXPRESSION_TYPE::FUNCTION_CALL);
+  ASSERT(expr->expr_type == EXPRESSION_TYPE::FUNCTION_CALL);
   FunctionCallExpr* const call = &expr->call;
+
+  //TODO: local functions
 
   CallSignature sig ={};
 
@@ -687,28 +781,40 @@ static void compile_find_function_call(Compiler* const comp,
     const auto end = call->arguments.end();
 
     for (; i < end; i++) {
-      sig.arguments.insert(i->type);
+      sig.arguments.insert({ i->meta_flags, i->type });
     }
   }
 
   sig.arguments.shrink();
 
-  OverloadSet set = generate_overload_set(comp, &sig);
+  OverloadSet set = generate_overload_set(comp, context, state, expr->span, &sig);
   if (comp->is_panic()) {
     return;
   }
 
   if (set.valid_overloads.size == 0) {
-    comp->set_unfound_signature(std::move(sig), expr->span);
+    UnknownName unknown ={};
+    unknown.all_names = true;
+    unknown.ident = sig.name;
+    unknown.namespace_index = context->current_namespace;
+    unknown.num_knowns = set.num_options_checked;
+    unknown.num_unknowns = 0;
+
+    comp->set_unfound_name(context, std::move(unknown),
+                           ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                           "'{}' has no valid overloads that match the call signature\n"
+                           "Call Signature: '{}'",
+                           sig.name, sig);
+    return;
   }
   else if (set.valid_overloads.size == 1) {
     //Success!
-    FunctionBase* func = set.valid_overloads.data[0];
-    call->function = func;
-    func->is_called = true;//tell it to be included in the final result
+    //Function* func = set.valid_overloads.data[0];
+    call->sig = set.valid_overloads.data[0];
+    //func->is_called = true;//tell it to be included in the final result
   }
   else if (set.complete_match) {
-    comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                        "More than one function exists that exactly matches signature '{}'",
                        call->function_name);
   }
@@ -717,16 +823,16 @@ static void compile_find_function_call(Compiler* const comp,
 
     //Load all the options into a string
     for (size_t i = 0; i < set.valid_overloads.size; i++) {
-      const FunctionBase* func = set.valid_overloads.data[i];
+      const SignatureStructure* sig = set.valid_overloads.data[i];
 
-      format_to_array(options_message, "Option {}: {}\n", i + 1, PrintFuncSignature{ func });
+      format_to_array(options_message, "Option {}: {}\n", i + 1, PrintSignatureType{ sig });
     }
 
     //Format to array doesnt null terminate
     //Instead replace the last '\n' with '\0'
     *options_message.back() = '\0';
 
-    comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                        "Found more than one function '{}' with signature that required implicit casts\n"
                        "Expcted: {}\n"
                        "{}", call->function_name, sig, options_message);
@@ -745,50 +851,41 @@ RuntimeValue take_address(Compiler* comp, State* state, CodeBlock* code, const R
 }
 
 static void cast_operator_type(Compiler* const comp,
+                               Context* const context,
                                State* const state,
                                ASTExpression* const expr) {
-  assert(expr->expr_type == EXPRESSION_TYPE::CAST);
+  ASSERT(expr->expr_type == EXPRESSION_TYPE::CAST);
 
-  const Types* const types = comp->types;
+  const Structures* const structures = comp->services.structures;
 
-  const Structure* const cast_to = expr->cast.type.type;
-  const Structure* const cast_from = expr->cast.expr->type;
+  const Type& cast_to = expr->cast.type.type;
+  META_FLAGS from_flags = expr->cast.expr->meta_flags;
+  const Type& cast_from = expr->cast.expr->type;
 
-  assert(cast_to != nullptr);
-  assert(cast_from != nullptr);
+  DEFER(&) { if (!comp->is_panic()) ASSERT(expr->cast.emit != nullptr); };
 
-  DEFER(&) { if (!comp->is_panic()) assert(expr->cast.emit != nullptr); };
-
-  const auto emit_cast_func = [&cast_to](ASTExpression* expr, CAST_FUNCTION cast) {
+  const auto emit_cast_func = [from_flags, &cast_to](ASTExpression* expr, CAST_FUNCTION cast) {
     expr->cast.emit = cast;
     expr->type = cast_to;
+    expr->meta_flags = from_flags;
   };
 
-  if (can_comptime_cast(cast_from, cast_to)) {
+  if (TYPE_TESTS::check_implicit_cast(from_flags, cast_from, cast_to)) {
     if (cast_from != cast_to) {
       TypeHint hint  ={};
       hint.tht = THT::EXACT;
       hint.type = cast_to;
 
-      compile_type_of_expression(comp, state, expr->cast.expr, &hint);
+      compile_type_of_expression(comp, context, state, expr->cast.expr, &hint);
     }
 
     emit_cast_func(expr, CASTS::no_op);
     return;
   }
 
-  switch (cast_from->type) {
-    case STRUCTURE_TYPE::ASCII_CHAR: {
-        //Can only cast ascii char to a u8
-        if (cast_to == types->s_u8) {
-          emit_cast_func(expr, CASTS::no_op);
-          return;
-        }
-
-        break;
-      }
+  switch (cast_from.struct_type()) {
     case STRUCTURE_TYPE::ENUM: {
-        const EnumStructure* en = (const EnumStructure*)cast_from;
+        const auto* en = cast_from.unchecked_base<EnumStructure>();
 
         if (cast_to == en->base) {
           emit_cast_func(expr, CASTS::no_op);
@@ -798,23 +895,23 @@ static void cast_operator_type(Compiler* const comp,
         break;
       }
     case STRUCTURE_TYPE::FIXED_ARRAY: {
-        const ArrayStructure* from_arr = (const ArrayStructure*)cast_from;
+        const auto* from_arr = cast_from.unchecked_base<ArrayStructure>();
 
-        if (cast_to->type == STRUCTURE_TYPE::FIXED_ARRAY) {
-          const ArrayStructure* to_arr = (const ArrayStructure*)cast_to;
+        /*if (cast_to.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
+          const auto* to_arr = cast_to.unchecked_base<ArrayStructure>();
 
-          if (can_implicit_cast(from_arr->base, to_arr->base) && from_arr->size() == to_arr->size()) {
+          if (TYPE_TESTS::can_implicit_cast(from_arr->base, to_arr->base) && from_arr->size() == to_arr->size()) {
             emit_cast_func(expr, CASTS::no_op);
             return;
           }
         }
-        else if (cast_to->type == STRUCTURE_TYPE::POINTER) {
-          const PointerStructure* to_ptr = (const PointerStructure*)cast_to;
+        else */
+        if (cast_to.struct_type() == STRUCTURE_TYPE::POINTER) {
+          const auto* to_ptr = cast_to.unchecked_base<PointerStructure>();
 
-          if (can_implicit_cast(from_arr->base, to_ptr->base) && from_arr->base->size() == to_ptr->base->size()) {
+          if (TYPE_TESTS::check_implicit_cast(from_flags, from_arr->base, to_ptr->base)) {
             //Must be in memory to cast like this
             set_runtime_flags(expr->cast.expr, state, false, (uint8_t)RVT::MEMORY);
-            expr->comptime_eval = false;//TODO: make this comptime
             emit_cast_func(expr, take_address);
             return;
           }
@@ -823,12 +920,12 @@ static void cast_operator_type(Compiler* const comp,
         break;
       }
     case STRUCTURE_TYPE::INTEGER: {
-        const IntegerStructure* from_int = (const IntegerStructure*)cast_from;
+        const auto* from_int = cast_from.unchecked_base<IntegerStructure>();
 
-        if (cast_to->type == STRUCTURE_TYPE::INTEGER) {
-          const IntegerStructure* to_int = (const IntegerStructure*)cast_to;
+        if (cast_to.struct_type() == STRUCTURE_TYPE::INTEGER) {
+          const auto* to_int = cast_to.unchecked_base<IntegerStructure>();
 
-          if (from_int->bytes >= to_int->bytes) {
+          if (from_int->size >= to_int->size) {
             //Can cast down ints easily
             emit_cast_func(expr, CASTS::no_op);
             return;
@@ -838,7 +935,7 @@ static void cast_operator_type(Compiler* const comp,
             //Need specific instructions for different sizes
             //Can cast up to r64 and then "cast down" which is free
 
-            if (from_int->bytes == 1) {
+            if (from_int->size == 1) {
               if (from_int->is_signed) {
                 emit_cast_func(expr, CASTS::i8_to_r64);
                 return;
@@ -848,7 +945,7 @@ static void cast_operator_type(Compiler* const comp,
                 return;
               }
             }
-            else if (from_int->bytes == 4) {
+            else if (from_int->size == 4) {
               if (from_int->is_signed) {
                 emit_cast_func(expr, CASTS::i32_to_r64);
                 return;
@@ -860,67 +957,28 @@ static void cast_operator_type(Compiler* const comp,
             }
           }
 
-          comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+          comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                              "Cannot cast type '{}' to type '{}'\n"
                              "They are both integers and this should be implemented",
-                             cast_from->name, cast_to->name);
+                             cast_from.name, cast_to.name);
           return;
         }
 
         break;
       }
-    case STRUCTURE_TYPE::SIMPLE_LITERAL: {
-        const SimpleLiteralStructure* from_lit = (const SimpleLiteralStructure*)cast_from;
-
-        if (cast_to->type == STRUCTURE_TYPE::SIMPLE_LITERAL) {
-          const SimpleLiteralStructure* to_lit = (const SimpleLiteralStructure*)cast_to;
-
-          if (from_lit->literal_type == SIMPLE_LITERAL_TYPE::SIGNED_INTEGER
-              && to_lit->literal_type == SIMPLE_LITERAL_TYPE::INTEGER) {
-            emit_cast_func(expr, CASTS::no_op);
-            return;
-          }
-        }
-        else if (cast_to->type == STRUCTURE_TYPE::INTEGER) {
-          const IntegerStructure* to_int = (const IntegerStructure*)cast_to;
-
-          if (from_lit->literal_type == SIMPLE_LITERAL_TYPE::SIGNED_INTEGER && !to_int->is_signed) {
-            TypeHint hint ={};
-            hint.tht = THT::EXACT;
-
-            switch (to_int->bytes) {
-              case 1: hint.type = comp->types->s_i8; break;
-              case 4: hint.type = comp->types->s_i32; break;
-              case 8: hint.type = comp->types->s_i64; break;
-              default: {
-                  comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
-                                     "No signed version of size {} int is available",
-                                     to_int->bytes);
-                  return;
-                }
-            }
-
-            compile_type_of_expression(comp, state, expr->cast.expr, &hint);
-            if (comp->is_panic()) {
-              return;
-            }
-
-            emit_cast_func(expr, CASTS::no_op);
-            return;
-          }
-        }
-
-        break;
-      }
     case STRUCTURE_TYPE::POINTER: {
-        const PointerStructure* from_ptr = (const PointerStructure*)cast_from;
-        if (cast_to->type == STRUCTURE_TYPE::POINTER) {
-          const PointerStructure* to_ptr = (const PointerStructure*)cast_to;
+        const auto* from_ptr = cast_from.unchecked_base<PointerStructure>();
+        if (cast_to.struct_type() == STRUCTURE_TYPE::POINTER) {
+          const auto* to_ptr = cast_to.unchecked_base<PointerStructure>();
 
+          // can always cast to and from *void
+          if (from_ptr->base.struct_type() == STRUCTURE_TYPE::VOID
+              || to_ptr->base.struct_type() == STRUCTURE_TYPE::VOID) {
+            emit_cast_func(expr, CASTS::no_op);
+            return;
+          }
 
-          if (from_ptr->base->type == STRUCTURE_TYPE::VOID // can always cast from *void
-              || to_ptr->base->type == STRUCTURE_TYPE::VOID // can always cast to *void
-              || (can_implicit_cast(from_ptr->base, to_ptr->base) && from_ptr->size() == to_ptr->size())) {
+          if (TYPE_TESTS::match_sizes(from_ptr->base, to_ptr->base)) {
             emit_cast_func(expr, CASTS::no_op);
             return;
           }
@@ -929,17 +987,17 @@ static void cast_operator_type(Compiler* const comp,
         break;
       }
     case STRUCTURE_TYPE::VOID: {
-        comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+        comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                            "Cannot cast '{}' to any type\n"
                            "Attempted to cast '{}' to '{}'",
-                           cast_from->name, cast_from->name, cast_to->name);
+                           cast_from.name, cast_from.name, cast_to.name);
         break;
       }
   }
 
-  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                      "Cannot cast type '{}' to type '{}'",
-                     cast_from->name, cast_to->name);
+                     cast_from.name, cast_to.name);
   return;
 }
 
@@ -948,22 +1006,25 @@ constexpr static bool already_const_type(EXPRESSION_TYPE et) {
     || et == EXPRESSION_TYPE::VALUE
     || et == EXPRESSION_TYPE::ASCII_STRING
     || et == EXPRESSION_TYPE::ASCII_CHAR
-    || et == EXPRESSION_TYPE::NULLPTR;
+    || et == EXPRESSION_TYPE::NULLPTR
+    || et == EXPRESSION_TYPE::STRUCT;
 }
 
 constexpr static bool can_compile_const_value(const ASTExpression* const expr) {
-  return expr->const_val == nullptr && expr->comptime_eval && !already_const_type(expr->expr_type);
+  return expr->const_val == nullptr
+    && TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)
+    && !already_const_type(expr->expr_type);
 }
 
 void force_load_const_value(Compiler* const comp, ASTExpression* expr) {
-  assert(expr->comptime_eval);
+  ASSERT(TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME));
 
   if (expr->const_val != nullptr) {
     return;
   }
 
   //If not already const then must be an "already const type"
-  assert(already_const_type(expr->expr_type));
+  ASSERT(already_const_type(expr->expr_type));
 
   switch (expr->expr_type) {
     case EXPRESSION_TYPE::ENUM: {
@@ -974,7 +1035,7 @@ void force_load_const_value(Compiler* const comp, ASTExpression* expr) {
         break;
       }
     case EXPRESSION_TYPE::VALUE: {
-        const size_t size = expr->type->size();
+        const size_t size = expr->type.structure->size;
 
         uint8_t* val_c = comp->constants.alloc_no_construct(size);
         memcpy_ts(val_c, size, (uint8_t*)&expr->value.value, size);
@@ -983,10 +1044,10 @@ void force_load_const_value(Compiler* const comp, ASTExpression* expr) {
         break;
       }
     case EXPRESSION_TYPE::ASCII_STRING: {
-        const ArrayStructure* const arr_type = (const ArrayStructure*)expr->type;
+        const auto* const arr_type = expr->type.extract_base<ArrayStructure>();
+        ASSERT(arr_type != nullptr);
 
-        const size_t size = arr_type->size();
-        char* string_c = (char*)comp->constants.alloc_no_construct(size);
+        char* string_c = (char*)comp->constants.alloc_no_construct(arr_type->size);
 
         expr->const_val = (uint8_t*)string_c;
         break;
@@ -995,29 +1056,29 @@ void force_load_const_value(Compiler* const comp, ASTExpression* expr) {
 }
 
 static void do_literal_cast(Compiler* const comp,
-                            const ASTExpression* expr, const Structure* to_type,
+                            const ASTExpression* expr, const Type& to_type,
                             const uint8_t* from, uint8_t* to) {
-  //This should be reached if the cast doesnt work
+  //This should not be reached if the cast doesnt work
 
-  const Structure* from_type = expr->type;
+  const Type& from_type = expr->type;
 
   if (from_type == to_type) {
-    const size_t size = from_type->size();
+    const size_t size = from_type.structure->size;
     memcpy_ts(to, size, from, size);
     return;
   }
 
-  switch (from_type->type) {
+  switch (from_type.structure->type) {
     case STRUCTURE_TYPE::FIXED_ARRAY: {
-        const ArrayStructure* from_arr = (const ArrayStructure*)from_type;
-        const ArrayStructure* to_arr = (const ArrayStructure*)to_type;
+        const auto* from_arr = from_type.unchecked_base<ArrayStructure>();
+        const auto* to_arr = to_type.unchecked_base<ArrayStructure>();
 
-        assert(to_type->type == STRUCTURE_TYPE::FIXED_ARRAY);
-        assert(from_arr->length == to_arr->length);
-        assert(expr->expr_type == EXPRESSION_TYPE::ARRAY_EXPR);
+        ASSERT(to_arr->type == STRUCTURE_TYPE::FIXED_ARRAY);
+        ASSERT(from_arr->length == to_arr->length);
+        ASSERT(expr->expr_type == EXPRESSION_TYPE::ARRAY_EXPR);
 
-        size_t from_base_size = from_arr->base->size();
-        size_t to_base_size = to_arr->base->size();
+        const size_t from_base_size = from_arr->base.structure->size;
+        const size_t to_base_size = to_arr->base.structure->size;
 
         for (size_t i = 0; i < from_arr->length; i++) {
           auto* base_expr = expr->array_expr.elements.data + i;
@@ -1030,120 +1091,30 @@ static void do_literal_cast(Compiler* const comp,
 
         break;
       }
-    case STRUCTURE_TYPE::SIMPLE_LITERAL: {
-        const SimpleLiteralStructure* ls = (const SimpleLiteralStructure*)from_type;
-
-        switch (ls->literal_type) {
-          case SIMPLE_LITERAL_TYPE::EMPTY_ARR: {
-              assert(false);//Should fix this later
-              break;
-            }
-          case SIMPLE_LITERAL_TYPE::SIGNED_INTEGER: {
-              const IntegerStructure* to_is = (const IntegerStructure*)to_type;
-              assert(to_type->type == STRUCTURE_TYPE::INTEGER);
-              assert(to_is->bytes <= 8);
-
-              //Can still be an unsigned or signed integer
-              int64_t comptime_val = x64_from_bytes(from);
-
-              if (to_is->is_signed) {
-                const int64_t max_negative_val = ~bit_fill_lower<int64_t>(to_is->bytes * 8 - 1);
-                const int64_t max_positive_val = bit_fill_lower<int64_t>(to_is->bytes * 8 - 1);
-
-                if (comptime_val < max_negative_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                     "'{}' value is too large to fit in type '{}'\n"
-                                     "The maximum negative value is: '{}'\n"
-                                     "Try using '% {}' to make the value small enough",
-                                     comptime_val, to_is->name, max_positive_val, max_positive_val);
-                  return;
-
-                }
-                else if (comptime_val > max_positive_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                     "'{}' value is too large to fit in type '{}'\n"
-                                     "The maximum positive value is: '{}'\n"
-                                     "Try using '% {}' to make the value small enough",
-                                     comptime_val, to_is->name, max_positive_val, max_positive_val);
-                  return;
-                }
-              }
-              else {
-                const uint64_t max_positive_val = bit_fill_lower<uint64_t>(to_is->bytes * 8);
-                const uint64_t abs_val = absolute(comptime_val);
-                if (comptime_val < 0) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                     "Tried to assign negative value '{}' into unsigned type '{}'\n"
-                                     "Try casting to '{}' first as this legally converts it to an unsigned type",
-                                     comptime_val, to_is->name, comp->types->s_int_lit->name);
-                  return;
-                }
-                else if (abs_val > max_positive_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                     "'{}' value is too large to fit in type '{}'\n"
-                                     "The maximum positive value is: '{}'\n"
-                                     "Try using '% {}' to make the value small enough",
-                                     abs_val, to_is->name, max_positive_val, max_positive_val);
-                  return;
-                }
-              }
-
-              //Should theoretically be able to just memcpy ... 
-              memcpy_ts(to, to_is->bytes, from, to_is->bytes);
-              break;
-            }
-          case SIMPLE_LITERAL_TYPE::INTEGER: {
-              const IntegerStructure* to_is = (const IntegerStructure*)to_type;
-              assert(to_type->type == STRUCTURE_TYPE::INTEGER);
-
-              assert(to_is->bytes <= 8);
-
-              uint64_t comptime_val = x64_from_bytes(from);
-              if (to_is->is_signed) {
-                const uint64_t max_positive_val = bit_fill_lower<uint64_t>(to_is->bytes * 8 - 1);
-                if (comptime_val > max_positive_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                     "'{}' value is too large to fit in type '{}'\n"
-                                     "The maximum positive value is: '{}'\n"
-                                     "Try using '% {}' to make the value small enough",
-                                     comptime_val, to_is->name, max_positive_val, max_positive_val);
-                  return;
-                }
-              }
-              else {
-                const uint64_t max_val = bit_fill_lower<uint64_t>(to_is->bytes * 8);
-                if (comptime_val > max_val) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                     "'{}' value is too large to fit in type '{}'\n"
-                                     "The maximum value is: '{}'"
-                                     "Try using '% {}' to make the value small enough",
-                                     comptime_val, to_is->name, max_val, max_val);
-                  return;
-                }
-              }
-
-              //Unsigned values should simply be loaded in byte by byte
-              memcpy_ts(to, to_is->bytes, from, to_is->bytes);
-              break;
-            }
-        }
-
-        break;
+    default: {
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
+                           "Attempted to cast '{}' to '{}' as if they were literals\n"
+                           "This is apparently invalid BUT the compiler thought it was valid ...\n"
+                           "There are 2 options:\n"
+                           "\tThe function which actually decides how to do the cast has a bug\n"
+                           "\tThe function which checks if the cast is valid has a bug\n\n",
+                           "Sorry :( This text exists because they are in 2 different parts of the codebase and it doesnt seem that farfetched that I would remove/add a case in one function and forget about the other\n\n"
+                           "At the time of writing im doing a big refactor in type system (meta type flags and distinct types are fun) and I basically have to do what feels like 100 million minor changes and writing this is my escapism, thank you for reading it and knowing my pain\n\n"
+                           "Again apology for the bug");
+        return;
       }
-    default:
-      assert(false);//should never be here
   }
 }
 
-static void compile_unary_operator_emit(Compiler* const comp, State* const state, ASTExpression* expr) {
-  assert(expr->expr_type == EXPRESSION_TYPE::UNARY_OPERATOR);
+static void compile_unary_operator_emit(Compiler* const comp, Context* context, State* const state, ASTExpression* expr) {
+  ASSERT(expr->expr_type == EXPRESSION_TYPE::UNARY_OPERATOR);
 
   switch (expr->un_op.op) {
     case UNARY_OPERATOR::NEG:
-      compile_unary_operator(comp, expr, neg_operators);
+      compile_unary_operator(comp, context, state, expr, neg_operators);
       break;
     case UNARY_OPERATOR::ADDRESS:
-      compile_take_address(comp, state, expr);
+      compile_take_address(comp, context, state, expr);
       break;
     case UNARY_OPERATOR::DEREF:
       compile_deref(comp, expr);
@@ -1151,7 +1122,7 @@ static void compile_unary_operator_emit(Compiler* const comp, State* const state
     default: {
         const char* name = UNARY_OP_STRING::get(expr->un_op.op);
 
-        comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                            "Type checking is not implemented for unary operator '{}'",
                            name);
         return;
@@ -1159,49 +1130,52 @@ static void compile_unary_operator_emit(Compiler* const comp, State* const state
   }
 }
 
-static void compile_binary_operator_emit(Compiler* const comp, State* const state, ASTExpression* const expr,
+static void compile_binary_operator_emit(Compiler* const comp, Context* context, State* const state, ASTExpression* const expr,
                                          const TypeHint* hint) {
   switch (expr->bin_op.op) {
     case BINARY_OPERATOR::ADD:
-      compile_binary_operator(comp, state, expr, add_operators, hint);
+      compile_binary_operator(comp, context, state, expr, add_operators, hint);
       break;
     case BINARY_OPERATOR::SUB:
-      compile_binary_operator(comp, state, expr, sub_operators, hint);
+      compile_binary_operator(comp, context, state, expr, sub_operators, hint);
       break;
     case BINARY_OPERATOR::MUL:
-      compile_binary_operator(comp, state, expr, mul_operators, hint);
+      compile_binary_operator(comp, context, state, expr, mul_operators, hint);
       break;
     case BINARY_OPERATOR::DIV:
-      compile_binary_operator(comp, state, expr, div_operators, hint);
+      compile_binary_operator(comp, context, state, expr, div_operators, hint);
       break;
     case BINARY_OPERATOR::EQUIVALENT:
-      compile_binary_operator(comp, state, expr, eq_operators);
+      compile_binary_operator(comp, context, state, expr, eq_operators);
       break;
     case BINARY_OPERATOR::NOT_EQ:
-      compile_binary_operator(comp, state, expr, neq_operators);
+      compile_binary_operator(comp, context, state, expr, neq_operators);
       break;
     case BINARY_OPERATOR::LESSER:
-      compile_binary_operator(comp, state, expr, lesser_operators);
+      compile_binary_operator(comp, context, state, expr, lesser_operators);
       break;
     case BINARY_OPERATOR::GREATER:
-      compile_binary_operator(comp, state, expr, greater_operators);
+      compile_binary_operator(comp, context, state, expr, greater_operators);
       break;
     case BINARY_OPERATOR::OR:
-      compile_binary_operator(comp, state, expr, or_operators, hint);
+      compile_binary_operator(comp, context, state, expr, or_operators, hint);
+      break;
+    case BINARY_OPERATOR::XOR:
+      compile_binary_operator(comp, context, state, expr, xor_operators, hint);
       break;
     case BINARY_OPERATOR::AND:
-      compile_binary_operator(comp, state, expr, and_operators, hint);
+      compile_binary_operator(comp, context, state, expr, and_operators, hint);
       break;
     case BINARY_OPERATOR::LEFT_SHIFT:
-      compile_binary_operator(comp, state, expr, left_shift_operators);
+      compile_binary_operator(comp, context, state, expr, left_shift_operators);
       break;
     case BINARY_OPERATOR::RIGHT_SHIFT:
-      compile_binary_operator(comp, state, expr, right_shift_operators);
+      compile_binary_operator(comp, context, state, expr, right_shift_operators);
       break;
     default: {
         const char* const name = BINARY_OP_STRING::get(expr->bin_op.op);
 
-        comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                            "Type Checking is not implemented for binary operator '{}'",
                            name);
         return;
@@ -1210,14 +1184,15 @@ static void compile_binary_operator_emit(Compiler* const comp, State* const stat
 }
 
 void set_runtime_flags(ASTExpression* const expr, State* const state, bool modified, uint8_t valid_rvts) {
-  expr->comptime_eval &= !modified;
+  if (modified) {
+    expr->meta_flags &= ~META_FLAG::COMPTIME;
+  }
   expr->valid_rvts &= valid_rvts;
 
   switch (expr->expr_type) {
     case EXPRESSION_TYPE::LOCAL: {
         Local* local = state->all_locals.data + expr->local;
 
-        local->comptime_eval &= !modified;
         local->valid_rvts &= expr->valid_rvts;
         break;
       }
@@ -1232,175 +1207,223 @@ void set_runtime_flags(ASTExpression* const expr, State* const state, bool modif
   }
 }
 
-static bool test_type_satisfies_hint(const Structure* ty, const TypeHint* hint) {
-  assert(ty != nullptr);
+static bool test_type_satisfies_hint(META_FLAGS flags, const Type& ty, const TypeHint* hint) {
+  ASSERT(ty.is_valid());
 
   if (hint == nullptr) return true;
 
 
   if (hint->tht == THT::EXACT) {
-    assert(hint->type != nullptr);
+    ASSERT(hint->type.is_valid());
 
     return ty == hint->type;
   }
-  else if (hint->tht == THT::BASE) {
-    assert(hint->type != nullptr);
-    const Structure* base = nullptr;
+  else if (hint->tht == THT::IMPLICIT) {
+    ASSERT(hint->type.is_valid());
 
-    switch (ty->type) {
+    return TYPE_TESTS::check_implicit_cast(flags, ty, hint->type);
+  }
+  else if (hint->tht == THT::BASE) {
+    ASSERT(hint->type.is_valid());
+    const Type* base = nullptr;
+
+    switch (ty.struct_type()) {
       case STRUCTURE_TYPE::FIXED_ARRAY:
-        base = static_cast<const ArrayStructure*>(ty)->base;
+        base = &ty.unchecked_base<ArrayStructure>()->base;
         break;
       case STRUCTURE_TYPE::POINTER:
-        base = static_cast<const PointerStructure*>(ty)->base;
+        base = &ty.unchecked_base<PointerStructure>()->base;
         break;
       default:
         return false;
     }
 
-    return base == hint->type;
+    return TYPE_TESTS::check_implicit_cast(flags, *base, hint->type);
   }
   else if (hint->tht == THT::BASE_HINT) {
+    const Type* ty_p = &ty;
+
     do {
-      switch (ty->type) {
+      switch (ty_p->struct_type()) {
         case STRUCTURE_TYPE::FIXED_ARRAY:
-          ty = static_cast<const ArrayStructure*>(ty)->base;
+          ty_p = &ty.unchecked_base<ArrayStructure>()->base;
           break;
         case STRUCTURE_TYPE::POINTER:
-          ty = static_cast<const PointerStructure*>(ty)->base;
+          ty_p = &ty.unchecked_base<PointerStructure>()->base;
           break;
         default:
           return false;
       }
 
       hint = hint->other_hint;
-      assert(hint != nullptr);
+      ASSERT(hint != nullptr);
     } while (hint->tht == THT::BASE_HINT);
 
-    return test_type_satisfies_hint(ty, hint);
+    return test_type_satisfies_hint(flags, *ty_p, hint);
   }
 
-  assert(false);
-  return true;
+  INVALID_CODE_PATH("Type hint union option not covered");
 }
 
-static void compile_test_type_satisfies_hint(Compiler* const comp, const Span& span, const Structure* ty, const TypeHint* hint) {
-  assert(ty != nullptr);
+static void compile_test_type_satisfies_hint(Compiler* const comp, const Span& span,
+                                             META_FLAGS flags, const Type& ty, const TypeHint* hint) {
+  ASSERT(ty.is_valid());
 
   if (hint == nullptr) return;
 
   if (hint->tht == THT::EXACT) {
-    assert(hint->type != nullptr);
+    ASSERT(hint->type.is_valid());
 
     if (ty != hint->type) {
-      comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
-                         "Could not implicity cast '{}' to '{}'",
-                         ty->name, hint->type->name);
+      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
+                         "Expected type: '{}'. Found type: '{}'",
+                         ty.name, hint->type.name);
+      return;
+    }
+  }
+  else if (hint->tht == THT::IMPLICIT) {
+    ASSERT(hint->type.is_valid());
+
+    if (!TYPE_TESTS::check_implicit_cast(flags, ty, hint->type)) {
+      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
+                         "Cannot implicitly case between type: '{}' and type: '{}'",
+                         ty.name, hint->type.name);
       return;
     }
   }
   else if (hint->tht == THT::BASE) {
-    assert(hint->type != nullptr);
-    const Structure* base = nullptr;
+    ASSERT(hint->type.is_valid());
+    const Type* base = nullptr;
 
-    switch (ty->type) {
+    switch (ty.struct_type()) {
       case STRUCTURE_TYPE::FIXED_ARRAY:
-        base = static_cast<const ArrayStructure*>(ty)->base;
+        base = &ty.unchecked_base<ArrayStructure>()->base;
         break;
       case STRUCTURE_TYPE::POINTER:
-        base = static_cast<const PointerStructure*>(ty)->base;
+        base = &ty.unchecked_base<PointerStructure>()->base;
         break;
       default:
-        comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+        comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
                            "'{}' is not an array or pointer type so has no base type",
-                           ty->name);
+                           ty.name);
         return;
     }
 
-    if (base != hint->type) {
-      comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
-                         "Could not implicity cast '{}' to '{}'",
-                         hint->type->name, base->name);
+    if (!TYPE_TESTS::check_implicit_cast(flags, *base, hint->type)) {
+      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
+                         "Could not implicitly cast '{}' to '{}'",
+                         hint->type.name, base->name);
       return;
     }
   }
   else if (hint->tht == THT::BASE_HINT) {
+    const Type* ty_p = &ty;
+
     do {
-      switch (ty->type) {
+      switch (ty_p->struct_type()) {
         case STRUCTURE_TYPE::FIXED_ARRAY:
-          ty = static_cast<const ArrayStructure*>(ty)->base;
+          ty_p = &ty.unchecked_base<ArrayStructure>()->base;
           break;
         case STRUCTURE_TYPE::POINTER:
-          ty = static_cast<const PointerStructure*>(ty)->base;
+          ty_p = &ty.unchecked_base<PointerStructure>()->base;
           break;
         default:
-          comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
                              "'{}' is not an array or pointer type so has no base type",
-                             ty->name);
+                             ty_p->name);
           return;
       }
 
       hint = hint->other_hint;
-      assert(hint != nullptr);
+      ASSERT(hint != nullptr);
     } while (hint->tht == THT::BASE_HINT);
 
-    compile_test_type_satisfies_hint(comp, span, ty, hint);
+    compile_test_type_satisfies_hint(comp, span, flags, ty, hint);
   }
 }
 
-static const Structure* build_pointer_type_from_type_hint(Compiler* const comp, const Span& span, const TypeHint* t_hint) {
+static Type build_pointer_type_from_type_hint(Compiler* const comp, Context* context, const Span& span, const TypeHint* t_hint) {
   if (t_hint->tht == THT::EXACT) {
     return t_hint->type;
   }
   else if (t_hint->tht == THT::BASE) {
-    return find_or_make_pointer_type(comp, span, t_hint->type);
+    return to_type(find_or_make_pointer_structure(comp, context, t_hint->type));
   }
   else {
-    return find_or_make_pointer_type(comp, span, build_pointer_type_from_type_hint(comp, span, t_hint->other_hint));
+    return to_type(find_or_make_pointer_structure(comp, context, build_pointer_type_from_type_hint(comp, context, span, t_hint->other_hint)));
   }
 }
 
 //Note: Recursive
 void compile_type_of_expression(Compiler* const comp,
+                                Context* const context,
                                 State* const state,
                                 ASTExpression* const expr,
                                 const TypeHint* const hint) {
   //Already typed
-  if (expr->type != nullptr && test_type_satisfies_hint(expr->type, hint)) {
+  if (expr->type.is_valid() && test_type_satisfies_hint(expr->meta_flags, expr->type, hint)) {
     return;
   }
 
-  assert(expr->valid_rvts != 0);//shouldnt start 0
-  DEFER(&) { assert(expr->valid_rvts != 0); };//shouldnt end 0
+  ASSERT(expr->valid_rvts != 0);//shouldnt start 0
+  DEFER(&) { ASSERT(expr->valid_rvts != 0); };//shouldnt end 0
 
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::STRUCT: {
+        ASTStructBody* struct_body = expr->struct_body.body;
+
+        if (!struct_body->type.is_valid()) {
+          comp->set_dep(context, struct_body->compilation_unit);
+          return;
+        }
+
+        SET_MASK(expr->meta_flags, META_FLAG::COMPTIME);
+        expr->type = comp->services.builtin_types->t_type;
+
+        break;
+      }
+    case EXPRESSION_TYPE::LAMBDA: {
+        //Never type the actual lambda here, its typed elsewhere
+        ASTLambda* lambda = expr->lambda.lambda;
+
+        if (lambda->sig.sig->sig_struct == nullptr) {
+          comp->set_dep(context, lambda->function->compilation_unit);
+          return;
+        }
+
+        SET_MASK(expr->meta_flags, META_FLAG::COMPTIME);
+        expr->type = to_type(lambda->sig.sig->sig_struct);
+        break;
+      }
     case EXPRESSION_TYPE::MEMBER: {
         expr->member.expr->call_leaf = expr->call_leaf;
 
         //Compile the object first
-        compile_type_of_expression(comp, state, expr->member.expr, nullptr);
+        compile_type_of_expression(comp, context, state, expr->member.expr, nullptr);
         if (comp->is_panic()) {
           return;
         }
 
         //Assignable if the base is assignable
-        expr->assignable = expr->index.expr->assignable;
+        expr->meta_flags = expr->index.expr->meta_flags;
 
-        assert(expr->member.expr->type != nullptr);
+        ASSERT(expr->member.expr->type.is_valid());
 
-        if (expr->member.expr->type->type != STRUCTURE_TYPE::COMPOSITE) {
-          comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+        if (expr->member.expr->type.struct_type() != STRUCTURE_TYPE::COMPOSITE) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                              "Type '{}' does not have any members (it is not a composite type)",
-                             expr->member.expr->type->name);
+                             expr->member.expr->type.name);
           return;
         }
 
-        const CompositeStructure* cs = (const CompositeStructure*)expr->member.expr->type;
+        const Type& cmp_t = expr->member.expr->type;
+
+        const auto* cs = cmp_t.unchecked_base<CompositeStructure>();
 
         auto i = cs->elements.begin();
         auto end = cs->elements.end();
 
-        expr->type = nullptr;//reset
+        expr->type.structure ={};//reset
 
         for (; i < end; i++) {
           if (i->name == expr->member.name) {
@@ -1410,20 +1433,19 @@ void compile_type_of_expression(Compiler* const comp,
           }
         }
 
-        if (expr->type == nullptr) {
-          comp->report_error(CompileCode::NAME_ERROR, expr->span,
+        if (!expr->type.is_valid()) {
+          comp->report_error(ERROR_CODE::NAME_ERROR, expr->span,
                              "Type '{}' has no member '{}'",
-                             cs->name, expr->member.name);
+                             cmp_t.name, expr->member.name);
           return;
         }
 
         //TODO: Make this work for other types
         set_runtime_flags(expr->member.expr, state, false, (uint8_t)RVT::MEMORY);
 
-        expr->comptime_eval = expr->member.expr->comptime_eval;
         expr->makes_call =  expr->member.expr->makes_call;
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
@@ -1435,7 +1457,7 @@ void compile_type_of_expression(Compiler* const comp,
         expr->index.index->call_leaf = expr->call_leaf;
 
         if (hint == nullptr) {
-          compile_type_of_expression(comp, state, expr->index.expr, nullptr);
+          compile_type_of_expression(comp, context, state, expr->index.expr, nullptr);
         }
         else {
           TypeHint index_hint ={};
@@ -1448,61 +1470,60 @@ void compile_type_of_expression(Compiler* const comp,
             index_hint.type = hint->type;
           }
 
-          compile_type_of_expression(comp, state, expr->index.expr, &index_hint);
+          compile_type_of_expression(comp, context, state, expr->index.expr, &index_hint);
         }
 
         if (comp->is_panic()) {
           return;
         }
 
-        //Assignable if the base array is assignable
-        expr->assignable = expr->index.expr->assignable;
+        expr->meta_flags = expr->index.expr->meta_flags;
 
-        assert(expr->index.expr->type != nullptr);
+        ASSERT(expr->index.expr->type.is_valid());
 
-        compile_type_of_expression(comp, state, expr->index.index, nullptr);
+        compile_type_of_expression(comp, context, state, expr->index.index, nullptr);
         if (comp->is_panic()) {
           return;
         }
-        assert(expr->index.index->type != nullptr);
+        ASSERT(expr->index.index->type.is_valid());
 
-        assert(expr->expr_type == EXPRESSION_TYPE::INDEX);
+        ASSERT(expr->expr_type == EXPRESSION_TYPE::INDEX);
 
         auto* arr_expr = expr->index.expr;
         auto* index_expr = expr->index.index;
 
         if (!TYPE_TESTS::can_index(arr_expr->type)) {
-          comp->report_error(CompileCode::TYPE_CHECK_ERROR, arr_expr->span,
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, arr_expr->span,
                              "Cannot take index of type: {}",
-                             arr_expr->type->name);
+                             arr_expr->type.name);
           return;
         }
 
         if (!TYPE_TESTS::is_int(index_expr->type)) {
-          comp->report_error(CompileCode::TYPE_CHECK_ERROR, index_expr->span,
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, index_expr->span,
                              "An index must be in integer\n"
                              "Found non-integer type: {}",
-                             index_expr->type->name);
+                             index_expr->type.name);
           return;
         }
 
 
-        if (TYPE_TESTS::is_literal(index_expr->type)) {
+        if (TEST_MASK(index_expr->meta_flags, META_FLAG::LITERAL)) {
           TypeHint inner_hint ={};
           inner_hint.tht = THT::EXACT;
-          inner_hint.type = comp->types->s_u64;
+          inner_hint.type = comp->services.builtin_types->t_u64;
 
-          compile_type_of_expression(comp, state, expr->index.index, &inner_hint);
+          compile_type_of_expression(comp, context, state, expr->index.index, &inner_hint);
           if (comp->is_panic()) {
             return;
           }
         }
 
-        if (!index_expr->comptime_eval) {
-          //If the index is not known at compile time then the array must in memory and in a register
+        if (!TEST_MASK(index_expr->meta_flags, META_FLAG::COMPTIME)) {
+          //If the index is not known at compile time then the array must be in memory or in a register
           uint8_t valids = (uint8_t)RVT::MEMORY;
 
-          if (arr_expr->type->size() <= 8) {
+          if (arr_expr->type.structure->size <= 8) {
             //Can be in a register if it will fit
             valids |= RVT::REGISTER;
           }
@@ -1510,11 +1531,10 @@ void compile_type_of_expression(Compiler* const comp,
           set_runtime_flags(arr_expr, state, false, valids);
         }
 
-        expr->type = static_cast<const ArrayStructure*>(arr_expr->type)->base;
-        expr->comptime_eval = index_expr->comptime_eval && arr_expr->comptime_eval;
+        expr->type = arr_expr->type.unchecked_base<ArrayStructure>()->base;
         expr->makes_call = index_expr->makes_call || arr_expr->makes_call;
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
@@ -1524,46 +1544,51 @@ void compile_type_of_expression(Compiler* const comp,
         auto i = expr->tuple_lit.elements.mut_begin();
         const auto end = expr->tuple_lit.elements.end();
 
-        //Assume true to start with
-        expr->comptime_eval = true;
+        //Assume comptime to start with
+        SET_MASK(expr->meta_flags, META_FLAG::COMPTIME);
 
 
         if (hint == nullptr) {
-          Array<const Structure*> element_types ={};
+          Array<Type> element_types ={};
 
           for (; i < end; i++) {
             i->call_leaf = expr->call_leaf;
 
-            compile_type_of_expression(comp, state, i, nullptr);
+            compile_type_of_expression(comp, context, state, i, nullptr);
             if (comp->is_panic()) {
               return;
             }
-            assert(i->type != nullptr);
+            ASSERT(i->type.is_valid());
 
             element_types.insert(i->type);
 
             expr->makes_call |= i->makes_call;
-            expr->comptime_eval &= i->comptime_eval;
+            expr->meta_flags &= i->meta_flags;
           }
 
-          //Create the type
-          expr->type = find_or_make_tuple_literal(comp, expr->span, std::move(element_types));
+          const Structure* tuple_s
+            = find_or_make_tuple_structure(comp,
+                                           context,
+                                           std::move(element_types));
+
+//Create the type
+          expr->type = to_type(tuple_s);
         }
         else {
           if (hint->tht != THT::EXACT) {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                "Tuple expressions have no base type");
             return;
           }
 
-          if (hint->type->type != STRUCTURE_TYPE::COMPOSITE) {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+          if (hint->type.struct_type() != STRUCTURE_TYPE::COMPOSITE) {
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                "'{}' is not a composite type",
-                               hint->type->name);
+                               hint->type.name);
             return;
           }
 
-          const CompositeStructure* s = (const CompositeStructure*)hint->type;
+          const auto* s = hint->type.unchecked_base<CompositeStructure>();
 
           auto s_i = s->elements.begin();
 
@@ -1574,25 +1599,26 @@ void compile_type_of_expression(Compiler* const comp,
             inner_h.tht = THT::EXACT;
             inner_h.type = s_i->type;
 
-            compile_type_of_expression(comp, state, i, &inner_h);
+            compile_type_of_expression(comp, context, state, i, &inner_h);
             if (comp->is_panic()) {
               return;
             }
-            assert(i->type != nullptr);
+            ASSERT(i->type.is_valid());
 
             expr->makes_call |= i->makes_call;
-            expr->comptime_eval &= i->comptime_eval;
+            expr->meta_flags &= i->meta_flags;
           }
 
           expr->type = hint->type;
         }
 
-        expr->assignable = false;
+        //Temp?
+        expr->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
         //Can currently on load into memory
         expr->valid_rvts &= RVT::MEMORY;
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
@@ -1600,15 +1626,15 @@ void compile_type_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::ARRAY_EXPR: {
-        expr->assignable = false;
+        expr->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
         auto i = expr->array_expr.elements.mut_begin();
         const auto end = expr->array_expr.elements.end();
 
         //Assume true to start with
-        expr->comptime_eval = true;
+        expr->meta_flags |= META_FLAG::COMPTIME;
 
-        const Structure* base = nullptr;
+        Type base ={};
 
         TypeHint inner_hint_holder ={};
 
@@ -1629,14 +1655,14 @@ void compile_type_of_expression(Compiler* const comp,
             fixed_hint = true;
           }
           else if (hint->tht == THT::EXACT) {
-            if (hint->type->type != STRUCTURE_TYPE::FIXED_ARRAY) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+            if (hint->type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                  "Could not implicity cast array to non-array type: '{}'",
-                                 hint->type->name);
+                                 hint->type.name);
               return;
             }
 
-            const ArrayStructure* arr_s = (const ArrayStructure*)hint->type;
+            const auto* arr_s = hint->type.unchecked_base<ArrayStructure>();
 
             inner_hint_holder.tht = THT::EXACT;
             inner_hint_holder.type = arr_s->base;
@@ -1652,18 +1678,18 @@ void compile_type_of_expression(Compiler* const comp,
           for (; i < end; i++) {
             i->call_leaf = expr->call_leaf;
 
-            compile_type_of_expression(comp, state, i, inner_hint);
+            compile_type_of_expression(comp, context, state, i, inner_hint);
             if (comp->is_panic()) {
               return;
             }
-            assert(i->type != nullptr);
+            ASSERT(i->type.is_valid());
 
-            if (base == nullptr) {
+            if (!base.is_valid()) {
               base = i->type;
             }
             else {
               //Check new element matches
-              if (can_comptime_cast(i->type, base)) {
+              if (TYPE_TESTS::check_implicit_cast(i->meta_flags, i->type, base)) {
                 base = i->type;//Will always be either same or more specific
               }
             }
@@ -1675,15 +1701,15 @@ void compile_type_of_expression(Compiler* const comp,
 
             for (; i < end; i++) {
               if (i->type != base) {
-                if (!can_comptime_cast(i->type, base)) {
-                  comp->report_error(CompileCode::TYPE_CHECK_ERROR, i->span,
+                if (!TYPE_TESTS::check_implicit_cast(i->meta_flags, i->type, base)) {
+                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, i->span,
                                      "Array type was inferred as '{}'\n"
                                      "Cannot implicity cast '{}' to '{}'",
-                                     base->name, i->type->name, base->name);
+                                     base.name, i->type.name, base.name);
                   return;
                 }
                 else {
-                  compile_type_of_expression(comp, state, i, inner_hint);
+                  compile_type_of_expression(comp, context, state, i, inner_hint);
                   if (comp->is_panic()) {
                     return;
                   }
@@ -1692,42 +1718,44 @@ void compile_type_of_expression(Compiler* const comp,
             }
 
             expr->makes_call |= i->makes_call;
-            expr->comptime_eval &= i->comptime_eval;
+            expr->meta_flags &= i->meta_flags;
           }
 
-          if (base == nullptr) {
-            assert(expr->array_expr.elements.size == 0);
-            expr->type = comp->types->s_empty_arr;
+          if (!base.is_valid()) {
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, i->span,
+                               "Array type could not inferred\n"
+                               "This is probably because the array was empty (i.e. [])");
+            return;
           }
           else {
-            expr->type = find_or_make_array_type(comp, expr->span, base, expr->array_expr.elements.size);
+            expr->type = to_type(find_or_make_array_structure(comp, context, base, expr->array_expr.elements.size));
           }
         }
         else {
-          assert(hint != nullptr);
+          ASSERT(hint != nullptr);
 
           for (; i < end; i++) {
             i->call_leaf = expr->call_leaf;
 
-            compile_type_of_expression(comp, state, i, inner_hint);
+            compile_type_of_expression(comp, context, state, i, inner_hint);
             if (comp->is_panic()) {
               return;
             }
-            assert(i->type != nullptr);
+            ASSERT(i->type.is_valid());
 
             expr->makes_call |= i->makes_call;
-            expr->comptime_eval &= i->comptime_eval;
+            expr->meta_flags &= i->meta_flags;
           }
 
           if (hint->tht == THT::EXACT) {
             expr->type = hint->type;
           }
           else {
-            expr->type = find_or_make_array_type(comp, expr->span, base, expr->array_expr.elements.size);
+            expr->type = to_type(find_or_make_array_structure(comp, context, base, expr->array_expr.elements.size));
           }
         }
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
@@ -1735,11 +1763,10 @@ void compile_type_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::ASCII_CHAR: {
-        expr->type = comp->types->s_ascii;
-        expr->comptime_eval = true;
-        expr->assignable = false;
+        expr->type = comp->services.builtin_types->t_ascii;
+        expr->meta_flags |= META_FLAG::COMPTIME;
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
@@ -1749,11 +1776,10 @@ void compile_type_of_expression(Compiler* const comp,
 
         const size_t len = expr->ascii_string->len + 1;
 
-        expr->type = find_or_make_array_type(comp, expr->span, comp->types->s_ascii, len);
-        expr->comptime_eval = true;
-        expr->assignable = false;
+        expr->type = to_type(find_or_make_array_structure(comp, context, comp->services.builtin_types->t_ascii, len));
+        expr->meta_flags |= META_FLAG::COMPTIME;
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
@@ -1761,112 +1787,161 @@ void compile_type_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::ENUM: {
-        const NamedElement* name = find_name(comp, comp->current_namespace, expr->enum_value.name);
+        const NamedElement* name = comp->services.names->find_name(context->current_namespace, expr->enum_value.name);
 
         if (name == nullptr) {
-          comp->set_unfound_name(expr->enum_value.name, comp->current_namespace, expr->span);
-          return;
-        }
-        else {
-          comp->report_error(CompileCode::NAME_ERROR, expr->span,
-                             "Expected '{}' to be an enum value but found a '{}'",
-                             expr->enum_value.name, name->type);
+          UnknownName unknown ={};
+          unknown.all_names = false;
+          unknown.ident = expr->enum_value.name;
+          unknown.namespace_index = context->current_namespace;
+          unknown.num_unknowns = 0;
+
+          comp->set_unfound_name(context, std::move(unknown),
+                                 ERROR_CODE::UNFOUND_DEPENDENCY, expr->span,
+                                 "Expected an enum but '{}' did not exist",
+                                 expr->enum_value.name);
           return;
         }
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        INVALID_CODE_PATH("Not yet implemented enums???");
+
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
 
-        expr->assignable = false;
+        //TODO: Is this valid?
+        expr->meta_flags |= META_FLAG::COMPTIME;
 
         break;
       }
     case EXPRESSION_TYPE::VALUE: {
+        constexpr auto smallest_type_for_integer = [](const BuiltinTypes* types, u64 val) -> Type {
+          if (val < 0) {
+            if (val >= INT8_MIN) {
+              return types->t_i8;
+            }
+            /*else if (val >= INT8_MIN) {
+              return types->t_i16;
+            }*/
+            else if (val >= INT32_MIN) {
+              return types->t_i32;
+            }
+            else if (val >= INT64_MIN) {
+              return types->t_i64;
+            }
+            else {
+              INVALID_CODE_PATH("There isnt a big enough integer");
+            }
+          }
+          else {
+            if (val < UINT8_MAX) {
+              return types->t_u8;
+            }
+            /*else if (val <= UINT16_MAX) {
+              return types->t_u16;
+            }*/
+            else if (val <= UINT32_MAX) {
+              return types->t_u32;
+            }
+            else if (val <= UINT64_MAX) {
+              return types->t_u64;
+            }
+            else {
+              INVALID_CODE_PATH("There isnt a big enough integer");
+            }
+          }
+
+          return {};
+        };
+
         ValueExpr* const val = &expr->value;
 
+        expr->meta_flags |= META_FLAG::LITERAL;
+        expr->meta_flags |= META_FLAG::COMPTIME;
 
         if (val->suffix == nullptr) {
+          const Type min_size_int = smallest_type_for_integer(comp->services.builtin_types,
+                                                              val->value);
+
           if (hint != nullptr) {
             if (hint->tht != THT::EXACT) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                 "Type '{}' has no base type",
-                                 comp->types->s_int_lit->name);
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                                 "This literal has no base type");
               return;
             }
 
             expr->type = hint->type;
 
-            if (!can_comptime_cast(comp->types->s_int_lit, expr->type)) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                                 "Could not implicity cast type '{}' to type '{}'",
-                                 comp->types->s_int_lit->name, expr->type->name);
+            if (!TYPE_TESTS::check_implicit_cast(expr->meta_flags, min_size_int, expr->type)) {
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                                 "Could not implicity cast literal of type '{}' to type '{}'\n"
+                                 "Integer types are decided by the smallest value that can hold it\n"
+                                 "If you want a different value try using an integer suffix",
+                                 min_size_int.name, expr->type.name);
               return;
             }
           }
           else {
-            expr->type = comp->types->s_int_lit;
+            expr->type = min_size_int;
           }
         }
         else {
-          if (val->suffix == comp->types->s_i64->name) {
-            expr->type = comp->types->s_i64;
+          if (val->suffix == comp->services.builtin_types->t_i64.name) {
+            expr->type = comp->services.builtin_types->t_i64;
           }
-          else if (val->suffix == comp->types->s_u64->name) {
-            expr->type = comp->types->s_u64;
+          else if (val->suffix == comp->services.builtin_types->t_u64.name) {
+            expr->type = comp->services.builtin_types->t_u64;
           }
           else {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                "Invalid integer literal suffix type '{}'",
                                val->suffix);
             return;
           }
 
-          compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+          compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
           if (comp->is_panic()) {
             return;
           }
         }
 
-        expr->comptime_eval = true;
-        expr->assignable = false;
-
         break;
       }
     case EXPRESSION_TYPE::NULLPTR: {
-        expr->comptime_eval = true;
+        expr->meta_flags |= META_FLAG::LITERAL;
+        expr->meta_flags |= META_FLAG::COMPTIME;
 
         if (hint != nullptr) {
           if (hint->tht == THT::EXACT) {
-            if (hint->type->type != STRUCTURE_TYPE::POINTER) {
-              comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
+            if (hint->type.struct_type() != STRUCTURE_TYPE::POINTER) {
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
                                  "'{}' is not a valid pointer type",
-                                 hint->type->name);
+                                 hint->type.name);
               return;
             }
 
             expr->type = hint->type;
           }
           else if (hint->tht == THT::BASE) {
-            expr->type = find_or_make_pointer_type(comp, expr->span, hint->type);
+            expr->type = to_type(find_or_make_pointer_structure(comp, context, hint->type));
           }
           else {
-            expr->type = build_pointer_type_from_type_hint(comp, expr->span, hint->other_hint);
+            expr->type = build_pointer_type_from_type_hint(comp, context, expr->span, hint->other_hint);
           }
 
-          if (!can_comptime_cast(comp->types->s_lit_ptr, expr->type)) {
-            comp->report_error(CompileCode::TYPE_CHECK_ERROR, expr->span,
-                               "Could not implicity cast type '{}' to type '{}'",
-                               comp->types->s_lit_ptr->name, expr->type->name);
+          if (!TYPE_TESTS::check_implicit_cast(expr->meta_flags,
+                                               comp->services.builtin_types->t_void_ptr, expr->type)) {
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                               "Could not implicitly cast type '{}' to type '{}'",
+                               comp->services.builtin_types->t_void_ptr.name, expr->type.name);
             return;
           }
         }
         else {
-          expr->type = comp->types->s_lit_ptr;
+          expr->type = comp->services.builtin_types->t_void_ptr;
         }
 
-        expr->assignable = false;
         break;
       }
     case EXPRESSION_TYPE::NAME: {
@@ -1874,51 +1949,62 @@ void compile_type_of_expression(Compiler* const comp,
 
         Local* const loc = state->find_local(name);
 
+        const Decl* decl = nullptr;
         if (loc != nullptr) {
           expr->set_union(EXPRESSION_TYPE::LOCAL);
           expr->local = loc - state->all_locals.data;
-          expr->type  = loc->type;
+          expr->type = loc->decl.type;
 
           loc->valid_rvts &= expr->valid_rvts;
+          decl = &loc->decl;
         }
         else {
-          NamedElement* non_local = find_name(comp, comp->current_namespace, name);
-          if (non_local == nullptr) {
-            comp->set_unfound_name(name, comp->current_namespace, expr->span);
-          }
-          else {
-            if (non_local->type != NamedElementType::GLOBAL) {
-              comp->report_error(CompileCode::NAME_ERROR, expr->span,
-                                 "Expected '{}' to be a local or a global but found a '{}'",
-                                 name, non_local->type);
-              return;
-            }
+          NamedElement* non_local = comp->services.names->find_name(context->current_namespace, name);
+          if (non_local == nullptr || non_local->unknowns > 0) {
+            UnknownName unknown ={};
+            unknown.all_names = false;
+            unknown.ident = name;
+            unknown.namespace_index = context->current_namespace;
+            unknown.num_knowns = non_local == nullptr ? 0 : non_local->globals.size;
+            unknown.num_unknowns = non_local == nullptr ? 0 : non_local->unknowns;
 
-            const Global* glob = non_local->global;
-
-            if (glob->type == nullptr) {
-              comp->set_dep(glob->compilation_unit);
-              return;
-            }
-
-            expr->set_union(EXPRESSION_TYPE::GLOBAL);
-            expr->global = glob;
-            expr->type   = glob->type;
-
-            assert(expr->type != nullptr);
+            comp->set_unfound_name(context, std::move(unknown),
+                                   ERROR_CODE::UNFOUND_DEPENDENCY, expr->span,
+                                   "'{}' was used but a it has not matching declaration",
+                                   name);
+            return;
           }
 
-          return;
+          if (non_local->globals.size != 1) {
+            comp->report_error(ERROR_CODE::NAME_ERROR, expr->span,
+                               "Name '{}' is ambiguous in this context", name);
+            return;
+          }
+
+          const Global* glob = non_local->globals.data[0];
+
+          if (!glob->decl.type.is_valid()) {
+            comp->set_dep(context, glob->compilation_unit);
+            return;
+          }
+
+          expr->set_union(EXPRESSION_TYPE::GLOBAL);
+          expr->global = glob;
+          expr->type   = glob->decl.type;
+
+          decl = &glob->decl;
         }
 
-        compile_test_type_satisfies_hint(comp, expr->span, loc->type, hint);
+        ASSERT(expr->type.is_valid());
+        ASSERT(decl != nullptr);
+
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
 
         //Can be comptime
-        expr->comptime_eval = loc->comptime_eval;
-        expr->assignable = true;
+        expr->meta_flags = decl->meta_flags;
 
         break;
       }
@@ -1927,59 +2013,56 @@ void compile_type_of_expression(Compiler* const comp,
 
         Local* const loc = state->all_locals.data + expr->local;
 
-        compile_test_type_satisfies_hint(comp, expr->span, loc->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, loc->decl.meta_flags, loc->decl.type, hint);
         if (comp->is_panic()) {
           return;
         }
 
-        expr->assignable = true;
-
+        expr->meta_flags = loc->decl.meta_flags;
         break;
       }
     case EXPRESSION_TYPE::GLOBAL: {
         //Can be reached during type inference
-        compile_test_type_satisfies_hint(comp, expr->span, expr->global->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->global->decl.meta_flags, expr->global->decl.type, hint);
         if (comp->is_panic()) {
           return;
         }
 
-        expr->assignable = true;
-
+        expr->meta_flags = expr->global->decl.meta_flags;
         break;
       }
     case EXPRESSION_TYPE::CAST: {
         expr->cast.expr->call_leaf = expr->call_leaf;
-        expr->comptime_eval = true; //assume true
+        expr->meta_flags |= META_FLAG::COMPTIME;
 
-        if (expr->cast.type.type == nullptr) {
-          compile_type(comp, &expr->cast.type);
+        if (!expr->cast.type.type.is_valid()) {
+          compile_type(comp, context, &expr->cast.type);
           if (comp->is_panic()) {
             return;
           }
         }
 
-        compile_type_of_expression(comp, state, expr->cast.expr, nullptr);
+        compile_type_of_expression(comp, context, state, expr->cast.expr, nullptr);
         if (comp->is_panic()) {
           return;
         }
 
-        assert(expr->cast.expr->type != nullptr);
+        ASSERT(expr->cast.expr->type.is_valid());
 
         //may set comtime to false
-        cast_operator_type(comp, state, expr);
+        cast_operator_type(comp, context, state, expr);
         if (comp->is_panic()) {
           return;
         }
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
 
-        expr->comptime_eval &= expr->cast.expr->comptime_eval;
+        expr->meta_flags &= expr->cast.expr->meta_flags;
         expr->makes_call = expr->cast.expr->makes_call;
         expr->type = expr->cast.type.type;
-        expr->assignable = false;
         break;
       }
     case EXPRESSION_TYPE::UNARY_OPERATOR: {
@@ -1993,39 +2076,26 @@ void compile_type_of_expression(Compiler* const comp,
 
           switch (expr->un_op.op) {
             case UNARY_OPERATOR::NEG: {
-                expr->assignable = false;
-
                 if (hint->tht == THT::EXACT) {
-                  const Structure* s = get_signed_type_of(comp->types, hint->type);
-                  if (s == nullptr) {
-                    //Dont both with hints as its going to fail anyway
-                    //let it fail later with a better message
-                    //RIP
-                    inner_hint = nullptr;
-                  }
-                  else {
-                    inner_hint_holder.tht = THT::EXACT;
-                    inner_hint_holder.type = s;
-                  }
+                  //TODO: This may be wrong
+                  inner_hint = hint;
                 }
                 else {
                   //Whatever this might entail
                   //No idea how this can even be called but maybe it will
-                  inner_hint = hint;
+                  INVALID_CODE_PATH("Some weird stuff with type hints is happening");
                 }
                 break;
               }
             case UNARY_OPERATOR::ADDRESS: {
-                expr->assignable = false;
-
                 switch (hint->tht) {
                   case THT::EXACT: {
-                      if (hint->type->type != STRUCTURE_TYPE::POINTER) {
+                      if (hint->type.struct_type() != STRUCTURE_TYPE::POINTER) {
                         inner_hint = nullptr;
                       }
                       else {
                         inner_hint_holder.tht = THT::EXACT;
-                        const PointerStructure* ps = (const PointerStructure*)hint->type;
+                        const auto* ps = hint->type.unchecked_base<PointerStructure>();
                         inner_hint_holder.type = ps->base;
                       }
 
@@ -2044,11 +2114,11 @@ void compile_type_of_expression(Compiler* const comp,
                 break;
               }
             case UNARY_OPERATOR::DEREF: {
-                expr->assignable = true;
+                expr->meta_flags |= META_FLAG::ASSIGNABLE;
 
                 if (hint->tht == THT::EXACT) {
                   inner_hint_holder.tht = THT::EXACT;
-                  inner_hint_holder.type = find_or_make_pointer_type(comp, expr->span, hint->type);
+                  inner_hint_holder.type = to_type(find_or_make_pointer_structure(comp, context, hint->type));
                 }
                 else {
                   inner_hint_holder.tht = THT::BASE_HINT;
@@ -2059,20 +2129,20 @@ void compile_type_of_expression(Compiler* const comp,
           }
         }
 
-        compile_type_of_expression(comp, state, expr->un_op.expr, inner_hint);
+        compile_type_of_expression(comp, context, state, expr->un_op.expr, inner_hint);
         if (comp->is_panic()) {
           return;
         }
 
-        expr->comptime_eval = expr->un_op.expr->comptime_eval;
+        expr->meta_flags = expr->un_op.expr->meta_flags;
         expr->makes_call = expr->un_op.expr->makes_call;
 
-        compile_unary_operator_emit(comp, state, expr);
+        compile_unary_operator_emit(comp, context, state, expr);
         if (comp->is_panic()) {
           return;
         }
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
@@ -2082,57 +2152,48 @@ void compile_type_of_expression(Compiler* const comp,
     case EXPRESSION_TYPE::BINARY_OPERATOR: {
         BinaryOperatorExpr* const bin_op = &expr->bin_op;
 
-        expr->assignable = false;
-
         bin_op->left->call_leaf = expr->call_leaf;
         bin_op->right->call_leaf = expr->call_leaf;
 
         //Do hints later
 
-        compile_type_of_expression(comp, state, bin_op->left, nullptr);
+        compile_type_of_expression(comp, context, state, bin_op->left, nullptr);
         if (comp->is_panic()) {
           return;
         }
 
-        compile_type_of_expression(comp, state, bin_op->right, nullptr);
+        compile_type_of_expression(comp, context, state, bin_op->right, nullptr);
         if (comp->is_panic()) {
           return;
         }
 
-        if (bin_op->left->comptime_eval && bin_op->right->comptime_eval) {
-          expr->comptime_eval = true;
-        }
-        else if (can_compile_const_value(bin_op->left)) {
-          expr->comptime_eval = false;
-
-          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
-          unit->expr = bin_op->left;
-
-          comp->set_dep(unit);
-          return;//guaranteed to have panic
-        }
-        else if (can_compile_const_value(bin_op->right)) {
-          expr->comptime_eval = false;
-
-          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
-          unit->expr = bin_op->right;
-
-          comp->set_dep(unit);
-          return;//guaranteed to have panic
-        }
-        else {
-          expr->comptime_eval = false;
-        }
-
+        expr->meta_flags = bin_op->left->meta_flags & bin_op->right->meta_flags;
         expr->makes_call = bin_op->left->makes_call || bin_op->right->makes_call;
 
+        if (!TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)) {
+          if (can_compile_const_value(bin_op->left)) {
+            ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+            unit->expr = bin_op->left;
+
+            comp->set_dep(context, unit);
+            return;//guaranteed to have panic
+          }
+          else if (can_compile_const_value(bin_op->right)) {
+            ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+            unit->expr = bin_op->right;
+
+            comp->set_dep(context, unit);
+            return;//guaranteed to have panic
+          }
+        }
+
         //pass in the hint for some operands
-        compile_binary_operator_emit(comp, state, expr, hint);
+        compile_binary_operator_emit(comp, context, state, expr, hint);
         if (comp->is_panic()) {
           return;
         }
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
@@ -2142,9 +2203,12 @@ void compile_type_of_expression(Compiler* const comp,
     case EXPRESSION_TYPE::FUNCTION_CALL: {
         FunctionCallExpr* const call = &expr->call;
 
-        expr->comptime_eval = true;
+        //TODO: Allow function execution at compile time
+        //Means we need to have a way to know which functions to load
+        //Currently it just expects to find a function but doesnt and calls the start of the code
+        expr->meta_flags |= ~META_FLAG::COMPTIME;
+
         expr->makes_call = true;
-        expr->assignable = false;
 
         {
           auto i = call->arguments.mut_begin();
@@ -2153,29 +2217,29 @@ void compile_type_of_expression(Compiler* const comp,
           for (; i < end; i++) {
             i->call_leaf = true;
 
-            compile_type_of_expression(comp, state, i, nullptr);
+            compile_type_of_expression(comp, context, state, i, nullptr);
             if (comp->is_panic()) {
               return;
             }
 
-            expr->comptime_eval &= i->comptime_eval;
+            expr->meta_flags &= i->meta_flags;
           }
         }
 
-        if (call->function == nullptr) {
-          compile_find_function_call(comp, expr);
+        if (call->sig == nullptr) {
+          compile_find_function_call(comp, context, state, expr);
           if (comp->is_panic()) {
             return;
           }
         }
 
-        const auto* func = call->function;
+        const auto* sig = call->sig;
 
         {
-          const size_t size = func->signature.parameter_types.size;
+          const size_t size = sig->parameter_types.size;
 
           if (call->arguments.size != size) {
-            comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+            comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                                "Compiler linked a function with {} parameters for a call with {} arguments!",
                                size, call->arguments.size);
             return;
@@ -2183,7 +2247,7 @@ void compile_type_of_expression(Compiler* const comp,
 
           //Do implicit casts
           for (size_t i = 0; i < size; i++) {
-            const Structure* param_t = func->signature.parameter_types.data[i];
+            const Type& param_t = sig->parameter_types.data[i];
             ASTExpression* arg_expr = call->arguments.data + i;
 
             TypeHint inner_hint ={};
@@ -2191,67 +2255,120 @@ void compile_type_of_expression(Compiler* const comp,
             inner_hint.tht = THT::EXACT;
             inner_hint.type = param_t;
 
-            compile_type_of_expression(comp, state, arg_expr, &inner_hint);
+            compile_type_of_expression(comp, context, state, arg_expr, &inner_hint);
             if (comp->is_panic()) {
               return;
             }
           }
         }
 
-        //TODO: Allow function execution at compile time
-        //Means we need to have a way to know which functions to load
-        //Currently it just expects to find a function but doesnt and calls the start of the code (I think)
-        expr->comptime_eval = false;
-
-        if (!expr->comptime_eval) {
+        if (!TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)) {
           auto i = call->arguments.mut_begin();
           const auto end = call->arguments.mut_end();
 
           for (; i < end; i++) {
             if (can_compile_const_value(i)) {
-              ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+              ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
               unit->expr = i;
 
-              comp->set_dep(unit);
+              comp->set_dep(context, unit);
               return;
             }
           }
         }
 
         //Last thing to do it set return type
-        expr->type = call->function->signature.return_type;
+        expr->type = sig->return_type;
 
-        compile_test_type_satisfies_hint(comp, expr->span, expr->type, hint);
+        compile_test_type_satisfies_hint(comp, expr->span, expr->meta_flags, expr->type, hint);
         if (comp->is_panic()) {
           return;
         }
         break;
       }
     default: {
-        comp->report_error(CompileCode::INTERNAL_ERROR, expr->span,
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->span,
                            "Invalid Expression type found! Expression id: '{}'",
                            (int)expr->expr_type);
         return;
       }
   }
 
-  assert(expr->type != nullptr);
+  ASSERT(expr->type.is_valid());
+}
+
+static void compile_type_of_decl(Compiler* const comp,
+                                 Context* const context,
+                                 State* const state,
+                                 ASTDecl* const decl) {
+  if (decl->type_ast != nullptr) {
+    if (!decl->type_ast->type.is_valid()) {
+      compile_type(comp, context, decl->type_ast);
+      if (comp->is_panic()) {
+        return;
+      }
+    }
+
+    if (!decl->expr->type.is_valid()) {
+      TypeHint type_hint ={};
+      type_hint.tht = THT::EXACT;
+      type_hint.type = decl->type_ast->type;
+
+      compile_type_of_expression(comp, context, state, decl->expr, &type_hint);
+      if (comp->is_panic()) {
+        return;
+      }
+    }
+
+    decl->type = decl->type_ast->type;
+  }
+  else {
+    if (!decl->expr->type.is_valid()) {
+      compile_type_of_expression(comp, context, state, decl->expr, nullptr);
+      if (comp->is_panic()) {
+        return;
+      }
+    }
+
+    decl->type = decl->expr->type;
+  }
+
+  ASSERT(decl->type.is_valid());
+
+  //if (decl->structure->type == STRUCTURE_TYPE::SIMPLE_LITERAL
+  //    || decl->structure->type == STRUCTURE_TYPE::TUPLE_LITERAL) {
+
+  //  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, decl->span,
+  //                     "The type of '{}' was infered as '{}' which does not have a given size\n"
+  //                     "Please use a different type (hopefully temporary)",
+  //                     decl->name, decl->structure->name);
+  //  return;
+  //}
+
+  if (decl->compile_time_const
+      && (decl->expr == nullptr || !TEST_MASK(decl->expr->meta_flags, META_FLAG::COMPTIME))) {
+    comp->report_error(ERROR_CODE::CONST_ERROR, decl->span,
+                       "Compile time declaration '{}' must be initialized by a compile time expression",
+                       decl->name);
+    return;
+  }
 }
 
 static void compile_type_of_statement(Compiler* const comp,
+                                      Context* context,
                                       Function* const func,
                                       State* const state,
                                       UntypedCode* untyped,
                                       ASTStatement* const statement) {
   switch (statement->type) {
     case STATEMENT_TYPE::ASSIGN: {
-        compile_type_of_expression(comp, state, statement->assign.assign_to, nullptr);
+        compile_type_of_expression(comp, context, state, statement->assign.assign_to, nullptr);
         if (comp->is_panic()) {
           return;
         }
 
-        if (!statement->assign.assign_to->assignable) {
-          comp->report_error(CompileCode::CONST_ERROR, statement->assign.assign_to->span,
+        if (!TEST_MASK(statement->assign.assign_to->meta_flags, META_FLAG::ASSIGNABLE)) {
+          comp->report_error(ERROR_CODE::CONST_ERROR, statement->assign.assign_to->span,
                              "Cannot assign to non-assignable expression");
           return;
         }
@@ -2262,7 +2379,7 @@ static void compile_type_of_statement(Compiler* const comp,
         hint.tht = THT::EXACT;
         hint.type = statement->assign.assign_to->type;
 
-        compile_type_of_expression(comp, state, statement->assign.value, &hint);
+        compile_type_of_expression(comp, context, state, statement->assign.value, &hint);
         if (comp->is_panic()) {
           return;
         }
@@ -2274,9 +2391,9 @@ static void compile_type_of_statement(Compiler* const comp,
 
         TypeHint hint ={};
         hint.tht = THT::EXACT;
-        hint.type = comp->types->s_bool;
+        hint.type = comp->services.builtin_types->t_bool;
 
-        compile_type_of_expression(comp, state, if_else->condition, &hint);
+        compile_type_of_expression(comp, context, state, if_else->condition, &hint);
         if (comp->is_panic()) {
           return;
         }
@@ -2291,9 +2408,9 @@ static void compile_type_of_statement(Compiler* const comp,
 
         TypeHint hint ={};
         hint.tht = THT::EXACT;
-        hint.type = comp->types->s_bool;
+        hint.type = comp->services.builtin_types->t_bool;
 
-        compile_type_of_expression(comp, state, while_loop->condition, &hint);
+        compile_type_of_expression(comp, context, state, while_loop->condition, &hint);
         if (comp->is_panic()) {
           return;
         }
@@ -2309,71 +2426,32 @@ static void compile_type_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::LOCAL: {
-        ASTLocal* const decl = &statement->local;
+        ASTDecl* const decl = &statement->local;
 
-        if (decl->type.type == nullptr) {
-          compile_type(comp, &decl->type);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
-        assert(decl->type.type != nullptr);
-
-        TypeHint hint ={};
-        hint.tht = THT::EXACT;
-        hint.type = decl->type.type;
-
-        compile_type_of_expression(comp, state, decl->expression, &hint);
+        compile_type_of_decl(comp, context, state, decl);
         if (comp->is_panic()) {
           return;
         }
 
-        assert(decl->expression->type != nullptr);
+        if (can_compile_const_value(decl->expr)) {
+          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+          unit->expr = decl->expr;
 
-        if (can_compile_const_value(decl->expression)) {
-          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
-          unit->expr = decl->expression;
-
-          comp->set_dep(unit);
+          comp->set_dep(context, unit);
           return;
         }
 
-        const NamedElement* possible_name = find_name(comp, comp->current_namespace, decl->name);
-
-        if (possible_name != nullptr) {
-          //Is actually the name for something else
-
-          switch (possible_name->type) {
-            case NamedElementType::STRUCTURE:
-              comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                 "Attempted to shadow the type '{}'",
-                                 decl->name);
-              break;
-            case NamedElementType::OVERLOADS:
-            case NamedElementType::FUNCTION_POINTER:
-              comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                 "Attempted to shadow the function '{}'",
-                                 decl->name);
-              break;
-            case NamedElementType::ENUM:
-              comp->report_error(CompileCode::NAME_ERROR, statement->span,
-                                 "Attempted to shadow the enum value '{}'",
-                                 decl->name);
-              break;
-            default: assert(false);
-          }
-
+        assert_empty_name(comp, statement->span, context->current_namespace, decl->name);
+        if (comp->is_panic()) {
           return;
         }
-
 
         //Check for shadowing
 
         const Local* shadowing = state->find_local(decl->name);
 
         if (shadowing != nullptr) {
-          comp->report_error(CompileCode::NAME_ERROR, statement->span,
+          comp->report_error(ERROR_CODE::NAME_ERROR, statement->span,
                              "Attempted to shadow the local variable '{}'",
                              decl->name);
           return;
@@ -2386,17 +2464,32 @@ static void compile_type_of_statement(Compiler* const comp,
         state->all_locals.insert_uninit(1);
         auto* loc = state->all_locals.back();
 
-        loc->name = decl->name;
-        loc->type = decl->type.type;
-        assert(loc->type != nullptr);
+        loc->decl.name = decl->name;
+        loc->decl.type = decl->type;
+        loc->decl.source = decl;
+        if (decl->compile_time_const) {
+          loc->decl.meta_flags |= META_FLAG::COMPTIME;
+        }
+        else {
+          loc->decl.meta_flags |= META_FLAG::ASSIGNABLE;
+        }
 
-        if (decl->expression->comptime_eval) {
+        ASSERT(loc->decl.type.is_valid());
+
+        if (TEST_MASK(loc->decl.meta_flags, META_FLAG::COMPTIME)) {
+          if (!TEST_MASK(decl->expr->meta_flags, META_FLAG::COMPTIME)) {
+            comp->report_error(ERROR_CODE::CONST_ERROR, decl->span,
+                               "Cannot initialize a compile time constant with "
+                               "a non compile time constant value");
+            return;
+          }
+
           //Load as constant
-          force_load_const_value(comp, decl->expression);
-          assert(decl->expression->const_val != nullptr);
+          force_load_const_value(comp, decl->expr);
+          ASSERT(decl->expr->const_val != nullptr);
 
           loc->val.type = RVT::CONST;
-          loc->val.constant = ConstantVal{ decl->expression->const_val, loc->type->size() };
+          loc->val.constant = ConstantVal{ decl->expr->const_val, loc->decl.type.structure->size };
         }
 
         state->active_locals.insert(decl->local_index);
@@ -2404,8 +2497,8 @@ static void compile_type_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::EXPRESSION: {
-        compile_type_of_expression(comp, state, statement->expression, nullptr);
 
+        compile_type_of_expression(comp, context, state, statement->expression.expr, nullptr);
         if (comp->is_panic()) {
           return;
         }
@@ -2415,34 +2508,33 @@ static void compile_type_of_statement(Compiler* const comp,
     case STATEMENT_TYPE::RETURN: {
         TypeHint hint ={};
         hint.tht  = THT::EXACT;
-        hint.type = func->signature.return_type;
+        hint.type = func->signature.sig_struct->return_type;
 
-        compile_type_of_expression(comp, state, statement->expression, &hint);
+        ASTExpression* const expr = statement->expression.expr;
+        compile_type_of_expression(comp, context, state, expr, &hint);
         if (comp->is_panic()) {
           return;
         }
 
-        ASTExpression* const expr = statement->expression;
-
         if (can_compile_const_value(expr)) {
-          ConstantExprUnit* unit = comp->new_const_expr_unit(comp->current_namespace);
+          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
           unit->expr = expr;
 
-          comp->set_dep(unit);
+          comp->set_dep(context, unit);
           return;
         }
         return;
       }
   }
 
-  comp->report_error(CompileCode::INTERNAL_ERROR, statement->span,
+  comp->report_error(ERROR_CODE::INTERNAL_ERROR, statement->span,
                      "Reached end of statement type checking without exiting\n"
                      "Statement type: {}\n", statement->type);
 }
 
 static RuntimeValue advance_runtime_arg(State* state,
                                         CallingConvArgIterator* itr,
-                                        const Structure* type) {
+                                        const Structure* s) {
   RuntimeValue val ={};
   if (itr->regs_used < itr->conv->num_parameter_registers) {
     //Load into register
@@ -2456,10 +2548,10 @@ static RuntimeValue advance_runtime_arg(State* state,
   }
   else {
     //Passed memory
-    assert(itr->conv->stack_direction == STACK_DIRECTION::RIGHT_TO_LEFT);
+    ASSERT(itr->conv->stack_direction == STACK_DIRECTION::RIGHT_TO_LEFT);
 
-    const size_t size = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : type->size();
-    const size_t align = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : type->alignment();
+    const size_t size = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : s->size;
+    const size_t align = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : s->alignment;
 
     const int32_t offset = state->stack.pass_stack_local(size, align);
 
@@ -2481,7 +2573,7 @@ static RuntimeValue advance_runtime_arg(State* state,
 
 static RuntimeValue advance_runtime_param(State* state,
                                           CallingConvParamIterator* itr,
-                                          const Structure* type) {
+                                          const Structure* s) {
   RuntimeValue val ={};
   if (itr->regs_used < itr->conv->num_parameter_registers) {
     //Load into register
@@ -2497,10 +2589,10 @@ static RuntimeValue advance_runtime_param(State* state,
   }
   else {
     //Passed memory
-    assert(itr->conv->stack_direction == STACK_DIRECTION::RIGHT_TO_LEFT);
+    ASSERT(itr->conv->stack_direction == STACK_DIRECTION::RIGHT_TO_LEFT);
 
-    const int32_t size = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : type->size();
-    const int32_t align = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : type->alignment();
+    const int32_t size = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : s->size;
+    const int32_t align = itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER ? 8 : s->alignment;
 
     //Determine the stack location
     const int32_t mod_align = itr->stack_passed % align;
@@ -2527,14 +2619,15 @@ static RuntimeValue advance_runtime_param(State* state,
 }
 
 static RuntimeValue load_to_argument_itr(Compiler* comp,
+                                         Context* context,
                                          State* state,
                                          CodeBlock* const code,
-                                         const Structure* type,
+                                         const Structure* s,
                                          RuntimeValue* val,
                                          CallingConvArgIterator* itr) {
-  RuntimeValue param = advance_runtime_arg(state, itr, type);
+  RuntimeValue param = advance_runtime_arg(state, itr, s);
 
-  const bool reg_passed_as_ptr = register_passed_as_pointer(type);
+  const bool reg_passed_as_ptr = register_passed_as_pointer(s);
 
   if (param.type == RVT::REGISTER && reg_passed_as_ptr) {
     //LEA
@@ -2544,17 +2637,20 @@ static RuntimeValue load_to_argument_itr(Compiler* comp,
     args.code = code;
     args.prim = val;
 
+    //Load as pointer
     RuntimeValue address = args.emit_address();
+    const Structure* ptr_type = find_or_make_pointer_structure(comp, context, to_type(s));
+    ASSERT(!comp->is_panic());
 
     //Copy
-    copy_runtime_to_runtime(comp, state, code, type, &address, &param);
+    copy_runtime_to_runtime(comp, state, code, ptr_type, &address, &param);
   }
   else if (param.type == RVT::REGISTER && !reg_passed_as_ptr) {
-    copy_runtime_to_runtime(comp, state, code, type, val, &param);
+    copy_runtime_to_runtime(comp, state, code, s, val, &param);
   }
   else if (param.type == RVT::MEMORY
            && (itr->conv->stack_pass_type == STACK_PASS_TYPE::VALUE || !reg_passed_as_ptr)) {
-    copy_runtime_to_runtime(comp, state, code, type, val, &param);
+    copy_runtime_to_runtime(comp, state, code, s, val, &param);
   }
   else if (param.type == RVT::MEMORY &&  itr->conv->stack_pass_type == STACK_PASS_TYPE::POINTER
            && reg_passed_as_ptr) {
@@ -2568,10 +2664,10 @@ static RuntimeValue load_to_argument_itr(Compiler* comp,
     RuntimeValue address = args.emit_address();
 
     //Copy
-    copy_runtime_to_runtime(comp, state, code, type, &address, &param);
+    copy_runtime_to_runtime(comp, state, code, s, &address, &param);
   }
   else {
-    assert(false);
+    INVALID_CODE_PATH("Runtime Value union option not covered");
   }
 
   return param;
@@ -2580,29 +2676,29 @@ static RuntimeValue load_to_argument_itr(Compiler* comp,
 static void load_const_to_mem(Compiler* const comp,
                               State* const state,
                               CodeBlock* const code,
-                              const Structure* type,
+                              const Structure* s,
                               ConstantVal constant,
                               MemIndex mem) {
 
-  const uint32_t size = type->size();
-  const uint32_t align = type->alignment();
+  const uint32_t size = s->size;
+  const uint32_t align = s->alignment;
 
   const size_t s_div_8 = size / 8;
   const size_t s_mod_8 = size % 8;
 
-  assert(size == constant.size);
+  ASSERT(size == constant.size);
 
   //Needs to go on stack
   auto* const mem_val = state->mem_values.data + mem.index;
   if (mem_val->size > 0) {
-    assert(mem_val->size >= size);
+    ASSERT(mem_val->size >= size);
   }
 
   int64_t* iptr = (int64_t*)constant.ptr;
 
   MemComplex indexed_mem = mem_val->mem;
 
-  if (comp->build_options.system == &system_x86_64) {
+  if (comp->build_options.endpoint_system == &system_x86_64) {
     auto mov_val = state->new_value();
 
     for (size_t itr = 0; itr < s_div_8; itr++) {
@@ -2682,7 +2778,7 @@ static void load_const_to_mem(Compiler* const comp,
       ByteCode::EMIT::COPY_8_TO_MEM(code->code, ptr[0], indexed_mem);
       break;
     default:
-      assert(false);//Logically should never ever be able to get here ...
+      INVALID_CODE_PATH("Somehow n mod 8 was bigger than 8 ... We broke maths");
   }
   state->use_mem(mem);
   comp->constants.free_no_destruct((void*)constant.ptr);
@@ -2692,12 +2788,12 @@ static void load_const_to_mem(Compiler* const comp,
 static void copy_mem_to_mem(Compiler* const comp,
                             State* const state,
                             CodeBlock* const code,
-                            const Structure* type,
+                            const Structure* s,
                             MemIndex from,
                             MemIndex to) {
 
-  const uint32_t size = type->size();
-  const uint32_t align = type->alignment();
+  const uint32_t size = s->size;
+  const uint32_t align = s->alignment;
 
   const size_t s_div_8 = size / 8;
   size_t s_mod_8 = size % 8;
@@ -2705,14 +2801,14 @@ static void copy_mem_to_mem(Compiler* const comp,
   //Needs to go on stack
   auto* const to_val = state->mem_values.data + to.index;
   if (to_val->size > 0) {
-    assert(to_val->size >= size);
+    ASSERT(to_val->size >= size);
   }
 
   MemComplex to_mem = to_val->mem;
 
   auto* const from_val = state->mem_values.data + from.index;
   if (from_val->size > 0) {
-    assert(from_val->size >= size);
+    ASSERT(from_val->size >= size);
   }
 
   MemComplex from_mem = from_val->mem;
@@ -2791,7 +2887,7 @@ static void copy_mem_to_mem(Compiler* const comp,
 }
 
 static void emit_copy_r_to_mem(const Structure* s, Array<uint8_t>& arr, uint8_t r, const MemComplex& mem) {
-  switch (s->size()) {
+  switch (s->size) {
     case 1:
       ByteCode::EMIT::COPY_R8_TO_MEM(arr, r, mem);
       break;
@@ -2805,12 +2901,12 @@ static void emit_copy_r_to_mem(const Structure* s, Array<uint8_t>& arr, uint8_t 
       ByteCode::EMIT::COPY_R64_TO_MEM(arr, r, mem);
       break;
     default:
-      assert(false);//Cant handle register sizes that arent a power of 2
+      INVALID_CODE_PATH("Cant handle register sizes that arent a power of 2");
   }
 }
 
 static void emit_copy_r_from_mem(const Structure* s, Array<uint8_t>& arr, uint8_t r, const MemComplex& mem) {
-  switch (s->size()) {
+  switch (s->size) {
     case 1:
       ByteCode::EMIT::COPY_R8_FROM_MEM(arr, r, mem);
       break;
@@ -2824,12 +2920,12 @@ static void emit_copy_r_from_mem(const Structure* s, Array<uint8_t>& arr, uint8_
       ByteCode::EMIT::COPY_R64_FROM_MEM(arr, r, mem);
       break;
     default:
-      assert(false);//Cant handle register sizes that arent a power of 2
+      INVALID_CODE_PATH("Cant handle register sizes that arent a power of 2");
   }
 }
 
 static void emit_copy_r_to_r(const Structure* s, Array<uint8_t>& arr, uint8_t r1, uint8_t r2) {
-  switch (s->size()) {
+  switch (s->size) {
     case 1:
       ByteCode::EMIT::COPY_R8_TO_R8(arr, r1, r2);
       break;
@@ -2843,7 +2939,7 @@ static void emit_copy_r_to_r(const Structure* s, Array<uint8_t>& arr, uint8_t r1
       ByteCode::EMIT::COPY_R64_TO_R64(arr, r1, r2);
       break;
     default:
-      assert(false);//Cant handle register sizes that arent a power of 2
+      INVALID_CODE_PATH("Cant handle register sizes that arent a power of 2");
   }
 }
 
@@ -2852,7 +2948,7 @@ static void load_const_to_reg(Compiler* const comp,
                               CodeBlock* const code,
                               ConstantVal constant,
                               ValueIndex reg) {
-  assert(constant.size <= 8);
+  ASSERT(constant.size <= 8);
 
   switch (constant.size) {
     case 1: {
@@ -2877,7 +2973,7 @@ static void load_const_to_reg(Compiler* const comp,
       }
     default:
       printf("ERROR: Unsupported constant size: %zu\n", constant.size);
-      assert(false);
+      INVALID_CODE_PATH("Cant handle register sizes that arent a power of 2");
   }
 
   comp->constants.free_no_destruct((void*)constant.ptr);
@@ -2918,7 +3014,7 @@ RuntimeValue new_const_in_reg(Compiler* const comp, State* const state, CodeBloc
       }
     default:
       printf("ERROR: Unsupported constant size: %zu\n", size);
-      assert(false);
+      INVALID_CODE_PATH("Cant handle register sizes that arent a power of 2");
   }
 
   state->control_flow.expression_num++;
@@ -2956,7 +3052,7 @@ static void copy_mem_to_runtime(Compiler* const comp,
                                 const Structure* type,
                                 MemIndex mem,
                                 RuntimeValue* to) {
-  assert(to->type != RVT::CONST);
+  ASSERT(to->type != RVT::CONST);
   DEFER(&) { state->control_flow.expression_num++; };
 
   switch (to->type) {
@@ -2986,18 +3082,18 @@ static void copy_mem_to_runtime(Compiler* const comp,
 static void copy_reg_to_runtime(Compiler* const comp,
                                 State* const state,
                                 CodeBlock* const code,
-                                const Structure* type,
+                                const Structure* structure,
                                 ValueIndex reg,
                                 RuntimeValue* to) {
-  assert(to->type != RVT::CONST);
+  ASSERT(to->type != RVT::CONST);
   DEFER(&) { state->control_flow.expression_num++; };
 
-  size_t size = type->size();
-  assert(size <= 8);
+  size_t size = structure->size;
+  ASSERT(size <= 8);
 
   switch (to->type) {
     case RVT::MEMORY: {
-        emit_copy_r_to_mem(type, code->code, (uint8_t)reg.val, state->get_mem(to->mem)->mem);
+        emit_copy_r_to_mem(structure, code->code, (uint8_t)reg.val, state->get_mem(to->mem)->mem);
         state->use_mem(to->mem);
         state->use_value(reg);
         break;
@@ -3007,7 +3103,7 @@ static void copy_reg_to_runtime(Compiler* const comp,
           return;//are the same so no need to copy
         }
 
-        emit_copy_r_to_r(type, code->code, (uint8_t)reg.val, (uint8_t)to->reg.val);
+        emit_copy_r_to_r(structure, code->code, (uint8_t)reg.val, (uint8_t)to->reg.val);
         state->value_copy(reg, to->reg);
         break;
       }
@@ -3015,7 +3111,7 @@ static void copy_reg_to_runtime(Compiler* const comp,
         to->type = RVT::REGISTER;
         to->reg = state->new_value();
 
-        emit_copy_r_to_r(type, code->code, (uint8_t)reg.val, (uint8_t)to->reg.val);
+        emit_copy_r_to_r(structure, code->code, (uint8_t)reg.val, (uint8_t)to->reg.val);
         state->value_copy(reg, to->reg);
         break;
       }
@@ -3025,7 +3121,7 @@ static void copy_reg_to_runtime(Compiler* const comp,
 void copy_runtime_to_runtime(Compiler* const comp,
                              State* const state,
                              CodeBlock* const code,
-                             const Structure* type,
+                             const Structure* structure,
                              const RuntimeValue* from,
                              RuntimeValue* to) {
   if (*from == *to) {
@@ -3034,36 +3130,36 @@ void copy_runtime_to_runtime(Compiler* const comp,
 
   DEFER(&) { state->control_flow.expression_num++; };
 
-  assert(from->type != RVT::UNKNOWN);
+  ASSERT(from->type != RVT::UNKNOWN);
 
   switch (from->type) {
     case RVT::CONST: {
-        load_const_to_runtime_val(comp, state, code, type, from->constant, to);
+        load_const_to_runtime_val(comp, state, code, structure, from->constant, to);
         break;
       }
     case RVT::REGISTER: {
-        copy_reg_to_runtime(comp, state, code, type, from->reg, to);
+        copy_reg_to_runtime(comp, state, code, structure, from->reg, to);
         break;
       }
     case RVT::MEMORY: {
-        copy_mem_to_runtime(comp, state, code, type, from->mem, to);
+        copy_mem_to_runtime(comp, state, code, structure, from->mem, to);
       }
   }
 }
 
 static void load_runtime_hint(Compiler* const comp,
                               State* const state,
-                              const Structure* type,
+                              const Structure* s,
                               RuntimeHint* hint,
                               uint8_t possible) {
-  assert(hint->is_hint);
+  ASSERT(hint->is_hint);
   hint->is_hint = false;
 
-  assert(possible != 0);//Cant have no options ever
+  ASSERT(possible != 0);//Cant have no options ever
   possible &= hint->hint_types;
-  assert(possible != 0);//Cant have overlapping options
+  ASSERT(possible != 0);//Cant have overlapping options
 
-  size_t size = type->size();
+  size_t size = s->size;
 
   if ((possible & (uint8_t)RVT::CONST) > 0) {
     hint->val.type = RVT::CONST;
@@ -3078,12 +3174,9 @@ static void load_runtime_hint(Compiler* const comp,
 
     state->mem_values.insert_uninit(1);
 
-    size_t size = type->size();
-    size_t alignment = type->alignment();
-
     auto* stack_val = state->mem_values.back();
     stack_val->mem.base = (uint8_t)state->rbp.val;
-    stack_val->mem.disp = state->stack.next_stack_local(size, alignment);
+    stack_val->mem.disp = state->stack.next_stack_local(size, s->alignment);
     stack_val->mem.scale = 0;
     stack_val->size = size;
   }
@@ -3101,7 +3194,7 @@ void copy_runtime_to_runtime_hint(Compiler* const comp,
                                   const uint8_t possible_types) {
 
   if (!to->is_hint) {
-    assert(((uint8_t)to->val.type & possible_types) > 0);
+    ASSERT(((uint8_t)to->val.type & possible_types) > 0);
     copy_runtime_to_runtime(comp, state, code, type, from, &to->val);
   }
   else {
@@ -3119,12 +3212,14 @@ void copy_runtime_to_runtime_hint(Compiler* const comp,
 }
 
 static void compile_bytecode_of_expression(Compiler* const comp,
+                                           Context* const context,
                                            State* const state,
                                            CodeBlock* const code,
                                            const ASTExpression* const expr,
                                            RuntimeHint* hint);
 
 static RuntimeValue compile_bytecode_of_expression_new(Compiler* const comp,
+                                                       Context* const context,
                                                        State* const state,
                                                        CodeBlock* const code,
                                                        const ASTExpression* const expr,
@@ -3132,52 +3227,57 @@ static RuntimeValue compile_bytecode_of_expression_new(Compiler* const comp,
   RuntimeHint rt_hint ={};
   rt_hint.is_hint = true;
   rt_hint.hint_types = hint;
-  compile_bytecode_of_expression(comp, state, code, expr, &rt_hint);
+  compile_bytecode_of_expression(comp, context, state, code, expr, &rt_hint);
 
-  assert(!rt_hint.is_hint);
-  assert(((uint8_t)rt_hint.val.type & hint) > 0);
+  ASSERT(!rt_hint.is_hint);
+  ASSERT(((uint8_t)rt_hint.val.type & hint) > 0);
   return rt_hint.val;
 }
 
 static void compile_bytecode_of_expression_existing(Compiler* const comp,
+                                                    Context* const context,
                                                     State* const state,
                                                     CodeBlock* const code,
                                                     const ASTExpression* const expr,
                                                     RuntimeValue* hint) {
+  ASSERT(hint->type != RVT::CONST);//Cant load to an existing constant
+
   RuntimeHint rt_hint ={};
   rt_hint.is_hint = false;
   rt_hint.val = *hint;
 
-  compile_bytecode_of_expression(comp, state, code, expr, &rt_hint);
+  compile_bytecode_of_expression(comp, context, state, code, expr, &rt_hint);
 
-  assert(rt_hint.val == *hint);
+  ASSERT(rt_hint.val == *hint);
 }
 
 static void compile_function_call(Compiler* const comp,
+                                  Context* const context,
                                   State* const state,
                                   CodeBlock* const code,
                                   const ASTExpression* const expr,
                                   RuntimeHint* hint) {
 
-  assert(expr->expr_type == EXPRESSION_TYPE::FUNCTION_CALL);
+  ASSERT(expr->expr_type == EXPRESSION_TYPE::FUNCTION_CALL);
   const FunctionCallExpr* const call = &expr->call;
 
   auto save_stack_params = state->stack.current_passed;
   DEFER(&) { state->stack.current_passed = save_stack_params; };
 
   state->made_call = true;
+  state->stack.require_call_alignment(16);//TODO: Actually work out the alignment
 
-  const CallingConvention* convention = call->function->signature.calling_convention;
+  const CallingConvention* convention = call->sig->calling_convention;
 
-  bool has_return = call->function->signature.return_type != comp->types->s_void;
-  bool return_via_pointer = has_return && register_passed_as_pointer(call->function->signature.return_type);
+  bool has_return = call->sig->return_type != comp->services.builtin_types->t_void;
+  bool return_via_pointer = has_return && register_passed_as_pointer(call->sig->return_type);
 
-  struct TypedVal {
+  struct StructuredVal {
     RuntimeValue rv ={};
-    const Structure* type = nullptr;
+    const Structure* str = nullptr;
   };
 
-  Array<TypedVal> parameter_vals;
+  Array<StructuredVal> parameter_vals;
   parameter_vals.reserve_total(call->arguments.size + return_via_pointer);
 
   if (return_via_pointer) {
@@ -3191,12 +3291,12 @@ static void compile_function_call(Compiler* const comp,
 
     for (size_t i = 0; i < size; i++) {
       const ASTExpression* inner_expr = call->arguments.data + i;
-      const Structure* call_type = call->function->signature.parameter_types.data[i];
+      const Type call_type = call->sig->parameter_types.data[i];
 
 
-      const RuntimeValue val = compile_bytecode_of_expression_new(comp, state, code, inner_expr, ALL_RVTS);
+      const RuntimeValue val = compile_bytecode_of_expression_new(comp, context, state, code, inner_expr, ALL_RVTS);
 
-      parameter_vals.insert({ val, call_type });
+      parameter_vals.insert({ val, call_type.structure });
     }
   }
 
@@ -3206,9 +3306,9 @@ static void compile_function_call(Compiler* const comp,
 
 
   if (return_via_pointer) {
-    assert(hint != nullptr);
+    ASSERT(hint != nullptr);
     //Load the return on the stack and then pass a pointer
-    load_runtime_hint(comp, state, call->function->signature.return_type, hint, (uint8_t)RVT::MEMORY);
+    load_runtime_hint(comp, state, call->sig->return_type.structure, hint, (uint8_t)RVT::MEMORY);
 
     UnOpArgs args ={};
     args.comp = comp;
@@ -3218,7 +3318,7 @@ static void compile_function_call(Compiler* const comp,
 
     //First element is reserved ahead of time
     parameter_vals.data[0].rv = args.emit_address();
-    parameter_vals.data[0].type = comp->types->s_void_ptr;//just any pointer type
+    parameter_vals.data[0].str = comp->services.builtin_types->t_void_ptr.structure;//just any pointer type
 
     state->control_flow.expression_num++;
   }
@@ -3233,7 +3333,7 @@ static void compile_function_call(Compiler* const comp,
 
   //Load the actual arguments
   for (; i < end; i++) {
-    RuntimeValue param_val = load_to_argument_itr(comp, state, code, i->type, &i->rv, &conv_iter);
+    RuntimeValue param_val = load_to_argument_itr(comp, context, state, code, i->str, &i->rv, &conv_iter);
 
     i->rv = std::move(param_val);
   }
@@ -3255,22 +3355,60 @@ static void compile_function_call(Compiler* const comp,
 
   size_t stack_params = state->stack.current_passed;
 
-  if (call->function->func_type == FUNCTION_TYPE::POINTER
-      && comp->build_options.system == &system_vm
-      && static_cast<const FunctionPointer*>(call->function)->is_dll) {
-    //native call from the vm
-    ByteCode::EMIT::CALL_NATIVE_X64(code->code, call->function, stack_params);
+  Function* func = nullptr;
+  {
+    const auto names = comp->services.names->find_all_names(context->current_namespace, call->function_name);
+    auto ni = names.begin();
+    const auto nend = names.end();
+
+    for (; ni < nend; ni++) {
+      const auto& globals = ni->named_element->globals;
+      auto gi = globals.begin();
+      const auto gend = globals.end();
+
+      for (; gi < gend; gi++) {
+        const Global* glob = *gi;
+        if (glob->decl.type.structure == call->sig) {
+          ASSERT(glob->constant_value.ptr != nullptr);
+          func = *(Function**)glob->constant_value.ptr;
+          goto FOUND_FUNC;
+        }
+      }
+    }
   }
-  else {
-    ByteCode::EMIT::CALL(code->code, call->function);
+
+  {
+    auto li = state->active_locals.begin();
+    const auto lend = state->active_locals.end();
+
+    for (; li < lend; li++) {
+      const Local* loc = state->all_locals.data + *li;
+
+      if (loc->decl.type.structure == call->sig && loc->decl.name == call->function_name) {
+        ASSERT(TEST_MASK(loc->decl.meta_flags, META_FLAG::COMPTIME));
+        ASSERT(loc->val.type == RVT::CONST);
+        ASSERT(loc->val.constant.size == 8);
+        func = *(Function**)loc->val.constant.ptr;
+        goto FOUND_FUNC;
+      }
+    }
   }
+
+FOUND_FUNC:
+  ASSERT(func != nullptr);
+
+
+  func->is_called = true;
+  ByteCode::EMIT::CALL(code->code, func);
+
+
   state->control_flow.had_call = true;
   state->control_flow.last_call = state->control_flow.expression_num;
 
   state->control_flow.expression_num++;
 
   if (has_return && !return_via_pointer) {
-    assert(hint != nullptr);
+    ASSERT(hint != nullptr);
 
     //Need to reserve RAX if we didnt already pass a pointer in
     const ValueIndex rax = state->new_value();
@@ -3287,36 +3425,33 @@ static void compile_function_call(Compiler* const comp,
     state->control_flow.expression_num++;
 
     if (hint->is_hint) {
-      load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts & NON_CONST_RVTS);
+      load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts & NON_CONST_RVTS);
     }
 
-    copy_reg_to_runtime(comp, state, code, expr->type, rax, &hint->val);
+    copy_reg_to_runtime(comp, state, code, expr->type.structure, rax, &hint->val);
   }
 }
 
 //Note: Recursive 
 static void compile_bytecode_of_expression(Compiler* const comp,
+                                           Context* const context,
                                            State* const state,
                                            CodeBlock* const code,
                                            const ASTExpression* const expr,
                                            RuntimeHint* hint) {
-  if (!state->comptime_compilation) {
-    assert(expr->type->type != STRUCTURE_TYPE::SIMPLE_LITERAL);
-    assert(expr->type->type != STRUCTURE_TYPE::TUPLE_LITERAL);
-  }
+  ASSERT(hint != nullptr);
 
   DEFER(&) {
-    if (hint != nullptr) assert(!hint->is_hint);
+    ASSERT(!hint->is_hint);
+
     state->control_flow.expression_num++;
   };
 
   if (expr->const_val != nullptr) {
-    assert(hint != nullptr);
-
     //Compile time expression
 
     //Copy the value to a new constant
-    const size_t size = expr->type->size();
+    const size_t size = expr->type.structure->size;
 
     uint8_t* bytes = (uint8_t*)comp->constants.alloc_no_construct(size);
     const uint8_t* c_bytes = (const uint8_t*)expr->const_val;
@@ -3326,24 +3461,56 @@ static void compile_bytecode_of_expression(Compiler* const comp,
     const ConstantVal constant ={ bytes, size };
 
     if (hint->is_hint) {
-      load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+      load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
     }
 
-    load_const_to_runtime_val(comp, state, code, expr->type, constant, &hint->val);
+    load_const_to_runtime_val(comp, state, code, expr->type.structure, constant, &hint->val);
     return;
   }
 
+
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::STRUCT: {
+        ASSERT(state->comptime_compilation);
+
+        if (hint->is_hint) {
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
+        }
+
+        Type* struct_c = (Type*)comp->constants.alloc_no_construct(sizeof(Type));
+        memcpy_ts(struct_c, 1, &expr->struct_body.body->type, 1);
+
+        load_const_to_runtime_val(comp, state, code, expr->type.structure,
+                                  ConstantVal{ (uint8_t*)struct_c, sizeof(Type)},
+                                  &hint->val);
+        break;
+      }
+    case EXPRESSION_TYPE::LAMBDA: {
+        ASSERT(state->comptime_compilation);
+
+        if (hint->is_hint) {
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
+        }
+
+        Function** func_c = (Function**)comp->constants.alloc_no_construct(8);
+        *func_c = expr->lambda.lambda->function;
+
+        load_const_to_runtime_val(comp, state, code, expr->type.structure,
+                                  ConstantVal{ (uint8_t*)func_c, 8 },
+                                  &hint->val);
+        break;
+      }
     case EXPRESSION_TYPE::MEMBER: {
-        assert(hint != nullptr);
+        ASSERT(hint != nullptr);
 
         RuntimeValue obj = compile_bytecode_of_expression_new(comp,
+                                                              context,
                                                               state,
                                                               code,
                                                               expr->index.expr,
                                                               (uint8_t)RVT::MEMORY);
 
-        assert(obj.type == RVT::MEMORY);
+        ASSERT(obj.type == RVT::MEMORY);
 
         RuntimeValue member ={};
         member.type = RVT::MEMORY;
@@ -3357,25 +3524,27 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           member_mem->mem = obj_mem->mem;
 
           member_mem->mem.disp += expr->member.offset;
-          member_mem->size = expr->type->size();
+          member_mem->size = expr->type.structure->size;
         }
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->type, &member, hint, expr->valid_rvts & NON_CONST_RVTS);
+        copy_runtime_to_runtime_hint(comp, state, code, expr->type.structure, &member, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
     case EXPRESSION_TYPE::INDEX: {
-        assert(hint != nullptr);
-        const size_t base_size = expr->type->size();
+        ASSERT(hint != nullptr);
+        const size_t base_size = expr->type.structure->size;
 
-        assert(TYPE_TESTS::can_index(expr->index.expr->type));
+        ASSERT(TYPE_TESTS::can_index(expr->index.expr->type));
 
         RuntimeValue arr = compile_bytecode_of_expression_new(comp,
+                                                              context,
                                                               state,
                                                               code,
                                                               expr->index.expr,
                                                               RVT::REGISTER | RVT::MEMORY);
 
         RuntimeValue index_val = compile_bytecode_of_expression_new(comp,
+                                                                    context,
                                                                     state,
                                                                     code,
                                                                     expr->index.index,
@@ -3393,7 +3562,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           arr = args.emit_deref();
         }
         else {
-          assert(TYPE_TESTS::is_array(expr->index.expr->type));
+          ASSERT(TYPE_TESTS::is_array(expr->index.expr->type));
         }
 
         if (arr.type == RVT::REGISTER) {
@@ -3425,7 +3594,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
             res = args.emit_shift_r_u64_by_8();
           }
           else {
-            assert(index_val.type == RVT::REGISTER);
+            ASSERT(index_val.type == RVT::REGISTER);
 
             ByteCode::EMIT::SET_R8_TO_8(code->code, (uint8_t)use_val.reg.val, (uint8_t)(base_size * 8));
             state->set_value(use_val.reg);
@@ -3442,7 +3611,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
             res = args.emit_shift_r_u64_by_8();
           }
 
-          copy_runtime_to_runtime_hint(comp, state, code, expr->type, &res, hint, expr->valid_rvts & NON_CONST_RVTS);
+          copy_runtime_to_runtime_hint(comp, state, code, expr->type.structure, &res, hint, expr->valid_rvts & NON_CONST_RVTS);
         }
         else {
           RuntimeValue index_mem ={};
@@ -3453,7 +3622,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           index_mem.mem = arr_index;
 
 
-          assert(arr.type == RVT::MEMORY);
+          ASSERT(arr.type == RVT::MEMORY);
           //In memory - do a memory index
 
           if (index_val.type == RVT::CONST) {
@@ -3466,7 +3635,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
             const size_t disp_index = (base_size * index);
 
             if (arr_mem->size > 0) {
-              assert(arr_mem->size >= disp_index);//Semi Bounds checking
+              ASSERT(arr_mem->size >= disp_index);//Semi Bounds checking
             }
 
             index_mem->mem = arr_mem->mem;
@@ -3475,14 +3644,14 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
           }
           else {
-            assert(index_val.type == RVT::REGISTER);
+            ASSERT(index_val.type == RVT::REGISTER);
             ValueIndex index = index_val.reg;
 
 
             const MemValue* arr_mem = state->get_mem(arr.mem);
             MemValue* index_mem = state->get_mem(arr_index);
 
-            assert(arr_mem->mem.scale == 0);
+            ASSERT(arr_mem->mem.scale == 0);
 
             index_mem->mem = arr_mem->mem;
             index_mem->size = base_size;
@@ -3491,25 +3660,23 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
           }
 
-          copy_runtime_to_runtime_hint(comp, state, code, expr->type, &index_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
+          copy_runtime_to_runtime_hint(comp, state, code, expr->type.structure, &index_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
         }
 
         break;
       }
     case EXPRESSION_TYPE::TUPLE_LIT: {
-        assert(hint != nullptr);
-        //Can only load into memory at the moment
-        assert(hint->val.type == RVT::MEMORY);
-        assert(expr->type->type == STRUCTURE_TYPE::COMPOSITE);
+        ASSERT(hint != nullptr);
+        ASSERT(expr->type.struct_type() == STRUCTURE_TYPE::COMPOSITE);
 
-        const CompositeStructure* cpst = (const CompositeStructure*)expr->type;
+        const auto* cpst = expr->type.unchecked_base<CompositeStructure>();
 
         //Load the hint to mem
         if (hint->is_hint) {
-          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
         }
 
-        assert(hint->val.type == RVT::MEMORY);
+        ASSERT(hint->val.type == RVT::MEMORY);
 
         RuntimeValue tup_single ={};
         tup_single.type = RVT::MEMORY;
@@ -3536,32 +3703,32 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           MemValue* el_mem = state->get_mem(tup_single.mem);
 
           el_mem->mem.disp = base_disp + i_t->offset;
-          el_mem->size = i_t->type->size();
+          el_mem->size = i_t->type.structure->size;
 
           //Load to that location
-          compile_bytecode_of_expression_existing(comp, state, code, i, &tup_single);
+          compile_bytecode_of_expression_existing(comp, context, state, code, i, &tup_single);
 
           state->stack.current = save_stack;//reset stack
         }
         break;
       }
     case EXPRESSION_TYPE::ARRAY_EXPR: {
-        assert(hint != nullptr);
-        const ArrayStructure* const arr_type = (const ArrayStructure*)expr->type;
+        ASSERT(hint != nullptr);
+        const auto* const arr_type = expr->type.unchecked_base<ArrayStructure>();
 
-        const size_t base_size = arr_type->base->size();
+        const size_t base_size = arr_type->base.structure->size;
 
-        const size_t full_align = arr_type->alignment();
-        const size_t full_size = arr_type->size();
+        const size_t full_align = arr_type->alignment;
+        const size_t full_size = arr_type->size;
 
         if (hint->is_hint) {
-          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
         }
 
         //TODO: Constants
 
         if (full_size <= 8) {
-          assert(hint->val.type != RVT::CONST);
+          ASSERT(hint->val.type != RVT::CONST);
 
           //Its shifting time
 
@@ -3570,7 +3737,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
           uint8_t shift_dst = 0;
 
-          assert(i < end);
+          ASSERT(i < end);
 
           //Set up mask
           RuntimeValue mask ={};
@@ -3595,7 +3762,12 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           args.info = nullptr;
 
           //First element doesnt need shifting and works as the base value to shift into
-          RuntimeValue res = compile_bytecode_of_expression_new(comp, state, code, i, (uint8_t)RVT::REGISTER);
+          RuntimeValue res = compile_bytecode_of_expression_new(comp,
+                                                                context,
+                                                                state,
+                                                                code,
+                                                                i,
+                                                                (uint8_t)RVT::REGISTER);
 
           args.left = &res;
           args.right = &mask;
@@ -3607,9 +3779,14 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           i++;
 
           for (; i < end; i++) {
-            assert(full_size > base_size);
+            ASSERT(full_size > base_size);
 
-            RuntimeValue el = compile_bytecode_of_expression_new(comp, state, code, i, (uint8_t)RVT::REGISTER);
+            RuntimeValue el = compile_bytecode_of_expression_new(comp,
+                                                                 context,
+                                                                 state,
+                                                                 code,
+                                                                 i,
+                                                                 (uint8_t)RVT::REGISTER);
             args.left = &el;
             args.right = &mask;
 
@@ -3639,12 +3816,12 @@ static void compile_bytecode_of_expression(Compiler* const comp,
             res = args.emit_or_64s();
           }
 
-          copy_runtime_to_runtime(comp, state, code, expr->type, &res, &hint->val);
+          copy_runtime_to_runtime(comp, state, code, expr->type.structure, &res, &hint->val);
         }
         else {
           //Can only load large arrays into memory
 
-          assert(hint->val.type == RVT::MEMORY);
+          ASSERT(hint->val.type == RVT::MEMORY);
 
           RuntimeValue arr_single ={};
           arr_single.type = RVT::MEMORY;
@@ -3665,7 +3842,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           auto save_stack = state->stack.current;
 
           for (; i < end; i++) {
-            compile_bytecode_of_expression_existing(comp, state, code, i, &arr_single);
+            compile_bytecode_of_expression_existing(comp, context, state, code, i, &arr_single);
 
             state->stack.current = save_stack;//reset stack
             state->get_mem(arr_single.mem)->mem.disp += (int32_t)base_size;
@@ -3674,24 +3851,24 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         break;
       }
     case EXPRESSION_TYPE::ASCII_CHAR: {
-        assert(hint != nullptr);
+        ASSERT(hint != nullptr);
         if (hint->is_hint) {
-          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
         }
 
         char* char_c = (char*)comp->constants.alloc_no_construct(1);
         *char_c = expr->ascii_char;
 
-        load_const_to_runtime_val(comp, state, code, expr->type,
+        load_const_to_runtime_val(comp, state, code, expr->type.structure,
                                   ConstantVal{ (uint8_t*)char_c, 1 },
                                   &hint->val);
         break;
       }
     case EXPRESSION_TYPE::ASCII_STRING: {
-        assert(hint != nullptr);
-        const ArrayStructure* const arr_type = (const ArrayStructure*)expr->type;
+        ASSERT(hint != nullptr);
+        const auto* const arr_type = expr->type.unchecked_base<ArrayStructure>();
 
-        const size_t size = arr_type->size();
+        const size_t size = arr_type->size;
         char* string_c = (char*)comp->constants.alloc_no_construct(size);
 
         const ConstantVal constant ={ (uint8_t*)string_c, size };
@@ -3699,30 +3876,30 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         memcpy_ts(string_c, size, expr->ascii_string->string, size);
 
         if (hint->is_hint) {
-          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
         }
 
-        load_const_to_runtime_val(comp, state, code, expr->type, constant, &hint->val);
+        load_const_to_runtime_val(comp, state, code, expr->type.structure, constant, &hint->val);
         break;
       }
     case EXPRESSION_TYPE::ENUM: {
-        assert(hint != nullptr);
-        assert(expr->type->size() == 8);
+        ASSERT(hint != nullptr);
+        ASSERT(expr->type.structure->size == 8);
         uint8_t* enum_c = comp->constants.alloc_no_construct(8);
         x64_to_bytes(expr->enum_value.enum_value->representation, enum_c);
 
         const ConstantVal constant ={ (uint8_t*)enum_c, 8 };
 
         if (hint->is_hint) {
-          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
         }
 
-        load_const_to_runtime_val(comp, state, code, expr->type, constant, &hint->val);
+        load_const_to_runtime_val(comp, state, code, expr->type.structure, constant, &hint->val);
         break;
       }
     case EXPRESSION_TYPE::VALUE: {
-        assert(hint != nullptr);
-        const size_t size = expr->type->size();
+        ASSERT(hint != nullptr);
+        const size_t size = expr->type.structure->size;
 
         uint8_t* val_c = comp->constants.alloc_no_construct(size);
         memcpy_ts(val_c, size, (uint8_t*)&expr->value.value, size);
@@ -3730,89 +3907,105 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         const ConstantVal constant ={ val_c, size };
 
         if (hint->is_hint) {
-          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
         }
 
-        load_const_to_runtime_val(comp, state, code, expr->type, constant, &hint->val);
+        load_const_to_runtime_val(comp, state, code, expr->type.structure, constant, &hint->val);
+
         break;
       }
     case EXPRESSION_TYPE::NULLPTR: {
-        assert(hint != nullptr);
+        ASSERT(hint != nullptr);
         uint8_t* val_c = comp->constants.alloc_no_construct(8);
         x64_to_bytes((uint64_t)0, val_c);
 
         const ConstantVal constant ={ val_c, 8 };
 
         if (hint->is_hint) {
-          load_runtime_hint(comp, state, expr->type, hint, expr->valid_rvts);
+          load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
         }
 
-        load_const_to_runtime_val(comp, state, code, expr->type, constant, &hint->val);
+        load_const_to_runtime_val(comp, state, code, expr->type.structure, constant, &hint->val);
         break;
       }
     case EXPRESSION_TYPE::LOCAL: {
-        assert(hint != nullptr);
+        ASSERT(hint != nullptr);
         Local* local = state->all_locals.data + expr->local;
 
-        if ((hint->hint_types & (uint8_t)RVT::CONST) > 0 && local->val.type == RVT::CONST) {
-          //Need to actively copy the constant. To stop it from being freed
-
+        RuntimeValue local_val = local->val;
+        if (local_val.type == RVT::CONST) {
+          //Need to actively copy the constant otherwise it will be freed twice
           ConstantVal copy_to ={};
-          const ConstantVal to_copy = local->val.constant;
+          const ConstantVal to_copy = local_val.constant;
 
           copy_to.ptr = comp->constants.alloc_no_construct(to_copy.size);
           copy_to.size = to_copy.size;
 
           memcpy_ts(copy_to.ptr, copy_to.size, to_copy.ptr, copy_to.size);
 
-          hint->is_hint = false;
-          hint->val.type     = RVT::CONST;
-          hint->val.constant = copy_to;
-        }
-        else {
-          copy_runtime_to_runtime_hint(comp, state, code, expr->type, &local->val, hint, expr->valid_rvts & NON_CONST_RVTS);
+          local_val.constant = copy_to;
         }
 
+        copy_runtime_to_runtime_hint(comp, state, code, expr->type.structure, &local->val, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
     case EXPRESSION_TYPE::GLOBAL: {
-        assert(hint != nullptr);
+        ASSERT(hint != nullptr);
         const Global* glob = expr->global;
 
-        ValueIndex reg_mem = state->new_value();
+        if (glob->constant_value.ptr != nullptr) {
+          if (hint->is_hint) {
+            load_runtime_hint(comp, state, expr->type.structure, hint, expr->valid_rvts);
+          }
 
-        ByteCode::EMIT::LOAD_GLOBAL_MEM(code->code, (uint8_t)reg_mem.val, glob);//changed later to be the actual location
-        state->set_value(reg_mem);
+          ConstantVal copied_val = copy_constant_value(comp, glob->constant_value);
 
-        state->control_flow.expression_num++;
+          load_const_to_runtime_val(comp,
+                                    state,
+                                    code,
+                                    glob->decl.type.structure, copied_val,
+                                    &hint->val);
+        }
+        else {
+          const auto reg_mem = state->new_value();
 
-        RuntimeValue global_mem ={};
-        global_mem.type = RVT::MEMORY;
-        global_mem.mem = state->new_mem();
+          ByteCode::EMIT::LOAD_GLOBAL_MEM(code->code, (uint8_t)reg_mem.val, glob);//changed later to be the actual location
+          state->set_value(reg_mem);
 
-        MemValue* mem_val = state->get_mem(global_mem.mem);
-        mem_val->size = glob->type->size();
-        mem_val->mem.base = (uint8_t)reg_mem.val;
+          state->control_flow.expression_num++;
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->type, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
+          RuntimeValue global_mem ={};
+          global_mem.type = RVT::MEMORY;
+          global_mem.mem = state->new_mem();
+
+          MemValue* mem_val = state->get_mem(global_mem.mem);
+          mem_val->size = glob->decl.type.structure->size;
+          mem_val->mem.base = (uint8_t)reg_mem.val;
+
+          copy_runtime_to_runtime_hint(comp, state, code, expr->type.structure, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
+        }
         break;
       }
     case EXPRESSION_TYPE::CAST: {
-        assert(hint != nullptr);
+        ASSERT(hint != nullptr);
         const CastExpr* const cast = &expr->cast;
-        RuntimeValue temp = compile_bytecode_of_expression_new(comp, state, code, cast->expr, ALL_RVTS);
+        RuntimeValue val = compile_bytecode_of_expression_new(comp,
+                                                              context,
+                                                              state,
+                                                              code,
+                                                              cast->expr, ALL_RVTS);
 
-        RuntimeValue rt = cast->emit(comp, state, code, &temp);
+        val = expr->cast.emit(comp, state, code, &val);
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->type, &rt, hint, expr->valid_rvts & NON_CONST_RVTS);
-
-        break;
+        copy_runtime_to_runtime_hint(comp, state, code, expr->type.structure, &val, hint, expr->valid_rvts);
+        return;
       }
     case EXPRESSION_TYPE::UNARY_OPERATOR: {
-        assert(hint != nullptr);
+        ASSERT(hint != nullptr);
         const UnaryOperatorExpr* const un_op = &expr->un_op;
 
         RuntimeValue temp = compile_bytecode_of_expression_new(comp,
+                                                               context,
                                                                state,
                                                                code,
                                                                un_op->expr,
@@ -3826,22 +4019,24 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
         RuntimeValue rt = (args.*un_op->emit)();
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->type, &rt, hint, expr->valid_rvts & NON_CONST_RVTS);
+        copy_runtime_to_runtime_hint(comp, state, code, expr->type.structure, &rt, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
     case EXPRESSION_TYPE::BINARY_OPERATOR: {
-        assert(hint != nullptr);
+        ASSERT(hint != nullptr);
         const BinaryOperatorExpr* const bin_op = &expr->bin_op;
         const ASTExpression* const left = bin_op->left;
         const ASTExpression* const right = bin_op->right;
 
         RuntimeValue temp_left = compile_bytecode_of_expression_new(comp,
+                                                                    context,
                                                                     state,
                                                                     code,
                                                                     left,
                                                                     ALL_RVTS);
 
         RuntimeValue temp_right = compile_bytecode_of_expression_new(comp,
+                                                                     context,
                                                                      state,
                                                                      code,
                                                                      right,
@@ -3858,29 +4053,41 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
         RuntimeValue res = (args.*(bin_op->emit))();
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->type, &res, hint, expr->valid_rvts & NON_CONST_RVTS);
+        copy_runtime_to_runtime_hint(comp, state, code, expr->type.structure, &res, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
     case EXPRESSION_TYPE::FUNCTION_CALL:
-      compile_function_call(comp, state, code, expr, hint);
+      compile_function_call(comp, context, state, code, expr, hint);
       break;
+    default: {
+        //Invalid enum type
+        //probably just didnt get around to supporting it
+        INVALID_CODE_PATH("Invalid EXPRESSION_TYPE enum");
+      }
   }
 }
 
 void compile_bytecode_of_statement(Compiler* const comp,
+                                   Context* const context,
                                    ASTStatement* const statement,
                                    State* const state,
                                    CodeBlock* const code) {
   switch (statement->type) {
     case STATEMENT_TYPE::ASSIGN: {
         RuntimeValue assign_to = compile_bytecode_of_expression_new(comp,
+                                                                    context,
                                                                     state,
                                                                     code,
                                                                     statement->assign.assign_to,
                                                                     (uint8_t)RVT::MEMORY);
 
         //Load into 'assign_to'
-        compile_bytecode_of_expression_existing(comp, state, code, statement->assign.value, &assign_to);
+        compile_bytecode_of_expression_existing(comp,
+                                                context,
+                                                state,
+                                                code,
+                                                statement->assign.value,
+                                                &assign_to);
         return;
       }
     case STATEMENT_TYPE::BLOCK: {
@@ -3891,16 +4098,17 @@ void compile_bytecode_of_statement(Compiler* const comp,
         const auto end = statement->block.block.mut_end();
 
         for (; i < end; i++) {
-          compile_bytecode_of_statement(comp, i, state, code);
+          compile_bytecode_of_statement(comp, context, i, state, code);
         }
 
         return;
       }
     case STATEMENT_TYPE::RETURN: {
         compile_bytecode_of_expression_existing(comp,
+                                                context,
                                                 state,
                                                 code,
-                                                statement->expression,
+                                                statement->expression.expr,
                                                 &state->return_val);
 
         if (state->return_val.type == RVT::REGISTER) {
@@ -3911,11 +4119,11 @@ void compile_bytecode_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::EXPRESSION: {
-        if (statement->expression->type == comp->types->s_void) {
-          compile_bytecode_of_expression(comp, state, code, statement->expression, nullptr);
+        if (statement->expression.expr->type == comp->services.builtin_types->t_void) {
+          compile_bytecode_of_expression(comp, context, state, code, statement->expression.expr, nullptr);
         }
         else {
-          auto a = compile_bytecode_of_expression_new(comp, state, code, statement->expression, ALL_RVTS);
+          auto a = compile_bytecode_of_expression_new(comp, context, state, code, statement->expression.expr, ALL_RVTS);
         }
 
         return;
@@ -3927,6 +4135,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
         ByteCode::EMIT::LABEL(code->code, base_label);//to jump back to in the loop
 
         RuntimeValue cond = compile_bytecode_of_expression_new(comp,
+                                                               context,
                                                                state,
                                                                code,
                                                                while_loop->condition,
@@ -3942,7 +4151,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
             //Compile while loop as a fixed loop with no condition
             const uint64_t base_label = comp->labels++;
 
-            compile_bytecode_of_statement(comp, while_loop->statement, state, code);
+            compile_bytecode_of_statement(comp, context, while_loop->statement, state, code);
             ByteCode::EMIT::JUMP_TO_FIXED(code->code, base_label);
           }
         }
@@ -3959,7 +4168,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
           //loop branch
           state->control_flow.new_flow();
           state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
-          compile_bytecode_of_statement(comp, while_loop->statement, state, code);
+          compile_bytecode_of_statement(comp, context, while_loop->statement, state, code);
 
           state->active_locals.size = locals;
 
@@ -3978,6 +4187,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
         ASTIfElse* const if_else = &statement->if_else;
 
         RuntimeValue cond = compile_bytecode_of_expression_new(comp,
+                                                               context,
                                                                state,
                                                                code,
                                                                if_else->condition,
@@ -3991,11 +4201,11 @@ void compile_bytecode_of_statement(Compiler* const comp,
 
           if (*(uint64_t*)cond.constant.ptr != 0) {
             //Compile if branch
-            compile_bytecode_of_statement(comp, if_else->if_statement, state, code);
+            compile_bytecode_of_statement(comp, context, if_else->if_statement, state, code);
           }
           else {
             //Compile else branch
-            compile_bytecode_of_statement(comp, if_else->else_statement, state, code);
+            compile_bytecode_of_statement(comp, context, if_else->else_statement, state, code);
           }
         }
         else {
@@ -4012,7 +4222,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
           //If branch
           state->control_flow.new_flow();
           state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
-          compile_bytecode_of_statement(comp, if_else->if_statement, state, code);
+          compile_bytecode_of_statement(comp, context, if_else->if_statement, state, code);
 
           state->active_locals.size = locals;
 
@@ -4026,7 +4236,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
           //Else branch
           state->control_flow.new_flow();
           state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
-          compile_bytecode_of_statement(comp, if_else->else_statement, state, code);
+          compile_bytecode_of_statement(comp, context, if_else->else_statement, state, code);
 
           ByteCode::EMIT::JUMP_TO_FIXED(code->code, escape_label);
 
@@ -4044,27 +4254,40 @@ void compile_bytecode_of_statement(Compiler* const comp,
         return;
       }
     case STATEMENT_TYPE::LOCAL: {
-        ASTLocal* const decl = &statement->local;
+        ASTDecl* const decl = &statement->local;
 
         Local* const local = state->all_locals.data + decl->local_index;
 
-        {
+        if (!TEST_MASK(local->decl.meta_flags, META_FLAG::COMPTIME)) {
           RuntimeHint hint ={};
           hint.is_hint = true;
           hint.hint_types = (comp->optimization_options.non_stack_locals ?
-                             ALL_RVTS
-                             : (uint8_t)RVT::MEMORY);
+                             NON_CONST_RVTS
+                             : (u8)RVT::MEMORY);
 
-          load_runtime_hint(comp, state, local->type, &hint, NON_CONST_RVTS);
+          load_runtime_hint(comp, state, local->decl.type.structure, &hint, local->valid_rvts);
 
           local->val = std::move(hint.val);
+
+          compile_bytecode_of_expression_existing(comp,
+                                                  context,
+                                                  state,
+                                                  code,
+                                                  decl->expr,
+                                                  &local->val);
+        }
+        else {
+          local->val = compile_bytecode_of_expression_new(comp,
+                                                          context,
+                                                          state,
+                                                          code,
+                                                          decl->expr,
+                                                          (u8)RVT::CONST);
         }
 
-        compile_bytecode_of_expression_existing(comp,
-                                                state,
-                                                code,
-                                                decl->expression,
-                                                &local->val);
+
+        //Needed for function calls
+        state->active_locals.insert(decl->local_index);
         return;
       }
   }
@@ -4104,10 +4327,25 @@ static void map_values(const System* sys,
   }
 
   //Finally allocate the stack
-  const uint64_t stack_needed = state->stack.max
+  uint64_t stack_needed = state->stack.max
     + ((uint64_t)state->made_call * conv->shadow_space_size)
     + state->stack.max_passed
     + (-base_pointer_offset);
+
+  //Branch modifies "stack_needed"
+  if (state->made_call) {
+    //Need to align to the call border
+    u64 aligned_stack = ceil_to_n<u64>(stack_needed, state->stack.call_alignment);
+
+    //The call instruction will push 8 bytes onto the stack anyway so need to fix that
+    if ((aligned_stack - 8) > stack_needed) {
+      stack_needed = (aligned_stack - 8);
+    }
+    else {
+      stack_needed = ceil_to_n<u64>(stack_needed + 8, state->stack.call_alignment) - 8;
+    }
+  }
+
 
   if (stack_needed > 0) {
     ByteCode::EMIT::ALLOCATE_STACK(temp, stack_needed);
@@ -4151,7 +4389,7 @@ static void map_values(const System* sys,
 
     {
       auto s = mem.scale;
-      assert(s == 0 || s == 1 || s == 2 || s == 4 || s == 8);
+      ASSERT(s == 0 || s == 1 || s == 2 || s == 4 || s == 8);
 
       if (s != 0) {
         const Value* const i = UNROLL_COALESCE(mem.index);
@@ -4360,7 +4598,7 @@ static void compute_value_intersections(ValueTree& tree, const ControlFlow& flow
   }
 }
 
-static uint64_t select(const CallingConvention* conv, State* const state) noexcept {
+static uint64_t select(const CallingConvention* conv, State* const state) {
   const ValueTree& tree = state->value_tree;
 
   struct UnindexedAdjacency {
@@ -4522,7 +4760,7 @@ static uint64_t select(const CallingConvention* conv, State* const state) noexce
     const auto end = tree.values.end();
 
     for (; i < end; i++) {
-      assert(i->value_type != ValueType::FREE);
+      ASSERT(i->value_type != ValueType::FREE);
 
       if (i->fixed()) {
         used_regs |= ((uint64_t)1 << (i->reg));
@@ -4589,12 +4827,12 @@ bool test_is_child(const CallingConvention* convention, const ValueTree& tree,
   //cant merge values that cross function calls with a volatile register
 
   if ((possible_child.crosses_call
-      && possible_parent.value_type == ValueType::FIXED
-      && convention->is_volatile(possible_parent.reg))
+       && possible_parent.value_type == ValueType::FIXED
+       && convention->is_volatile(possible_parent.reg))
       ||
       (possible_parent.crosses_call
-      && possible_child.value_type == ValueType::FIXED
-      && convention->is_volatile(possible_child.reg))) {
+       && possible_child.value_type == ValueType::FIXED
+       && convention->is_volatile(possible_child.reg))) {
     return false;
   }
 
@@ -4754,7 +4992,10 @@ void coalesce(const Compiler* const comp, const CallingConvention* conv, State* 
 // Build -> Coalesce -> Select -> Map
 //
 // Also emits a function prolog and function epilog
-void graph_colour_algo(Compiler* const comp, const CallingConvention* const conv, CodeBlock* const code, State* const state) {
+void graph_colour_algo(Compiler* const comp,
+                       const CallingConvention* const conv,
+                       CodeBlock* const code,
+                       State* const state) noexcept {
   if (comp->print_options.pre_reg_alloc) {
     IO::print("\n=== Pre Register Allocation Bytecode ===\n\n");
     ByteCode::print_bytecode(&reg_num_as_string, stdout, code->code.data, code->code.size);
@@ -4768,13 +5009,13 @@ void graph_colour_algo(Compiler* const comp, const CallingConvention* const conv
   const uint64_t regs = select(conv, state);
 
   //map values and function prolog and epilog
-  map_values(comp->build_options.system, conv, code, state, regs);
+  map_values(comp->build_options.endpoint_system, conv, code, state, regs);
 
   code->code.shrink();
 
   if (comp->print_options.normal_bytecode) {
     IO::print("\n=== Normal Bytecode ===\n\n");
-    ByteCode::print_bytecode(comp->build_options.system->reg_name_from_num, stdout, code->code.data, code->code.size);
+    ByteCode::print_bytecode(comp->build_options.endpoint_system->reg_name_from_num, stdout, code->code.data, code->code.size);
     IO::print("\n=============================\n\n");
   }
 }
@@ -4820,13 +5061,14 @@ ASTStatement* advance_scopes(UntypedIterator* itr, State* state) {
 }
 
 void compile_function_body_types(Compiler* const comp,
-                                 ASTFunctionDeclaration* const ast_func,
+                                 Context* const context,
+                                 ASTLambda* const ast_lambda,
                                  Function* const func,
                                  UntypedCode* const untyped,
                                  State* const state) {
 
   while (untyped->current_statement != nullptr) {
-    compile_type_of_statement(comp, func, state, untyped, untyped->current_statement);
+    compile_type_of_statement(comp, context, func, state, untyped, untyped->current_statement);
     if (comp->is_panic()) {
       return;
     }
@@ -4837,11 +5079,11 @@ void compile_function_body_types(Compiler* const comp,
 }
 
 void compile_function_body_init(Compiler* const comp,
-                                ASTFunctionDeclaration* const ast_func,
+                                ASTLambda* const ast_lambda,
                                 Function* const func,
                                 UntypedCode* const untyped,
                                 State* const state) {
-  ASTFunctionSignature* ast_sig = &ast_func->signature;
+  ASTFuncSig* ast_sig = &ast_lambda->sig;
 
   //Enter the body
   state->control_flow.new_flow();
@@ -4858,14 +5100,15 @@ void compile_function_body_init(Compiler* const comp,
     auto l_i = state->all_locals.data + index;
     state->active_locals.insert(index);
 
-    l_i->name = i->name;
-    l_i->type = i->type.type;
+    l_i->decl.name = i->name;
+    l_i->decl.type = i->type;
+    l_i->decl.meta_flags |= META_FLAG::ASSIGNABLE;
     l_i->valid_rvts &= NON_CONST_RVTS;//Cant have const parameters
     l_i->val = RuntimeValue();
   }
 
   //Set up the scopes
-  new_scope(&untyped->itr, ast_func->body.block.mut_begin(), ast_func->body.block.end(), state);
+  new_scope(&untyped->itr, ast_lambda->body.block.mut_begin(), ast_lambda->body.block.end(), state);
   untyped->current_statement = advance_scopes(&untyped->itr, state);
 }
 
@@ -4891,11 +5134,12 @@ void init_state_regs(const CallingConvention* convention, State* state) {
 
 //Cant error???
 void compile_function_body_code(Compiler* const comp,
-                                ASTFunctionDeclaration* const ast_func,
+                                Context* const context,
+                                ASTLambda* const ast_lambda,
                                 Function* const func,
                                 State* const state) {
   //Should never be called twice on the same function
-  assert(func->code_block.code.size == 0);
+  ASSERT(func->code_block.code.size == 0);
 
   //Enter the body - setup
   func->code_block.label = comp->labels++;
@@ -4903,15 +5147,15 @@ void compile_function_body_code(Compiler* const comp,
   state->control_flow.new_flow();
 
   //Useful values
-  init_state_regs(func->signature.calling_convention, state);
+  init_state_regs(func->signature.sig_struct->calling_convention, state);
 
-  bool return_as_ptr = func->signature.return_via_addres;
+  bool return_as_ptr = func->signature.sig_struct->return_via_addres;
 
-  const Structure* actual_return_type = return_as_ptr
-    ? func->signature.actual_parameter_types.data[0]
-    : func->signature.return_type;
+  const Type actual_return_type = return_as_ptr
+    ? func->signature.sig_struct->actual_parameter_types.data[0]
+    : func->signature.sig_struct->return_type;
 
-  const CallingConvention* convention = func->signature.calling_convention;
+  const CallingConvention* convention = func->signature.sig_struct->calling_convention;
 
   //Parameter set values
   {
@@ -4922,7 +5166,7 @@ void compile_function_body_code(Compiler* const comp,
     };
 
     if (return_as_ptr) {
-      state->return_val = advance_runtime_param(state, &param_itr, actual_return_type);
+      state->return_val = advance_runtime_param(state, &param_itr, actual_return_type.structure);
     }
     else {
       state->return_val.type = RVT::REGISTER;
@@ -4934,18 +5178,18 @@ void compile_function_body_code(Compiler* const comp,
     }
 
     //The actual types
-    auto i_param = func->signature.actual_parameter_types.begin();
-    auto end_param = func->signature.actual_parameter_types.end();
+    auto i_param = func->signature.sig_struct->actual_parameter_types.begin();
+    auto end_param = func->signature.sig_struct->actual_parameter_types.end();
 
     if (return_as_ptr) { i_param++; }
 
     auto* i_loc = state->all_locals.mut_begin();
-    const auto end_loc = i_loc + func->signature.parameter_types.size;
+    const auto end_loc = i_loc + func->signature.sig_struct->parameter_types.size;
 
     for (; i_param < end_param; (i_param++, i_loc++)) {
-      assert(i_loc < end_loc);
+      ASSERT(i_loc < end_loc);
 
-      i_loc->val = advance_runtime_param(state, &param_itr, *i_param);
+      i_loc->val = advance_runtime_param(state, &param_itr, i_param->structure);
     }
   }
 
@@ -4967,15 +5211,13 @@ void compile_function_body_code(Compiler* const comp,
     }
 
     if (return_as_ptr && state->return_val.type == RVT::REGISTER) {
-
-
       if (comp->optimization_options.non_stack_locals) {
         RuntimeHint load_hint ={};
         load_hint.hint_types = NON_CONST_RVTS;
 
-        load_runtime_hint(comp, state, actual_return_type, &load_hint, NON_CONST_RVTS);
+        load_runtime_hint(comp, state, actual_return_type.structure, &load_hint, NON_CONST_RVTS);
 
-        copy_runtime_to_runtime(comp, state, &func->code_block, actual_return_type, &state->return_val, &load_hint.val);
+        copy_runtime_to_runtime(comp, state, &func->code_block, actual_return_type.structure, &state->return_val, &load_hint.val);
 
         state->return_val = std::move(load_hint.val);
       }
@@ -4999,31 +5241,31 @@ void compile_function_body_code(Compiler* const comp,
         stack_v->mem.scale = 0;
         stack_v->size = 8;
 
-        copy_reg_to_runtime(comp, state, &func->code_block, actual_return_type, state->return_val.reg, &rt_v);
+        copy_reg_to_runtime(comp, state, &func->code_block, actual_return_type.structure, state->return_val.reg, &rt_v);
 
         state->return_val = std::move(rt_v);
       }
     }
 
-    auto i_act_param = func->signature.actual_parameter_types.begin();
-    const auto end_act_param = func->signature.actual_parameter_types.end();
+    auto i_act_param = func->signature.sig_struct->actual_parameter_types.begin();
+    const auto end_act_param = func->signature.sig_struct->actual_parameter_types.end();
 
     if (return_as_ptr) { i_act_param++; }
 
-    auto i_param = func->signature.parameter_types.begin();
-    const auto end_param = func->signature.parameter_types.end();
+    auto i_param = func->signature.sig_struct->parameter_types.begin();
+    const auto end_param = func->signature.sig_struct->parameter_types.end();
 
     auto i_loc = state->all_locals.mut_begin();
     const auto end_loc = state->all_locals.end();
 
     for (; i_param < end_param; (i_loc++, i_param++, i_act_param++)) {
-      assert(i_loc < end_loc);
-      assert(i_act_param < end_act_param);
+      ASSERT(i_loc < end_loc);
+      ASSERT(i_act_param < end_act_param);
 
-      const Structure* param_t = *i_param;
-      const Structure* act_param_t = *i_act_param;
+      const Type& param_t = *i_param;
+      const Type& act_param_t = *i_act_param;
 
-      assert(i_loc->type == param_t);
+      ASSERT(i_loc->decl.type == param_t);
 
       RuntimeValue rt_p ={};
 
@@ -5039,14 +5281,14 @@ void compile_function_body_code(Compiler* const comp,
           RuntimeHint load_hint ={};
           load_hint.hint_types = i_loc->valid_rvts;
 
-          load_runtime_hint(comp, state, param_t, &load_hint, NON_CONST_RVTS);
+          load_runtime_hint(comp, state, param_t.structure, &load_hint, NON_CONST_RVTS);
 
-          copy_runtime_to_runtime(comp, state, &func->code_block, param_t, &i_loc->val, &load_hint.val);
+          copy_runtime_to_runtime(comp, state, &func->code_block, param_t.structure, &i_loc->val, &load_hint.val);
 
           rt_p = std::move(load_hint.val);
         }
         else {
-          assert((i_loc->valid_rvts & RVT::MEMORY) > 0);
+          ASSERT((i_loc->valid_rvts & RVT::MEMORY) > 0);
           rt_p.type = RVT::MEMORY;
           rt_p.mem  = state->new_mem();
 
@@ -5062,13 +5304,13 @@ void compile_function_body_code(Compiler* const comp,
           }
 
           stack_v->mem.scale = 0;
-          stack_v->size = param_t->size();
+          stack_v->size = param_t.structure->size;
 
-          copy_reg_to_runtime(comp, state, &func->code_block, param_t, i_loc->val.reg, &rt_p);
+          copy_reg_to_runtime(comp, state, &func->code_block, param_t.structure, i_loc->val.reg, &rt_p);
         }
       }
-      else if (act_param_t->type == STRUCTURE_TYPE::POINTER
-               && static_cast<const PointerStructure*>(act_param_t)->base == param_t) {
+      else if (act_param_t.struct_type() == STRUCTURE_TYPE::POINTER
+               && act_param_t.unchecked_base<PointerStructure>()->base == param_t) {
         //passed as pointer
         //Just do a simple deref
         //This should actually solves all issues with lifetimes later in the system
@@ -5082,7 +5324,7 @@ void compile_function_body_code(Compiler* const comp,
       }
       else {
         //Should never be here
-        assert(false);
+        INVALID_CODE_PATH("Signature mismatch in code generation");
       }
 
       i_loc->val = std::move(rt_p);
@@ -5094,12 +5336,12 @@ void compile_function_body_code(Compiler* const comp,
   //Calculate all the values
   //and compile the bytecode
   {
-    Array<ASTStatement>& statements = ast_func->body.block;
+    Array<ASTStatement>& statements = ast_lambda->body.block;
 
     auto i = statements.mut_begin();
     const auto end = statements.mut_end();
     for (; i < end; i++) {
-      compile_bytecode_of_statement(comp, i, state, &func->code_block);
+      compile_bytecode_of_statement(comp, context, i, state, &func->code_block);
     }
   }
 
@@ -5107,139 +5349,241 @@ void compile_function_body_code(Compiler* const comp,
 }
 
 static void compile_function_signature_type(Compiler* const comp,
-                                            ASTFunctionSignature* const ast_sig,
+                                            Context* const context,
+                                            ASTFuncSig* const ast_sig,
                                             FunctionSignature* const sig) {
   DO_NOTHING;
 
   {
-    auto i_ast = ast_sig->parameters.mut_begin();
-    auto i = sig->parameter_types.mut_begin();
-    auto end = sig->parameter_types.end();
+    auto i = ast_sig->parameters.mut_begin();
+    auto end = ast_sig->parameters.end();
 
-    while (i < end) {
-      if (*i == nullptr) {
-        compile_type(comp, &i_ast->type);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        *i = i_ast->type.type;
+    for (; i < end; i++) {
+      ASSERT(i->type_ast != nullptr);
+      compile_type(comp, context, i->type_ast);
+      if (comp->is_panic()) {
+        return;
       }
 
-      i++;
-      i_ast++;
+      //Need to load the type
+      i->type = i->type_ast->type;
     }
   }
 
-  compile_type(comp, &ast_sig->return_type);
+  compile_type(comp, context, &ast_sig->return_type);
   if (comp->is_panic()) {
     return;
   }
 
-  //Success
-  sig->return_type = ast_sig->return_type.type;
-
-  sig->return_via_addres = register_passed_as_pointer(sig->return_type);
-  if (sig->return_via_addres) {
-    sig->actual_parameter_types.insert(find_or_make_pointer_type(comp, ast_sig->return_type.span, sig->return_type));
-  }
+  Array<Type> params ={};
+  params.reserve_total(ast_sig->parameters.size);
 
   {
-    auto i = sig->parameter_types.begin();
-    auto i_ast = ast_sig->parameters.begin();
-    const auto end = sig->parameter_types.end();
-
-    size_t num_params = sig->actual_parameter_types.size;
-    const CallingConvention* convention = sig->calling_convention;
-
-    for (; i < end; i++, i_ast++) {
-      const Structure* s = *i;
-
-      const bool too_big = register_passed_as_pointer(s);
-      const bool as_ptr = (num_params < convention->num_parameter_registers
-                           || convention->stack_pass_type == STACK_PASS_TYPE::POINTER)
-        && too_big;
-
-      if (as_ptr) {
-        //Load as pointer
-        sig->actual_parameter_types.insert(find_or_make_pointer_type(comp, i_ast->type.span, s));
-      }
-      else {
-        sig->actual_parameter_types.insert(s);
-      }
-
-      num_params++;
+    auto i = ast_sig->parameters.begin();
+    auto end = ast_sig->parameters.end();
+    for (; i < end; i++) {
+      params.insert(i->type);
     }
   }
+
+  sig->sig_struct = find_or_make_lamdba_structure(comp,
+                                                  context,
+                                                  ast_sig->convention,
+                                                  std::move(params),
+                                                  ast_sig->return_type.type);
 }
 
-void compile_untyped_structure_declaration(Compiler* comp, UntypedStructureElements* untyped) {
+void compile_untyped_structure_declaration(Compiler* comp, Context* context, UntypedStructureElements* untyped) {
   for (; untyped->i < untyped->end; untyped->i++) {
-    compile_type(comp, &untyped->i->type);
+    compile_type(comp, context, &untyped->i->type);
     if (comp->is_panic()) {
       return;
     }
   }
 }
 
-void compile_untyped_global(Compiler* comp, State* state, ASTGlobalDeclaration* decl, Global* global) {
-  if (decl->type.type == nullptr) {
-    compile_type(comp, &decl->type);
-    if (comp->is_panic()) {
+void compile_import_expression_type(Compiler* comp, Context* context, State* state,
+                                    ASTExpression* expr) {
+  compile_type_of_expression(comp, context, state, expr, nullptr);
+  if (comp->is_panic()) { return; }
+
+  if (expr->type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                       "#{} expression must be a character array\n"
+                       "Instead found: {}",
+                       comp->intrinsics.import, expr->type.name);
+    return;
+  }
+
+  const auto* arr = expr->type.unchecked_base<ArrayStructure>();
+
+  if (arr->base != comp->services.builtin_types->t_ascii) {
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                       "#{} expression must be a character array\n"
+                       "Expected base type: {}\n"
+                       "Instead found: {}",
+                       comp->intrinsics.import, comp->services.builtin_types->t_ascii.name, arr->base.name);
+    return;
+  }
+
+  if (!TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)) {
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->span,
+                       "#{} expression must be a compile time constant",
+                       comp->intrinsics.import);
+    return;
+  }
+}
+
+static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp, NamespaceIndex import_to) {
+
+  const char* path = nullptr;
+
+  if (already_const_type(imp->expr_location.expr_type)) {
+    ASSERT(imp->expr_location.expr_type == EXPRESSION_TYPE::ASCII_STRING);
+
+    path = imp->expr_location.ascii_string->string;
+  }
+  else {
+    ASSERT(imp->expr_location.const_val != nullptr);
+
+    path = (const char*)imp->expr_location.const_val;
+  }
+
+  ASSERT(path != nullptr);
+
+  Namespace* ns = comp->services.names->get_raw_namespace(import_to);
+
+  FileLocation loc = parse_file_location(ns->source_file.directory->string, path,
+                                         comp->services.strings);
+
+  if (imp->expr_location.const_val != nullptr) {
+    comp->constants.free_no_destruct(imp->expr_location.const_val);
+    imp->expr_location.const_val = nullptr;
+  }
+
+  const auto is_correct_file =[&loc](const ASTFile* f) {
+    return f->file_loc == loc;
+  };
+
+  const ASTFile* imported_file = comp->parsed_files.find_if(is_correct_file);
+
+  if (imported_file) {
+    ns = comp->services.names->get_raw_namespace(import_to);
+    ns->imported.insert(imported_file->namespace_index);
+  }
+  else {
+    FileImport file_import ={};
+    file_import.file_loc = std::move(loc);
+    file_import.ns_index = comp->services.names->new_namespace();
+    file_import.span = imp->span;
+
+    ns = comp->services.names->get_raw_namespace(import_to);
+    ns->imported.insert(file_import.ns_index);
+
+    comp->services.file_loader->unparsed_files.insert(std::move(file_import));
+  }
+}
+
+static void compile_untyped_global(Compiler* comp, Context* context, State* state, ASTDecl* decl, Global* global) {
+  compile_type_of_decl(comp, context, state, decl);
+  if (comp->is_panic()) {
+    return;
+  }
+
+  global->decl.type = decl->type;
+  if (decl->compile_time_const) {
+    global->decl.meta_flags |= META_FLAG::COMPTIME;
+  }
+  else {
+    global->decl.meta_flags |= META_FLAG::ASSIGNABLE;
+  }
+}
+
+void compile_init_expr_of_global(Compiler* comp, Context* context, State* state, ASTDecl* decl, Global* global) {
+  if (TEST_MASK(global->decl.meta_flags, META_FLAG::COMPTIME)) {
+    if (decl->expr->const_val == nullptr) {
+      ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+      unit->expr = decl->expr;
+
+      comp->set_dep(context, unit);
+      return;
+    }
+
+    global->constant_value.ptr = decl->expr->const_val;
+    global->constant_value.size = global->decl.type.structure->size;
+    decl->expr->const_val = nullptr;
+  }
+  else {
+    ASSERT(global->decl.type.is_valid());
+
+    state->control_flow.new_flow();
+
+    global->init.label = comp->labels++;
+    state->return_label = comp->labels++;
+
+    ValueIndex reg_mem = state->new_value();
+
+    ByteCode::EMIT::LOAD_GLOBAL_MEM(global->init.code, (uint8_t)reg_mem.val, global);//changed later to be the actual location
+    state->set_value(reg_mem);
+
+    state->control_flow.expression_num++;
+
+    RuntimeValue global_mem ={};
+    global_mem.type = RVT::MEMORY;
+    global_mem.mem = state->new_mem();
+
+    MemValue* mem_val = state->get_mem(global_mem.mem);
+    mem_val->size = global->decl.type.structure->size;
+    mem_val->mem.base = (uint8_t)reg_mem.val;
+
+    compile_bytecode_of_expression_existing(comp, context, state, &global->init, decl->expr, &global_mem);
+
+    graph_colour_algo(comp, comp->build_options.default_calling_convention, &global->init, state);
+  }
+
+  //Now it can exist
+  NamedElement* el = comp->services.names->find_name(context->current_namespace, decl->name);
+
+  if (decl->type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
+    //Special stuff to allow overloads
+
+    {
+      auto i = el->globals.begin();
+      auto end = el->globals.end();
+
+      for (; i < end; i++) {
+        const Global* g = *i;
+        if (g->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
+          comp->report_error(ERROR_CODE::NAME_ERROR, g->decl.source->span,
+                             "Cannot overload the non-function '{}'", decl->name);
+          return;
+        }
+
+        //TODO: check the functions are ok to be overloaded
+      }
+    }
+
+  }
+  else {
+    if (el->globals.size + el->unknowns != 1) {
+      comp->report_error(ERROR_CODE::NAME_ERROR, decl->span,
+                         "Cannot overload the non-function '{}'", decl->name);
       return;
     }
   }
 
-  if (decl->init_expr.type == nullptr) {
-    TypeHint type_hint ={};
-    type_hint.tht = THT::EXACT;
-    type_hint.type = decl->type.type;
-
-    compile_type_of_expression(comp, state, &decl->init_expr, &type_hint);
-    if (comp->is_panic()) {
-      return;
-    }
-  }
-
-  global->type = decl->type.type;
+  el->unknowns--;
+  el->globals.insert(global);
 }
 
-void compile_init_expr_of_global(Compiler* comp, State* state, ASTGlobalDeclaration* decl, Global* global) {
-  assert(global->type != nullptr);
-
-  state->control_flow.new_flow();
-
-  global->init.label = comp->labels++;
-  state->return_label = comp->labels++;
-
-  ValueIndex reg_mem = state->new_value();
-
-  ByteCode::EMIT::LOAD_GLOBAL_MEM(global->init.code, (uint8_t)reg_mem.val, global);//changed later to be the actual location
-  state->set_value(reg_mem);
-
-  state->control_flow.expression_num++;
-
-  RuntimeValue global_mem ={};
-  global_mem.type = RVT::MEMORY;
-  global_mem.mem = state->new_mem();
-
-  MemValue* mem_val = state->get_mem(global_mem.mem);
-  mem_val->size = global->type->size();
-  mem_val->mem.base = (uint8_t)reg_mem.val;
-
-  compile_bytecode_of_expression_existing(comp, state, &global->init, &decl->init_expr, &global_mem);
-
-  graph_colour_algo(comp, comp->build_options.default_calling_convention, &global->init, state);
-}
-
-void compile_new_composite_structure(Compiler* comp, ASTStructureDeclaration* struct_decl) {
-  CompositeStructure* cmp_s = new_composite_type(comp, struct_decl->name_span, struct_decl->name);
+void compile_new_composite_structure(Compiler* comp, Context* context, ASTStructBody* struct_body) {
+  CompositeStructure* cmp_s = STRUCTS::new_composite_structure(comp);
 
   uint32_t current_size = 0;
   uint32_t current_alignment = 0;
 
-  auto i = struct_decl->elements.begin();
-  auto end = struct_decl->elements.end();
+  auto i = struct_body->elements.begin();
+  auto end = struct_body->elements.end();
 
   for (; i < end; i++) {
     cmp_s->elements.insert_uninit(1);
@@ -5249,638 +5593,204 @@ void compile_new_composite_structure(Compiler* comp, ASTStructureDeclaration* st
     b->name = i->name;
     b->offset = current_size;
 
-    uint32_t this_align = b->type->alignment();
+    uint32_t this_align = b->type.structure->alignment;
 
     current_size = (uint32_t)ceil_to_n(current_size, this_align);
-    current_size += b->type->size();
+    current_size += b->type.structure->size;
 
     current_alignment = larger(this_align, current_alignment);
   }
 
-  cmp_s->declaration = struct_decl;
-  cmp_s->cached_size = current_size;
-  cmp_s->cached_alignment = current_alignment;
+  cmp_s->declaration = struct_body;
+  cmp_s->size = current_size;
+  cmp_s->alignment = current_alignment;
 
-  NamedElement* name = find_name(comp, comp->current_namespace, struct_decl->name);
-  if (name->type != NamedElementType::STRUCTURE) {
-    comp->report_error(CompileCode::NAME_ERROR, struct_decl->name_span,
-                       "Name mismatch. Expected '{}' to be a structure but found '{}'",
-                       struct_decl->name, name->type);
-    return;
-  }
-
-  if (name->structure != nullptr) {
-    comp->report_error(CompileCode::NAME_ERROR, struct_decl->name_span,
-                       "'{}' already exists",
-                       struct_decl->name);
-    return;
-  }
-
-  name->structure = cmp_s;
+  struct_body->type = to_type(cmp_s);
 }
 
 
-CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp) {
-  while (comp->file_loader.unparsed_files.size > 0) {
+void compile_current_unparsed_files(Compiler* const comp) {
+  while (comp->services.file_loader->unparsed_files.size > 0) {
     //still have files to parse
 
     //parse the last file
-    const FileImport* file_import = comp->file_loader.unparsed_files.back();
+    const FileImport* file_import = comp->services.file_loader->unparsed_files.back();
 
     const InternString* full_path = file_import->file_loc.full_name;
 
     if (comp->print_options.file_loads) {
-      printf("Loading file \"%s\" ...\n", full_path->string);
+      IO::print("Loading file \"", full_path->string, "\" ...\n");
     }
 
     //Just a sanity check - should alread have been set
-    if (file_import->file_loc.extension == comp->file_loader.axl
+    if (file_import->file_loc.extension == comp->services.file_loader->axl
         || file_import->file_loc.extension == nullptr) {
       //Load a source file
 
       OwnedPtr<const char> text_source = FILES::load_file_to_string(full_path->string);
 
       if (text_source.ptr == nullptr) {
-        comp->report_error(CompileCode::FILE_ERROR, comp->file_loader.unparsed_files.back()->span,
+        comp->report_error(ERROR_CODE::FILE_ERROR, comp->services.file_loader->unparsed_files.back()->span,
                            "File '{}' could not be opened, perhaps it does not exist",
                            full_path);
-        return print_compile_errors(comp);
+        return;
       }
 
       //Loaded file can pop of the file stack thing
       //It will shortly be loaded into the parsed files
-      comp->file_loader.unparsed_files.pop();
+      comp->services.file_loader->unparsed_files.pop();
 
-      //Set up the parser
-      Parser parser ={};
-      parser.lexer.strings = comp->strings;
-      init_parser(&parser, full_path, text_source.ptr);
+      //Reset the parser for this file
+      reset_parser(comp, full_path, text_source.ptr);
+
+      // ^ Can error (in the lexing)
+      if (comp->is_panic()) {
+        return;
+      }
 
       //Parse
       comp->parsed_files.insert_uninit(1);
       ASTFile* ast_file = comp->parsed_files.back();
       ast_file->file_loc = file_import->file_loc;
+
       ast_file->namespace_index = file_import->ns_index;
+      comp->services.parser->current_namespace = file_import->ns_index;
 
-      parse_file(&parser, ast_file);
+      parse_file(comp, comp->services.parser, ast_file);
 
-      //Should have all been copied now :) - can free the file
+
+      //Test for errors
+      if (comp->is_panic()) {
+        return;
+      }
+
+      //Should no longer be needed now - can free the file
       text_source.free_no_destruct();
 
-      if (parser.current.type == AxleTokenType::Error) {
-        //Reporting parse errors
-
-        Span span ={};
-        span.full_path = parser.current.pos.full_path;
-
-        span.char_start = parser.current.pos.character;
-        span.char_end = span.char_start + 1;
-
-        span.line_start = parser.current.pos.line;
-        span.line_end = span.line_start;
-
-        comp->report_error(CompileCode::SYNTAX_ERROR, span,
-                           "Parse Error: \"{}\"",
-                           parser.current.string->string);
-        return print_compile_errors(comp);
-      }
+      ASSERT(comp->services.parser->current.type != AxleTokenType::Error);
 
       if (comp->print_options.ast) {
         IO::print("\n=== Print Parsed AST ===\n\n");
-        print_ast(ast_file);
+        print_ast(comp, ast_file);
         IO::print("\n========================\n\n");
       }
 
-      //This may load new files onto the unparsed files stack
-      build_compilation_units_for_file(comp, ast_file);
       if (comp->is_panic()) {
-        return print_compile_errors(comp);
+        return;
       }
+      process_parsed_file(comp, ast_file);
     }
     else {
-      comp->report_error(CompileCode::FILE_ERROR, file_import->span,
+      comp->report_error(ERROR_CODE::FILE_ERROR, file_import->span,
                          "'{}' is not a loadable file extension",
                          file_import->file_loc.extension);
-      return print_compile_errors(comp);
-    }
-  }
-
-  //Should have no new files
-  comp->file_loader.unparsed_files.free();
-
-  return CompileCode::NO_ERRORS;
-}
-
-void compile_valid_convention_combo(Compiler* comp,
-                                    const Span& span,
-                                    const CallingConvention* conv,
-                                    const CallingConvention** fill) {
-  bool x86_64 = conv == &convention_microsoft_x64
-    && comp->build_options.system == &system_x86_64;
-
-  //bool stdcall = conv == &convention_stdcall
-  //  && comp->build_options.system == &system_x86_64;
-
-  bool vm = conv == &convention_vm
-    && comp->build_options.system == &system_vm;
-
-  if (true) {
-    *fill = conv;
-  }
-  else {
-    //comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
-    //                   "Calling convention '{}' is not valid with system '{}'",
-    //                   conv->name, comp->build_options.system->name);
-  }
-}
-
-void compile_calling_convention_for_function(Compiler* const comp,
-                                             const Span& span,
-                                             const InternString* conv_name,
-                                             const CallingConvention** fill) {
-
-
-  if (conv_name == comp->system_names.conv_x64) {
-    compile_valid_convention_combo(comp, span, &convention_microsoft_x64, fill);
-  }
-  else if (conv_name == comp->system_names.conv_stdcall) {
-    compile_valid_convention_combo(comp, span, &convention_stdcall, fill);
-  }
-  else if (conv_name == comp->system_names.conv_vm) {
-    compile_valid_convention_combo(comp, span, &convention_vm, fill);
-  }
-  else {
-    comp->report_error(CompileCode::TYPE_CHECK_ERROR, span,
-                       "Calling convention '{}' does not exist",
-                       conv_name);
-  }
-}
-
-void build_compilation_units_for_file(Compiler* const comp, ASTFile* const file) {
-
-  Namespace* ns = comp->all_namespaces.data + file->namespace_index.index;
-
-  ASTFileHeader& header = file->header;
-
-  if (header.is_dll_header) {
-    header.dll_header.loc = parse_file_location(file->file_loc.directory->string,
-                                                header.dll_header.relative_path->string,
-                                                comp->strings);
-
-    if (header.dll_header.loc.extension != comp->file_loader.dll) {
-    //.dll is the only valid extension
-      comp->report_error(CompileCode::FILE_ERROR, header.dll_header.span,
-                         "#dll_header extension was invalid\n"
-                         "Expected: '.{}'\n"
-                         "Found:    '.{}'",
-                         comp->file_loader.dll, header.dll_header.loc.extension);
       return;
     }
-
-    comp->dlls_import.insert_uninit(1);
-    ImportedDll* dll_file = comp->dlls_import.back();
-
-    dll_file->span = header.dll_header.span;
-    dll_file->name = header.dll_header.loc.full_name;
   }
+}
 
+void process_parsed_file(Compiler* const comp, ASTFile* const file) {
+  Namespace* ns = comp->services.names->get_raw_namespace(file->namespace_index);
+
+  ns->source_file = file->file_loc;
 
   {
     auto i = file->imports.mut_begin();
     const auto end = file->imports.mut_end();
 
     for (; i < end; i++) {
-      if (i->std) {
-        i->loc = parse_file_location(comp->build_options.std_lib_folder->string,
-                                     i->relative_path->string,
-                                     comp->strings);
-      }
-      else {
-        i->loc = parse_file_location(file->file_loc.directory->string,
-                                     i->relative_path->string,
-                                     comp->strings);
-      }
+      ImportUnit* imp = comp->new_import_unit(file->namespace_index);
+      imp->import_ast = i;
+    }
+  }
 
-      //Check file extensions
-      if (i->loc.extension != comp->file_loader.axl
-          && i->loc.extension != nullptr) {
-        comp->report_error(CompileCode::FILE_ERROR, i->span,
-                           "Import extension was invalid\n"
-                           "Expected no extension or '.{}'\n"
-                           "Found '.{}'",
-                           comp->file_loader.axl, i->loc.extension);
-        return;
-      }
-      else if (i->loc.extension == nullptr) {
+  {
+    ASTDecl* i = file->decls.mut_begin();
+    const auto end = file->decls.end();
 
+    for (; i < end; i++) {
+      NamedElement* el = ns->names.get_val(i->name);
+      if (el == nullptr) {
+        el = ns->names.insert(i->name);
       }
 
+      //Not typed yet
+      el->unknowns++;
 
-      const auto is_file =[loc = &i->loc](const ASTFile* f) {
-        return f->file_loc == *loc;
-      };
+      GlobalUnit* unit = comp->new_global_unit(file->namespace_index);
+      Global* glob =  comp->globals.insert();
 
-      const ASTFile* import_file = comp->parsed_files.find_if(is_file);
+      glob->decl.name = i->name;
+      glob->decl.source = i;
 
-      //Do we need to make a new file?
-      if (import_file == nullptr) {
-        comp->file_loader.unparsed_files.insert_uninit(1);
-        FileImport* new_file = comp->file_loader.unparsed_files.back();
-
-        //Set the namespace
-        NamespaceIndex new_index = NamespaceIndex{ comp->all_namespaces.size };
-        comp->all_namespaces.insert_uninit(1);
-        //Reset the namespace because it get invalidated
-        ns = comp->all_namespaces.data + file->namespace_index.index;
-
-        new_file->file_loc = i->loc;
-        new_file->span = i->span;
-
-        new_file->ns_index = new_index;
-
-        ns->imported.insert(new_file->ns_index);
-      }
-      else {
-        //Import name
-        ns->imported.insert(import_file->namespace_index);
-      }
+      unit->global = glob;
+      unit->source = i;
     }
   }
 
   //Might as well try and save some memory
   ns->imported.shrink();
-
-  //Load all the structures
-  {
-    auto i = file->structs.mut_begin();
-    const auto end = file->structs.mut_end();
-
-    for (; i < end; i++) {
-      ASTStructureDeclaration* struct_decl = i;
-
-      //Must first compile the signature
-      StructureUnit* const unit = comp->new_structure_unit(file->namespace_index);
-
-      unit->source = struct_decl;
-
-      unit->untyped.i = struct_decl->elements.mut_begin();
-      unit->untyped.end = struct_decl->elements.end();
-
-      {
-        NamedElement* str = ns->names.get_val(struct_decl->name);
-        if (str != nullptr) {
-          comp->report_error(CompileCode::NAME_ERROR, struct_decl->name_span,
-                             "Name '{}' already exists\n"
-                             "Cannot overload globals",
-                             struct_decl->name);
-          return;
-        }
-      }
-
-      NamedElement* str = ns->names.insert(struct_decl->name);
-      str->set_union(NamedElementType::GLOBAL);
-      str->structure = nullptr;
-    }
-  }
-
-  //Load all the globals
-  {
-    auto i = file->globals.mut_begin();
-    const auto end = file->globals.mut_end();
-
-    for (; i < end; i++) {
-      ASTGlobalDeclaration* global_decl = i;
-
-      //Must first compile the signature
-      GlobalUnit* const unit = comp->new_global_unit(file->namespace_index);
-
-      Global* global = comp->globals.insert();
-
-      unit->source = global_decl;
-      unit->global = global;
-
-      global->source = global_decl;
-      global->name = global_decl->name;
-      global->compilation_unit = unit;
-
-      //Have to insert names before compiled to stop naming conflicts
-
-      {
-        NamedElement* glob = ns->names.get_val(global_decl->name);
-        if (glob != nullptr) {
-          comp->report_error(CompileCode::NAME_ERROR, global_decl->span,
-                             "Name '{}' already exists\n"
-                             "Cannot overload globals",
-                             global_decl->name);
-          return;
-        }
-      }
-
-      NamedElement* glob = ns->names.insert(global_decl->name);
-      glob->set_union(NamedElementType::GLOBAL);
-      glob->global = global;
-    }
-  }
-
-  //Load all the functions
-  {
-    auto i = file->functions.mut_begin();
-    const auto end = file->functions.mut_end();
-
-    for (; i < end; i++) {
-      ASTFunctionDeclaration* func_decl = i;
-
-      ASTFunctionSignature* sig = &func_decl->signature;
-
-      //Must first compile the signature
-      SignatureUnit* const unit = comp->new_signature_unit(file->namespace_index);
-
-      if (header.is_dll_header) {
-        if (func_decl->body.block.size > 0) {
-          comp->report_error(CompileCode::FILE_ERROR, i->signature.signature_span,
-                             "DLL Header functions cannot have bodies");
-          return;
-        }
-
-        FunctionPointer* dll_func = comp->new_function_pointer();
-        dll_func->is_dll = true;
-        dll_func->compilation_unit = unit;
-
-        //Pick the calling convention
-        if (sig->convention == nullptr) {
-          compile_valid_convention_combo(comp, sig->signature_span,
-                                         comp->build_options.default_calling_convention,
-                                         &dll_func->signature.calling_convention);
-        }
-        else {
-          compile_calling_convention_for_function(comp, sig->signature_span,
-                                                  sig->convention, &dll_func->signature.calling_convention);
-        }
-
-        if (comp->is_panic()) {
-          return;
-        }
-
-        //Test doesnt exist already in the namespace
-        {
-          NamedElement* func = ns->names.get_val(sig->name);
-          if (func != nullptr) {
-            comp->report_error(CompileCode::NAME_ERROR, sig->signature_span,
-                               "Name '{}' already exists\n"
-                               "Cannot overload in the dll header",
-                               sig->name);
-            return;
-          }
-        }
-
-        ImportedDll* dll_file = comp->dlls_import.back();
-
-        //Import dll
-        dll_file->imports.insert_uninit(1);
-        SingleDllImport* single = dll_file->imports.back();
-        single->name = sig->name;
-        single->ptr = dll_func;
-
-        //New name
-        NamedElement new_func ={};
-        new_func.set_union(NamedElementType::FUNCTION_POINTER);
-        new_func.func_pointer = dll_func;
-
-        ns->names.insert(sig->name, std::move(new_func));
-
-        //Link up the ast and function
-        unit->source = func_decl;
-        unit->sig = &dll_func->signature;
-        unit->func = nullptr;//no next function
-        dll_func->signature.name = sig->name;
-
-        //Setup parameters
-        sig->parameters.shrink();
-        dll_func->signature.parameter_types.insert_uninit(sig->parameters.size);
-        dll_func->signature.parameter_types.shrink();
-      }
-      else {
-        //Make  new function
-        Function* const func = comp->new_function();
-
-        func->compilation_unit = unit;
-
-        //Pick the calling convention
-        //Pick the calling convention
-        if (sig->convention == nullptr) {
-          compile_valid_convention_combo(comp, sig->signature_span,
-                                         comp->build_options.default_calling_convention,
-                                         &func->signature.calling_convention);
-        }
-        else {
-          compile_calling_convention_for_function(comp, sig->signature_span,
-                                                  sig->convention, &func->signature.calling_convention);
-        }
-
-        if (comp->is_panic()) {
-          return;
-        }
-
-        //Add to the namespace
-        //Have to do this early to let overloads know it exists but isnt ready yet
-
-        NamedElement* overloads = ns->names.get_val(sig->name);
-        if (overloads == nullptr) {
-          NamedElement new_overloads ={};
-          new_overloads.set_union(NamedElementType::OVERLOADS);
-          new_overloads.overloads.insert(func);
-
-          ns->names.insert(sig->name, std::move(new_overloads));
-        }
-        else {
-          if (overloads->type != NamedElementType::OVERLOADS) {
-            comp->report_error(CompileCode::NAME_ERROR, sig->signature_span,
-                               "Name '{}' already exists and cannot be overloaded",
-                               sig->name);
-            return;
-          }
-          else {
-            overloads->overloads.insert(func);
-          }
-        }
-
-        //Link up the ast and function
-        unit->source = func_decl;
-        unit->sig = &func->signature;
-        unit->func = func;
-        func->signature.name = sig->name;
-
-        //Setup parameters - TODO: Check this is actually doing the right thing
-        sig->parameters.shrink();
-        func->signature.parameter_types.insert_uninit(sig->parameters.size);
-        func->signature.parameter_types.shrink();
-      }
-    }
-  }
 }
 
-//Same as 'find_name' but returns all of the possible options - useful for overload sets
-Array<NamedElement*> find_all_names(Compiler* const comp,
-                                    NamespaceIndex ns_index,
-                                    const InternString* name) {
+void add_comp_unit_for_lambda(Compiler* const comp, NamespaceIndex namespace_index, ASTLambda* lambda) noexcept {
+  //Make  new function
+  Function* const func = comp->new_function();
 
-  Array<NamedElement*> all_names ={};
+  SignatureUnit* const unit = comp->new_signature_unit(namespace_index);
 
-  //first try the builtin namespace for primitive and stuff
-  const Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
-  NamedElement* el = ns->names.get_val(name);
+  func->compilation_unit = unit;
 
-  if (el != nullptr) {
-    all_names.insert(el);
+  //Link up the ast and function
+  lambda->function = func;
+  lambda->sig.sig = &func->signature;
+  func->declaration = lambda;
+
+  unit->source = lambda;
+  unit->sig = &func->signature;
+  unit->func = func;
+
+  lambda->sig.parameters.shrink();
+  lambda->sig.convention = comp->build_options.default_calling_convention;
+}
+
+void add_comp_unit_for_struct(Compiler* const comp, NamespaceIndex namespace_index, ASTStructBody* struct_body) noexcept {
+  StructureUnit* const unit = comp->new_structure_unit(namespace_index);
+
+  unit->source = struct_body;
+
+  unit->untyped.i = struct_body->elements.mut_begin();
+  unit->untyped.end = struct_body->elements.end();
+
+  struct_body->compilation_unit = unit;
+}
+
+void free_compilation_unit(Compiler* const comp, CompilationUnit* unit) {
+  FOR(unit->dependency_of, u) {
+    free_compilation_unit(comp, *u);
   }
 
-  //now test the actual namespace
-  ns = comp->all_namespaces.data + ns_index.index;
-
-  while (true) {
-    el = ns->names.get_val(name);
-
-    if (el != nullptr) {
-      all_names.insert(el);
-    }
-
-    //Load from imported namespaces
-    auto i = ns->imported.begin();
-    const auto end = ns->imported.end();
-
-    for (; i < end; i++) {
-      const Namespace* imported = comp->all_namespaces.data + i->index;
-
-      el = imported->names.get_val(name);
-      if (el != nullptr) {
-        all_names.insert(el);
-      }
-    }
-
-
-    if (ns->is_sub_namespace) {
-      //Instead of recursion
-      ns = comp->all_namespaces.data + ns->inside.index;
-    }
-    else {
+  switch (unit->type) {
+    case COMPILATION_TYPE::FUNCTION:
+      comp->function_units.free((const FunctionUnit*)unit);
       break;
-    }
-  }
-
-  //Finally return
-  return all_names;
-}
-
-NamedElement* find_name(Compiler* const comp,
-                        NamespaceIndex ns_index,
-                        const InternString* name) {
-
-//first try the builtin namespace for primitive and stuff
-  const Namespace* ns = comp->all_namespaces.data + comp->builtin_namespace.index;
-  NamedElement* el = ns->names.get_val(name);
-
-  if (el != nullptr) {
-    return el;
-  }
-
-  //now test the actual namespace
-  ns = comp->all_namespaces.data + ns_index.index;
-
-  while (true) {
-    el = ns->names.get_val(name);
-
-    if (el != nullptr) {
-      return el;
-    }
-
-    //Check from imported namespaces
-    auto i = ns->imported.begin();
-    const auto end = ns->imported.end();
-
-    for (; i < end; i++) {
-      const Namespace* imported = comp->all_namespaces.data + i->index;
-
-      el = imported->names.get_val(name);
-      if (el != nullptr) {
-        return el;
-      }
-    }
-
-
-    if (ns->is_sub_namespace) {
-      //Instead of recursion
-      ns = comp->all_namespaces.data + ns->inside.index;
-    }
-    else {
+    case COMPILATION_TYPE::STRUCTURE:
+      comp->structure_units.free((const StructureUnit*)unit);
       break;
-    }
+    case COMPILATION_TYPE::SIGNATURE:
+      comp->signature_units.free((const SignatureUnit*)unit);
+      break;
+    case COMPILATION_TYPE::CONST_EXPR:
+      comp->const_expr_units.free((const ConstantExprUnit*)unit);
+      break;
+    case COMPILATION_TYPE::GLOBAL:
+      comp->global_units.free((const GlobalUnit*)unit);
+      break;
+    case COMPILATION_TYPE::IMPORT:
+      comp->import_units.free((const ImportUnit*)unit);
+      break;
+    default:
+      INVALID_CODE_PATH("Invalid compilation type");
   }
-
-  //Didnt find it at all
-  return nullptr;
-}
-
-NamedElement* find_empty_name(Compiler* const comp,
-                              NamespaceIndex ns_index,
-                              const InternString* name) {
-  NamedElement* pos_empty = find_name(comp, ns_index, name);
-
-  if (pos_empty == nullptr) {
-    return (comp->all_namespaces.data + ns_index.index)->names.insert(name);
-  }
-  else {
-    //Wasnt empty
-    return nullptr;
-  }
-}
-
-CompileCode print_compile_errors(const Compiler* const comp) {
-  CompileCode ret = CompileCode::NO_ERRORS;
-
-  IO::err_print("--- Compiler Encountered A Fatal Error ---\n\n");
-
-  auto i = comp->errors.error_messages.begin();
-  const auto end = comp->errors.error_messages.end();
-
-  InternHashTable<OwnedPtr<const char>> files ={};
-
-  for (; i < end; i++) {
-    ret = i->type;
-
-    const char* message_type = compile_code_string(i->type);
-    IO::err_print(message_type);
-    IO::err_print(":\n");
-
-    OwnedPtr<char> type_set_message = format_type_set(i->message.ptr, 4, 70);
-
-    IO::err_print(type_set_message.ptr);
-    IO::err_print('\n');
-
-    if (i->span.full_path != nullptr) {
-      const Span& span = i->span;
-
-      IO::err_print("Location: ");
-
-      if (!files.contains(i->span.full_path)) {
-        auto load_file = FILES::load_file_to_string(i->span.full_path->string);
-
-        files.insert(i->span.full_path, std::move(load_file));
-      }
-
-      OwnedPtr<const char>* ptr_ptr = files.get_val(i->span.full_path);
-      assert(ptr_ptr != nullptr);
-
-      const char* source = ptr_ptr->ptr;
-      OwnedPtr<char> string = load_span_from_file(span, source);
-
-      IO::err_print(format("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start));
-      IO::err_print(string.ptr);
-      IO::err_print("\n\n");
-    }
-  }
-
-  IO::err_print("------------------------------------------\n");
-  return ret;
 }
 
 void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
@@ -5916,33 +5826,134 @@ void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
     case COMPILATION_TYPE::GLOBAL:
       comp->global_units.free((const GlobalUnit*)unit);
       break;
+    case COMPILATION_TYPE::IMPORT:
+      comp->import_units.free((const ImportUnit*)unit);
+      break;
+    default:
+      INVALID_CODE_PATH("Invalid compilation type");
   }
 }
 
-CompileCode compile_all(Compiler* const comp) {
-  while (comp->to_compile.size > 0) {
+ERROR_CODE compile_all(Compiler* const comp) {
+  Array<CompilationUnit*> to_compile ={};
+  CompilationUnit** to_comp_i = nullptr;
+  CompilationUnit** to_comp_end = nullptr;
+
+  DEFER(comp, &to_comp_i, &to_comp_end) {
+    for (; to_comp_i < to_comp_end; to_comp_i++) {
+      free_compilation_unit(comp, *to_comp_i);
+    }
+
+    FOR(comp->to_compile, it) {
+      free_compilation_unit(comp, *it);
+    }
+
+    //FOR(comp->unfound_deps.unfound, it) {
+    //  free_compilation_unit(comp, it->unit_waiting);
+    //}
+  };
+
+
+  while (comp->is_compiling()) {
     //Compile waiting
     {
-      Array<CompilationUnit*> to_compile = std::move(comp->to_compile);
+      if (comp->services.file_loader->unparsed_files.size > 0) {
+        compile_current_unparsed_files(comp);
+        if (comp->is_panic()) {
+          return comp->services.errors->print_all();
+        }
+      }
 
-      auto i = to_compile.mut_begin();
-      const auto end = to_compile.mut_end();
+      to_compile = std::move(comp->to_compile);
 
-      for (; i < end; i++) {
-        CompilationUnit* comp_u = *i;
-        comp->current_unit = comp_u;
-        comp->current_namespace = comp_u->available_names;
+      to_comp_i = to_compile.mut_begin();
+      to_comp_end = to_compile.mut_end();
+
+      for (; to_comp_i < to_comp_end; to_comp_i++) {
+        CompilationUnit* comp_u = *to_comp_i;
+
+        Context context ={};
+        context.current_unit = comp_u;
+        context.current_namespace = comp_u->available_names;
+
+        //TODO: Determine system and calling convention
+        context.system = nullptr;
+        context.calling_convention = nullptr;
+
+        if (comp->print_options.start_comp_unit) {
+          format_print("Running Comp unit {}\n",
+                       PrintPtr{ comp_u });
+        }
 
         switch (comp_u->type) {
+          case COMPILATION_TYPE::IMPORT: {
+              ImportUnit* const unit = (ImportUnit*)comp_u;
+
+              switch (unit->stage) {
+                case IMPORT_COMP_STAGE::UNTYPED: {
+                    compile_import_expression_type(comp, &context, &unit->state,
+                                                   &unit->import_ast->expr_location);
+                    if (comp->is_panic()) {
+                      if (comp->is_fatal()) {
+                        return comp->services.errors->print_all();
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
+                    }
+                    else {
+                      unit->stage = IMPORT_COMP_STAGE::UNPARSED;
+
+                      //Only called if this isnt already a constant literal
+                      if (can_compile_const_value(&unit->import_ast->expr_location)) {
+                        ConstantExprUnit* const_u = comp->new_const_expr_unit(unit->available_names);
+
+                        const_u->expr = &unit->import_ast->expr_location;
+                        const_u->state = std::move(unit->state);
+
+                        const_u->cast_to ={};
+
+                        comp->set_dep(&context, const_u);
+                        ASSERT(comp->is_panic() && !comp->is_fatal());
+                        comp->reset_panic();
+
+                        //dont redo this one straight away as it has a dependency
+                      }
+                      else {
+                        //redo this one straight away as already loaded
+                        to_comp_i--;
+                      }
+
+                    }
+                    break;
+                  }
+                case IMPORT_COMP_STAGE::UNPARSED: {
+                    compile_import_file(comp, &context, unit->import_ast, unit->available_names);
+                    if (comp->is_panic()) {
+                      if (comp->is_fatal()) {
+                        return comp->services.errors->print_all();
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
+                    }
+
+                    close_compilation_unit(comp, comp_u);
+                    break;
+                  }
+              }
+
+              break;
+            }
           case COMPILATION_TYPE::GLOBAL: {
               GlobalUnit* const unit = (GlobalUnit*)comp_u;
 
               switch (unit->stage) {
                 case GLOBAL_COMP_STAGE::UNTYPED: {
-                    compile_untyped_global(comp, &unit->state, unit->source, unit->global);
+                    compile_untyped_global(comp, &context, &unit->state, unit->source, unit->global);
                     if (comp->is_panic()) {
                       if (comp->is_fatal()) {
-                        return print_compile_errors(comp);
+                        return comp->services.errors->print_all();
                       }
                       else {
                         comp->reset_panic();
@@ -5950,14 +5961,19 @@ CompileCode compile_all(Compiler* const comp) {
                     }
                     else {
                       unit->stage = GLOBAL_COMP_STAGE::TYPED;
-                      i--;//redo straight away
+                      to_comp_i--;//redo straight away
                     }
                     break;
                   }
                 case GLOBAL_COMP_STAGE::TYPED: {
-                    compile_init_expr_of_global(comp, &unit->state, unit->source, unit->global);
+                    compile_init_expr_of_global(comp, &context, &unit->state, unit->source, unit->global);
                     if (comp->is_panic()) {
-                      return print_compile_errors(comp);
+                      if (comp->is_fatal()) {
+                        return comp->services.errors->print_all();
+                      }
+                      else {
+                        comp->reset_panic();
+                      }
                     }
                     else {
                       close_compilation_unit(comp, comp_u);
@@ -5973,10 +5989,10 @@ CompileCode compile_all(Compiler* const comp) {
 
               switch (unit->stage) {
                 case STRUCTURE_COMP_STAGE::UNTYPED: {
-                    compile_untyped_structure_declaration(comp, &unit->untyped);
+                    compile_untyped_structure_declaration(comp, &context, &unit->untyped);
                     if (comp->is_panic()) {
                       if (comp->is_fatal()) {
-                        return print_compile_errors(comp);
+                        return comp->services.errors->print_all();
                       }
                       else {
                         comp->reset_panic();
@@ -5984,15 +6000,15 @@ CompileCode compile_all(Compiler* const comp) {
                     }
                     else {
                       unit->stage = STRUCTURE_COMP_STAGE::TYPED;
-                      i--;//redo straight away
+                      to_comp_i--;//redo straight away
                     }
                     break;
                   }
                 case STRUCTURE_COMP_STAGE::TYPED: {
-                    compile_new_composite_structure(comp, unit->source);
+                    compile_new_composite_structure(comp, &context, unit->source);
                     if (comp->is_panic()) {
                       //Should only be called once
-                      return print_compile_errors(comp);
+                      return comp->services.errors->print_all();
                     }
 
                     //Finished
@@ -6000,9 +6016,9 @@ CompileCode compile_all(Compiler* const comp) {
                     break;
                   }
                 default: {
-                    comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+                    comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                        "A compilation unit was created for a completed structure");
-                    return print_compile_errors(comp);
+                    return comp->services.errors->print_all();
                   }
               }
 
@@ -6012,16 +6028,16 @@ CompileCode compile_all(Compiler* const comp) {
               SignatureUnit* const unit = (SignatureUnit*)comp_u;
 
               if (unit->stage != SIGNATURE_COMP_STAGE::UNTYPED) {
-                comp->report_error(CompileCode::INTERNAL_ERROR, Span{},
+                comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                    "A compilation unit was created for a completed signature");
-                return print_compile_errors(comp);
+                return comp->services.errors->print_all();
               }
 
-              compile_function_signature_type(comp, &unit->source->signature, unit->sig);
+              compile_function_signature_type(comp, &context, &unit->source->sig, unit->sig);
               //Error handling
               if (comp->is_panic()) {
                 if (comp->is_fatal()) {
-                  return print_compile_errors(comp);
+                  return comp->services.errors->print_all();
                 }
                 else {
                   comp->reset_panic();
@@ -6058,7 +6074,7 @@ CompileCode compile_all(Compiler* const comp) {
                                                &unit->state);
                     if (comp->is_panic()) {
                       if (comp->is_fatal()) {
-                        return print_compile_errors(comp);
+                        return comp->services.errors->print_all();
                       }
                       else {
                         comp->reset_panic();
@@ -6066,13 +6082,14 @@ CompileCode compile_all(Compiler* const comp) {
                     }
                     else {
                       unit->stage = FUNCTION_COMP_STAGE::UNTYPED_BODY;
-                      i--;//Try it again straight away
+                      to_comp_i--;//Try it again straight away
                     }
 
                     break;
                   }
                 case FUNCTION_COMP_STAGE::UNTYPED_BODY: {
                     compile_function_body_types(comp,
+                                                &context,
                                                 unit->source,
                                                 unit->func,
                                                 &unit->untyped,
@@ -6080,7 +6097,7 @@ CompileCode compile_all(Compiler* const comp) {
 
                     if (comp->is_panic()) {
                       if (comp->is_fatal()) {
-                        return print_compile_errors(comp);
+                        return comp->services.errors->print_all();
                       }
                       else {
                         comp->reset_panic();
@@ -6088,19 +6105,20 @@ CompileCode compile_all(Compiler* const comp) {
                     }
                     else {
                       unit->stage = FUNCTION_COMP_STAGE::TYPED_BODY;
-                      i--;//Try it again straight away
+                      to_comp_i--;//Try it again straight away
                     }
                     break;
                   }
                 case FUNCTION_COMP_STAGE::TYPED_BODY: {
                     compile_function_body_code(comp,
+                                               &context,
                                                unit->source,
                                                unit->func,
                                                &unit->state);
 
                     if (comp->is_panic()) {
                       if (comp->is_fatal()) {
-                        return print_compile_errors(comp);
+                        return comp->services.errors->print_all();
                       }
                       else {
                         comp->reset_panic();
@@ -6125,12 +6143,14 @@ CompileCode compile_all(Compiler* const comp) {
                     hint.type = unit->cast_to;
 
                     compile_type_of_expression(comp,
+                                               &context,
                                                &unit->state,
                                                unit->expr,
-                                               unit->cast_to == nullptr ? nullptr : &hint);
+                                               (unit->cast_to.is_valid() ?
+                                                &hint : nullptr));
                     if (comp->is_panic()) {
                       if (comp->is_fatal()) {
-                        return print_compile_errors(comp);
+                        return comp->services.errors->print_all();
                       }
                       else {
                         comp->reset_panic();
@@ -6138,13 +6158,13 @@ CompileCode compile_all(Compiler* const comp) {
                     }
                     else {
                       unit->stage = EXPR_COMP_STAGE::TYPED;
-                      i--;
+                      to_comp_i--;
                     }
                     break;
                   }
                 case EXPR_COMP_STAGE::TYPED: {
-                    if (unit->cast_to != nullptr) {
-                      assert(unit->expr->type == unit->cast_to);
+                    if (unit->cast_to.is_valid()) {
+                      ASSERT(unit->expr->type == unit->cast_to);
                     }
 
                     //maybe need??
@@ -6157,7 +6177,7 @@ CompileCode compile_all(Compiler* const comp) {
                     //Have to compile to vm
                     BuildOptions options;
                     options.default_calling_convention = &convention_vm;
-                    options.system             = &system_vm;
+                    options.endpoint_system            = &system_vm;
                     options.entry_point = comp->build_options.entry_point;
                     options.output_file = comp->build_options.output_file;
                     options.file_name   = comp->build_options.file_name;
@@ -6178,15 +6198,15 @@ CompileCode compile_all(Compiler* const comp) {
                     //Compile bytecode
                     state->comptime_compilation = true;
 
-                    const Structure* type = unit->expr->type;
+                    const Type type = unit->expr->type;
 
                     //Do we need to pass as a parameter
                     const bool return_as_ptr = register_passed_as_pointer(type);
 
 
-                    const Structure* actual_return_type = find_or_make_pointer_type(comp, unit->expr->span, type);
+                    const Structure* actual_return_type = find_or_make_pointer_structure(comp, &context, type);
 
-                    uint8_t* const_val = comp->constants.alloc_no_construct(type->size());
+                    uint8_t* const_val = comp->constants.alloc_no_construct(type.structure->size);
 
                     {
                       CallingConvParamIterator param_itr ={
@@ -6218,7 +6238,12 @@ CompileCode compile_all(Compiler* const comp) {
                       }
                     }
 
-                    compile_bytecode_of_expression_existing(comp, state, &block, unit->expr, &state->return_val);
+                    compile_bytecode_of_expression_existing(comp,
+                                                            &context,
+                                                            state,
+                                                            &block,
+                                                            unit->expr,
+                                                            &state->return_val);
 
                     if (state->return_val.type == RVT::REGISTER) {
                       state->use_value(state->return_val.reg);
@@ -6231,15 +6256,17 @@ CompileCode compile_all(Compiler* const comp) {
 
                     //Backend
                     Program prog ={};
-                    vm_backend_single_func(&prog, &block, comp);
+                    compile_backend_single_func(&prog, &block, comp, &system_vm);
 
                     if (comp->is_panic()) {
-                      return print_compile_errors(comp);
+                      return comp->services.errors->print_all();
                     }
 
                     if (comp->print_options.comptime_exec) {
+                      Printer printer ={};
+
                       IO::print("\nAbout to execute Compile Time Code:\n");
-                      print_ast_expression(unit->expr);
+                      print_ast_expression(&printer, unit->expr);
                       IO::print("\n\nWhich produced this bytecode:\n");
                       ByteCode::print_bytecode(&vm_regs_name_from_num, stdout, prog.code.ptr, prog.code_size);
                     }
@@ -6247,40 +6274,39 @@ CompileCode compile_all(Compiler* const comp) {
                     //Run the VM
                     if (return_as_ptr) {
                       X64_UNION pass_param = const_val;
-                      vm_set_parameters(convention, comp->vm, pass_param);
+                      vm_set_parameters(convention, comp->services.vm, pass_param);
                     }
 
-                    ErrorCode err = vm_rum(comp->vm, &prog);
-                    if (err != ErrorCode::OK) {
-                      comp->report_error(CompileCode::INTERNAL_ERROR, unit->expr->span,
-                                         "VM returned error code '{}' in compile time execution",
-                                         err);
-                      return print_compile_errors(comp);
+                    comp->services.vm->errors = comp->services.errors;
+
+                    vm_rum(comp->services.vm, &prog);
+                    if (comp->is_panic()) {
+                      return comp->services.errors->print_all();
                     }
 
                     //Get the value back
                     if (return_as_ptr) {
                       if (comp->print_options.comptime_res) {
                         IO::print("\nComptime Res In Bytes: ");
-                        print_as_bytes(const_val, type->size());
+                        print_as_bytes(const_val, type.structure->size);
                         putc('\n', stdout);
                       }
                     }
                     else {
                       //Effectively stored in RAX
-                      uint64_t val = comp->vm->registers[convention_vm.return_register].b64.reg;
+                      uint64_t val = comp->services.vm->registers[convention_vm.return_register].b64.reg;
                       x64_to_bytes(val, const_val);
 
                       if (comp->print_options.comptime_res) {
-                        printf("\nComptime Res: %llu\n", val);
+                        printf("\nComptime Res: %llx\n", val);
                       }
                     }
 
-                    if (unit->cast_to != nullptr) {
-                      uint8_t* res = comp->constants.alloc_no_construct(unit->cast_to->size());
+                    if (unit->cast_to.is_valid()) {
+                      uint8_t* res = comp->constants.alloc_no_construct(unit->cast_to.structure->size);
                       do_literal_cast(comp, unit->expr, unit->cast_to, const_val, res);
                       if (comp->is_panic()) {
-                        return print_compile_errors(comp);
+                        return comp->services.errors->print_all();
                       }
 
                       comp->constants.free_no_destruct(const_val);
@@ -6305,61 +6331,54 @@ CompileCode compile_all(Compiler* const comp) {
       }
     }
 
-
-
-
-    if (comp->to_compile.size == 0) {
+    if (!comp->is_compiling()) {
       //Wait for there to be no compiling to check unfound deps - best chance they exist
 
       if (comp->unfound_deps.unfound.size > 0) {
         const size_t num_deps = comp->unfound_deps.unfound.size;
         //Remove units if dependency has been found
         comp->unfound_deps.unfound.remove_if([comp](const UnfoundDep& dep) {
-          switch (dep.type) {
-            case UnfoundDepType::Name: {
-                if (find_name(comp, dep.name.namespace_index, dep.name.ident) == nullptr) {
-                  return false;
-                }
-                break;
-              }
-            case UnfoundDepType::Function: {
-                auto overloads = generate_overload_set(comp, &dep.signature);
+          usize globals = 0;
+          usize unknowns = 0;
 
-                if (overloads.valid_overloads.size == 0) {
-                  return false;
-                }
+          if (dep.name.all_names) {
+            Array<NamespaceElement> el = comp->services.names->find_all_names(dep.name.namespace_index, dep.name.ident);
 
-                //if there are multiple overloads then let it error in the type check phase
-                break;
-              }
+            FOR(el, it) {
+              unknowns += it->named_element->unknowns;
+              globals += it->named_element->globals.size;
+            }
           }
-
-          //Success!
-          comp->to_compile.insert(dep.unit_waiting);
-          return true;
-        });
-
-        if (num_deps == comp->unfound_deps.unfound.size) {
-          //All dependencies are still unfound
-          auto i = comp->unfound_deps.unfound.begin();
-          auto end = comp->unfound_deps.unfound.end();
-
-          for (; i < end; i++) {
-            switch (i->type) {
-              case UnfoundDepType::Name: {
-                  comp->report_error(CompileCode::UNFOUND_DEPENDENCY, i->span,
-                                     "'{}' does not exist", i->name.ident);
-                  break;
-                }
-              case UnfoundDepType::Function: {
-                  comp->report_error(CompileCode::UNFOUND_DEPENDENCY, i->span,
-                                     "'{}' does not exist", i->signature);
-                  break;
-                }
+          else {
+            NamedElement* el = comp->services.names->find_name(dep.name.namespace_index, dep.name.ident);
+            if (el != nullptr) {
+              unknowns += el->unknowns;
+              globals += el->globals.size;
             }
           }
 
-          return print_compile_errors(comp);
+          if (globals != dep.name.num_knowns || unknowns != dep.name.num_unknowns) {
+            //Success!
+            comp->to_compile.insert(dep.unit_waiting);
+            return true;
+          }
+          else {
+            return false;
+          }
+                                             });
+
+        if (num_deps == comp->unfound_deps.unfound.size) {
+          //All dependencies are still unfound
+          auto i = comp->unfound_deps.unfound.mut_begin();
+          auto end = comp->unfound_deps.unfound.mut_end();
+
+          comp->services.errors->error_messages.reserve_extra(comp->unfound_deps.unfound.size);
+
+          for (; i < end; i++) {
+            comp->services.errors->error_messages.insert(std::move(i->as_error));
+            free_compilation_unit(comp, i->unit_waiting);
+          }
+          return comp->services.errors->print_all();
         }
       }
     }
@@ -6374,7 +6393,7 @@ CompileCode compile_all(Compiler* const comp) {
 
       load_portable_executable_from_file(comp, i->span, &single_dll, i->name->string);
       if (comp->is_panic()) {
-        return print_compile_errors(comp);
+        return comp->services.errors->print_all();
       }
 
       auto i_el = i->imports.begin();
@@ -6382,7 +6401,7 @@ CompileCode compile_all(Compiler* const comp) {
       for (; i_el < end_el; i_el++) {
         if (!single_dll.export_table.names.contains(i_el->name)) {
           //Now thats a lot of indirection
-          comp->report_error(CompileCode::UNFOUND_DEPENDENCY, i_el->ptr->declaration->signature.signature_span,
+          comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i_el->ptr->declaration->sig.signature_span,
                              "Dll '{}' does export anything named '{}'",
                              i->name, i_el->name);
         }
@@ -6390,12 +6409,12 @@ CompileCode compile_all(Compiler* const comp) {
 
       //Let it emit multiple errors
       if (comp->is_panic()) {
-        return print_compile_errors(comp);
+        return comp->services.errors->print_all();
       }
     }
   }
 
-  return CompileCode::NO_ERRORS;
+  return ERROR_CODE::NO_ERRORS;
 }
 
 void print_compiled_functions(const Compiler* const comp) {
@@ -6406,109 +6425,173 @@ void print_compiled_functions(const Compiler* const comp) {
     const Function* func = i.get();
 
     printf("FUNCTION %s:\n", func->signature.name->string);
-    ByteCode::print_bytecode(comp->build_options.system->reg_name_from_num, stdout, func->code_block.code.data, func->code_block.code.size);
+    ByteCode::print_bytecode(comp->build_options.endpoint_system->reg_name_from_num, stdout, func->code_block.code.data, func->code_block.code.size);
     IO::print('\n');
   }
 }
 
+//Make sure that t_struct is already created!!!
+Type create_named_type(Compiler* comp, const Span& span, NamespaceIndex ns,
+                       const InternString* name, const Structure* s) {
+  NamedElement* ne = comp->services.names->create_name(ns, name);
+
+  if (ne == nullptr) {
+    comp->report_error(ERROR_CODE::NAME_ERROR, span,
+                       "Tried to create a type of name '{}', but this name is already used",
+                       name);
+    return { nullptr, nullptr };
+  }
+
+  Global* g = comp->globals.insert();
+
+  ASSERT(comp->services.builtin_types->t_type.is_valid());
+
+  Type type ={ name, s };
+
+  g->decl.meta_flags = (u8)META_FLAG::COMPTIME;
+  g->decl.name = name;
+  g->decl.type = comp->services.builtin_types->t_type;
+  g->constant_value.ptr = comp->constants.alloc_no_construct<Type>();
+  g->constant_value.size = sizeof(Type);
+
+  memcpy_ts((Type*)g->constant_value.ptr, 1, &type, 1);
+
+  ne->globals.insert(g);
+
+  return type;
+}
+
+void create_named_enum_value(Compiler* comp, const Span& span, NamespaceIndex ns, const EnumValue* v) {
+  NamedElement* ne = comp->services.names->create_name(ns, v->name);
+
+  if (ne == nullptr) {
+    comp->report_error(ERROR_CODE::NAME_ERROR, span,
+                       "Tried to create an enum value of name '{}', but this name is already used",
+                       v->name);
+    return;
+  }
+
+  Global* g = comp->globals.insert();
+
+  ASSERT(v->type.is_valid());
+
+  g->decl.meta_flags = (u8)META_FLAG::COMPTIME;
+  g->decl.name = v->name;
+  g->decl.type = v->type;
+  g->constant_value.ptr = comp->constants.alloc_no_construct<const EnumValue*>();
+  g->constant_value.size = sizeof(const EnumValue*);
+
+  memcpy_ts((const EnumValue**)g->constant_value.ptr, 1, &v, 1);
+
+  ne->globals.insert(g);
+}
+
 void init_compiler(const APIOptions& options, Compiler* comp) {
   //Setup the built in namespace
-  comp->builtin_namespace.index = comp->all_namespaces.size;
-  comp->all_namespaces.insert_uninit(1);
+  //comp->builtin_namespace = comp->names->builtin_namespace;
+
+  NamespaceIndex builtin_namespace = comp->services.names->builtin_namespace;
 
   //Init the types
-  auto* types = comp->types;
-  auto* strings = comp->strings;
+  auto* structures = comp->services.structures;
+  auto* builtin_types = comp->services.builtin_types;
+  auto* strings = comp->services.strings;
 
-  Structure* const s_void = new_base_type(comp, Span{}, strings->intern("void"));
-  s_void->type = STRUCTURE_TYPE::VOID;
-  types->s_void = s_void;
+  const auto register_builtin_type = [comp, builtin_namespace](const Structure* s) -> Type {
+    Type t = create_named_type(comp, Span{}, builtin_namespace, s->struct_name, s);
+    ASSERT(!comp->is_panic());
+    return t;
+  };
 
-  types->s_void_ptr = new_pointer_type(comp, Span{}, s_void);
+  const auto register_builtin_enum_value = [comp, builtin_namespace](const EnumValue* v) {
+    create_named_enum_value(comp, Span{}, builtin_namespace, v);
+    ASSERT(!comp->is_panic());
+  };
 
-  Structure* const ascii = new_base_type(comp, Span{}, strings->intern("ascii"));
-  ascii->type = STRUCTURE_TYPE::ASCII_CHAR;
-  types->s_ascii = ascii;
-
-  SimpleLiteralStructure* const int_lit = new_simple_literal_type(comp, Span{}, strings->intern("lit_uint"));
-  int_lit->literal_type = SIMPLE_LITERAL_TYPE::INTEGER;
-  types->s_int_lit = int_lit;
-
-  SimpleLiteralStructure* const sint_lit = new_simple_literal_type(comp, Span{}, strings->intern("lit_sint"));
-  sint_lit->literal_type = SIMPLE_LITERAL_TYPE::SIGNED_INTEGER;
-  types->s_sint_lit = sint_lit;
-
-
-  SimpleLiteralStructure* const empty_arr = new_simple_literal_type(comp, Span{}, strings->intern("lit_empty_array"));
-  empty_arr->literal_type = SIMPLE_LITERAL_TYPE::EMPTY_ARR;
-  types->s_empty_arr = empty_arr;
-
-  SimpleLiteralStructure* const s_lit_ptr = new_simple_literal_type(comp, Span{}, strings->intern("lit_ptr"));
-  s_lit_ptr->literal_type = SIMPLE_LITERAL_TYPE::POINTER;
-  types->s_lit_ptr = s_lit_ptr;
-
-
-  IntegerStructure* const u8 = new_int_type(comp, Span{}, strings->intern("u8"));
-  u8->is_signed = false;
-  u8->bytes     = 1;
-
-  types->s_u8 = u8;
-
-  IntegerStructure* const i8 = new_int_type(comp, Span{}, strings->intern("i8"));
-  i8->is_signed = true;
-  i8->bytes     = 1;
-
-  types->s_i8 = i8;
-
-  IntegerStructure* const u32 = new_int_type(comp, Span{}, strings->intern("u32"));
-  u32->is_signed = false;
-  u32->bytes     = 4;
-
-  types->s_u32 = u32;
-
-  IntegerStructure* const i32 = new_int_type(comp, Span{}, strings->intern("i32"));
-  i32->is_signed = true;
-  i32->bytes     = 4;
-
-  types->s_i32 = i32;
-
-
-  IntegerStructure* const u64 = new_int_type(comp, Span{}, strings->intern("u64"));
-  u64->is_signed = false;
-  u64->bytes     = 8;
-
-  types->s_u64 = u64;
-
-  IntegerStructure* const i64 = new_int_type(comp, Span{}, strings->intern("i64"));
-  i64->is_signed = true;
-  i64->bytes     = 8;
-
-  types->s_i64 = i64;
-
-
-  EnumStructure* const s_bool = new_enum_type(comp, Span{}, strings->intern("bool"));
-  s_bool->base = u8;
-
-  types->s_bool = s_bool;
-
-  s_bool->enum_values.reserve_extra(2);
   {
-    EnumValue* const e_true = new_enum_value(comp, Span{}, s_bool, strings->intern("true"));
-    types->e_true = e_true;
+    Structure* const s_type = STRUCTS::new_base_structure(comp,
+                                                          strings->intern("type"));
+    s_type->type = STRUCTURE_TYPE::TYPE;
+    s_type->size = sizeof(Type);
+    s_type->alignment = alignof(Type);
+    builtin_types->t_type = to_type(s_type);
 
-    e_true->representation = 1;
-
-    EnumValue* const e_false = new_enum_value(comp, Span{}, s_bool, strings->intern("false"));
-    types->e_false = e_false;
-
-    e_true->representation = 0;
+    /*_ = */ register_builtin_type(s_type);
   }
-  s_bool->enum_values.shrink();
 
+
+  {
+    const auto base_type = [&](const auto& name, STRUCTURE_TYPE ty, u32 size, Type* t) {
+      Structure* s = STRUCTS::new_base_structure(comp, strings->intern(name));
+      s->type = ty;
+      s->size = size;
+      s->alignment = size;
+
+      *t = register_builtin_type(s);
+    };
+
+    base_type("void", STRUCTURE_TYPE::VOID, 0, &builtin_types->t_void);
+    base_type("ascii", STRUCTURE_TYPE::ASCII_CHAR, 1, &builtin_types->t_ascii);
+  }
+
+  {
+    const auto int_type = [&](const auto& name, bool is_signed, u32 size, Type* t) {
+      IntegerStructure* s = STRUCTS::new_int_structure(comp, strings->intern(name));
+      s->is_signed = is_signed;
+      s->size = size;
+      s->alignment = size;
+
+      *t = register_builtin_type(s);
+    };
+
+    int_type("u8", false, 1, &builtin_types->t_u8);
+    int_type("i8", true, 1, &builtin_types->t_i8);
+    int_type("u32", false, 4, &builtin_types->t_u32);
+    int_type("i32", true, 4, &builtin_types->t_i32);
+    int_type("u64", false, 8, &builtin_types->t_u64);
+    int_type("i64", true, 8, &builtin_types->t_i64);
+  }
+
+  {
+    Structure* const s_void_ptr = STRUCTS::new_pointer_structure(comp, builtin_types->t_void);
+  }
+
+  {
+    EnumStructure* const s_bool = STRUCTS::new_enum_structure(comp, builtin_types->t_u8);
+    const InternString* bool_name = strings->intern("bool");
+
+    builtin_types->t_bool = create_named_type(comp, Span{}, builtin_namespace, bool_name, s_bool);
+    ASSERT(!comp->is_panic());
+
+    s_bool->enum_values.reserve_extra(2);
+    {
+      EnumValue* const e_true = STRUCTS::new_enum_value(comp, s_bool, bool_name,
+                                                        strings->intern("true"));
+      e_true->representation = 1;
+      builtin_types->e_true = e_true;
+      register_builtin_enum_value(e_true);
+
+
+      EnumValue* const e_false = STRUCTS::new_enum_value(comp, s_bool, bool_name,
+                                                         strings->intern("false"));
+
+      e_true->representation = 0;
+      builtin_types->e_false = e_false;
+      register_builtin_enum_value(e_false);
+
+    }
+    s_bool->enum_values.shrink();
+  }
+
+
+  //Intrinsics
+#define MOD(n) comp->intrinsics. ## n = strings->intern(#n);
+  INTRINSIC_MODS;
+#undef MOD
 
   //File extensions
-  comp->file_loader.axl = strings->intern("axl");
-  comp->file_loader.dll = strings->intern("dll");
+  comp->services.file_loader->axl = strings->intern("axl");
+  comp->services.file_loader->dll = strings->intern("dll");
 
   //Systems
   comp->system_names.sys_vm = strings->intern(system_vm.name);
@@ -6524,83 +6607,87 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
   comp->optimization_options = options.optimize;
 
   if (options.build.file_name == nullptr) {
-    comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+    comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                        "Expected input file name");
     return;
   }
 
-  comp->build_options.file_name = comp->strings->intern(options.build.file_name);
+  comp->build_options.file_name = strings->intern(options.build.file_name);
 
   if (options.build.entry_point == nullptr) {
-    comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+    comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                        "Expected entry point");
     return;
   }
 
-  comp->build_options.entry_point = comp->strings->intern(options.build.entry_point);
+  comp->build_options.entry_point = strings->intern(options.build.entry_point);
 
   if (options.build.output_file != nullptr) {
-    comp->build_options.output_file = comp->strings->intern(options.build.output_file);
+    comp->build_options.output_file = strings->intern(options.build.output_file);
   }
 
 
   if (options.build.std_lib_folder == nullptr) {
-    comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+    comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                        "Expected std lib folder");
     return;
   }
-  comp->build_options.std_lib_folder = comp->strings->intern(options.build.std_lib_folder);
+  comp->build_options.std_lib_folder = strings->intern(options.build.std_lib_folder);
 
   {
-    const InternString* system_name = comp->strings->intern(options.build.system_name);
+    const InternString* system_name = strings->intern(options.build.system_name);
 
     if (system_name == comp->system_names.sys_vm) {
-      comp->build_options.system = &system_vm;
+      comp->build_options.endpoint_system = &system_vm;
     }
     else if (system_name == comp->system_names.sys_x86_64) {
-      comp->build_options.system = &system_x86_64;
+      comp->build_options.endpoint_system = &system_x86_64;
     }
     else {
-      comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+      comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                          "Invalid system '{}'", system_name);
       return;
     }
   }
 
   {
-    const InternString* conv_name = comp->strings->intern(options.build.default_calling_convention);
+    const InternString* conv_name = strings->intern(options.build.default_calling_convention);
 
     if (conv_name == comp->system_names.conv_vm) {
       comp->build_options.default_calling_convention = &convention_vm;
 
-      if (comp->build_options.system != &system_vm) {
-        comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+      if (comp->build_options.endpoint_system != &system_vm) {
+        comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                            "Invalid system and calling convention combo '{}' and '{}'",
-                           comp->build_options.system->name, conv_name);
+                           comp->build_options.endpoint_system->name, conv_name);
       }
     }
     else if (conv_name == comp->system_names.conv_x64) {
       comp->build_options.default_calling_convention = &convention_microsoft_x64;
 
-      if (comp->build_options.system != &system_x86_64) {
-        comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+      if (comp->build_options.endpoint_system != &system_x86_64) {
+        comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                            "Invalid system and calling convention combo '{}' and '{}'",
-                           comp->build_options.system->name, conv_name);
+                           comp->build_options.endpoint_system->name, conv_name);
       }
     }
     else if (conv_name == comp->system_names.conv_stdcall) {
-      comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+      comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                          "Invalid system and calling convention combo '{}' and '{}'",
-                         comp->build_options.system->name, conv_name);
+                         comp->build_options.endpoint_system->name, conv_name);
     }
     else {
-      comp->report_error(CompileCode::UNFOUND_DEPENDENCY, Span{},
+      comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                          "Invalid default calling convention '{}'", conv_name);
     }
   }
 }
 
 void build_data_section_for_exec(Program* prog, Compiler* const comp) {
+
+}
+
+void build_data_section_for_vm(Program* prog, Compiler* const comp) {
   InternHashTable<size_t> loaded_strings ={};
 
   Array<uint8_t> data ={};
@@ -6658,13 +6745,13 @@ void build_data_section_for_exec(Program* prog, Compiler* const comp) {
 
   //Function pointers
   {
-    auto i = comp->function_pointers.begin_iter();
-    auto end = comp->function_pointers.end_iter();
+    auto i = comp->functions.begin_iter();
+    auto end = comp->functions.end_iter();
 
     for (; i != end; i.next()) {
-      FunctionPointer* func = i.get();
+      Function* func = i.get();
 
-      if (func->is_called) {
+      if (func->is_called && func->func_type == FUNCTION_TYPE::EXTERN) {
         //Reserve the location
         func->data_index = write_u64(data, 0);
       }
@@ -6679,7 +6766,9 @@ void build_data_section_for_exec(Program* prog, Compiler* const comp) {
     for (; i != end; i.next()) {
       Global* glob = i.get();
 
-      glob->data_index = write_num_bytes(data, glob->type->size(), glob->type->alignment());
+      if (glob->constant_value.ptr == nullptr) {
+        glob->data_index = write_num_bytes(data, glob->decl.type.structure->size, glob->decl.type.structure->alignment);
+      }
     }
   }
 
@@ -6699,10 +6788,10 @@ void build_data_section_for_exec(Program* prog, Compiler* const comp) {
       const auto end_func = i_dll->imports.end();
 
       for (; i_func < end_func; i_func++) {
-        FunctionPointer* func = i_func->ptr;
+        Function* func = i_func->ptr;
         const InternString* name = i_func->name;
 
-        if (func->is_called) {
+        if (func->is_called && func->func_type == FUNCTION_TYPE::EXTERN) {
           //Function is used in this dll
           if (!written_header) {
             //Need to put in the name of the dll before any functions
