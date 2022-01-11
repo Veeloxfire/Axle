@@ -7,10 +7,12 @@
 #include "parser.h"
 #include "files.h"
 #include "ast.h"
+#include "names.h"
 
 #include "api.h"
 
 #include "type.h"
+
 
 
 struct VM;
@@ -137,14 +139,25 @@ struct ValueTree {
 };
 
 struct StackState {
-  uint64_t current = 0;
-  uint64_t max = 0;
+  u64 current = 0;
+  u64 max = 0;
 
-  uint64_t current_passed = 0;
-  uint64_t max_passed = 0;
+  u64 current_passed = 0;
+  u64 max_passed = 0;
 
-  int32_t pass_stack_local(uint64_t size, uint64_t alignment);
-  int32_t next_stack_local(uint64_t size, uint64_t alignment);
+  u64 call_alignment = 1;
+
+  i32 pass_stack_local(u64 size, u64 alignment);
+  i32 next_stack_local(u64 size, u64 alignment);
+  void require_call_alignment(u64 req_align);
+};
+
+struct Decl {
+  ASTDecl* source = nullptr;
+
+  const InternString* name ={};
+  META_FLAGS meta_flags ={};
+  Type type ={};
 };
 
 struct MemValue {
@@ -153,9 +166,7 @@ struct MemValue {
 };
 
 struct Local {
-  bool comptime_eval = false;
-  const InternString* name ={};
-  const Structure* type = nullptr;
+  Decl decl;
 
   uint8_t valid_rvts = ALL_RVTS;
   RuntimeValue val ={};
@@ -205,13 +216,13 @@ void init_state_regs(const CallingConvention* convention, State* state);
 
 //Type hint type
 enum struct THT : uint8_t {
-  EXACT, BASE, BASE_HINT
+  EXACT, IMPLICIT, BASE, BASE_HINT
 };
 
 struct TypeHint {
   THT tht = THT::EXACT;
   union {
-    const Structure* type = nullptr;
+    Type type ={};
     const TypeHint* other_hint;
   };
 };
@@ -242,17 +253,18 @@ struct UntypedStructureElements {
 };
 
 struct Global {
-  ASTGlobalDeclaration* source = nullptr;
   CompilationUnit* compilation_unit = nullptr;
 
-  const Structure* type = nullptr;
-  const InternString* name = nullptr;
+  Decl decl;
+
   size_t data_index = 0;
+  ConstantVal constant_value ={};
+
   CodeBlock init ={};
 };
 
 enum struct COMPILATION_TYPE : uint8_t {
-  NONE, STRUCTURE, FUNCTION, SIGNATURE, CONST_EXPR, GLOBAL
+  NONE, STRUCTURE, FUNCTION, SIGNATURE, CONST_EXPR, GLOBAL, IMPORT
 };
 
 enum struct STRUCTURE_COMP_STAGE : uint8_t {
@@ -275,6 +287,10 @@ enum struct FUNCTION_COMP_STAGE : uint8_t {
   UNINIT, UNTYPED_BODY, TYPED_BODY, FINISHED
 };
 
+enum struct IMPORT_COMP_STAGE : u8 {
+  UNTYPED, UNPARSED, FINISHED
+};
+
 struct CompilationUnit {
   COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
 
@@ -287,10 +303,18 @@ struct CompilationUnit {
   NamespaceIndex available_names ={};
 };
 
+struct ImportUnit : public CompilationUnit {
+  IMPORT_COMP_STAGE stage = IMPORT_COMP_STAGE::UNTYPED;
+
+  State state ={};
+
+  ASTImport* import_ast;
+};
+
 struct SignatureUnit : public CompilationUnit {
   SIGNATURE_COMP_STAGE stage = SIGNATURE_COMP_STAGE::UNTYPED;
 
-  ASTFunctionDeclaration* source = nullptr;
+  ASTLambda* source = nullptr;
   FunctionSignature* sig = nullptr;
   Function* func = nullptr;
 };
@@ -298,14 +322,14 @@ struct SignatureUnit : public CompilationUnit {
 struct StructureUnit : public CompilationUnit {
   STRUCTURE_COMP_STAGE stage = STRUCTURE_COMP_STAGE::UNTYPED;
 
-  ASTStructureDeclaration* source = nullptr;
+  ASTStructBody* source = nullptr;
   UntypedStructureElements untyped ={};
 };
 
 struct GlobalUnit : public CompilationUnit {
   GLOBAL_COMP_STAGE stage = GLOBAL_COMP_STAGE::UNTYPED;
 
-  ASTGlobalDeclaration* source = nullptr;
+  ASTDecl* source = nullptr;
   Global* global = nullptr;
 
   State state ={};
@@ -314,7 +338,7 @@ struct GlobalUnit : public CompilationUnit {
 struct FunctionUnit : public CompilationUnit {
   FUNCTION_COMP_STAGE stage = FUNCTION_COMP_STAGE::UNINIT;
 
-  ASTFunctionDeclaration* source = nullptr;
+  ASTLambda* source = nullptr;
   Function* func = nullptr;
 
   UntypedCode untyped ={};
@@ -325,124 +349,44 @@ struct ConstantExprUnit : public CompilationUnit {
   EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::UNTYPED;
 
   ASTExpression* expr = nullptr;
-  const Structure* cast_to = nullptr;
+  Type cast_to ={};
 
   State state ={};
 };
 
-struct ErrorMessage {
-  CompileCode type = CompileCode::NO_ERRORS;
-  Span span ={};
-  OwnedPtr<char> message ={};
-};
-
-struct Errors {
-  bool panic = false;
-  Array<ErrorMessage> error_messages ={};
-};
-
 struct CallSignature {
   const InternString* name = nullptr;
-  Array<const Structure*> arguments ={};
+  Array<TypeAndFlags> arguments ={};
 };
+
+struct OverloadSet {
+  bool complete_match = false;
+  Array<const SignatureStructure*> valid_overloads ={};
+
+  usize num_options_checked = 0;
+};
+
 
 struct UnknownName {
-  const InternString* ident;
-  NamespaceIndex namespace_index;
+  bool all_names = false;
+  const InternString* ident = nullptr;
+  NamespaceIndex namespace_index ={};
+  usize num_knowns = 0;
+  usize num_unknowns = 0;
 };
 
-enum struct UnfoundDepType {
-  Unkown, Name, Function
-};
 
 struct UnfoundDep {
+  UnknownName name ={};
   CompilationUnit* unit_waiting ={};
-  UnfoundDepType type = UnfoundDepType::Unkown;
-  Span span ={};
-
-  union {
-    char _dummpy ={};
-    UnknownName name;
-    CallSignature signature;
-  };
-
-  UnfoundDep() = default;
-  UnfoundDep(UnfoundDep&& a) noexcept {
-    move_from(std::move(a));
-  }
-  UnfoundDep& operator=(UnfoundDep&& a) noexcept {
-    this->~UnfoundDep();
-    move_from(std::move(a));
-    return *this;
-  }
-
-  void move_from(UnfoundDep&&) noexcept;
-
-  void set_union(UnfoundDepType et) noexcept;
-  void destruct_union() noexcept;
-
-  ~UnfoundDep();
+  
+  //Used if the dependency isnt found
+  ErrorMessage as_error={};
 };
 
 struct UnfoundDependencies {
   bool panic = false;
   Array<UnfoundDep> unfound ={};
-};
-
-#define N_E_T_MODS \
-MODIFY(NONE, "unknown", _dummy) \
-MODIFY(OVERLOADS, "funciton", overloads) \
-MODIFY(FUNCTION_POINTER, "funciton", func_pointer) \
-MODIFY(STRUCTURE, "structure", structure) \
-MODIFY(ENUM, "enum", enum_value) \
-MODIFY(GLOBAL, "global", global)
-
-enum struct NamedElementType : uint8_t {
-#define MODIFY(name, str, expr_name) name,
-  N_E_T_MODS
-#undef MODIFY
-};
-
-struct NamedElement {
-  NamedElementType type;
-  union {
-    char _dummy;
-    Array<Function*> overloads;
-    FunctionPointer* func_pointer;
-    const Structure* structure;
-    const EnumValue* enum_value;
-    const Global* global;
-    //NamespaceIndex other_namespace;
-  };
-
-  void set_union(NamedElementType ty);
-  void destruct_union();
-  void move_from(NamedElement&& ne);
-
-  //This is not '= default' because intellisense complains and that annoys me
-  NamedElement() : type(NamedElementType::NONE), _dummy('\0') {}
-
-  NamedElement(NamedElement&& ne) noexcept {
-    move_from(std::move(ne));
-  }
-
-  NamedElement& operator=(NamedElement&& ne) noexcept {
-    this->~NamedElement();
-    move_from(std::move(ne));
-    return *this;
-  }
-
-  ~NamedElement() noexcept {
-    destruct_union();
-  }
-};
-
-struct Namespace {
-  bool is_sub_namespace = false;
-  NamespaceIndex inside ={};
-
-  InternHashTable<NamedElement> names ={};
-  Array<NamespaceIndex> imported ={};
 };
 
 struct FileImport {
@@ -459,7 +403,7 @@ struct FileLoader {
 };
 
 struct SingleDllImport {
-  FunctionPointer* ptr;
+  Function* ptr;
   uint32_t rva_hint;
   const InternString* name;
 };
@@ -470,7 +414,18 @@ struct ImportedDll {
   Array<SingleDllImport> imports ={};
 };
 
-struct SystemsAndConcentionNames {
+
+#define INTRINSIC_MODS \
+MOD(import) \
+MOD(build_options) \
+
+struct Intrinsics {
+#define MOD(n) const InternString* n = nullptr;
+  INTRINSIC_MODS;
+#undef MOD
+};
+
+struct SystemsAndConventionNames {
   const InternString* sys_vm      = nullptr;
   const InternString* sys_x86_64  = nullptr;
 
@@ -480,14 +435,39 @@ struct SystemsAndConcentionNames {
 };
 
 struct BuildOptions {
+  u32 ptr_size = 8;
+
   const InternString* file_name   = nullptr;
   const InternString* entry_point = nullptr;
   const InternString* output_file = nullptr;
 
   const InternString* std_lib_folder = nullptr;
 
-  const System* system = nullptr;
+  const System* endpoint_system = nullptr;
+  const System* vm_system = nullptr;
   const CallingConvention* default_calling_convention = nullptr;
+};
+
+struct Context {
+  const System* system = nullptr;
+  const CallingConvention* calling_convention = nullptr;
+
+  Span span;
+
+  CompilationUnit* current_unit;
+  NamespaceIndex current_namespace;
+};
+
+struct Services {
+  Lexer* lexer = nullptr;
+  Parser* parser = nullptr;
+  VM* vm = nullptr;
+  Errors* errors = nullptr;
+  NamesHandler* names = nullptr;
+  FileLoader* file_loader = nullptr;
+  Structures* structures = nullptr;
+  BuiltinTypes* builtin_types = nullptr;
+  StringInterner* strings = nullptr;
 };
 
 struct Compiler {
@@ -495,19 +475,16 @@ struct Compiler {
   BuildOptions           build_options        ={};
   APIOptimizationOptions optimization_options ={};
 
-  SystemsAndConcentionNames system_names ={};
-  VM* vm = nullptr;
+  SystemsAndConventionNames system_names ={};
+  Intrinsics intrinsics ={};
 
-  CompilationUnit* current_unit ={};
+  Services services;
 
-  Errors errors ={};
+  Array<Token> current_stream ={};
+
   UnfoundDependencies unfound_deps ={};
 
-  NamespaceIndex builtin_namespace ={};
-  NamespaceIndex current_namespace ={};
-  Array<Namespace> all_namespaces ={};
-
-  FileLoader file_loader ={};
+  NamespaceIndex build_file_namespace ={};//needs to be saved for finding main
 
   Array<ImportedDll> dlls_import ={};
   Array<ASTFile> parsed_files ={};
@@ -515,6 +492,7 @@ struct Compiler {
   FreelistBlockAllocator<SignatureUnit> signature_units ={};
   FreelistBlockAllocator<StructureUnit> structure_units ={};
   FreelistBlockAllocator<FunctionUnit> function_units ={};
+  FreelistBlockAllocator<ImportUnit> import_units ={};
   FreelistBlockAllocator<ConstantExprUnit> const_expr_units ={};
   FreelistBlockAllocator<GlobalUnit> global_units ={};
 
@@ -522,57 +500,78 @@ struct Compiler {
 
   BucketArray<Global> globals ={};
   BucketArray<Function> functions ={};
-  BucketArray<FunctionPointer> function_pointers ={};
 
   ArenaAllocator constants ={};
-
-  Types* types = nullptr;
-  StringInterner* strings = nullptr;
 
   uint64_t labels = 0;
 
   Function* new_function();
-  FunctionPointer* new_function_pointer();
 
+  ImportUnit* new_import_unit(NamespaceIndex ns);
   ConstantExprUnit* new_const_expr_unit(NamespaceIndex ns);
   FunctionUnit* new_function_unit(NamespaceIndex ns);
   SignatureUnit* new_signature_unit(NamespaceIndex ns);
   StructureUnit* new_structure_unit(NamespaceIndex ns);
   GlobalUnit* new_global_unit(NamespaceIndex ns);
 
+  inline constexpr bool is_panic() const { return services.errors->panic || unfound_deps.panic; }
+  inline constexpr bool is_fatal() const { return services.errors->panic; }
+  inline constexpr void reset_panic() { services.errors->panic = false; unfound_deps.panic = false; }
 
-  constexpr bool is_panic() const { return errors.panic || unfound_deps.panic; }
-  constexpr bool is_fatal() const { return errors.panic; }
-  constexpr void reset_panic() { errors.panic = false; unfound_deps.panic = false; }
-
-  template<typename ... T>
-  void report_error(CompileCode code, const Span& span, const char* f_message, T&& ... ts) {
-    errors.panic = true;
-
-    OwnedPtr<char> message = format(f_message, std::forward<T>(ts)...);
-    errors.error_messages.insert({ code, span, std::move(message) });
+  inline constexpr bool is_compiling() const {
+    return to_compile.size > 0
+      || services.file_loader->unparsed_files.size > 0;
   }
 
-  void set_unfound_name(const InternString* name, NamespaceIndex ns, const Span& span);
-  void set_unfound_signature(CallSignature&& sig, const Span& span);
-  void set_dep(CompilationUnit* unit);
+  template<typename ... T>
+  void report_error(ERROR_CODE code, const Span& span, const char* f_message, T&& ... ts) {
+    services.errors->register_error(code, span, f_message, std::forward<T>(ts)...);
+
+    services.errors->panic = true;
+  }
+
+  template<typename ... T>
+  void set_unfound_name(Context* context, UnknownName&& name,
+                        ERROR_CODE code, const Span& span,
+                        const char* f_message, T&& ... ts) {
+    ASSERT(name.ident != nullptr);
+    unfound_deps.panic = true;
+
+    unfound_deps.unfound.insert_uninit(1);
+    UnfoundDep* dep = unfound_deps.unfound.back();
+
+    dep->name = std::move(name);
+    dep->unit_waiting = context->current_unit;
+    dep->as_error.type = code;
+    dep->as_error.span = span;
+    dep->as_error.message = format(f_message, std::forward<T>(ts)...);
+  }
+
+  void set_dep(Context* context, CompilationUnit* unit);
 };
+
+void add_comp_unit_for_lambda(Compiler* const comp, NamespaceIndex ns_index, ASTLambda* lambda) noexcept;
+void add_comp_unit_for_struct(Compiler* const comp, NamespaceIndex ns_index, ASTStructBody* struct_body) noexcept;
 
 void init_compiler(const APIOptions& options, Compiler* comp);
 
-CompileCode compile_all(Compiler* const comp);
+ERROR_CODE compile_all(Compiler* const comp);
 
 void set_runtime_flags(ASTExpression* const expr, State* const state,
                        bool modified, uint8_t valid_rvts);
 
 void compile_type_of_expression(Compiler* const comp,
+                                Context* context,
                                 State* const state,
                                 ASTExpression* const expr,
                                 const TypeHint* const hint);
 
-CompileCode parse_all_unparsed_files_with_imports(Compiler* const comp);
+void cast_operator_type(Compiler* const comp,
+                        Context* const context,
+                        State* const state,
+                        ASTExpression* const expr);
 
-void build_compilation_units_for_file(Compiler* const comp, ASTFile* const func);
+void process_parsed_file(Compiler* const comp, ASTFile* const func);
 
 void print_compiled_functions(const Compiler* comp);
 
@@ -589,31 +588,17 @@ void copy_runtime_to_runtime(Compiler* const comp,
                              const RuntimeValue* from,
                              RuntimeValue* to);
 
-const Structure* find_or_make_array_type(Compiler* const comp,
-                                         const Span& span,
-                                         const Structure* base,
+const Structure* find_or_make_array_structure(Compiler* const comp,
+                                         Context* context,
+                                         const Type& base,
                                          size_t length);
 
-const Structure* find_or_make_pointer_type(Compiler* const comp,
-                                           const Span& span,
-                                           const Structure* base);
+const Structure* find_or_make_pointer_structure(Compiler* const comp,
+                                           Context* context,
+                                           const Type& base);
 
-const Structure* find_or_make_tuple_literal(Compiler* const comp,
-                                            const Span& span,
-                                            Array<const Structure*>&& elements);
+const Structure* find_or_make_tuple_structure(Compiler* const comp,
+                                            Context* context,
+                                            Array<Type>&& elements);
 
-NamedElement* find_name(Compiler* const comp,
-                        NamespaceIndex ns_index,
-                        const InternString* name);
-
-NamedElement* find_empty_name(Compiler* const comp,
-                              NamespaceIndex ns_index,
-                              const InternString* name);
-
-Array<NamedElement*> find_all_names(Compiler* const comp,
-                                    NamespaceIndex ns_index,
-                                    const InternString* name);
-
-CompileCode print_compile_errors(const Compiler* const comp);
-
-void build_data_section_for_exec(Program* prog, Compiler* const comp);
+void build_data_section_for_vm(Program* prog, Compiler* const comp);

@@ -9,8 +9,10 @@
 struct ASTType;
 struct ASTExpression;
 struct ASTStatement;
+struct ASTLambda;
+struct ASTStructBody;
 
-struct Structure;
+struct Type;
 struct Function;
 struct EnumValue;
 struct State;
@@ -18,11 +20,6 @@ struct Global;
 
 struct ASTName {
   const InternString* name ={};
-  const Structure* type = nullptr;
-};
-
-enum struct TYPE_TYPE {
-  NORMAL, ARRAY, PTR
 };
 
 struct ASTArrayType {
@@ -43,17 +40,57 @@ struct ASTPtrType {
   }
 };
 
+struct ASTLambdaType {
+  //Last one is the return type
+  Array<ASTType> types ={};
+};
+
+struct ASTTupleType {
+  Array<ASTType> types ={};
+};
+
+#define TYPE_TYPE_MOD \
+MOD(NORMAL, name) \
+MOD(ARRAY, arr) \
+MOD(PTR, ptr) \
+MOD(TUPLE, tuple) \
+MOD(LAMBDA, lambda)
+
+enum struct TYPE_TYPE {
+  UNKNOWN = 0,
+
+#define MOD(name, t) name,
+  TYPE_TYPE_MOD
+#undef MOD
+};
+
 struct ASTType {
-  TYPE_TYPE type_type;
-  Span span;
+  TYPE_TYPE type_type = TYPE_TYPE::UNKNOWN;
+  Type type ={};
+  Span span ={};
 
   union {
-    const InternString* name ={};
+    char _dummy = '\0';
+    const InternString* name;
     ASTArrayType arr;
     ASTPtrType ptr;
+    ASTTupleType tuple;
+    ASTLambdaType lambda;
   };
 
-  const Structure* type = nullptr;
+  ASTType() = default;
+
+  ASTType(ASTType&& a) noexcept {
+    move_from(std::move(a));
+  }
+
+  ASTType& operator=(ASTType&& a) noexcept {
+    this->~ASTType();
+    move_from(std::move(a));
+    return *this;
+  }
+
+  void move_from(ASTType&&) noexcept;
 
   void set_union(TYPE_TYPE);
   void destruct_union();
@@ -83,7 +120,8 @@ struct FunctionCallExpr {
   Array<ASTExpression> arguments ={};
 
   const InternString* function_name = nullptr;
-  const FunctionBase* function = nullptr;
+  const SignatureStructure* sig = nullptr;
+  //const Function* function = nullptr;
 };
 
 struct EnumValueExpr {
@@ -106,6 +144,13 @@ struct CastExpr {
   ASTType type;
   ASTExpression* expr = nullptr;
   CAST_FUNCTION emit = nullptr;
+
+  inline CastExpr& operator=(CastExpr&& c) noexcept {
+    type = std::move(c.type);
+    expr = std::exchange(c.expr, nullptr);
+    emit = std::exchange(c.emit, nullptr);
+    return *this;
+  }
 
   ~CastExpr() {
     free_destruct_single(expr);
@@ -142,6 +187,26 @@ struct MemberAccessExpr {
   }
 };
 
+struct LambdaExpr {
+  ASTLambda* lambda;
+
+  ~LambdaExpr() {
+    free_destruct_single(lambda);
+  }
+};
+
+struct StructExpr {
+  ASTStructBody* body;
+
+  ~StructExpr() {
+    free_destruct_single(body);
+  }
+};
+
+struct CompIntrinsicExpr {
+  const InternString* name;
+};
+
 #define EXPRESSION_TYPE_MODIFY \
 MODIFY(CAST, cast) \
 MODIFY(UNARY_OPERATOR, un_op) \
@@ -159,6 +224,9 @@ MODIFY(ASCII_CHAR, ascii_char) \
 MODIFY(INDEX, index) \
 MODIFY(NULLPTR, _dummy) \
 MODIFY(MEMBER, member) \
+MODIFY(LAMBDA, lambda) \
+MODIFY(STRUCT, struct_body) \
+MODIFY(COMP_INTRINSIC, comp_intrinsic)
 
 enum struct EXPRESSION_TYPE : uint8_t {
   UNKNOWN = 0,
@@ -168,14 +236,13 @@ enum struct EXPRESSION_TYPE : uint8_t {
 };
 
 struct ASTExpression {
-  const Structure* type = nullptr;
-
   uint8_t valid_rvts = ALL_RVTS;
 
-  bool assignable = false;
   bool makes_call = false;
   bool call_leaf = false;
-  bool comptime_eval = false;
+
+  META_FLAGS meta_flags;
+  Type type;
 
   uint8_t* const_val = nullptr;
 
@@ -199,6 +266,9 @@ struct ASTExpression {
     const InternString* ascii_string;
     IndexExpr index;
     MemberAccessExpr member;
+    LambdaExpr lambda;
+    StructExpr struct_body;
+    CompIntrinsicExpr comp_intrinsic;
   };
 
   ASTExpression() = default;
@@ -213,7 +283,6 @@ struct ASTExpression {
     return *this;
   }
 
-  void reset_linked_list() noexcept;
   void move_from(ASTExpression&&) noexcept;
 
   void set_union(EXPRESSION_TYPE et) noexcept;
@@ -238,15 +307,56 @@ enum struct STATEMENT_TYPE : uint8_t {
 #undef MOD
 };
 
-struct ASTLocal {
-  ASTExpression* expression ={};
-  ASTType type ={};
+struct ASTBlock {
+  Array<ASTStatement> block ={};
+};
+
+struct ASTDecl {
   const InternString* name = nullptr;
+  bool compile_time_const = false;
+  Type type ={};
+
+  //Only used in locals
   size_t local_index = 0;
 
-  ~ASTLocal() {
-    free_destruct_single(expression);
+  ASTType* type_ast ={};
+  ASTExpression* expr ={};
+
+  Span span ={};
+
+  ~ASTDecl() {
+    free_destruct_single(type_ast);
+    free_destruct_single(expr);
   }
+};
+
+struct ASTFuncSig {
+  FunctionSignature* sig = nullptr;
+  const CallingConvention* convention = nullptr;
+
+  ASTType return_type ={};
+  Array<ASTDecl> parameters ={};
+
+  Span signature_span ={};
+};
+
+struct ASTLambda {
+  Function* function = nullptr;
+
+  ASTFuncSig sig ={};
+  ASTBlock body ={};
+};
+
+struct ASTTypedName {
+  ASTType type ={};
+  const InternString* name = nullptr;
+};
+
+struct ASTStructBody {
+  CompilationUnit* compilation_unit;
+  Type type{};
+  Span span ={};
+  Array<ASTTypedName> elements = {};
 };
 
 struct ASTWhile {
@@ -271,10 +381,6 @@ struct ASTIfElse {
   }
 };
 
-struct ASTBlock {
-  Array<ASTStatement> block ={};
-};
-
 struct ASTAssign {
   ASTExpression* assign_to ={};
   ASTExpression* value ={};
@@ -285,14 +391,23 @@ struct ASTAssign {
   }
 };
 
+struct ExprHolder {
+  ASTExpression* expr = nullptr;
+
+  ~ExprHolder() {
+    free_destruct_single(expr);
+  }
+};
+
+
 struct ASTStatement {
   STATEMENT_TYPE type = STATEMENT_TYPE::UNKNOWN;
   Span span;
 
   union {
     char _dummy ={};
-    ASTExpression* expression;
-    ASTLocal local;
+    ExprHolder expression;
+    ASTDecl local;
     ASTWhile while_loop;
     ASTIfElse if_else;
     ASTBlock block;
@@ -306,71 +421,21 @@ struct ASTStatement {
   ~ASTStatement();
 };
 
-struct ASTTypedName {
-  ASTType type ={};
-  const InternString* name = nullptr;
-};
-
-struct ASTStructureDeclaration {
-  const InternString* name = nullptr;
-  Span name_span = {};
-
-  Array<ASTTypedName> elements = {};
-
-  const Structure* structure = nullptr;
-};
-
-struct ASTFunctionSignature {
-  const InternString* convention = nullptr;
-
-  const InternString* name = nullptr;
-  ASTType return_type;
-  Array<ASTLocal> parameters;
-
-  Span signature_span ={};
-};
-
-struct ASTFunctionDeclaration {
-  ASTFunctionSignature signature ={};
-  ASTBlock body;
-};
-
-struct ASTGlobalDeclaration {
-  ASTType type ={};
-  const InternString* name = nullptr;
-  ASTExpression init_expr ={};
-
-  Span span ={};
-};
-
 struct ASTImport {
-  bool std = false;
-  const InternString* relative_path = nullptr;
+  ASTExpression expr_location;
+
+  //If empty then import all
+  Array<ASTDecl> imports;
 
   Span span ={};
-
-  FileLocation loc ={};
-};
-
-enum struct FILE_TYPE : uint8_t {
-  NONE, SOURCE, DLL_HEADER
-};
-
-struct ASTFileHeader {
-  bool is_dll_header;
-  ASTImport dll_header;
 };
 
 struct ASTFile {
   FileLocation file_loc ={};
   NamespaceIndex namespace_index = {};
 
-  ASTFileHeader header = {};
-
   Array<ASTImport> imports = {};
-  Array<ASTGlobalDeclaration> globals = {};
-  Array<ASTFunctionDeclaration> functions ={};
-  Array<ASTStructureDeclaration> structs ={};
+  Array<ASTDecl> decls = {};
 };
 
 struct ScopeView {
@@ -378,5 +443,11 @@ struct ScopeView {
   const ASTStatement* end;
 };
 
-void print_ast(const ASTFile* file);
-void print_ast_expression(const ASTExpression* expr);
+struct Printer {
+  size_t tabs = 0;
+
+  void newline() const;
+};
+
+void print_ast(const Compiler* comp, const ASTFile* file);
+void print_ast_expression(Printer* printer, const ASTExpression* expr);

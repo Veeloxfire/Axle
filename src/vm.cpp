@@ -15,7 +15,10 @@ void VM::allocate_stack(uint64_t bytes) {
   SP -= bytes;
 
   if (SP <= stack) {
-    throw std::exception("STACK OVERFLOW");
+    errors->register_error(ERROR_CODE::VM_ERROR, Span{},
+                           "VM Stack overflow during allocation");
+    errors->panic = true;
+    return;
   }
 }
 
@@ -23,7 +26,9 @@ void VM::push(X64_UNION val) {
   SP -= 8;
 
   if (SP <= stack) {
-    throw std::exception("STACK OVERFLOW");
+    errors->register_error(ERROR_CODE::VM_ERROR, Span{},
+                           "VM Stack overflow during 'push' operation");
+    errors->panic = true;
     return;
   }
 
@@ -32,7 +37,9 @@ void VM::push(X64_UNION val) {
 
 X64_UNION VM::pop() {
   if (SP + 8 >= stack + STACK_SIZE) {
-    throw std::exception("STACK UNDERFLOW");
+    errors->register_error(ERROR_CODE::VM_ERROR, Span{},
+                           "VM Stack underflow during 'pop' operation");
+    errors->panic = true;
     return { (uint64_t) 0 };
   }
 
@@ -66,7 +73,7 @@ void vm_call_native_x64(VM* const vm, const void* func_ptr, uint64_t stack_requi
   vm->registers[0].b64.reg = call_native_x64(func_ptr, param_registers, vm->SP, stack_required);
 }
 
-ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
+void vm_rum(VM* const vm, Program* prog) noexcept {
   //Load dlls
   Array<Windows::ActiveDll> actives = {};
 
@@ -145,20 +152,36 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::NEQ_R8S;
           break;
         }
-      case ByteCode::LESS_R64S: {
-          const auto i = ByteCode::PARSE::LESS_R64S(vm->IP);
+      case ByteCode::LESS_U64S: {
+          const auto i = ByteCode::PARSE::LESS_U64S(vm->IP);
 
           vm->registers[i.val2].b64.reg = (vm->registers[i.val2].b64.reg < vm->registers[i.val1].b64.reg);
 
-          vm->IP += ByteCode::SIZE_OF::LESS_R64S;
+          vm->IP += ByteCode::SIZE_OF::LESS_U64S;
           break;
         }
-      case ByteCode::GREAT_R64S: {
-          const auto i = ByteCode::PARSE::GREAT_R64S(vm->IP);
+      case ByteCode::GREAT_U64S: {
+          const auto i = ByteCode::PARSE::GREAT_U64S(vm->IP);
 
           vm->registers[i.val2].b64.reg = (vm->registers[i.val2].b64.reg > vm->registers[i.val1].b64.reg);
 
-          vm->IP += ByteCode::SIZE_OF::GREAT_R64S;
+          vm->IP += ByteCode::SIZE_OF::GREAT_U64S;
+          break;
+        }
+      case ByteCode::LESS_I64S: {
+          const auto i = ByteCode::PARSE::LESS_I64S(vm->IP);
+
+          vm->registers[i.val2].b64.reg = (vm->registers[i.val2].b64.reg_s < vm->registers[i.val1].b64.reg_s);
+
+          vm->IP += ByteCode::SIZE_OF::LESS_I64S;
+          break;
+        }
+      case ByteCode::GREAT_I64S: {
+          const auto i = ByteCode::PARSE::GREAT_I64S(vm->IP);
+
+          vm->registers[i.val2].b64.reg = (vm->registers[i.val2].b64.reg_s > vm->registers[i.val1].b64.reg_s);
+
+          vm->IP += ByteCode::SIZE_OF::GREAT_I64S;
           break;
         }
       case ByteCode::OR_R64S: {
@@ -167,6 +190,14 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
           vm->registers[i.val2].b64.reg |= vm->registers[i.val1].b64.reg;
 
           vm->IP += ByteCode::SIZE_OF::OR_R64S;
+          break;
+        }
+      case ByteCode::XOR_R64S: {
+          const auto i = ByteCode::PARSE::XOR_R64S(vm->IP);
+
+          vm->registers[i.val2].b64.reg ^= vm->registers[i.val1].b64.reg;
+
+          vm->IP += ByteCode::SIZE_OF::XOR_R64S;
           break;
         }
       case ByteCode::AND_R64S: {
@@ -209,14 +240,14 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::LOAD_ADDRESS;
           break;
         }
-      case ByteCode::LOAD_GLOBAL_MEM: {
+      /*case ByteCode::LOAD_GLOBAL_MEM: {
           const auto i = ByteCode::PARSE::LOAD_GLOBAL_MEM(vm->IP);
 
           vm->registers[i.val].b64.b_ptr = i.u64;
 
           vm->IP += ByteCode::SIZE_OF::LOAD_GLOBAL_MEM;
           break;
-        }
+        }*/
       case ByteCode::NEG_R64: {
           const auto i = ByteCode::PARSE::NEG_R64(vm->IP);
 
@@ -294,6 +325,9 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
           const auto i = ByteCode::PARSE::PUSH_R64(vm->IP);
 
           vm->push(vm->registers[i.val].b64.reg);
+          if (vm->errors->panic) {
+            return;
+          }
 
           vm->IP += ByteCode::SIZE_OF::PUSH_R64;
           break;
@@ -302,6 +336,9 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
           const auto i = ByteCode::PARSE::POP_TO_R64(vm->IP);
 
           vm->registers[i.val].b64.reg = vm->pop();
+          if (vm->errors->panic) {
+            return;
+          }
 
           vm->IP += ByteCode::SIZE_OF::POP_TO_R64;
           break;
@@ -310,6 +347,9 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
           const auto i = ByteCode::PARSE::ALLOCATE_STACK(vm->IP);
 
           vm->allocate_stack(i.u64.val);
+          if (vm->errors->panic) {
+            return;
+          }
 
           vm->IP += ByteCode::SIZE_OF::ALLOCATE_STACK;
           break;
@@ -473,6 +513,10 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
         }
       case ByteCode::PUSH_FRAME: {
           vm->push(vm->BP);
+          if (vm->errors->panic) {
+            return;
+          }
+
           vm->BP = vm->SP;
           vm->IP += ByteCode::SIZE_OF::PUSH_FRAME;
           break;
@@ -480,6 +524,10 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
       case ByteCode::POP_FRAME: {
           vm->SP = vm->BP;
           vm->BP = vm->pop();
+          if (vm->errors->panic) {
+            return;
+          }
+
           vm->IP += ByteCode::SIZE_OF::POP_FRAME;
           break;
         }
@@ -487,6 +535,10 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
           const auto i = ByteCode::PARSE::CALL(vm->IP);
 
           vm->push(vm->IP + ByteCode::SIZE_OF::CALL);
+          if (vm->errors->panic) {
+            return;
+          }
+
           vm->IP = prog->code.ptr + i.u64.val;
           break;
         }
@@ -502,18 +554,19 @@ ErrorCode vm_rum(VM* const vm, Program* prog) noexcept {
           const auto i = ByteCode::PARSE::RETURN(vm->IP);
 
           vm->IP = vm->pop();
-          if (vm->IP == nullptr) {
-            //End execution
-            return ErrorCode::OK;
+          if (vm->errors->panic || vm->IP == nullptr) {
+            return;
           }
           break;
         }
+      case ByteCode::LOAD_GLOBAL_MEM://should never actually be called
       default: {
           uint8_t op = vm->IP[0];
-          fprintf(stderr, "ENCOUNTERED INVALID INSTRUCTION!\n"
-                          "            Code: %d, Name: %s\n",
-                  op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
-          return ErrorCode::UNDEFINED_INSTRUCTION;
+          vm->errors->register_error(ERROR_CODE::VM_ERROR, Span{},
+                                     "Encountered invalid instruction\n"
+                                     "Code: {}\nName: '{}'",
+                                     op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
+          return;
         }
     } 
   }

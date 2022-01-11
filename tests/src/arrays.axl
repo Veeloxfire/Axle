@@ -1,5 +1,0 @@
-function main() -> u64 {
-  [u64; 4] a = [3, 2, 0, 1];
-
-  return a[a[a[a[0]]]];
-}

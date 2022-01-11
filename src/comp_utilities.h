@@ -3,12 +3,12 @@
 
 //Important forward declarations
 struct Compiler;
+struct Context;
 struct State;
-struct Structure;
 struct CodeBlock;
-struct Types;
 struct ASTExpression;
 struct Local;
+struct Global;
 
 //New structures
 
@@ -45,9 +45,9 @@ struct MemIndex {
 //Runtime value type
 enum struct RVT : uint8_t {
   UNKNOWN  = 0,
-  REGISTER = 1,
-  MEMORY   = 2,
-  CONST    = 4,
+  REGISTER = 1 << 0,
+  MEMORY   = 1 << 1,
+  CONST    = 1 << 3,
 };
 
 constexpr uint8_t operator|(RVT l, RVT r) {
@@ -130,17 +130,18 @@ MOD(TYPE_CHECK_ERROR)\
 MOD(NAME_ERROR)\
 MOD(FILE_ERROR)\
 MOD(INTERNAL_ERROR) \
-MOD(CONST_ERROR)
+MOD(CONST_ERROR) \
+MOD(VM_ERROR)
 
-enum struct CompileCode : uint8_t {
+enum struct ERROR_CODE : uint8_t {
 #define MOD(E) E,
   COMPCODEINC
 #undef MOD
 };
 
-constexpr const char* compile_code_string(CompileCode c) {
+constexpr const char* error_code_string(ERROR_CODE c) {
   switch (c) {
-  #define MOD(E) case CompileCode:: ## E: return #E;
+  #define MOD(E) case ERROR_CODE:: ## E: return #E;
     COMPCODEINC
     #undef MOD
   }
@@ -159,6 +160,7 @@ MODIFY(EQUIVALENT, "==", 2)\
 MODIFY(NOT_EQ, "!=", 2)\
 MODIFY(OR, "|", 1)\
 MODIFY(AND, "&", 1)\
+MODIFY(XOR, "^", 1)\
 MODIFY(RIGHT_SHIFT, ">>", 4)\
 MODIFY(LEFT_SHIFT, "<<", 4)
 

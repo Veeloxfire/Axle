@@ -27,6 +27,8 @@ struct APIPrintOptions {
   bool coalesce_values = false;
   bool run_headers     = false;
   bool file_loads      = false;
+  bool start_comp_unit = false;
+  //bool unfound_dep     = false;
 };
 
 struct APIOptions {

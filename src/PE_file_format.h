@@ -172,6 +172,8 @@ struct Data_directory {
   uint32_t size = 0x00000000;
 };
 
+static_assert(sizeof(Data_directory) == 8);
+
 //Not all emited
 struct Image_header_directories {
   Data_directory export_table ={};

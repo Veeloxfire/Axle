@@ -3,6 +3,7 @@
 #include "safe_lib.h"
 #include "utility.h"
 #include "files.h"
+#include "errors.h"
 
 struct ASTFile;
 
@@ -27,6 +28,7 @@ MODIFY(BackSlash, "/") \
 MODIFY(Lesser, "<") \
 MODIFY(Greater, ">") \
 MODIFY(Or, "|") \
+MODIFY(Xor, "^") \
 MODIFY(And, "&") \
 MODIFY(Equals, "=") \
 MODIFY(Bang, "!") \
@@ -40,27 +42,23 @@ MODIFY(Left_Square, "[") \
 MODIFY(Right_Square, "]") \
 MODIFY(Comma, ",") \
 MODIFY(Semicolon, ";") \
+MODIFY(Colon, ":") \
 MODIFY(Full_Stop, ".")
-
-#define AXLE_TOKEN_INTRINSICS \
-MODIFY(Import, "#import") \
-MODIFY(Stdlib, "#stdlib") \
-MODIFY(DLLHeader, "#dll_header") \
-MODIFY(Convention, "#conv") \
 
 #define AXLE_TOKEN_MODIFY \
 MODIFY(Error, "") \
-MODIFY(Eof, "") \
+MODIFY(End, "") \
 MODIFY(Identifier, "") \
+MODIFY(Intrinsic, "") \
 MODIFY(Number, "") \
 MODIFY(String, "") \
 MODIFY(Character, "") \
 AXLE_TOKEN_KEYWORDS \
 AXLE_TOKEN_OPERATORS \
 AXLE_TOKEN_STRUCTURAL \
-AXLE_TOKEN_INTRINSICS
 
 
+//Error is for reporting lexing errors and should never been seen in the parser
 enum class AxleTokenType : uint8_t {
 #define MODIFY(n, str) n,
   AXLE_TOKEN_MODIFY
@@ -89,18 +87,12 @@ struct Token {
   Position pos ={};
 };
 
-struct Span {
-  //is null if file_name == nullptr
-  const InternString* full_path ={};
-  size_t line_start = 0;
-  size_t line_end = 0;
-  size_t char_start = 0;
-  size_t char_end = 0;
-};
+struct Span;
 
+void set_span_start(const Token& token, Span& span);
+void set_span_end(const Token& token, Span& span);
 
 Span span_of_token(const Token& tok);
-OwnedPtr<char> load_span_from_file(const Span& span, const char* source);
 
 struct Lexer {
   StringInterner* strings = nullptr;
@@ -110,18 +102,25 @@ struct Lexer {
   const char* top = nullptr;
 };
 
+struct TokenStream {
+  Token* i;
+  Token* end;
+};
+
 struct Parser {
-  Lexer lexer ={};
+  TokenStream stream;
+  NamespaceIndex current_namespace;
 
   Token prev = {};
   Token current ={};
   Token next ={};
-
-  void report_error(const char* error_message);
 };
 
-void init_parser(Parser* const parser,  const InternString* full_path, const char* source);
-void parse_file(Parser* const parser, ASTFile* const file);
+void reset_parser(struct Compiler* const comp,
+                  const InternString* file_name,
+                  const char* string);
+
+void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file);
 
 struct KeywordPair {
   const char* keyword = nullptr;

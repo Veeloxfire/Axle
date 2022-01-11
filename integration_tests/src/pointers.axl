@@ -1,0 +1,10 @@
+func :: (ptr: *u64) -> u64 {
+  return *ptr;
+}
+
+
+main :: () -> u64 {
+  a: u64 = 3;
+
+  return func(&a);
+}

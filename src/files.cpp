@@ -6,7 +6,7 @@ namespace FILES {
   OpenedFile open(const char* name,
                   OPEN_MODE open_mode,
                   DATA_MODE data_mode) {
-    OpenedFile opened_file;
+    OpenedFile opened_file ={};
     char mode[3] ={ (char)open_mode, (char)data_mode, '\0' };
     opened_file.error_code = fopen_s(&opened_file.file, name, mode);
     return opened_file;

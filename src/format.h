@@ -5,11 +5,11 @@ struct TokenTypeString;
 enum struct AxleTokenType : uint8_t;
 enum struct STATEMENT_TYPE : uint8_t;
 enum struct ErrorCode : uint8_t;
-enum struct NamedElementType : uint8_t;
 
-struct FunctionBase;
+struct Function;
 struct CallSignature;
 struct FileLocation;
+struct SignatureStructure;
 struct FunctionCallExpr;
 
 //For printing character as it appears in code
@@ -18,11 +18,19 @@ struct DisplayChar {
 };
 
 struct PrintFuncSignature {
-  const FunctionBase* func;
+  const Function* func;
+};
+
+struct PrintSignatureType {
+  const SignatureStructure* sig;
 };
 
 struct PrintCallSignature {
   const FunctionCallExpr* call;
+};
+
+struct PrintPtr {
+  const void* ptr;
 };
 
 
@@ -35,6 +43,7 @@ void load_string(Array<char>& res, int32_t i32);
 void load_string(Array<char>& res, uint32_t u32);
 void load_string(Array<char>& res, int64_t i64);
 void load_string(Array<char>& res, uint64_t u64);
+void load_string(Array<char>& res, PrintPtr ptr);
 
 void load_string(Array<char>& res, DisplayChar c);
 void load_string(Array<char>& res, const char* str);
@@ -43,10 +52,10 @@ void load_string(Array<char>& res, const InternString* str);
 void load_string(Array<char>& res, const TokenTypeString& str);
 void load_string(Array<char>& res, AxleTokenType tt);
 void load_string(Array<char>& res, STATEMENT_TYPE st);
-void load_string(Array<char>& res, NamedElementType nt);
 void load_string(Array<char>& res, ErrorCode ec);
 
 void load_string(Array<char>& res, PrintFuncSignature func);
+void load_string(Array<char>& res, PrintSignatureType sig);
 void load_string(Array<char>& res, PrintCallSignature call);
 void load_string(Array<char>& res, const CallSignature& call_sig);
 
@@ -63,8 +72,7 @@ Formatter& operator<<(Formatter& f, const T& t) {
 
   while (true) {
     if (f.format_string[0] == '\0') {
-      throw std::exception("Invalid format");
-      break;
+      INVALID_CODE_PATH("Invalid format");
     }
     else if (f.format_string[0] == '{' && f.format_string[1] == '}') {
       const size_t num_chars = f.format_string - string;
@@ -106,7 +114,7 @@ void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
 
   while (true) {
     if (format[0] == '{' && format[1] == '}') {
-      throw std::exception("Invalid format");
+      INVALID_CODE_PATH("Invalid format");
       break;
     }
     else if (format[0] == '\0') {
@@ -135,7 +143,16 @@ OwnedPtr<char> format(const char* format, const T& ... ts) {
 
   result.shrink();
   return result;
+}
 
+template<typename ... T>
+void format_print(const char* format, const T& ... ts) {
+  Array<char> result ={};
+
+  format_to_array(result, format, ts...);
+  result.insert('\0');
+
+  IO::print(result.data);
 }
 
 OwnedPtr<char> format_type_set(const char* format, size_t prepend_spaces, size_t max_width);

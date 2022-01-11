@@ -92,19 +92,6 @@ void load_string(Array<char>& res, const AxleTokenType tt) {
   load_string(res, str);
 }
 
-void load_string(Array<char>& res, NamedElementType nt) {
-  switch (nt) {
-    #define MODIFY(name, str, expr_name) case NamedElementType:: ## name: load_string(res, str); break;
-      N_E_T_MODS
-      #undef MODIFY
-
-    default:
-      load_string(res, "unknown_name(");
-      load_string(res, (uint8_t)nt);
-      load_string(res, ')');
-      break;
-  }
-}
 
 void load_string(Array<char>& res, STATEMENT_TYPE st) {
 
@@ -155,6 +142,40 @@ static void load_unsigned(Array<char>& res, uint64_t u64) {
 
   if (is_0) {
     res.insert('0');
+  }
+}
+
+static void load_unsigned_hex(Array<char>& res, uint64_t u) {
+  constexpr size_t LEN = 16;
+  
+  char string_res[2 + LEN] ={
+    '0', 'x',
+    '0', '0', '0', '0', '0', '0', '0', '0',
+    '0', '0', '0', '0', '0', '0', '0', '0' 
+  };
+
+  for (u32 i = 0; i < LEN; i++) {
+    u8 digit = u & 0xF;
+    u >>= 4;
+
+    if (digit >= 10) {
+      ASSERT(digit < 16);
+      string_res[((LEN - 1) - i) + 2] = ('A' + (digit - 10));
+    }
+    else {
+      string_res[((LEN - 1) - i) + 2] = ('0' + digit);
+    }
+  }
+
+  res.concat(string_res, LEN + 2);
+}
+
+void load_string(Array<char>& res, PrintPtr ptr) {
+  if (ptr.ptr == nullptr) {
+    load_string(res, "nullptr");
+  }
+  else {
+    load_unsigned_hex(res, (uintptr_t)ptr.ptr);
   }
 }
 
@@ -216,35 +237,39 @@ void load_string(Array<char>& res, PrintCallSignature p_call) {
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      load_string(res, i->type->name);
+      load_string(res, i->type.name);
       load_string(res, ", ");
     }
 
-    load_string(res, i->type->name);
+    load_string(res, i->type.name);
   }
 
   load_string(res, ')');
 }
 
 void load_string(Array<char>& res, PrintFuncSignature p_func) {
-  const FunctionBase* func = p_func.func;
+  load_string(res, PrintSignatureType{p_func.func->signature.sig_struct});
+}
+
+void load_string(Array<char>& res, PrintSignatureType p_sig) {
+  const SignatureStructure* sig = p_sig.sig;
 
   res.insert('(');
 
-  auto i = func->signature.parameter_types.begin();
-  const auto end = func->signature.parameter_types.end();
+  auto i = sig->parameter_types.begin();
+  const auto end = sig->parameter_types.end();
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      load_string(res, (*i)->name);
+      load_string(res, i->name);
       load_string(res, ", ");
     }
 
-    load_string(res, (*i)->name);
+    load_string(res, i->name);
   }
 
   load_string(res, ") -> ");
-  load_string(res, func->signature.return_type->name);
+  load_string(res, sig->return_type.name);
 }
 
 void load_string(Array<char>& res, const CallSignature& call_sig) {
@@ -257,11 +282,11 @@ void load_string(Array<char>& res, const CallSignature& call_sig) {
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      load_string(res, (*i)->name->string);
+      load_string(res, i->type.name->string);
       load_string(res, ", ");
     }
 
-    load_string(res, (*i)->name->string);
+    load_string(res, i->type.name->string);
   }
 
   res.insert(')');

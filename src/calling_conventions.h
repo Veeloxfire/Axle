@@ -11,7 +11,10 @@ struct REGISTER_CONSTANT;
 struct Compiler;
 struct Program;
 struct Structure;
+struct Type;
 struct State;
+struct CodeBlock;
+struct Relocation;
 
 //header
 
@@ -33,7 +36,16 @@ struct ForcedColours {
 };
 
 using REG_NAME_FROM_NUM_PTR = FUNCTION_PTR<const char*, uint8_t>;
-using BACKEND_PTR = FUNCTION_PTR<void, Program*, Compiler*>;
+
+using BACKEND_TRANSLATE_PTR = FUNCTION_PTR<
+  void, 
+  Compiler*,
+  Program*,
+  Array<uint8_t>&,
+  const CodeBlock*,
+  size_t*,
+  Array<Relocation>&
+>;
 
 struct System {
 #define CONST_NAME(n) static constexpr char n ## _name[] = #n
@@ -47,7 +59,9 @@ struct System {
   uint8_t num_registers;
 
   REG_NAME_FROM_NUM_PTR reg_name_from_num;
-  BACKEND_PTR backend;
+
+  BACKEND_TRANSLATE_PTR backend_translate;
+  //BACKEND_JUMP_FIX_PTR backend_jump_fix;
 };
 
 struct CallingConvention {
@@ -96,7 +110,8 @@ extern const CallingConvention convention_vm;
 extern const CallingConvention convention_microsoft_x64;
 extern const CallingConvention convention_stdcall;
 
-bool register_passed_as_pointer(const Structure* type);
+bool register_passed_as_pointer(const Structure* s);
+bool register_passed_as_pointer(const Type& t);
 
 struct CallingConvArgIterator {
   const CallingConvention* conv;

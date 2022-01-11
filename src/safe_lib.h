@@ -6,12 +6,41 @@
 
 #include <memory>
 
+using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using u64 = uint64_t;
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
+using i64 = int64_t;
+using usize = size_t;
+
+#ifdef ASSERT_EXCEPTIONS
+#define ASSERT(expr) do { if(!(expr))\
+throw std::exception("Assertion failed: " #expr); } while(false)
+
+#define INVALID_CODE_PATH(reason) throw std::exception("Invalid Code path \"" reason "\"")
+
+#define INVALID_CODE_PATH_ABORT(reason) IO::err_print("Invalid Code path \"" reason "\"");\
+abort()
+#else
+#define ASSERT(expr) assert(expr)
+
+#define INVALID_CODE_PATH(reason) assert((reason, false));\
+throw std::exception("Invalid Code path \"" reason "\"")
+
+#define INVALID_CODE_PATH_ABORT(reason) assert((reason, false));\
+IO::err_print("Invalid Code path \"" reason "\"");\
+abort()
+#endif
+
 //#define COUNT_ALLOC
 
 template<typename T>
 constexpr inline void memcpy_ts(T* dest, size_t dest_size, const T* source, size_t src_size) {
   const errno_t res = memcpy_s((void*)dest, dest_size * sizeof(T), (const void*)source, src_size * sizeof(T));
-  assert(res == 0);
+  ASSERT(res == 0);
 }
 
 template<typename T>
@@ -56,15 +85,19 @@ void free_heap_check(T* ptr, size_t num_bytes) {
   const uint8_t* ptr_end = (const uint8_t*)ptr + num_bytes;
 
   for (size_t i = 0; i < 4; i++) {
-    assert(ptr_end[i] == 0xFD);
+    ASSERT(ptr_end[i] == 0xFD);
   }
 }
 
 struct ALLOC_COUNTER {
+  using DESTRUCTOR = void (*)(void*, size_t);
+
   struct Allocation {
     const char* type_name;
     const void* mem;
-    size_t size;
+    size_t element_size;
+    size_t count;
+    DESTRUCTOR destruct_arr;
   };
 
   Allocation* allocs = nullptr;
@@ -81,6 +114,22 @@ struct ALLOC_COUNTER {
   size_t valid_remove_calls = 0;
   size_t insert_calls = 0;
 
+  inline void reset() {
+    allocs = nullptr;
+    num_allocs = 0;
+    capacity = 0;
+
+    current_allocated_size = 0;
+
+    max_allocated_blocks = 0;
+    max_allocated_size   = 0;
+
+    update_calls = 0;
+    null_remove_calls = 0;
+    valid_remove_calls = 0;
+    insert_calls = 0;
+  }
+
   template<typename T>
   void insert(T* t, size_t num) {
     insert_calls++;
@@ -95,14 +144,16 @@ struct ALLOC_COUNTER {
 
 
       auto* new_allocs = (Allocation*)std::realloc(allocs, capacity * sizeof(Allocation));
-      assert(new_allocs != nullptr);
+      ASSERT(new_allocs != nullptr);
 
       allocs = new_allocs;
     }
 
-    allocs[num_allocs].type_name = typeid(T*).name();
+    allocs[num_allocs].type_name = typeid(T).name();
     allocs[num_allocs].mem  = (const void*)t;
-    allocs[num_allocs].size = num * sizeof(T);
+    allocs[num_allocs].element_size = sizeof(T);
+    allocs[num_allocs].count = num;
+    allocs[num_allocs].destruct_arr = (DESTRUCTOR)&destruct_arr<T>;
 
     num_allocs++;
     if (num_allocs > max_allocated_blocks) {
@@ -133,9 +184,9 @@ struct ALLOC_COUNTER {
       if (i->mem == f_v) {
         i->mem = (const void*)to;
 
-        current_allocated_size -= i->size;
-        i->size = num * sizeof(T);
-        current_allocated_size += i->size;
+        current_allocated_size -= (i->count * i->element_size);
+        i->count = num;
+        current_allocated_size += (i->count * i->element_size);
 
         if (current_allocated_size > max_allocated_size) {
           max_allocated_size = current_allocated_size;
@@ -143,6 +194,24 @@ struct ALLOC_COUNTER {
 
         return;
       }
+    }
+
+    INVALID_CODE_PATH("Tried to update something that wasnt allocated");
+  }
+
+  //This is an unordered remove
+  void remove_single(Allocation* i) {
+    num_allocs--;
+    const auto end = allocs + num_allocs;
+
+    //Remove it by moving it to the end of the array
+    //then shortening the array
+
+    //Dont need to do anything if "i" is already at the end
+    if (i != end) {
+
+      //Swap "end" with "i"
+      std::swap(*i, *end);
     }
   }
 
@@ -162,22 +231,15 @@ struct ALLOC_COUNTER {
 
     for (; i < end; i++) {
       if (i->mem == t_v) {
-        free_heap_check(t, i->size);
+        free_heap_check(t, i->count * i->element_size);
 
-        current_allocated_size -= i->size;
-        num_allocs--;
-        goto REMOVE;
+        current_allocated_size -= (i->count * i->element_size);
+        remove_single(i);
+        return;
       }
     }
 
-    return;
-
-  REMOVE:
-    auto mov_i = i++;
-
-    for (; i < end; (i++, mov_i++)) {
-      *mov_i = std::move(*i);
-    }
+    INVALID_CODE_PATH("Freed something that wasnt allocated");
   }
 
 
@@ -190,10 +252,10 @@ struct ALLOC_COUNTER {
 #endif
 
 template<typename T>
-T* allocate_default(const size_t num = 1) {
+T* allocate_default(const size_t num) {
   T* t = (T*)std::malloc(sizeof(T) * num);
 
-  assert(t != nullptr);
+  ASSERT(t != nullptr);
 
 #ifdef COUNT_ALLOC
   ALLOC_COUNTER::allocated().insert(t, num);
@@ -203,11 +265,16 @@ T* allocate_default(const size_t num = 1) {
   return t;
 }
 
+template<typename T>
+inline T* allocate_default() {
+  return allocate_default<T>(1);
+}
+
 template<typename T, typename ... U>
 T* allocate_single_constructed(U&& ... u) {
   T* t = (T*)std::malloc(sizeof(T));
 
-  assert(t != nullptr);
+  ASSERT(t != nullptr);
 
 #ifdef COUNT_ALLOC
   ALLOC_COUNTER::allocated().insert(t, 1);
@@ -220,7 +287,7 @@ T* allocate_single_constructed(U&& ... u) {
 template<typename T>
 T* reallocate_default(T* ptr, const size_t old_size, const size_t new_size) {
   T* val = (T*)std::realloc((void*)ptr, sizeof(T) * new_size);
-  assert(val != nullptr);
+  ASSERT(val != nullptr);
 
   if (old_size < new_size) {
     default_init(val + old_size, new_size - old_size);

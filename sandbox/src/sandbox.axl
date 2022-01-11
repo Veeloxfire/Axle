@@ -1,26 +1,6 @@
-#stdlib "io.axl";
-#stdlib "memory.axl";
+#import "util.axl";
 
-function main() -> u64 {
-  *ascii var = cast(*ascii, allocate(14));
-
-  var[0] = 'H';
-  var[1] = 'e';
-  var[2] = 'l';
-  var[3] = 'l';
-  var[4] = 'o';
-  var[5] = ' ';
-  var[6] = 'W';
-  var[7] = 'o';
-  var[8] = 'r';
-  var[9] = 'l';
-  var[10] = 'd';
-  var[11] = '!';
-  var[12] = '\n';
-  var[13] = '\0';
-
-  print(var);
-
-  free(cast(*void, var));
-  return 0;
+main :: () -> u64 {
+  return add(1, 2);
 }
+

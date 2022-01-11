@@ -12,20 +12,134 @@
 #define JOIN2(a, b) a ## b
 #define JOIN(a, b) JOIN2(a, b)
 
-constexpr uint64_t fnv1_hash(const char* c, size_t size) {
-  constexpr uint64_t prime = 0x100000001b3;
+#define FOR(name, it) \
+for(auto it = (name).begin(), JOIN(__end, __LINE__) = (name).end(); \
+it < JOIN(__end, __LINE__); it++)
 
-  uint64_t base = 0xcbf29ce484222325;
+#define FOR_MUT(name, it) \
+for(auto it = (name).mut_begin(), JOIN(__end, __LINE__) = (name).mut_end(); \
+it < JOIN(__end, __LINE__); it++)
+
+constexpr inline u64 MAX_DECIMAL_U64_DIGITS = sizeof("9223372036854775807") - 1;
+
+constexpr u64 greatest_common_divisor(u64 v1, u64 v2) {
+  //Swap to be the correct way around
+  if (v1 > v2) {
+    const u64 temp = v1;
+    v1 = v2;
+    v2 = temp;
+  }
+
+  while (v2 != 0) {
+    const u64 temp = v1 % v2;
+    v1 = v2;
+    v2 = temp;
+  }
+
+  return v1;
+}
+
+constexpr u64 lowest_common_multiple(u64 v1, u64 v2) {
+  const u64 gcd = greatest_common_divisor(v1, v2);
+
+  return (v1 * v2) / gcd;
+}
+
+
+constexpr inline u64 FNV1_HASH_BASE = 0xcbf29ce484222325;
+constexpr inline u64 FNV1_HASH_PRIME = 0x100000001b3;
+
+constexpr uint64_t fnv1a_hash(const char* c, size_t size) {
+  uint64_t base = FNV1_HASH_BASE;
 
   while (size > 0) {
     base ^= *c;
-    base *= prime;
+    base *= FNV1_HASH_PRIME;
 
     c++;
     size--;
   }
 
   return base;
+}
+
+constexpr u64 fnv1a_hash_u16(u64 start, u16 u) {
+  //1
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //2
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+
+  return start;
+}
+
+constexpr u64 fnv1a_hash_u32(u64 start, u32 u) {
+  //1
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //2
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //3
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //4
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+
+  return start;
+}
+
+constexpr u64 fnv1a_hash_u64(u64 start, u64 u) {
+  //1
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //2
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //3
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //4
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //5
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //6
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //7
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+  u >>= 8;
+
+  //8
+  start ^= (u & 0xff);
+  start *= FNV1_HASH_PRIME;
+
+  return start;
 }
 
 constexpr bool can_be_from_sign_extension(uint64_t u64) {
@@ -76,8 +190,7 @@ constexpr size_t ceil_div(size_t x, size_t y) noexcept {
 //Log 2 for uniform random 64 bit number
 constexpr inline uint64_t log_2(uint64_t v) {
   if (v == 0) {
-    throw std::exception("MATH ERROR! Cannot log of 0");
-    return 0;
+    INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
   uint64_t max = 63;
@@ -96,9 +209,13 @@ constexpr inline uint64_t log_2(uint64_t v) {
   return max;
 }
 
+constexpr inline uint64_t pow_16(uint64_t v) {
+  return 1ull << (8ull * v);
+}
+
 constexpr inline uint64_t pow_10(uint64_t v) {
   if (v > 19) {
-    throw std::exception("Power too high!");
+    INVALID_CODE_PATH("Power too high!");
     return 0;
   }
 
@@ -130,8 +247,7 @@ constexpr inline uint64_t pow_10(uint64_t v) {
 
 constexpr inline uint64_t log_10_floor(uint64_t v) {
   if (v == 0) {
-    throw std::exception("MATH ERROR! Cannot log of 0");
-    return 0;
+    INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
   //Max uint64_t = 18446744073709551615
@@ -159,8 +275,7 @@ constexpr inline uint64_t log_10_floor(uint64_t v) {
 //Floors the output
 constexpr inline uint64_t small_log_2_floor(uint64_t v) {
   if (v == 0) {
-    throw std::exception("MATH ERROR! Cannot log of 0");
-    return 0;
+    INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
   uint64_t min = 0;
@@ -174,8 +289,7 @@ constexpr inline uint64_t small_log_2_floor(uint64_t v) {
 
 constexpr inline uint64_t small_log_2_ceil(uint64_t v) {
   if (v == 0) {
-    throw std::exception("MATH ERROR! Cannot log of 0");
-    return 0;
+    INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
   uint8_t found1 = 0;//max value of 1
@@ -333,6 +447,7 @@ struct Array {
 
     for (size_t i = 0; i < size; i++) {
       if (lambda(data[i])) {
+        destruct_single(data + i);
         num_removed++;
       }
       else {
@@ -498,6 +613,248 @@ struct Array {
 
     arr.free();
   }
+
+  void concat(const T* arr, size_t N) noexcept {
+    reserve_extra(N);
+    memcpy_ts(data + size, (capacity - size), arr, N);
+
+    size += N;
+  }
+};
+
+template<typename T>
+struct SparseHash;
+
+template<typename K, typename V, typename HASH = SparseHash<K>>
+struct SparseHashSet {
+  enum struct ENTRY_TYPE : u8 {
+    FILLED, EMPTY, TOMBSTONE
+  };
+
+  using Key = K;
+  using Value = V;
+
+  struct KeyEntry {
+    ENTRY_TYPE type;
+    Key key;
+  };
+
+  constexpr static float LOAD_FACTOR = 0.75;
+
+  uint8_t* data      = nullptr;// ptr to data in the array
+  size_t el_capacity = 0;//number of elements
+  size_t used        = 0;
+
+  constexpr bool needs_resize(size_t extra) const {
+    return (el_capacity * LOAD_FACTOR) <= (used + extra);
+  }
+
+  constexpr const KeyEntry* key_entry_arr() const {
+    return (const KeyEntry*)data;
+  }
+
+  constexpr Value* val_arr() const {
+    return (Value*)(data + (el_capacity * sizeof(KeyEntry)));
+  }
+
+  ~SparseHashSet() {
+    {
+      const KeyEntry* keys = key_entry_arr();
+      Value* vals = val_arr();
+
+      for (size_t i = 0; i < el_capacity; i++) {
+        if (keys[i].type == ENTRY_TYPE::FILLED) {
+          vals[i].~Value();
+        }
+      }
+    }
+
+    free_no_destruct(data);
+
+    data = nullptr;
+    el_capacity = 0;
+    used = 0;
+  }
+
+  bool contains(const Key* key) const {
+    if (el_capacity == 0) return false;
+
+    const KeyEntry* keys = key_entry_arr();
+
+    const auto hash_val = HASH::hash(key);
+
+    size_t index = hash_val % el_capacity;
+
+    const KeyEntry* test_key = keys + index;
+    while (true) {
+      if (test_key->type != ENTRY_TYPE::FILLED) {
+        return false;
+      }
+
+      if (test_key->key == *key) {
+        return true;
+      }
+
+      index++;
+      index %= el_capacity;
+      test_key = keys + index;
+    }
+  }
+
+  size_t get_soa_index(const Key* key) const {
+    const KeyEntry* hash_arr = key_entry_arr();
+
+    bool found_tombstone = false;
+    size_t tombstone_index = 0;
+
+    const auto hash_val = HASH::hash(key);
+    size_t index = hash_val % el_capacity;
+
+    const KeyEntry* test_key = hash_arr + index;
+    while (test_key->type != ENTRY_TYPE::EMPTY) {
+      if (test_key->type == ENTRY_TYPE::FILLED && test_key->key == *key) {
+        return index;
+      }
+      else if (test_key->type == ENTRY_TYPE::TOMBSTONE && !found_tombstone) {
+        found_tombstone = true;
+        tombstone_index = index;
+      }
+
+      index++;
+      index %= el_capacity;
+      test_key = hash_arr[index];
+    }
+
+    if (found_tombstone) {
+      return tombstone_index;
+    }
+    else {
+      return index;
+    }
+  }
+
+  void try_extend(size_t num) {
+    if (needs_resize(num)) {
+      uint8_t* old_data = data;
+      const size_t old_el_cap = el_capacity;
+
+      do {
+        el_capacity <<= 1;
+      } while (needs_resize(num));
+
+      const size_t required_alloc_bytes = el_capacity
+        * (sizeof(KeyEntry) + sizeof(Value));
+
+      data = allocate_default<uint8_t>(required_alloc_bytes);
+
+      const KeyEntry* hash_arr = (const KeyEntry*)data;
+      Value* val_arr = (Value*)(data + el_capacity * sizeof(KeyEntry));
+
+      const KeyEntry* old_hash_arr = (const KeyEntry*)old_data;
+      Value* old_val_arr = (Value*)(old_data + old_el_cap * sizeof(KeyEntry));
+
+      for (size_t i = 0; i < old_el_cap; i++) {
+        const KeyEntry* key = old_hash_arr + i;
+
+        if (key->type == ENTRY_TYPE::FILLED) {
+          const size_t new_index = get_soa_index(key);
+
+          hash_arr[new_index] = key;
+          val_arr[new_index]  = std::move(old_val_arr[i]);
+        }
+      }
+
+
+      //Dont need to destruct old values as they've been moved
+      free_no_destruct(old_data);
+    }
+  }
+
+  Value* get_val(const Key* const key) const {
+    if (el_capacity == 0) return nullptr;
+
+    const size_t soa_index = get_soa_index(key);
+
+    {
+      const KeyEntry* test_key = key_entry_arr() + soa_index;
+
+      if (test_key->type != ENTRY_TYPE::FILLED) {
+        return nullptr;
+      }
+    }
+
+    return val_arr() + soa_index;
+  }
+
+  void insert(const Key* const key, Value&& val) {
+    if (el_capacity == 0) {
+      el_capacity = 8;
+      data = allocate_default<uint8_t>(8 * (sizeof(KeyEntry) + sizeof(Value)));
+
+      size_t soa_index = get_soa_index(key);
+
+      const KeyEntry* const keys = key_entry_arr();
+      Value* const vals = val_arr();
+
+      used++;
+      keys[soa_index] = key;
+      vals[soa_index] = std::move(val);
+    }
+    else {
+      size_t soa_index = get_soa_index(key);
+
+      {
+        const KeyEntry* test_key = key_entry_arr() + soa_index;
+
+        if (test_key->type != ENTRY_TYPE::FILLED && needs_resize(1)) {
+          //need to resize
+          try_extend(1);
+          //need to reset the key
+          soa_index = get_soa_index(key);
+        }
+      }
+
+      const KeyEntry* const keys = key_entry_arr();
+      Value* const vals = val_arr();
+
+      used++;
+      keys[soa_index] = key;
+      vals[soa_index] = std::move(val);
+    }
+  }
+
+  Value* insert(const Key* const key) {
+    if (el_capacity == 0) {
+      el_capacity = 8;
+      data = allocate_default<uint8_t>(8 * (sizeof(KeyEntry) + sizeof(Value)));
+
+      size_t soa_index = get_soa_index(key);
+
+      const KeyEntry* const keys = key_entry_arr();
+
+      used++;
+      keys[soa_index] = key;
+    }
+    else {
+      size_t soa_index = get_soa_index(key);
+
+      {
+        const KeyEntry* test_key = key_entry_arr() + soa_index;
+
+        if (test_key->type != ENTRY_TYPE::FILLED && needs_resize(1)) {
+          //need to resize
+          try_extend(1);
+          //need to reset the key
+          soa_index = get_soa_index(key);
+        }
+      }
+
+      const KeyEntry* const keys = key_entry_arr();
+
+      used++;
+      keys[soa_index] = key;
+    }
+  }
 };
 
 template<typename T>
@@ -647,12 +1004,19 @@ struct ArenaAllocator {
   ArenaAllocator() = default;
   ~ArenaAllocator();
 
+  bool _debug_freelist_loops() const;
+  bool _debug_valid_free_pointer(void* ptr) const;
 
   void new_block();
   void add_to_free_list(FreeList* fl);
 
   uint8_t* alloc_no_construct(size_t bytes);
   void free_no_destruct(void* val);
+
+  template<typename T>
+  inline uint8_t* alloc_no_construct() {
+    return alloc_no_construct(sizeof(T));
+  }
 };
 
 struct BumpAllocator {
@@ -696,9 +1060,9 @@ struct FreelistBlockAllocator {
   struct BLOCK {
     constexpr static size_t BLOCK_SIZE = 32;
 
-    size_t filled = 0;
-    BLOCK* prev = nullptr;
 
+    //size_t filled = 0;
+    BLOCK* prev = nullptr;
     Element data[BLOCK_SIZE] ={};
   };
 
@@ -809,7 +1173,9 @@ struct FreelistBlockAllocator {
 
 
   void free(const T* t) {
-    assert(_debug_valid_free_ptr(t));
+    ASSERT(_debug_valid_free_ptr(t));
+
+    destruct_single(t);
 
     Element* new_e = (Element*)t;
     new_e->el.~T();
@@ -844,6 +1210,148 @@ struct SquareBitMatrix {
   void remove_a_intersects_b(size_t a, size_t b);
 
   size_t new_value();
+};
+
+template<typename T>
+struct Queue {
+  struct CircularBuffer {
+    static constexpr size_t SINGLE_BUFFER_SIZE = 64;
+    static_assert(SINGLE_BUFFER_SIZE < 255, "u8 needs to be small enough");
+
+    bool empty = false;
+    u8 front_offset = 0;
+    u8 end_offset = 0;
+
+    T data[SINGLE_BUFFER_SIZE] ={};
+
+    CircularBuffer* prev = nullptr;
+    CircularBuffer* next = nullptr;
+  };
+
+  //Not guaranteed to be the first allocated
+  CircularBuffer* front = nullptr;
+
+  //Not actually the last allocated, just the last used
+  CircularBuffer* back = nullptr;
+
+  Queue() = default;
+  ~Queue() {
+    CircularBuffer* curr = front;
+    CircularBuffer* next = curr->next;
+
+    while (true) {
+      free_destruct_single(curr);
+
+      if (next == nullptr) { return; }
+
+      //Break the loop
+      CircularBuffer* holder = next->next;
+      next->next = nullptr;
+
+      curr = next;
+      next = holder;
+    }
+  }
+
+  void enqueue(T t) {
+    if (back == nullptr) {
+      CircularBuffer* first = allocate_default<CircularBuffer>();
+
+      front = first;
+      back = first;
+
+      //Its a loop
+      back->next = back;
+      back->prev = back;
+    }
+    else if (back->front_offset == back->end_offset) {
+      if (!back->next->emtpy) {
+        //the next isnt empty so we need a new buffer
+
+        CircularBuffer* new_back = allocate_default<CircularBuffer>();
+
+        back->next->prev = new_back;
+        new_back->next = back->next;
+
+        new_back->prev = back;
+        back->next = new_back;
+
+        back = new_back;
+      }
+      else {
+        back = back->next;
+      }
+    }
+
+    back->empty = false;
+    back->data[back->end_offset] = std::move(t);
+    back->end_offset++;
+
+    //loop end offset
+    if (back->end_offset == CircularBuffer::SINGLE_BUFFER_SIZE) {
+      back->end_offset -= CircularBuffer::SINGLE_BUFFER_SIZE;
+    }
+  }
+
+  u64 num_elements() const {
+    if (front == nullptr || front->empty) return 0;
+
+    u64 counter = 0;
+
+    //Count the full buffers in between
+    {
+      CircularBuffer* step = front->next;
+      while (step != back) {
+        counter += CircularBuffer::SINGLE_BUFFER_SIZE;
+        step = step->next;
+      }
+    }
+
+    //Then count the end
+    if (!back->empty) {
+      if (back->front_offset >= back->end_offset) {
+        counter += (CircularBuffer::SINGLE_BUFFER_SIZE - (back->front_offset - back->end_offset));
+      }
+      else {
+        counter += (back->end_offset - back->front_offset);
+      }
+    }
+
+    //Then count the front
+    if (front->front_offset >= front->end_offset) {
+      counter += (CircularBuffer::SINGLE_BUFFER_SIZE - (front->front_offset - front->end_offset));
+    }
+    else {
+      counter += (front->end_offset - front->front_offset);
+    }
+
+    return counter;
+  }
+
+  bool is_empty() const {
+    return front == nullptr || front->empty;
+  }
+
+  T dequeue() {
+    ASSERT(!is_empty());
+
+    //Cannot be empty so no need to check for that
+    T ret = std::move(front->data[front->front_offset]);
+
+    if (front->front_offset == 0) {
+      front->front_offset += CircularBuffer::SINGLE_BUFFER_SIZE;
+    }
+
+    front->front_offset--;
+
+    if (front->front_offset == front->end_offset) {
+      //Now is empty
+      front->empty = true;
+      front = front->next;
+    }
+
+    return ret;
+  }
 };
 
 template<typename T>
@@ -1170,6 +1678,14 @@ struct MEMBER {
 };
 
 
+template<typename T>
+using DESTRUCTOR = FUNCTION_PTR<void, T>;
+
+template<typename T>
+constexpr inline DESTRUCTOR<T> get_destructor() {
+  return &destruct_single<T>;
+}
+
 
 template<typename T>
 constexpr inline T square(T t) { return t * t; }
@@ -1210,6 +1726,20 @@ namespace IO {
   void err_print(const char* string);
   void err_print(const OwnedPtr<char>& string);
   void err_print(const char c);
+
+  template<typename U, typename V, typename ... T>
+  void print(U&& u, V&& v, T&& ... t) {
+    print(std::forward<U>(u));
+    print(std::forward<V>(v));
+    (print(std::forward<T>(t)), ...);
+  }
+
+  template<typename U, typename V, typename ... T>
+  void err_print(U&& u, V&& v, T&& ... t) {
+    err_print(std::forward<U>(u));
+    err_print(std::forward<V>(v));
+    (err_print(std::forward<T>(t)), ...);
+  }
 }
 
 #define DO_NOTHING ((void)0)
@@ -1237,3 +1767,9 @@ constexpr bool slow_string_eq(const char* str1, const char* str2) {
 
   return str1[0] == str2[0];//both are '\0'
 }
+
+#ifdef NDEBUG
+#define assert_if(cond, expr) ((void)0)
+#else
+#define assert_if(cond, expression) if(cond) ASSERT(expression)
+#endif
