@@ -1303,10 +1303,10 @@ static void parse_primary(Compiler* const comp, Parser* const parser, ASTExpress
 
         constexpr auto parser_is_func = [](Compiler* comp,
                                            const Token* tokens, const Token* end)->bool {
-          const Token* new_tok = step_brackets(comp, tokens, end);
-          return (new_tok + 1) < end
-            && new_tok->type == AxleTokenType::Sub
-            && (new_tok + 1)->type == AxleTokenType::Greater;
+                                             const Token* new_tok = step_brackets(comp, tokens, end);
+                                             return (new_tok + 1) < end
+                                               && new_tok->type == AxleTokenType::Sub
+                                               && (new_tok + 1)->type == AxleTokenType::Greater;
         };
 
         const bool is_func = parser_is_func(comp, parser->stream.i - 2, parser->stream.end);
@@ -1552,7 +1552,7 @@ static void parse_type(Compiler* const comp, Parser* const parser, ASTType* cons
 
           args.insert_uninit(1);
           ASTType* ty = args.back();
-          
+
           parse_type(comp, parser, ty);
           if (comp->is_panic()) {
             return;
@@ -2180,6 +2180,38 @@ static void print_ast_block(Printer* const printer, const ASTBlock* block) {
 
 void print_ast_expression(Printer* const printer, const ASTExpression* expr) {
   switch (expr->expr_type) {
+    case EXPRESSION_TYPE::STRUCT: {
+        const ASTStructBody* body = expr->struct_body.body;
+
+        IO::print("struct {");
+        printer->tabs++;
+        printer->newline();
+
+        auto i = body->elements.begin();
+        const auto end = body->elements.end();
+
+        if (i < end) {
+          for (; (i + 1) < end; i++) {
+            IO::print(i->name->string);
+            IO::print(": ");
+            print_type(printer, &i->type);
+            IO::print(';');
+            printer->newline();
+          }
+
+          IO::print(i->name->string);
+          IO::print(": ");
+          print_type(printer, &i->type);
+          IO::print(';');
+
+          printer->tabs--;
+          printer->newline();
+        }
+
+        IO::print('}');
+
+        break;
+      }
     case EXPRESSION_TYPE::LAMBDA: {
         const ASTLambda* lambda = expr->lambda.lambda;
 

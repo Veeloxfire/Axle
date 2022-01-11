@@ -536,6 +536,7 @@ void compile_type(Compiler* const comp,
                                  "Could not resolve name '{}'\n"
                                  "This name had multiple unknown dependencies",
                                  type->name);
+          return;
         }
         else {
           if (name->globals.size != 1) {
@@ -1962,7 +1963,7 @@ void compile_type_of_expression(Compiler* const comp,
           if (non_local == nullptr || non_local->unknowns > 0) {
             UnknownName unknown ={};
             unknown.all_names = false;
-            unknown.ident = expr->enum_value.name;
+            unknown.ident = name;
             unknown.namespace_index = context->current_namespace;
             unknown.num_knowns = non_local == nullptr ? 0 : non_local->globals.size;
             unknown.num_unknowns = non_local == nullptr ? 0 : non_local->unknowns;
@@ -3480,7 +3481,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         memcpy_ts(struct_c, 1, &expr->struct_body.body->type, 1);
 
         load_const_to_runtime_val(comp, state, code, expr->type.structure,
-                                  ConstantVal{ (uint8_t*)struct_c, 8 },
+                                  ConstantVal{ (uint8_t*)struct_c, sizeof(Type)},
                                   &hint->val);
         break;
       }

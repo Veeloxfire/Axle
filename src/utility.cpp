@@ -114,9 +114,11 @@ bool ArenaAllocator::_debug_valid_free_pointer(void* ptr) const {
 }
 
 uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
+  ASSERT(bytes != 0);
   ASSERT(!_debug_freelist_loops());
 
   size_t req_size = ceil_div(bytes, 8);
+  ASSERT(req_size != 0);
 
   FreeList* prev = nullptr;
   FreeList* fl = (FreeList*)free_list;
@@ -181,6 +183,7 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
 }
 
 void ArenaAllocator::free_no_destruct(void* val) {
+  ASSERT(val != nullptr);
   ASSERT(!_debug_freelist_loops());
   ASSERT(_debug_valid_free_pointer(val));
 

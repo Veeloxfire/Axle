@@ -120,6 +120,7 @@ static constexpr Test tests[] ={
   Test{"Pointers", TEST_DIR("pointers.axl"), 3},
   Test{"FNV1 Hash", TEST_DIR("fnv1_hash.axl"), fnv1_hash("hello", 5)},
   Test{"Globals", TEST_DIR("globals.axl"), fib_recurse_main()},
+  Test{"Structs", TEST_DIR("structs.axl"), 3},
 };
 
 static constexpr size_t num_tests = sizeof(tests)/sizeof(Test);
