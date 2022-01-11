@@ -5848,9 +5848,9 @@ ERROR_CODE compile_all(Compiler* const comp) {
       free_compilation_unit(comp, *it);
     }
 
-    FOR(comp->unfound_deps.unfound, it) {
-      free_compilation_unit(comp, it->unit_waiting);
-    }
+    //FOR(comp->unfound_deps.unfound, it) {
+    //  free_compilation_unit(comp, it->unit_waiting);
+    //}
   };
 
 
@@ -6512,6 +6512,8 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
     Structure* const s_type = STRUCTS::new_base_structure(comp,
                                                           strings->intern("type"));
     s_type->type = STRUCTURE_TYPE::TYPE;
+    s_type->size = sizeof(Type);
+    s_type->alignment = alignof(Type);
     builtin_types->t_type = to_type(s_type);
 
     /*_ = */ register_builtin_type(s_type);
