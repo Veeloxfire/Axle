@@ -414,21 +414,24 @@ struct Array {
   T* mut_end() { return data + size; }
 
   T remove_at(const size_t index) {
+    ASSERT(index < size);
+
     T t = std::move(data[index]);
 
     for (size_t i = index; i < size - 1; i++) {
-      data[index] = std::move(data[index + 1]);
+      data[i] = std::move(data[i + 1]);
     }
     size--;
     return t;
   }
 
   void insert_at(const size_t index, T&& t) {
+    ASSERT(index <= size);
     reserve_extra(1);
 
     size++;
-    for (size_t i = size + 1; i > index; i--) {
-      data[i - 1] = std::move(data[i - 1]);
+    for (size_t i = size; (i - 1) > index; i--) {
+      data[i - 1] = std::move(data[i - 2]);
     }
 
     data[index] = std::move(t);
