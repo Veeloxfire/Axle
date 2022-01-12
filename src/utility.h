@@ -1212,143 +1212,154 @@ struct SquareBitMatrix {
 
 template<typename T>
 struct Queue {
-  struct CircularBuffer {
-    static constexpr size_t SINGLE_BUFFER_SIZE = 64;
-    static_assert(SINGLE_BUFFER_SIZE < 255, "u8 needs to be small enough");
+  T* holder;
+  usize start;
+  usize size;
+  usize capacity;
 
-    bool empty = false;
-    u8 front_offset = 0;
-    u8 end_offset = 0;
+  //No copy!
+  Queue(const Queue&) = delete;
 
-    T data[SINGLE_BUFFER_SIZE] ={};
-
-    CircularBuffer* prev = nullptr;
-    CircularBuffer* next = nullptr;
-  };
-
-  //Not guaranteed to be the first allocated
-  CircularBuffer* front = nullptr;
-
-  //Not actually the last allocated, just the last used
-  CircularBuffer* back = nullptr;
-
-  Queue() = default;
-  ~Queue() {
-    CircularBuffer* curr = front;
-    CircularBuffer* next = curr->next;
-
-    while (true) {
-      free_destruct_single(curr);
-
-      if (next == nullptr) { return; }
-
-      //Break the loop
-      CircularBuffer* holder = next->next;
-      next->next = nullptr;
-
-      curr = next;
-      next = holder;
-    }
+  Queue(Queue&& q) noexcept : holder(q.holder), start(q.start), size(q.size), capacity(q.capacity)
+  {
+    q.holder = nullptr;
+    q.start = 0;
+    q.size = 0;
+    q.capacity = 0;
   }
 
-  void enqueue(T t) {
-    if (back == nullptr) {
-      CircularBuffer* first = allocate_default<CircularBuffer>();
+  Queue() noexcept = default;
 
-      front = first;
-      back = first;
+  Queue& operator=(Queue&& q) noexcept {
+    free();
 
-      //Its a loop
-      back->next = back;
-      back->prev = back;
-    }
-    else if (back->front_offset == back->end_offset) {
-      if (!back->next->emtpy) {
-        //the next isnt empty so we need a new buffer
+    holder = std::exchange(q.holder, nullptr);
+    start = std::exchange(q.start, 0);
+    size = std::exchange(q.size, 0);
+    capacity = std::exchange(q.capacity, 0);
 
-        CircularBuffer* new_back = allocate_default<CircularBuffer>();
-
-        back->next->prev = new_back;
-        new_back->next = back->next;
-
-        new_back->prev = back;
-        back->next = new_back;
-
-        back = new_back;
-      }
-      else {
-        back = back->next;
-      }
-    }
-
-    back->empty = false;
-    back->data[back->end_offset] = std::move(t);
-    back->end_offset++;
-
-    //loop end offset
-    if (back->end_offset == CircularBuffer::SINGLE_BUFFER_SIZE) {
-      back->end_offset -= CircularBuffer::SINGLE_BUFFER_SIZE;
-    }
+    return *this;
   }
 
-  u64 num_elements() const {
-    if (front == nullptr || front->empty) return 0;
-
-    u64 counter = 0;
-
-    //Count the full buffers in between
-    {
-      CircularBuffer* step = front->next;
-      while (step != back) {
-        counter += CircularBuffer::SINGLE_BUFFER_SIZE;
-        step = step->next;
-      }
-    }
-
-    //Then count the end
-    if (!back->empty) {
-      if (back->front_offset >= back->end_offset) {
-        counter += (CircularBuffer::SINGLE_BUFFER_SIZE - (back->front_offset - back->end_offset));
-      }
-      else {
-        counter += (back->end_offset - back->front_offset);
-      }
-    }
-
-    //Then count the front
-    if (front->front_offset >= front->end_offset) {
-      counter += (CircularBuffer::SINGLE_BUFFER_SIZE - (front->front_offset - front->end_offset));
+  void free() {
+    if (start + size > capacity) {
+      usize temp = capacity - start;
+      destruct_arr<T>(holder + start, temp);
+      destruct_arr<T>(holder + start, size - temp);
     }
     else {
-      counter += (front->end_offset - front->front_offset);
+      destruct_arr<T>(holder + start, size);
     }
 
-    return counter;
+    ::free_no_destruct(holder);
+    holder = nullptr;
+    start = 0;
+    size = 0;
+    capacity = 0;
   }
 
-  bool is_empty() const {
-    return front == nullptr || front->empty;
+  ~Queue() noexcept {
+    free();
   }
 
-  T dequeue() {
-    ASSERT(!is_empty());
+  //Does the index taking into account wrapping
+  usize _ptr_index(usize i) const {
+    return (start + i) % capacity;
+  }
 
-    //Cannot be empty so no need to check for that
-    T ret = std::move(front->data[front->front_offset]);
-
-    if (front->front_offset == 0) {
-      front->front_offset += CircularBuffer::SINGLE_BUFFER_SIZE;
+  void push_front(T t) {
+    if (size == capacity) {
+      extend();
     }
 
-    front->front_offset--;
+    if (start == 0) {
+      start = capacity - 1;
+    }
+    else {
+      start--;
+    }
+    size++;
 
-    if (front->front_offset == front->end_offset) {
-      //Now is empty
-      front->empty = true;
-      front = front->next;
+    new(holder + start) T(std::move(t));
+  }
+
+  T pop_front() {
+    ASSERT(size > 0);
+
+    T val = std::move(holder[start]);
+    start++;
+    size--;
+    
+    if (start >= capacity) {
+      start -= capacity;
     }
 
-    return ret;
+    return val;
+  }
+
+  void push_back(T t) {
+    if (size == capacity) {
+      extend();
+    }
+
+    new(holder + _ptr_index(size)) T(std::move(t));
+    size++;
+  }
+
+  T pop_back() {
+    ASSERT(size > 0);
+
+    size--;
+    T val = std::move(holder[_ptr_index(size)]);
+
+    return val;
+  }
+
+  void extend() {
+    if (capacity == 0) {
+      holder = allocate_default<T>(8);
+      capacity = 8;
+      return;
+    }
+
+    usize new_cap = capacity << 1;
+
+    T* new_holder = allocate_default<T>(new_cap);
+
+    usize i = 0;
+    usize end_i = size + 1;
+    for (; i < end_i; i++) {
+      new_holder[i] = std::move(holder[_ptr_index(i)]);
+    }
+
+    free_no_destruct(holder);
+    holder = new_holder;
+    capacity = new_cap;
+
+    start = 0;
+  }
+
+  void shrink() {
+    if (size == 0) {
+      free();
+      return;
+    }
+
+    usize new_cap = size;
+
+    T* new_holder = allocate_default<T>(new_cap);
+
+    usize i = 0;
+    usize end_i = size + 1;
+    for (; i < end_i; i++) {
+      new_holder[i] = std::move(holder[_ptr_index(i)]);
+    }
+
+    free_no_destruct(holder);
+    holder = new_holder;
+    capacity = new_cap;
+
+    start = 0;
   }
 };
 

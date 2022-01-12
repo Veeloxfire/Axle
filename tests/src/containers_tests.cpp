@@ -1,7 +1,7 @@
 #include "tests.h"
 
 TEST_FUNCTION(Util_Array_Insert_Remove) {
-  Array<int> a ={};
+  Array<usize> a ={};
 
   for (usize i = 0; i < 1000; i++) {
     a.insert(i ^ (i + 1));
@@ -59,10 +59,36 @@ TEST_FUNCTION(Util_Array_Insert_Remove) {
     ASSERT(a.data[i] == (i ^ (i + 1)));
   }
 
-
   for (usize i = 0; i < 1000; i++) {
     a.pop();
   }
 
   ASSERT(a.size == 0);
+}
+
+
+TEST_FUNCTION(Util_Queue_Insert_Remove) {
+  Queue<usize> a ={};
+
+  for (usize i = 0; i < 100; i++) {
+    a.push_back(i ^ (i + 1));
+  }
+
+  ASSERT(a.size == 100);
+
+  for (usize i = 0; i < 100; i++) {
+    ASSERT(a.pop_front() == (i ^ (i + 1)));
+  }
+
+  for (usize i = 0; i < 100; i++) {
+    a.push_front(i ^ (i + 1));
+  }
+
+  ASSERT(a.size == 100);
+
+  ASSERT(a.pop_back() == (0 ^ 1));
+
+  for (usize i = 1; i < 100; i++) {
+    ASSERT(a.pop_back() == (i ^ (i + 1)));
+  }
 }
