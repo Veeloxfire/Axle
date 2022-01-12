@@ -16,9 +16,12 @@ using i32 = int32_t;
 using i64 = int64_t;
 using usize = size_t;
 
+#define STR_REPLAC2(a) #a
+#define STR_REPLACE(a) STR_REPLAC2(a)
+
 #ifdef ASSERT_EXCEPTIONS
 #define ASSERT(expr) do { if(!(expr))\
-throw std::exception("Assertion failed: " #expr); } while(false)
+throw std::exception("Assertion failed in at line " STR_REPLACE(__LINE__) ", file " __FILE__ ":\n" #expr); } while(false)
 
 #define INVALID_CODE_PATH(reason) throw std::exception("Invalid Code path \"" reason "\"")
 

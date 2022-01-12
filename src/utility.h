@@ -4,7 +4,6 @@
 #include <string.h>
 #include <utility>
 #include <new>
-#include <assert.h>
 
 #include "safe_lib.h"
 
