@@ -230,7 +230,8 @@ struct TypeHint {
 struct UntypedIterator {
   struct Scope {
     size_t num_outer_locals = 0;
-    ScopeView scope ={};
+    AST_LINKED* scope ={};
+    AST_LOCAL next;
   };
 
   Array<Scope> scopes;
@@ -239,18 +240,16 @@ struct UntypedIterator {
 struct UntypedCode {
   UntypedIterator itr;
 
-  ASTStatement* current_statement = nullptr;
+  AST_LOCAL current_statement;
 };
 
 void new_scope(UntypedIterator*,
-               ASTStatement* begin, const ASTStatement* end,
+               AST_LINKED* l,
+               AST_LOCAL n,
                State* state);
-ASTStatement* advance_scopes(UntypedIterator* itr, State* state);
 
-struct UntypedStructureElements {
-  ASTTypedName* i = nullptr;
-  const ASTTypedName* end = nullptr;
-};
+AST_LOCAL advance_scopes(UntypedIterator* itr, State* state);
+
 
 struct Global {
   CompilationUnit* compilation_unit = nullptr;
@@ -323,7 +322,7 @@ struct StructureUnit : public CompilationUnit {
   STRUCTURE_COMP_STAGE stage = STRUCTURE_COMP_STAGE::UNTYPED;
 
   ASTStructBody* source = nullptr;
-  UntypedStructureElements untyped ={};
+  AST_LINKED* untyped ={};
 };
 
 struct GlobalUnit : public CompilationUnit {
@@ -340,15 +339,15 @@ struct FunctionUnit : public CompilationUnit {
 
   ASTLambda* source = nullptr;
   Function* func = nullptr;
+  UntypedCode untyped = {};
 
-  UntypedCode untyped ={};
   State state ={};
 };
 
 struct ConstantExprUnit : public CompilationUnit {
   EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::UNTYPED;
 
-  ASTExpression* expr = nullptr;
+  ASTExpressionBase* expr = nullptr;
   Type cast_to ={};
 
   State state ={};
@@ -487,7 +486,7 @@ struct Compiler {
   NamespaceIndex build_file_namespace ={};//needs to be saved for finding main
 
   Array<ImportedDll> dlls_import ={};
-  Array<ASTFile> parsed_files ={};
+  Array<FileAST> parsed_files ={};
 
   FreelistBlockAllocator<SignatureUnit> signature_units ={};
   FreelistBlockAllocator<StructureUnit> structure_units ={};
@@ -557,21 +556,15 @@ void init_compiler(const APIOptions& options, Compiler* comp);
 
 ERROR_CODE compile_all(Compiler* const comp);
 
-void set_runtime_flags(ASTExpression* const expr, State* const state,
+void set_runtime_flags(ASTExpressionBase* expr, State* const state,
                        bool modified, uint8_t valid_rvts);
-
-void compile_type_of_expression(Compiler* const comp,
-                                Context* context,
-                                State* const state,
-                                ASTExpression* const expr,
-                                const TypeHint* const hint);
 
 void cast_operator_type(Compiler* const comp,
                         Context* const context,
                         State* const state,
-                        ASTExpression* const expr);
+                        ASTCastExpr* const expr);
 
-void process_parsed_file(Compiler* const comp, ASTFile* const func);
+void process_parsed_file(Compiler* const comp, FileAST* const func);
 
 void print_compiled_functions(const Compiler* comp);
 
@@ -602,3 +595,9 @@ const Structure* find_or_make_tuple_structure(Compiler* const comp,
                                             Array<Type>&& elements);
 
 void build_data_section_for_vm(Program* prog, Compiler* const comp);
+
+void compile_type_of_expression(Compiler* const comp,
+                                Context* const context,
+                                State* const state,
+                                ASTExpressionBase* const expr,
+                                const TypeHint* const hint);

@@ -15,15 +15,35 @@ struct AST;
 
 using AST_LOCAL = AST*;
 
+struct AST_LINKED {
+  AST_LOCAL curr = 0;
+  AST_LINKED* next = 0;
+};
+
 struct AST_ARR {
   AST_LINKED* start = 0;
   usize count;
 };
 
-struct AST_LINKED {
-  AST_LOCAL curr = 0;
-  AST_LINKED* next = 0;
+#define FOR_AST(arr, it) \
+for(auto [_l, it] = _start_ast_iterate(arr); _l; (_l = _l->next, _l && (it = _l->curr)))
+
+struct _AST_ITERATE_HOLDER {
+  AST_LINKED* l;
+  AST_LOCAL loc;
 };
+
+constexpr inline _AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
+  if (a.start == nullptr) {
+    return { nullptr, 0 };
+  }
+  else {
+    return {
+      a.start,
+      a.start->curr,
+    };
+  }
+}
 
 //Anything allocated via this structure will not be destroyed
 struct AstStorage {
@@ -51,6 +71,8 @@ enum struct AST_TYPE : u8 {
   UNARY_OPERATOR,
   BINARY_OPERATOR,
   IDENTIFIER_EXPR,
+  LOCAL,
+  GLOBAL,
   NUMBER,
   FUNCTION_CALL,
   TUPLE_LIT,
@@ -72,17 +94,25 @@ enum struct AST_TYPE : u8 {
   IMPORT,
 };
 
+constexpr bool valid_type_node(AST_TYPE t) {
+  switch (t) {
+    case AST_TYPE::NAMED_TYPE:
+    case AST_TYPE::ARRAY_TYPE:
+    case AST_TYPE::PTR_TYPE:
+    case AST_TYPE::LAMBDA_TYPE:
+    case AST_TYPE::TUPLE_TYPE: return true;
+    default: return false;
+  }
+}
+
 struct AST {
   AST_TYPE ast_type;
+  Type node_type ={};
+  Span node_span ={};
 };
 
 struct ASTTypeBase : public AST {
   Type type ={};
-  Span span ={};
-};
-
-struct ASTSpanned : public AST {
-  Span span;
 };
 
 struct ASTExpressionBase : public AST {
@@ -92,11 +122,8 @@ struct ASTExpressionBase : public AST {
   bool call_leaf = false;
 
   META_FLAGS meta_flags;
-  Type type;
 
   uint8_t* const_val = nullptr;
-
-  Span span;
 };
 
 struct ASTNamedType : public ASTTypeBase {
@@ -172,6 +199,11 @@ struct ASTArrayExpr : public ASTExpressionBase {
 
 struct ASTIdentifier : public ASTExpressionBase {
   const InternString* name;
+
+  union {
+    const void* ptr;
+    usize index;
+  };
 };
 
 struct ASTMemberAccessExpr : public ASTExpressionBase {
@@ -207,8 +239,6 @@ struct ASTDecl : public AST {
 
   AST_LOCAL type_ast = 0;
   AST_LOCAL expr = 0;
-
-  Span span ={};
 };
 
 struct ASTFuncSig : public AST {
@@ -217,8 +247,6 @@ struct ASTFuncSig : public AST {
 
   AST_LOCAL return_type = 0;
   AST_ARR parameters ={};
-
-  Span span ={};
 };
 
 struct ASTLambda : public AST {
@@ -236,34 +264,31 @@ struct ASTTypedName : public AST {
 struct ASTStructBody : public AST {
   CompilationUnit* compilation_unit;
   Type type{};
-  Span span ={};
   AST_ARR elements = {};
 };
 
-struct ASTWhile : public ASTSpanned {
+struct ASTWhile : public AST {
   AST_LOCAL condition = 0;
   AST_LOCAL statement = 0;
 };
 
-struct ASTIfElse : public ASTSpanned {
+struct ASTIfElse : public AST {
   AST_LOCAL condition = 0;
   AST_LOCAL if_statement = 0;
   AST_LOCAL else_statement = 0;
 };
 
-struct ASTReturn : public ASTSpanned {
+struct ASTReturn : public AST {
   AST_LOCAL expr = 0;
 };
 
-struct ASTAssign : public ASTSpanned {
+struct ASTAssign : public AST {
   AST_LOCAL assign_to = 0;
   AST_LOCAL value = 0;
 };
 
 struct ASTImport : public AST {
   AST_LOCAL expr_location;
-
-  Span span ={};
 };
 
 struct FileAST {
@@ -280,5 +305,5 @@ struct Printer {
   void newline() const;
 };
 
-void print_ast(const Compiler* comp, const AstStorage* store, const FileAST* file);
-void print_ast_expression(Printer* printer, const AstStorage* store, AST_LOCAL expr);
+void print_full_ast(const FileAST* file);
+void print_full_ast(AST_LOCAL expr);

@@ -3,14 +3,13 @@
 struct InternString;
 struct TokenTypeString;
 enum struct AxleTokenType : uint8_t;
-enum struct STATEMENT_TYPE : uint8_t;
 enum struct ErrorCode : uint8_t;
 
 struct Function;
 struct CallSignature;
 struct FileLocation;
 struct SignatureStructure;
-struct FunctionCallExpr;
+struct ASTFunctionCallExpr;
 
 //For printing character as it appears in code
 struct DisplayChar {
@@ -26,7 +25,7 @@ struct PrintSignatureType {
 };
 
 struct PrintCallSignature {
-  const FunctionCallExpr* call;
+  const ASTFunctionCallExpr* call;
 };
 
 struct PrintPtr {
@@ -51,7 +50,6 @@ void load_string(Array<char>& res, const Array<char>& str);
 void load_string(Array<char>& res, const InternString* str);
 void load_string(Array<char>& res, const TokenTypeString& str);
 void load_string(Array<char>& res, AxleTokenType tt);
-void load_string(Array<char>& res, STATEMENT_TYPE st);
 void load_string(Array<char>& res, ErrorCode ec);
 
 void load_string(Array<char>& res, PrintFuncSignature func);

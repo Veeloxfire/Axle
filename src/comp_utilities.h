@@ -7,6 +7,7 @@ struct Context;
 struct State;
 struct CodeBlock;
 struct AST;
+struct ASTExpressionBase;
 struct Local;
 struct Global;
 

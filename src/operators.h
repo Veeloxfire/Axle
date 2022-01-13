@@ -120,7 +120,7 @@ struct DerefUnOp {
 void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
-                             ASTExpression* expr,
+                             struct ASTBinaryOperatorExpr* expr,
                              const SignAgnArithBinOp& op,
                              const TypeHint* hint);
 
@@ -128,7 +128,7 @@ void compile_binary_operator(Compiler* comp,
 void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
-                             ASTExpression* expr,
+                             struct ASTBinaryOperatorExpr* expr,
                              const SignedArithBinOp& op,
                              const TypeHint* hint);
 
@@ -136,14 +136,14 @@ void compile_binary_operator(Compiler* comp,
 void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
-                             ASTExpression* expr,
+                             struct ASTBinaryOperatorExpr* expr,
                              const EqOpBin& op);
 
 //Overload for unpositioned operators
 void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
-                             ASTExpression* expr,
+                             struct ASTBinaryOperatorExpr* expr,
                              const UnpositionedBinOpOptions& op,
                              const TypeHint* hint);
 
@@ -151,31 +151,31 @@ void compile_binary_operator(Compiler* comp,
 void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
-                             ASTExpression* expr,
+                             struct ASTBinaryOperatorExpr* expr,
                              const UnbalancedBinOpOptions& op);
 
 //Overload for unbalanced operators that dont care about left sign
 void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
-                             ASTExpression* expr,
+                             struct ASTBinaryOperatorExpr* expr,
                              const UnbalancedLeftSignAgnBin& op);
 
 //Overload for unary operators
 void compile_unary_operator(Compiler* comp,
                             Context* context,
                             State* state,
-                            ASTExpression* expr,
+                            struct ASTUnaryOperatorExpr* expr,
                             const UnaryOpOptions& op);
 
 //Overload for taking address
 void compile_take_address(Compiler* comp,
                           Context* context,
                           State* state,
-                          ASTExpression* expr);
+                          struct ASTUnaryOperatorExpr* expr);
 
 void compile_deref(Compiler* comp,
-                   ASTExpression* expr);
+                   struct ASTUnaryOperatorExpr* expr);
 
 inline constexpr UnpositionedBinOpOptions add_operators ={ 
   &BinOpArgs::emit_add_64s,

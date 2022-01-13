@@ -105,6 +105,8 @@ struct TokenStream {
   Token* end;
 };
 
+struct AstStorage;
+
 struct Parser {
   AstStorage* store ={};
 

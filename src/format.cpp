@@ -92,24 +92,6 @@ void load_string(Array<char>& res, const AxleTokenType tt) {
   load_string(res, str);
 }
 
-
-void load_string(Array<char>& res, STATEMENT_TYPE st) {
-
-  switch (st) {
-    case STATEMENT_TYPE::UNKNOWN: load_string(res, "UNKNOWN"); break;
-
-  #define MOD(name, expr_name) case STATEMENT_TYPE:: ## name: load_string(res, #name); break;
-    MOD_STATEMENTS
-    #undef MOD
-
-    default:
-      load_string(res, "unknown_statement(");
-      load_string(res, (uint8_t)st);
-      load_string(res, ')');
-      break;
-  }
-}
-
 void load_string(Array<char>& res, ErrorCode er) {
   const char* err_str = error_code_string(er);
   load_string(res, err_str);
@@ -228,20 +210,21 @@ void load_string(Array<char>& res, uint32_t u32) {
 }
 
 void load_string(Array<char>& res, PrintCallSignature p_call) {
-  const FunctionCallExpr* call = p_call.call;
+  const ASTFunctionCallExpr* call = p_call.call;
 
   res.insert('(');
 
-  auto i = call->arguments.begin();
-  const auto end = call->arguments.end();
+  auto l = call->arguments.start;
 
-  if (i < end) {
-    for (; i < (end - 1); i++) {
-      load_string(res, i->type.name);
+  if (l) {
+    load_string(res, l->curr->node_type.name);
+    l = l->next;
+
+    while(l) {
       load_string(res, ", ");
+      load_string(res, l->curr->node_type.name);
+      l = l->next;
     }
-
-    load_string(res, i->type.name);
   }
 
   load_string(res, ')');

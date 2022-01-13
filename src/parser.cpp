@@ -592,6 +592,9 @@ void reset_parser(Compiler* const comp,
   Lexer* const lex = comp->services.lexer;
   Parser* const parser = comp->services.parser;
 
+  //TEMP
+  parser->store = new AstStorage();
+
 
   lex->strings = comp->services.strings;
   lex->top = string;
@@ -669,7 +672,7 @@ static const InternString* parse_name(Compiler* const comp, Parser* const parser
     comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Expected token type '{}'. Found: '{}'",
                        AxleTokenType::Identifier, parser->current.type);
-    return;
+    return nullptr;
   }
 
   const InternString* name = parser->current.string;
@@ -766,16 +769,6 @@ static BINARY_OPERATOR parse_binary_operator(Compiler* const comp, Parser* const
   return BINARY_OPERATOR::ADD;//just return whatever and hope everything errors out
 }
 
-//static void reset_bin_op_span(ASTExpression* expr) {
-//  ASSERT(expr->expr_type == EXPRESSION_TYPE::BINARY_OPERATOR);
-//
-//  expr->span.full_path = expr->bin_op.left->span.full_path;
-//  expr->span.char_start = expr->bin_op.left->span.char_start;
-//  expr->span.char_end = expr->bin_op.right->span.char_end;
-//  expr->span.line_start = expr->bin_op.left->span.line_start;
-//  expr->span.line_end = expr->bin_op.right->span.line_end;
-//}
-
 struct PrecidenceState {
   bool finished;
   BINARY_OPERATOR next_op;
@@ -785,13 +778,13 @@ struct PrecidenceState {
 static PrecidenceState parse_binary_precidence(Compiler* const comp, Parser* const parser, BINARY_OPERATOR op, AST_LOCAL lhs) {
   AST_LOCAL pos_rhs = parse_unary_op(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return { true, op, 0 };
   }
 
   if (is_binary_operator(parser)) {
     BINARY_OPERATOR op2 = parse_binary_operator(comp, parser);
     if (comp->is_panic()) {
-      return;
+      return { true, op, 0 };
     }
 
     while (true) {
@@ -840,14 +833,14 @@ static PrecidenceState parse_binary_precidence(Compiler* const comp, Parser* con
 static AST_LOCAL parse_binary_operators(Compiler* const comp, Parser* const parser, BINARY_OPERATOR op) {
   AST_LOCAL un = parse_unary_op(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
 
   if (is_binary_operator(parser)) {
     BINARY_OPERATOR op = parse_binary_operator(comp, parser);
     if (comp->is_panic()) {
-      return;
+      return 0;
     }
 
     u8 prec = precidence_table[(usize)op];
@@ -868,7 +861,7 @@ static AST_LOCAL parse_inner_expression(Compiler* const comp, Parser* const pars
 
   AST_LOCAL left = parse_unary_op(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   if (!is_binary_operator(parser)) {
@@ -878,12 +871,12 @@ static AST_LOCAL parse_inner_expression(Compiler* const comp, Parser* const pars
 
   const BINARY_OPERATOR op = parse_binary_operator(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   AST_LOCAL right = parse_binary_operators(comp, parser, op);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   set_span_end(parser->current, s);
@@ -893,7 +886,7 @@ static AST_LOCAL parse_inner_expression(Compiler* const comp, Parser* const pars
   ast->op = op;
   ast->left = left;
   ast->right = right;
-  ast->span = s;
+  ast->node_span = s;
 
   return ast;
 }
@@ -1140,7 +1133,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
         ASTTupleLitExpr* tup_lit = PARSER_ALLOC(ASTTupleLitExpr);
         tup_lit->ast_type = AST_TYPE::TUPLE_LIT;
         tup_lit->elements = arr;
-        tup_lit->span = span;
+        tup_lit->node_span = span;
 
         return (AST*)tup_lit;
       }
@@ -1168,7 +1161,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
           curr_list->curr = parse_inner_expression(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           if (parser->current.type == AxleTokenType::Comma) {
@@ -1179,14 +1172,13 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
           }
         }
 
-
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Right_Square);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         SPAN_END;
@@ -1194,7 +1186,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
         ASTArrayExpr* arr_expr = PARSER_ALLOC(ASTArrayExpr);
         arr_expr->ast_type = AST_TYPE::ARRAY_EXPR;
         arr_expr->elements = elements;
-        arr_expr->span = span;
+        arr_expr->node_span = span;
 
         return arr_expr;
       }
@@ -1206,14 +1198,14 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         SPAN_END;
 
         ASTAsciiString* s = PARSER_ALLOC(ASTAsciiString);
         s->ast_type = AST_TYPE::ASCII_STRING;
-        s->span = span;
+        s->node_span = span;
         s->string = str;
 
         return s;
@@ -1226,14 +1218,14 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         SPAN_END;
 
         ASTAsciiChar* c = PARSER_ALLOC(ASTAsciiChar);
         c->ast_type = AST_TYPE::ASCII_CHAR;
-        c->span = span;
+        c->node_span = span;
         c->character = ch;
 
         return c;
@@ -1245,34 +1237,34 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
         expect(comp, parser, AxleTokenType::Left_Bracket);
         if (comp->is_panic()) {
-          return nullptr;
+          return 0;
         }
 
         AST_LOCAL ty = parse_type(comp, parser);
         if (comp->is_panic()) {
-          return nullptr;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Comma);
         if (comp->is_panic()) {
-          return nullptr;
+          return 0;
         }
 
         AST_LOCAL expr = parse_inner_expression(comp, parser);
         if (comp->is_panic()) {
-          return nullptr;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Right_Bracket);
         if (comp->is_panic()) {
-          return nullptr;
+          return 0;
         }
 
         SPAN_END;
 
         ASTCastExpr* cast = PARSER_ALLOC(ASTCastExpr);
         cast->ast_type = AST_TYPE::CAST;
-        cast->span = span;
+        cast->node_span = span;
         cast->type = ty;
         cast->expr = expr;
 
@@ -1282,7 +1274,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
         u64 val = string_to_uint(parser->current.string->string);
         advance(comp, parser);
         if (comp->is_panic()) {
-          return nullptr;
+          return 0;
         }
 
         const InternString* suffix = nullptr;
@@ -1291,7 +1283,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
           advance(comp, parser);
 
           if (comp->is_panic()) {
-            return nullptr;
+            return 0;
           }
         }
 
@@ -1299,7 +1291,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
         ASTNumber* num = PARSER_ALLOC(ASTNumber);
         num->ast_type = AST_TYPE::NUMBER;
-        num->span = span;
+        num->node_span = span;
         num->value = val;
         num->suffix = suffix;
 
@@ -1315,13 +1307,13 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
           //ident
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           //left bracket
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           AST_ARR arguments ={};
@@ -1355,26 +1347,26 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
                 comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                                    "Expected '{}', Found '{}'",
                                    AxleTokenType::Comma, parser->current.type);
-                return;
+                return 0;
               }
             }
 
             if (comp->is_panic()) {
-              return;
+              return 0;
             }
           }
 
 
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           SPAN_END;
 
           ASTFunctionCallExpr* call = PARSER_ALLOC(ASTFunctionCallExpr);
           call->ast_type = AST_TYPE::FUNCTION_CALL;
-          call->span = span;
+          call->node_span = span;
           call->function_name = function_name;
           call->arguments = arguments;
 
@@ -1385,14 +1377,14 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           SPAN_END;
 
           ASTIdentifier* i = PARSER_ALLOC(ASTIdentifier);
           i->ast_type = AST_TYPE::IDENTIFIER_EXPR;
-          i->span = span;
+          i->node_span = span;
           i->name = name;
 
           return i;
@@ -1428,9 +1420,11 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
       }
     default: comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                                 "Unexpected Token Type '{}'", parser->current.type);
+      return 0;
   }
 
   INVALID_CODE_PATH("Did not return an expression node ...");
+  return 0;
 }
 
 static AST_LOCAL parse_primary_and_suffix(Compiler* const comp, Parser* const parser) {
@@ -1440,7 +1434,7 @@ static AST_LOCAL parse_primary_and_suffix(Compiler* const comp, Parser* const pa
 
   AST_LOCAL current = parse_primary(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   //Parse the suffixes
@@ -1451,14 +1445,14 @@ static AST_LOCAL parse_primary_and_suffix(Compiler* const comp, Parser* const pa
 
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           AST_LOCAL index = parse_inner_expression(comp, parser);
 
           expect(comp, parser, AxleTokenType::Right_Square);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           SPAN_END;
@@ -1467,10 +1461,10 @@ static AST_LOCAL parse_primary_and_suffix(Compiler* const comp, Parser* const pa
           index_expr->ast_type = AST_TYPE::INDEX_EXPR;
           index_expr->expr = current;
           index_expr->index = index;
-          index_expr->span = span;
+          index_expr->node_span = span;
 
           current = index_expr;
-
+          //Loop again
           break;
         }
       case AxleTokenType::Full_Stop: {
@@ -1478,12 +1472,12 @@ static AST_LOCAL parse_primary_and_suffix(Compiler* const comp, Parser* const pa
 
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           const InternString* name = parse_name(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           SPAN_END;
@@ -1492,9 +1486,10 @@ static AST_LOCAL parse_primary_and_suffix(Compiler* const comp, Parser* const pa
           member->ast_type = AST_TYPE::MEMBER_ACCESS;
           member->expr = current;
           member->name = name;
-          member->span = span;
+          member->node_span = span;
 
           current = member;
+          //Loop again
           break;
         }
       default:
@@ -1502,6 +1497,9 @@ static AST_LOCAL parse_primary_and_suffix(Compiler* const comp, Parser* const pa
         return current;
     }
   }
+
+  INVALID_CODE_PATH("Managed to escape loop ...");
+  return 0;
 }
 
 static AST_LOCAL parse_unary_op(Compiler* const comp, Parser* const parser) {
@@ -1512,7 +1510,7 @@ static AST_LOCAL parse_unary_op(Compiler* const comp, Parser* const parser) {
 
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL p = parse_unary_op(comp, parser);
@@ -1522,7 +1520,7 @@ static AST_LOCAL parse_unary_op(Compiler* const comp, Parser* const parser) {
         ASTUnaryOperatorExpr* op = PARSER_ALLOC(ASTUnaryOperatorExpr);
         op->ast_type = AST_TYPE::UNARY_OPERATOR;
         op->op = UNARY_OPERATOR::NEG;
-        op->span = span;
+        op->node_span = span;
         op->expr = p;
 
         return op;
@@ -1533,7 +1531,7 @@ static AST_LOCAL parse_unary_op(Compiler* const comp, Parser* const parser) {
 
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL p = parse_unary_op(comp, parser);
@@ -1543,7 +1541,7 @@ static AST_LOCAL parse_unary_op(Compiler* const comp, Parser* const parser) {
         ASTUnaryOperatorExpr* op = PARSER_ALLOC(ASTUnaryOperatorExpr);
         op->ast_type = AST_TYPE::UNARY_OPERATOR;
         op->op = UNARY_OPERATOR::DEREF;
-        op->span = span;
+        op->node_span = span;
         op->expr = p;
 
         return op;
@@ -1554,7 +1552,7 @@ static AST_LOCAL parse_unary_op(Compiler* const comp, Parser* const parser) {
 
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL p = parse_unary_op(comp, parser);
@@ -1564,7 +1562,7 @@ static AST_LOCAL parse_unary_op(Compiler* const comp, Parser* const parser) {
         ASTUnaryOperatorExpr* op = PARSER_ALLOC(ASTUnaryOperatorExpr);
         op->ast_type = AST_TYPE::UNARY_OPERATOR;
         op->op = UNARY_OPERATOR::ADDRESS;
-        op->span = span;
+        op->node_span = span;
         op->expr = p;
 
         return op;
@@ -1590,7 +1588,7 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
 
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_ARR args ={};
@@ -1611,7 +1609,7 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
 
           list->curr = parse_type(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           if (parser->current.type == AxleTokenType::Right_Bracket) {
@@ -1620,7 +1618,7 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
           else if (parser->current.type != AxleTokenType::Comma) {
             comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                                "Invalid token type '{}' in type list", parser->current.type);
-            return;
+            return 0;
           }
 
           ASSERT(parser->current.type == AxleTokenType::Comma);
@@ -1630,7 +1628,7 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
         ASSERT(parser->current.type == AxleTokenType::Right_Bracket);
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         if (parser->current.type == AxleTokenType::Sub
@@ -1639,28 +1637,28 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
             comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                                "Expected -> or nothing after type\n"
                                "Found we the compiler thinks is '->' but the characters are separated");
-            return;
+            return 0;
           }
 
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           AST_LOCAL ret = parse_type(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           SPAN_END;
 
           ASTLambdaType* l = PARSER_ALLOC(ASTLambdaType);
           l->ast_type = AST_TYPE::LAMBDA_TYPE;
-          l->span = span;
+          l->node_span = span;
           l->args = args;
           l->ret = ret;
 
@@ -1671,7 +1669,7 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
 
           ASTTupleType* tup = PARSER_ALLOC(ASTTupleType);
           tup->ast_type = AST_TYPE::TUPLE_TYPE;
-          tup->span = span;
+          tup->node_span = span;
           tup->types = args;
 
           return tup;
@@ -1681,7 +1679,7 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
         const InternString* i = parser->current.string;
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         SPAN_END;
@@ -1689,7 +1687,9 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
         ASTNamedType* nt = PARSER_ALLOC(ASTNamedType);
         nt->ast_type = AST_TYPE::NAMED_TYPE;
         nt->name = i;
-        nt->span = span;
+        nt->node_span = span;
+
+        return nt;
       }
     case AxleTokenType::Left_Square: {
         // Array type
@@ -1697,36 +1697,36 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
 
         advance(comp, parser);//[
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         //Base Type
         AST_LOCAL base = parse_type(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Semicolon);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         //Expression
         AST_LOCAL expr = parse_expression(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Right_Square);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         SPAN_END;
 
         ASTArrayType* arr = PARSER_ALLOC(ASTArrayType);
         arr->ast_type = AST_TYPE::ARRAY_TYPE;
-        arr->span = span;
+        arr->node_span = span;
         arr->base = base;
         arr->expr = expr;
 
@@ -1738,20 +1738,20 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
 
         advance(comp, parser);//*
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         //Base
         AST_LOCAL base = parse_type(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         SPAN_END;
 
         ASTPtrType* arr = PARSER_ALLOC(ASTPtrType);
         arr->ast_type = AST_TYPE::PTR_TYPE;
-        arr->span = span;
+        arr->node_span = span;
         arr->base = base;
 
         return arr;
@@ -1766,17 +1766,17 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
 static AST_LOCAL parse_typed_name(Compiler* const comp, Parser* const parser) {
   const InternString* name = parse_name(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   expect(comp, parser, AxleTokenType::Colon);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   AST_LOCAL ty = parse_type(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   ASTTypedName* tn = PARSER_ALLOC(ASTTypedName);
@@ -1801,25 +1801,25 @@ static AST_LOCAL parse_decl(Compiler* const comp, Parser* const parser) {
   if (parser->current.type != AxleTokenType::Identifier) {
     comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Expected Identifier as declarations start with identifiers");
-    return;
+    return 0;
   }
 
   const InternString* name = parser->current.string;
   advance(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   expect(comp, parser, AxleTokenType::Colon);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   //Explicit type??
   if (parser->current.type != AxleTokenType::Equals && parser->current.type != AxleTokenType::Colon) {
     ty = parse_type(comp, parser);
     if (comp->is_panic()) {
-      return;
+      return 0;
     }
   }
 
@@ -1835,27 +1835,31 @@ static AST_LOCAL parse_decl(Compiler* const comp, Parser* const parser) {
     comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                        "Expected '{}' or '{}' but found '{}'",
                        AxleTokenType::Equals, AxleTokenType::Colon, parser->current.type);
-    return;
+    return 0;
   }
 
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   expr = parse_expression(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   if (expr->ast_type != AST_TYPE::LAMBDA) {
     expect(comp, parser, AxleTokenType::Semicolon);
+    if (comp->is_panic()) {
+      return 0;
+    }
   }
 
   SPAN_END;
 
   ASTDecl* d = PARSER_ALLOC(ASTDecl);
   d->ast_type = AST_TYPE::DECL;
-  d->span = span;
+  d->node_span = span;
+  d->name = name;
   d->compile_time_const = constant;
   d->type_ast = ty;
   d->expr = expr;
@@ -1874,58 +1878,58 @@ static AST_LOCAL parse_statement(Compiler* const comp, Parser* const parser) {
     case AxleTokenType::Return: {
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL expr = parse_expression(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Semicolon);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         SPAN_END;
 
         ASTReturn* ret = PARSER_ALLOC(ASTReturn);
         ret->ast_type = AST_TYPE::RETURN;
-        ret->span = span;
+        ret->node_span = span;
         ret->expr = expr;
         return ret;
       }
     case AxleTokenType::If: {
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Left_Bracket);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL cond = parse_expression(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Right_Bracket);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL if_branch = parse_statement(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL else_branch = 0;
         if (parser->current.type == AxleTokenType::Else) {
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
           else_branch = parse_statement(comp, parser);
         }
@@ -1934,7 +1938,7 @@ static AST_LOCAL parse_statement(Compiler* const comp, Parser* const parser) {
 
         ASTIfElse* if_else = PARSER_ALLOC(ASTIfElse);
         if_else->ast_type = AST_TYPE::IF_ELSE;
-        if_else->span = span;
+        if_else->node_span = span;
         if_else->condition = cond;
         if_else->if_statement = if_branch;
         if_else->else_statement = else_branch;
@@ -1944,22 +1948,22 @@ static AST_LOCAL parse_statement(Compiler* const comp, Parser* const parser) {
     case AxleTokenType::While: {
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Left_Bracket);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL cond = parse_expression(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         expect(comp, parser, AxleTokenType::Right_Bracket);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         AST_LOCAL loop = parse_statement(comp, parser);
@@ -1968,7 +1972,7 @@ static AST_LOCAL parse_statement(Compiler* const comp, Parser* const parser) {
 
         ASTWhile* w = PARSER_ALLOC(ASTWhile);
         w->ast_type = AST_TYPE::WHILE;
-        w->span = span;
+        w->node_span = span;
         w->condition = cond;
         w->statement = loop;
 
@@ -1985,31 +1989,31 @@ static AST_LOCAL parse_statement(Compiler* const comp, Parser* const parser) {
         //Get the assign to expression
         AST_LOCAL assign_to = parse_expression(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
 
         if (parser->current.type == AxleTokenType::Equals) {
           advance(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           //reset the expr
           AST_LOCAL expr = parse_expression(comp, parser);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           expect(comp, parser, AxleTokenType::Semicolon);
           if (comp->is_panic()) {
-            return;
+            return 0;
           }
 
           SPAN_END;
 
           ASTAssign* assign = PARSER_ALLOC(ASTAssign);
           assign->ast_type = AST_TYPE::ASSIGN;
-          assign->span = span;
+          assign->node_span = span;
           assign->assign_to = assign_to;
           assign->value = expr;
 
@@ -2027,7 +2031,7 @@ static AST_LOCAL parse_statement(Compiler* const comp, Parser* const parser) {
                              "Found '{}'",
                              AxleTokenType::Equals, AxleTokenType::Semicolon,
                              parser->current.type);
-          return;
+          return 0;
         }
         break;
       }
@@ -2037,7 +2041,7 @@ static AST_LOCAL parse_statement(Compiler* const comp, Parser* const parser) {
 static AST_LOCAL parse_block(Compiler* const comp, Parser* const parser) {
   expect(comp, parser, AxleTokenType::Left_Brace);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   AST_ARR statements ={};
@@ -2048,7 +2052,7 @@ static AST_LOCAL parse_block(Compiler* const comp, Parser* const parser) {
       //Empty statement
       advance(comp, parser);
       if (comp->is_panic()) {
-        return;
+        return 0;
       }
       continue;
     }
@@ -2069,12 +2073,12 @@ static AST_LOCAL parse_block(Compiler* const comp, Parser* const parser) {
 
 
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   expect(comp, parser, AxleTokenType::Right_Brace);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   ASTBlock* b = PARSER_ALLOC(ASTBlock);
@@ -2091,7 +2095,7 @@ static AST_LOCAL parse_function_signature(Compiler* const comp, Parser* const pa
 
   expect(comp, parser, AxleTokenType::Left_Bracket);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   AST_ARR args ={};
@@ -2120,7 +2124,7 @@ static AST_LOCAL parse_function_signature(Compiler* const comp, Parser* const pa
       else if (parser->current.type == AxleTokenType::Comma) {
         advance(comp, parser);
         if (comp->is_panic()) {
-          return;
+          return 0;
         }
         continue;
       }
@@ -2128,30 +2132,30 @@ static AST_LOCAL parse_function_signature(Compiler* const comp, Parser* const pa
         //ERROR
         comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                            "Expected a comma!");
-        return;
+        return 0;
       }
     }
   }
 
 
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   advance(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   // ->
   expect(comp, parser, AxleTokenType::Sub);// -
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   expect(comp, parser, AxleTokenType::Greater);// >
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   SPAN_END;
@@ -2162,7 +2166,7 @@ static AST_LOCAL parse_function_signature(Compiler* const comp, Parser* const pa
   sig->ast_type = AST_TYPE::FUNCTION_SIGNATURE;
   sig->parameters = args;
   sig->return_type = ret;
-  sig->span = span;
+  sig->node_span = span;
 
   return sig;
 }
@@ -2170,7 +2174,7 @@ static AST_LOCAL parse_function_signature(Compiler* const comp, Parser* const pa
 static AST_LOCAL parse_lambda(Compiler* const comp, Parser* const parser) {
   AST_LOCAL sig = parse_function_signature(comp, parser);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   AST_LOCAL body = 0;
@@ -2186,7 +2190,7 @@ static AST_LOCAL parse_lambda(Compiler* const comp, Parser* const parser) {
                        "Expected '{}' or '{}'\nFound '{}'",
                        AxleTokenType::Left_Brace, AxleTokenType::Semicolon,
                        parser->current.type);
-    return;
+    return 0;
   }
 
   ASTLambda* l = PARSER_ALLOC(ASTLambda);
@@ -2203,12 +2207,12 @@ static AST_LOCAL parse_lambda(Compiler* const comp, Parser* const parser) {
 static AST_LOCAL parse_structure(Compiler* const comp, Parser* const parser) {
   expect(comp, parser, AxleTokenType::Struct);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   expect(comp, parser, AxleTokenType::Left_Brace);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   AST_ARR arr ={};
@@ -2229,18 +2233,18 @@ static AST_LOCAL parse_structure(Compiler* const comp, Parser* const parser) {
 
     linked->curr = parse_typed_name(comp, parser);
     if (comp->is_panic()) {
-      return;
+      return 0;
     }
     expect(comp, parser, AxleTokenType::Semicolon);
   }
 
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   expect(comp, parser, AxleTokenType::Right_Brace);
   if (comp->is_panic()) {
-    return;
+    return 0;
   }
 
   ASTStructBody* s = PARSER_ALLOC(ASTStructBody);
@@ -2304,7 +2308,7 @@ void parse_file(Compiler* const comp, Parser* const parser, FileAST* const file)
       ASTImport* imp = PARSER_ALLOC(ASTImport);
       imp->ast_type = AST_TYPE::IMPORT;
       imp->expr_location = expr;
-      imp->span = span;
+      imp->node_span = span;
 
       linked->curr = imp;
     }
@@ -2390,9 +2394,9 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::CAST: {
         ASTCastExpr* cast = (ASTCastExpr*)a;
         IO::print("cast(");
-        IO::print(cast->type);
+        print_ast(printer, cast->type);
         IO::print(", ");
-        IO::print(cast->expr);
+        print_ast(printer, cast->expr);
         IO::print(')');
         return;
       }
@@ -2419,14 +2423,14 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         ASTNumber* n = (ASTNumber*)a;
         printf("%llu", n->value);
         if (n->suffix != nullptr) {
-          IO::print(n->suffix);
+          IO::print(n->suffix->string);
         }
         return;
       }
     case AST_TYPE::FUNCTION_CALL: {
         ASTFunctionCallExpr* c = (ASTFunctionCallExpr*)a;
 
-        IO::print(c->function_name, '(');
+        IO::print(c->function_name->string, '(');
 
         AST_LINKED* l = c->arguments.start;
 
@@ -2659,7 +2663,12 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
   INVALID_CODE_PATH("INVALID/UNCOVERED NODE TYPE IN PRINTER!");
 }
 
-void print_ast(const Compiler* comp, const FileAST* file) {
+void print_full_ast(AST_LOCAL expr) {
+  Printer printer ={};
+  print_ast(&printer, expr);
+}
+
+void print_full_ast(const FileAST* file) {
   Printer printer ={};
 
   AST_LINKED* l = file->contents.start;
@@ -2683,3 +2692,4 @@ void print_ast(const Compiler* comp, const FileAST* file) {
       l = l->next;
     }
   }
+}
