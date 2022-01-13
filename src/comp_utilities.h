@@ -6,7 +6,7 @@ struct Compiler;
 struct Context;
 struct State;
 struct CodeBlock;
-struct ASTExpression;
+struct AST;
 struct Local;
 struct Global;
 

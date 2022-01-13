@@ -172,12 +172,6 @@ constexpr T bit_fill_lower(uint8_t bits) {
   return ~bit_fill_upper<T>(64 - bits);
 }
 
-template<typename T>
-void reset_type(T* t) noexcept {
-  t->~T();
-  new(t) T();
-}
-
 template<typename T, size_t i>
 constexpr size_t array_size(T(&)[i]) {
   return i;
@@ -1719,26 +1713,22 @@ EXECUTE_AT_END(T&& t)->EXECUTE_AT_END<T>;
 #define DEFER(...) EXECUTE_AT_END JOIN(defer, __LINE__) = [__VA_ARGS__]() mutable ->void 
 
 namespace IO {
-  void print(const char* string);
-  void print(const OwnedPtr<char>& string);
-  void print(const char c);
+  void print_impl(const char* string);
+  void print_impl(const OwnedPtr<char>& string);
+  void print_impl(const char c);
 
-  void err_print(const char* string);
-  void err_print(const OwnedPtr<char>& string);
-  void err_print(const char c);
+  void err_print_impl(const char* string);
+  void err_print_impl(const OwnedPtr<char>& string);
+  void err_print_impl(const char c);
 
-  template<typename U, typename V, typename ... T>
-  void print(U&& u, V&& v, T&& ... t) {
-    print(std::forward<U>(u));
-    print(std::forward<V>(v));
-    (print(std::forward<T>(t)), ...);
+  template<typename ... T>
+  void print(const T& ... t) {
+    (print_impl(t), ...);
   }
 
-  template<typename U, typename V, typename ... T>
-  void err_print(U&& u, V&& v, T&& ... t) {
-    err_print(std::forward<U>(u));
-    err_print(std::forward<V>(v));
-    (err_print(std::forward<T>(t)), ...);
+  template<typename ... T>
+  void err_print(const T& ... t) {
+    (err_print_impl(t), ...);
   }
 }
 

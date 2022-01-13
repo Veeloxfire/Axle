@@ -6,236 +6,86 @@
 #include "parser.h"
 #include "comp_utilities.h"
 
-struct ASTType;
-struct ASTExpression;
-struct ASTStatement;
-struct ASTLambda;
-struct ASTStructBody;
-
 struct Type;
 struct Function;
 struct EnumValue;
 struct State;
 struct Global;
+struct AST;
 
-struct ASTName {
-  const InternString* name ={};
+using AST_LOCAL = AST*;
+
+struct AST_ARR {
+  AST_LINKED* start = 0;
+  usize count;
 };
 
-struct ASTArrayType {
-  ASTType* base = nullptr;
-  ASTExpression* expr = nullptr;
+struct AST_LINKED {
+  AST_LOCAL curr = 0;
+  AST_LINKED* next = 0;
+};
 
-  ~ASTArrayType() {
-    free_destruct_single(base);
-    free_destruct_single(expr);
+//Anything allocated via this structure will not be destroyed
+struct AstStorage {
+  constexpr static usize BLOCK_SIZE = 1024 * 8;
+  u8 ast_mem[BLOCK_SIZE];
+  usize top;
+
+  u8* push_alloc_bytes(usize size, usize align);
+
+  template<typename T>
+  T* push() {
+    T* ast = (T*)push_alloc_bytes(sizeof(T), alignof(T));
+    new (ast) T();
+    return ast;
   }
 };
 
-struct ASTPtrType {
-  ASTType* base = nullptr;
-
-  ~ASTPtrType() {
-    free_destruct_single(base);
-  }
+enum struct AST_TYPE : u8 {
+  NAMED_TYPE,
+  ARRAY_TYPE,
+  PTR_TYPE,
+  LAMBDA_TYPE,
+  TUPLE_TYPE,
+  CAST,
+  UNARY_OPERATOR,
+  BINARY_OPERATOR,
+  IDENTIFIER_EXPR,
+  NUMBER,
+  FUNCTION_CALL,
+  TUPLE_LIT,
+  ARRAY_EXPR,
+  ASCII_STRING,
+  ASCII_CHAR,
+  INDEX_EXPR,
+  MEMBER_ACCESS,
+  LAMBDA,
+  STRUCT,
+  DECL,
+  TYPED_NAME,
+  ASSIGN,
+  BLOCK,
+  IF_ELSE,
+  WHILE,
+  RETURN,
+  FUNCTION_SIGNATURE,
+  IMPORT,
 };
 
-struct ASTLambdaType {
-  //Last one is the return type
-  Array<ASTType> types ={};
+struct AST {
+  AST_TYPE ast_type;
 };
 
-struct ASTTupleType {
-  Array<ASTType> types ={};
-};
-
-#define TYPE_TYPE_MOD \
-MOD(NORMAL, name) \
-MOD(ARRAY, arr) \
-MOD(PTR, ptr) \
-MOD(TUPLE, tuple) \
-MOD(LAMBDA, lambda)
-
-enum struct TYPE_TYPE {
-  UNKNOWN = 0,
-
-#define MOD(name, t) name,
-  TYPE_TYPE_MOD
-#undef MOD
-};
-
-struct ASTType {
-  TYPE_TYPE type_type = TYPE_TYPE::UNKNOWN;
+struct ASTTypeBase : public AST {
   Type type ={};
   Span span ={};
-
-  union {
-    char _dummy = '\0';
-    const InternString* name;
-    ASTArrayType arr;
-    ASTPtrType ptr;
-    ASTTupleType tuple;
-    ASTLambdaType lambda;
-  };
-
-  ASTType() = default;
-
-  ASTType(ASTType&& a) noexcept {
-    move_from(std::move(a));
-  }
-
-  ASTType& operator=(ASTType&& a) noexcept {
-    this->~ASTType();
-    move_from(std::move(a));
-    return *this;
-  }
-
-  void move_from(ASTType&&) noexcept;
-
-  void set_union(TYPE_TYPE);
-  void destruct_union();
-  ~ASTType();
 };
 
-struct BinaryOperatorExpr {
-  BINARY_OPERATOR op;
-
-  ASTExpression* left = nullptr;
-  ASTExpression* right = nullptr;
-
-  BinOpEmitInfo info = {};
-  BINARY_OPERATOR_FUNCTION emit = nullptr;
-
-  ~BinaryOperatorExpr() {
-    free_destruct_single(left);
-    free_destruct_single(right);
-  }
+struct ASTSpanned : public AST {
+  Span span;
 };
 
-struct TupleLitExpr {
-  Array<ASTExpression> elements = {};
-};
-
-struct FunctionCallExpr {
-  Array<ASTExpression> arguments ={};
-
-  const InternString* function_name = nullptr;
-  const SignatureStructure* sig = nullptr;
-  //const Function* function = nullptr;
-};
-
-struct EnumValueExpr {
-  const EnumValue* enum_value = nullptr;
-  const InternString* name ={};
-};
-
-struct UnaryOperatorExpr {
-  UNARY_OPERATOR op;
-  ASTExpression* expr = nullptr;
-
-  UNARY_OPERATOR_FUNCTION emit = nullptr;
-
-  ~UnaryOperatorExpr() {
-    free_destruct_single(expr);
-  }
-};
-
-struct CastExpr {
-  ASTType type;
-  ASTExpression* expr = nullptr;
-  CAST_FUNCTION emit = nullptr;
-
-  inline CastExpr& operator=(CastExpr&& c) noexcept {
-    type = std::move(c.type);
-    expr = std::exchange(c.expr, nullptr);
-    emit = std::exchange(c.emit, nullptr);
-    return *this;
-  }
-
-  ~CastExpr() {
-    free_destruct_single(expr);
-  }
-};
-
-struct IndexExpr {
-  ASTExpression* expr = nullptr;
-  ASTExpression* index = nullptr;
-
-  ~IndexExpr() {
-    free_destruct_single(expr);
-    free_destruct_single(index);
-  }
-};
-
-struct ValueExpr {
-  uint64_t value = 0;
-  const InternString* suffix =nullptr;
-};
-
-struct ArrayExpr {
-  Array<ASTExpression> elements;
-};
-
-struct MemberAccessExpr {
-  ASTExpression* expr = nullptr;
-
-  uint32_t offset = 0;
-  const InternString* name = nullptr;
-
-  ~MemberAccessExpr() {
-    free_destruct_single(expr);
-  }
-};
-
-struct LambdaExpr {
-  ASTLambda* lambda;
-
-  ~LambdaExpr() {
-    free_destruct_single(lambda);
-  }
-};
-
-struct StructExpr {
-  ASTStructBody* body;
-
-  ~StructExpr() {
-    free_destruct_single(body);
-  }
-};
-
-struct CompIntrinsicExpr {
-  const InternString* name;
-};
-
-#define EXPRESSION_TYPE_MODIFY \
-MODIFY(CAST, cast) \
-MODIFY(UNARY_OPERATOR, un_op) \
-MODIFY(BINARY_OPERATOR, bin_op) \
-MODIFY(NAME, name) \
-MODIFY(LOCAL, local) \
-MODIFY(GLOBAL, global) \
-MODIFY(ENUM, enum_value) \
-MODIFY(VALUE, value) \
-MODIFY(FUNCTION_CALL, call) \
-MODIFY(TUPLE_LIT, tuple_lit) \
-MODIFY(ARRAY_EXPR, array_expr) \
-MODIFY(ASCII_STRING, ascii_string) \
-MODIFY(ASCII_CHAR, ascii_char) \
-MODIFY(INDEX, index) \
-MODIFY(NULLPTR, _dummy) \
-MODIFY(MEMBER, member) \
-MODIFY(LAMBDA, lambda) \
-MODIFY(STRUCT, struct_body) \
-MODIFY(COMP_INTRINSIC, comp_intrinsic)
-
-enum struct EXPRESSION_TYPE : uint8_t {
-  UNKNOWN = 0,
-#define MODIFY(name, expr_name) name, 
-  EXPRESSION_TYPE_MODIFY
-#undef MODIFY
-};
-
-struct ASTExpression {
+struct ASTExpressionBase : public AST {
   uint8_t valid_rvts = ALL_RVTS;
 
   bool makes_call = false;
@@ -247,71 +97,107 @@ struct ASTExpression {
   uint8_t* const_val = nullptr;
 
   Span span;
-
-  EXPRESSION_TYPE expr_type = EXPRESSION_TYPE::UNKNOWN;
-  union {
-    char _dummy = '\0';
-    CastExpr cast;
-    UnaryOperatorExpr un_op;
-    BinaryOperatorExpr bin_op;
-    FunctionCallExpr call;
-    TupleLitExpr tuple_lit;
-    EnumValueExpr enum_value;
-    const InternString* name;
-    size_t local;
-    const Global* global;
-    ValueExpr value;
-    char ascii_char;
-    ArrayExpr array_expr;
-    const InternString* ascii_string;
-    IndexExpr index;
-    MemberAccessExpr member;
-    LambdaExpr lambda;
-    StructExpr struct_body;
-    CompIntrinsicExpr comp_intrinsic;
-  };
-
-  ASTExpression() = default;
-
-  ASTExpression(ASTExpression&& a) noexcept {
-    move_from(std::move(a));
-  }
-
-  ASTExpression& operator=(ASTExpression&& a) noexcept {
-    this->~ASTExpression();
-    move_from(std::move(a));
-    return *this;
-  }
-
-  void move_from(ASTExpression&&) noexcept;
-
-  void set_union(EXPRESSION_TYPE et) noexcept;
-  void destruct_union() noexcept;
-  ~ASTExpression();
 };
 
-#define MOD_STATEMENTS \
-MOD(EXPRESSION, expression) \
-MOD(LOCAL, local) \
-MOD(RETURN, expression) \
-MOD(IF_ELSE, if_else) \
-MOD(WHILE, while_loop) \
-MOD(BLOCK, block) \
-MOD(ASSIGN, assign) \
-
-enum struct STATEMENT_TYPE : uint8_t {
-  UNKNOWN = 0,
-
-#define MOD(name, expr_name) name,
-  MOD_STATEMENTS
-#undef MOD
+struct ASTNamedType : public ASTTypeBase {
+  const InternString* name ={};
 };
 
-struct ASTBlock {
-  Array<ASTStatement> block ={};
+struct ASTArrayType : public ASTTypeBase {
+  AST_LOCAL base = 0;
+  AST_LOCAL expr = 0;
 };
 
-struct ASTDecl {
+struct ASTPtrType : public ASTTypeBase {
+  AST_LOCAL base = 0;
+};
+
+struct ASTLambdaType : public ASTTypeBase {
+  AST_LOCAL ret = 0;
+  AST_ARR args ={};
+};
+
+struct ASTTupleType : public ASTTypeBase {
+  AST_ARR types ={};
+};
+
+struct ASTBinaryOperatorExpr : public ASTExpressionBase {
+  BINARY_OPERATOR op;
+
+  AST_LOCAL left = 0;
+  AST_LOCAL right = 0;
+
+  BinOpEmitInfo info = {};
+  BINARY_OPERATOR_FUNCTION emit = nullptr;
+};
+
+struct ASTTupleLitExpr : public ASTExpressionBase {
+  AST_ARR elements = {};
+};
+
+struct ASTFunctionCallExpr : public ASTExpressionBase {
+  AST_ARR arguments ={};
+
+  const InternString* function_name = nullptr;
+  const SignatureStructure* sig = nullptr;
+  //const Function* function = nullptr;
+};
+
+struct ASTUnaryOperatorExpr : public ASTExpressionBase {
+  UNARY_OPERATOR op;
+  AST_LOCAL expr = 0;
+
+  UNARY_OPERATOR_FUNCTION emit = nullptr;
+};
+
+struct ASTCastExpr : public ASTExpressionBase {
+  AST_LOCAL type = 0;
+  AST_LOCAL expr = 0;
+  CAST_FUNCTION emit = nullptr;
+};
+
+struct ASTIndexExpr : public ASTExpressionBase {
+  AST_LOCAL expr = 0;
+  AST_LOCAL index = 0;
+};
+
+struct ASTNumber : public ASTExpressionBase {
+  uint64_t value = 0;
+  const InternString* suffix =nullptr;
+};
+
+struct ASTArrayExpr : public ASTExpressionBase {
+  AST_ARR elements ={};
+};
+
+struct ASTIdentifier : public ASTExpressionBase {
+  const InternString* name;
+};
+
+struct ASTMemberAccessExpr : public ASTExpressionBase {
+  AST_LOCAL expr = 0;
+
+  uint32_t offset = 0;
+  const InternString* name = nullptr;
+};
+
+struct ASTAsciiString : public ASTExpressionBase {
+  const InternString* string;
+};
+
+struct ASTAsciiChar : public ASTExpressionBase {
+  char character;
+};
+
+//struct ASTCompIntrinsic : public ASTExpressionBase {
+//  const InternString* name;
+//};
+
+struct ASTBlock : public AST {
+  AST_ARR block ={};
+};
+
+struct ASTDecl : public AST {
   const InternString* name = nullptr;
   bool compile_time_const = false;
   Type type ={};
@@ -319,128 +205,73 @@ struct ASTDecl {
   //Only used in locals
   size_t local_index = 0;
 
-  ASTType* type_ast ={};
-  ASTExpression* expr ={};
+  AST_LOCAL type_ast = 0;
+  AST_LOCAL expr = 0;
 
   Span span ={};
-
-  ~ASTDecl() {
-    free_destruct_single(type_ast);
-    free_destruct_single(expr);
-  }
 };
 
-struct ASTFuncSig {
+struct ASTFuncSig : public AST {
   FunctionSignature* sig = nullptr;
   const CallingConvention* convention = nullptr;
 
-  ASTType return_type ={};
-  Array<ASTDecl> parameters ={};
+  AST_LOCAL return_type = 0;
+  AST_ARR parameters ={};
 
-  Span signature_span ={};
+  Span span ={};
 };
 
-struct ASTLambda {
+struct ASTLambda : public AST {
   Function* function = nullptr;
 
-  ASTFuncSig sig ={};
-  ASTBlock body ={};
+  AST_LOCAL sig ={};
+  AST_LOCAL body ={};
 };
 
-struct ASTTypedName {
-  ASTType type ={};
+struct ASTTypedName : public AST {
+  AST_LOCAL type ={};
   const InternString* name = nullptr;
 };
 
-struct ASTStructBody {
+struct ASTStructBody : public AST {
   CompilationUnit* compilation_unit;
   Type type{};
   Span span ={};
-  Array<ASTTypedName> elements = {};
+  AST_ARR elements = {};
 };
 
-struct ASTWhile {
-  ASTExpression* condition ={};
-  ASTStatement* statement = nullptr;
-
-  ~ASTWhile() {
-    free_destruct_single(condition);
-    free_destruct_single(statement);
-  }
+struct ASTWhile : public ASTSpanned {
+  AST_LOCAL condition = 0;
+  AST_LOCAL statement = 0;
 };
 
-struct ASTIfElse {
-  ASTExpression* condition ={};
-  ASTStatement* if_statement = nullptr;
-  ASTStatement* else_statement = nullptr;
-
-  ~ASTIfElse() {
-    free_destruct_single(condition);
-    free_destruct_single(if_statement);
-    free_destruct_single(else_statement);
-  }
+struct ASTIfElse : public ASTSpanned {
+  AST_LOCAL condition = 0;
+  AST_LOCAL if_statement = 0;
+  AST_LOCAL else_statement = 0;
 };
 
-struct ASTAssign {
-  ASTExpression* assign_to ={};
-  ASTExpression* value ={};
-
-  ~ASTAssign() {
-    free_destruct_single(assign_to);
-    free_destruct_single(value);
-  }
+struct ASTReturn : public ASTSpanned {
+  AST_LOCAL expr = 0;
 };
 
-struct ExprHolder {
-  ASTExpression* expr = nullptr;
-
-  ~ExprHolder() {
-    free_destruct_single(expr);
-  }
+struct ASTAssign : public ASTSpanned {
+  AST_LOCAL assign_to = 0;
+  AST_LOCAL value = 0;
 };
 
-
-struct ASTStatement {
-  STATEMENT_TYPE type = STATEMENT_TYPE::UNKNOWN;
-  Span span;
-
-  union {
-    char _dummy ={};
-    ExprHolder expression;
-    ASTDecl local;
-    ASTWhile while_loop;
-    ASTIfElse if_else;
-    ASTBlock block;
-    ASTAssign assign;
-  };
-
-  void set_union(STATEMENT_TYPE st) noexcept;
-  void destruct_union() noexcept;
-
-  ASTStatement() = default;
-  ~ASTStatement();
-};
-
-struct ASTImport {
-  ASTExpression expr_location;
-
-  //If empty then import all
-  Array<ASTDecl> imports;
+struct ASTImport : public AST {
+  AST_LOCAL expr_location;
 
   Span span ={};
 };
 
-struct ASTFile {
+struct FileAST {
   FileLocation file_loc ={};
   NamespaceIndex namespace_index = {};
 
-  Array<ASTImport> imports = {};
-  Array<ASTDecl> decls = {};
-};
-
-struct ScopeView {
-  ASTStatement* i;
-  const ASTStatement* end;
+  //can be import or decl
+  AST_ARR contents = {};
 };
 
 struct Printer {
@@ -449,5 +280,5 @@ struct Printer {
   void newline() const;
 };
 
-void print_ast(const Compiler* comp, const ASTFile* file);
-void print_ast_expression(Printer* printer, const ASTExpression* expr);
+void print_ast(const Compiler* comp, const AstStorage* store, const FileAST* file);
+void print_ast_expression(Printer* printer, const AstStorage* store, AST_LOCAL expr);

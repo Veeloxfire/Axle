@@ -361,26 +361,26 @@ uint8_t* BumpAllocator::allocate_no_construct(size_t bytes) {
   return ptr;
 }
 
-void IO::print(const char* string) {
+void IO::print_impl(const char* string) {
   fputs(string, stdout);
 }
 
-void IO::print(const OwnedPtr<char>& string) {
+void IO::print_impl(const OwnedPtr<char>& string) {
   fputs(string.ptr, stdout);
 }
 
-void IO::print(const char c) {
+void IO::print_impl(const char c) {
   putc(c, stdout);
 }
 
-void IO::err_print(const char* string) {
+void IO::err_print_impl(const char* string) {
   fputs(string, stderr);
 }
 
-void IO::err_print(const OwnedPtr<char>& string) {
+void IO::err_print_impl(const OwnedPtr<char>& string) {
   fputs(string.ptr, stderr);
 }
 
-void IO::err_print(const char c)  {
+void IO::err_print_impl(const char c)  {
   putc(c, stderr);
 }

@@ -5,8 +5,6 @@
 #include "files.h"
 #include "errors.h"
 
-struct ASTFile;
-
 #define AXLE_TOKEN_KEYWORDS \
 MODIFY(Return, "return") \
 MODIFY(Function, "function") \
@@ -14,9 +12,6 @@ MODIFY(Global, "global") \
 MODIFY(If, "if") \
 MODIFY(While, "while") \
 MODIFY(Else, "else") \
-MODIFY(True, "true") \
-MODIFY(False, "false") \
-MODIFY(Nullptr, "nullptr") \
 MODIFY(Cast, "cast") \
 MODIFY(Struct, "struct")
 
@@ -92,6 +87,9 @@ struct Span;
 void set_span_start(const Token& token, Span& span);
 void set_span_end(const Token& token, Span& span);
 
+#define SPAN_START set_span_start(parser->current, span)
+#define SPAN_END set_span_end(parser->prev, span)
+
 Span span_of_token(const Token& tok);
 
 struct Lexer {
@@ -108,6 +106,9 @@ struct TokenStream {
 };
 
 struct Parser {
+  AstStorage* store ={};
+
+
   TokenStream stream;
   NamespaceIndex current_namespace;
 
@@ -116,11 +117,14 @@ struct Parser {
   Token next ={};
 };
 
+#define PARSER_ALLOC(T) parser->store->push<T>()
+
 void reset_parser(struct Compiler* const comp,
                   const InternString* file_name,
                   const char* string);
 
-void parse_file(Compiler* const comp, Parser* const parser, ASTFile* const file);
+struct FileAST;
+void parse_file(Compiler* const comp, Parser* const parser, FileAST* const file);
 
 struct KeywordPair {
   const char* keyword = nullptr;

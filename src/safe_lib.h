@@ -79,6 +79,14 @@ constexpr inline void default_init(T* const dest) {
   new(dest) T();
 }
 
+
+template<typename T>
+void reset_type(T* t) noexcept {
+  t->~T();
+  new(t) T();
+}
+
+
 #ifdef COUNT_ALLOC
 template<typename T>
 void free_heap_check(T* ptr, size_t num_bytes) {
