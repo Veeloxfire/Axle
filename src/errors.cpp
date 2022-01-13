@@ -4,7 +4,7 @@
 OwnedPtr<char> load_span_from_source(const Span& span, const char* source) {
   Array<char> res ={};
 
-  size_t character = 0;
+  //size_t character = 0;
   size_t line = 0;
 
   bool should_emit = false;

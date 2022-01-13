@@ -568,7 +568,11 @@ static void expect(Compiler* const comp, Parser* parser, const AxleTokenType t) 
     advance(comp, parser);
   }
   else {
-    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+    Span span ={};
+    set_span_start(parser->prev, span);
+    set_span_end(parser->current, span);
+
+    comp->report_error(ERROR_CODE::SYNTAX_ERROR, span,
                        "Unexpected Token: {}, Expected: {}", parser->current.type, t);
   }
 }
@@ -776,6 +780,7 @@ struct PrecidenceState {
 };
 
 static PrecidenceState parse_binary_precidence(Compiler* const comp, Parser* const parser, BINARY_OPERATOR op, AST_LOCAL lhs) {
+  NEW_LHS:
   AST_LOCAL pos_rhs = parse_unary_op(comp, parser);
   if (comp->is_panic()) {
     return { true, op, 0 };
@@ -787,7 +792,8 @@ static PrecidenceState parse_binary_precidence(Compiler* const comp, Parser* con
       return { true, op, 0 };
     }
 
-    while (true) {
+  NEW_RHS:
+    {
       u8 prec1 = precidence_table[(usize)op];
       u8 prec2 = precidence_table[(usize)op2];
 
@@ -798,7 +804,7 @@ static PrecidenceState parse_binary_precidence(Compiler* const comp, Parser* con
           ASTBinaryOperatorExpr* bin_op = PARSER_ALLOC(ASTBinaryOperatorExpr);
           bin_op->ast_type = AST_TYPE::BINARY_OPERATOR;
           bin_op->left = lhs;
-          bin_op->right = pos_rhs;
+          bin_op->right = n.expr;
           bin_op->op = op;
 
           return { true, op, bin_op };
@@ -806,6 +812,7 @@ static PrecidenceState parse_binary_precidence(Compiler* const comp, Parser* con
         else {
           op2 = n.next_op;
           pos_rhs = n.expr;
+          goto NEW_RHS;
         }
       }
       else {
@@ -815,7 +822,10 @@ static PrecidenceState parse_binary_precidence(Compiler* const comp, Parser* con
         bin_op->right = pos_rhs;
         bin_op->op = op;
 
-        return { false, op2, bin_op };
+        lhs = bin_op;
+        op = op2;
+
+        goto NEW_LHS;
       }
     }
   }
@@ -830,65 +840,31 @@ static PrecidenceState parse_binary_precidence(Compiler* const comp, Parser* con
   }
 }
 
-static AST_LOCAL parse_binary_operators(Compiler* const comp, Parser* const parser, BINARY_OPERATOR op) {
-  AST_LOCAL un = parse_unary_op(comp, parser);
+static AST_LOCAL parse_inner_expression(Compiler* const comp, Parser* const parser) {
+  Span span ={};
+  SPAN_START;
+
+  AST_LOCAL pos_left = parse_unary_op(comp, parser);
   if (comp->is_panic()) {
     return 0;
   }
-
 
   if (is_binary_operator(parser)) {
-    BINARY_OPERATOR op = parse_binary_operator(comp, parser);
-    if (comp->is_panic()) {
-      return 0;
-    }
+      BINARY_OPERATOR op = parse_binary_operator(comp, parser);
+      if (comp->is_panic()) {
+        return 0;
+      }
 
-    u8 prec = precidence_table[(usize)op];
+      PrecidenceState s = parse_binary_precidence(comp, parser, op, pos_left);
+      ASSERT(s.finished);
+      SPAN_END;
+      s.expr->node_span = span;
 
-    PrecidenceState s = parse_binary_precidence(comp, parser, op, un);
-    ASSERT(s.finished);
-
-    return s.expr;
+      return s.expr;
   }
   else {
-    return un;
+    return pos_left;
   }
-}
-
-static AST_LOCAL parse_inner_expression(Compiler* const comp, Parser* const parser) {
-  Span s ={};
-  set_span_start(parser->current, s);
-
-  AST_LOCAL left = parse_unary_op(comp, parser);
-  if (comp->is_panic()) {
-    return 0;
-  }
-
-  if (!is_binary_operator(parser)) {
-    return left;
-  }
-
-
-  const BINARY_OPERATOR op = parse_binary_operator(comp, parser);
-  if (comp->is_panic()) {
-    return 0;
-  }
-
-  AST_LOCAL right = parse_binary_operators(comp, parser, op);
-  if (comp->is_panic()) {
-    return 0;
-  }
-
-  set_span_end(parser->current, s);
-
-  ASTBinaryOperatorExpr* ast = PARSER_ALLOC(ASTBinaryOperatorExpr);
-
-  ast->op = op;
-  ast->left = left;
-  ast->right = right;
-  ast->node_span = s;
-
-  return ast;
 }
 
 static AST_LOCAL parse_expression(Compiler* const comp, Parser* const parser) {
@@ -1391,7 +1367,15 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
         }
       }
     case AxleTokenType::Struct: {
-        return parse_structure(comp, parser);
+        AST_LOCAL s = parse_structure(comp, parser);
+        SPAN_END;
+
+        ASTStructExpr* se = PARSER_ALLOC(ASTStructExpr);
+        se->ast_type = AST_TYPE::STRUCT_EXPR;
+        se->node_span = span;
+        se->struct_body = s;
+
+        return se;
       }
     case AxleTokenType::Left_Bracket: {
         //Function or expression
@@ -1407,13 +1391,23 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
         const bool is_func = parser_is_func(comp, parser->stream.i - 2, parser->stream.end);
 
         if (is_func) {
-          return parse_lambda(comp, parser);
+          AST_LOCAL l = parse_lambda(comp, parser);
+          SPAN_END;
+
+          ASTLambdaExpr* le = PARSER_ALLOC(ASTLambdaExpr);
+          le->ast_type = AST_TYPE::LAMBDA_EXPR;
+          le->node_span = span;
+          le->lambda = l;
+
+          return le;
         }
         else {
           expect(comp, parser, AxleTokenType::Left_Bracket);
           AST* e = parse_inner_expression(comp, parser);
           expect(comp, parser, AxleTokenType::Right_Bracket);
 
+          SPAN_END;
+          e->node_span = span;
 
           return e;
         }
@@ -1847,7 +1841,7 @@ static AST_LOCAL parse_decl(Compiler* const comp, Parser* const parser) {
     return 0;
   }
 
-  if (expr->ast_type != AST_TYPE::LAMBDA) {
+  if (expr->ast_type != AST_TYPE::LAMBDA_EXPR) {
     expect(comp, parser, AxleTokenType::Semicolon);
     if (comp->is_panic()) {
       return 0;
@@ -2158,9 +2152,12 @@ static AST_LOCAL parse_function_signature(Compiler* const comp, Parser* const pa
     return 0;
   }
 
-  SPAN_END;
-
   AST_LOCAL ret = parse_type(comp, parser);
+  if (comp->is_panic()) {
+    return 0;
+  }
+
+  SPAN_END;
 
   ASTFuncSig* sig = PARSER_ALLOC(ASTFuncSig);
   sig->ast_type = AST_TYPE::FUNCTION_SIGNATURE;
@@ -2514,11 +2511,21 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         IO::print('.', ma->name->string);
         return;
       }
+    case AST_TYPE::LAMBDA_EXPR: {
+        ASTLambdaExpr* le = (ASTLambdaExpr*)a;
+        print_ast(printer, le->lambda);
+        break;
+      }
     case AST_TYPE::LAMBDA: {
         ASTLambda* ld = (ASTLambda*)a;
         print_ast(printer, ld->sig);
         print_ast(printer, ld->body);
         return;
+      }
+    case AST_TYPE::STRUCT_EXPR: {
+        ASTStructExpr* se = (ASTStructExpr*)a;
+        print_ast(printer, se->struct_body);
+        break;
       }
     case AST_TYPE::STRUCT: {
         ASTStructBody* s = (ASTStructBody*)a;

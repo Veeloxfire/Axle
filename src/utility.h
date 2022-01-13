@@ -516,6 +516,8 @@ struct Array {
   }
 
   void try_reserve_next(const size_t total_required) noexcept {
+    if (total_required < capacity) return;
+
     const size_t prev = capacity;
 
     //Min capacity should be 8

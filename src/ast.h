@@ -82,7 +82,9 @@ enum struct AST_TYPE : u8 {
   INDEX_EXPR,
   MEMBER_ACCESS,
   LAMBDA,
+  LAMBDA_EXPR,
   STRUCT,
+  STRUCT_EXPR,
   DECL,
   TYPED_NAME,
   ASSIGN,
@@ -121,7 +123,7 @@ struct ASTExpressionBase : public AST {
   bool makes_call = false;
   bool call_leaf = false;
 
-  META_FLAGS meta_flags;
+  META_FLAGS meta_flags = 0;
 
   uint8_t* const_val = nullptr;
 };
@@ -248,6 +250,15 @@ struct ASTFuncSig : public AST {
   AST_LOCAL return_type = 0;
   AST_ARR parameters ={};
 };
+
+struct ASTLambdaExpr : public ASTExpressionBase {
+  AST_LOCAL lambda;
+};
+
+struct ASTStructExpr : public ASTExpressionBase {
+  AST_LOCAL struct_body;
+};
+
 
 struct ASTLambda : public AST {
   Function* function = nullptr;

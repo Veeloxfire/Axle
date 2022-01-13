@@ -715,7 +715,7 @@ namespace ByteCode {
     }
   #undef X
 
-    return -1;
+    return (size_t)-1;
   }
 
   namespace WRITE {

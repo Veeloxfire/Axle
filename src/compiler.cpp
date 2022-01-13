@@ -543,7 +543,7 @@ void compile_type_of_node(Compiler* const comp,
           memcpy_ts(&nt->type, 1, (const Type*)global->constant_value.ptr, 1);
         }
 
-        nt->type = comp->services.builtin_types->t_type;
+        nt->node_type = comp->services.builtin_types->t_type;
 
         return;
       }
@@ -611,7 +611,6 @@ void compile_type_of_node(Compiler* const comp,
       }
     case AST_TYPE::PTR_TYPE: {
         ASTPtrType* ptr = (ASTPtrType*)a;
-        ptr->type = comp->services.builtin_types->t_type;
 
         compile_type_of_node(comp, context, ptr->base);
         if (comp->is_panic()) {
@@ -627,6 +626,7 @@ void compile_type_of_node(Compiler* const comp,
 
         ptr->type.name = s->struct_name;
         ptr->type.structure = s;
+        ptr->node_type = comp->services.builtin_types->t_type;
         return;
       }
     case AST_TYPE::LAMBDA_TYPE: {
@@ -668,7 +668,7 @@ void compile_type_of_node(Compiler* const comp,
         lt->type.structure = s;
         lt->type.name = s->struct_name;
 
-        lt->type = comp->services.builtin_types->t_type;
+        lt->node_type = comp->services.builtin_types->t_type;
 
         return;
       }
@@ -698,6 +698,7 @@ void compile_type_of_node(Compiler* const comp,
 
         tt->type.structure = s;
         tt->type.name = s->struct_name;
+        tt->node_type = comp->services.builtin_types->t_type;
 
         return;
       }
@@ -1446,8 +1447,9 @@ void compile_type_of_expression(Compiler* const comp,
   DEFER(&) { ASSERT(expr->valid_rvts != 0); };//shouldnt end 0
 
   switch (expr->ast_type) {
-    case AST_TYPE::STRUCT: {
-        ASTStructBody* struct_body = (ASTStructBody*)expr;
+    case AST_TYPE::STRUCT_EXPR: {
+        ASTStructExpr* se = (ASTStructExpr*)expr;
+        ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
 
         if (!struct_body->type.is_valid()) {
           comp->set_dep(context, struct_body->compilation_unit);
@@ -1459,9 +1461,10 @@ void compile_type_of_expression(Compiler* const comp,
 
         break;
       }
-    case AST_TYPE::LAMBDA: {
+    case AST_TYPE::LAMBDA_EXPR: {
         //Never type the actual lambda here, its typed elsewhere
-        ASTLambda* lambda = (ASTLambda*)expr;
+        ASTLambdaExpr* le = (ASTLambdaExpr*)expr;
+        ASTLambda* lambda = (ASTLambda*)le->lambda;
         ASTFuncSig* sig = (ASTFuncSig*)lambda->sig;
 
         if (sig->sig->sig_struct == nullptr) {
@@ -1579,16 +1582,16 @@ void compile_type_of_expression(Compiler* const comp,
           return;
         }
 
-        if (!TYPE_TESTS::is_int(index_expr->node_type)) {
-          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, index_expr->node_span,
+        if (!TYPE_TESTS::is_int(index->node_type)) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, index->node_span,
                              "An index must be in integer\n"
                              "Found non-integer type: {}",
-                             index_expr->node_type.name);
+                             index->node_type.name);
           return;
         }
 
 
-        if (TEST_MASK(index_expr->meta_flags, META_FLAG::LITERAL)) {
+        if (TEST_MASK(index->meta_flags, META_FLAG::LITERAL)) {
           TypeHint inner_hint ={};
           inner_hint.tht = THT::EXACT;
           inner_hint.type = comp->services.builtin_types->t_u64;
@@ -1599,7 +1602,7 @@ void compile_type_of_expression(Compiler* const comp,
           }
         }
 
-        if (!TEST_MASK(index_expr->meta_flags, META_FLAG::COMPTIME)) {
+        if (!TEST_MASK(index->meta_flags, META_FLAG::COMPTIME)) {
           //If the index is not known at compile time then the array must be in memory or in a register
           uint8_t valids = (uint8_t)RVT::MEMORY;
 
@@ -1612,7 +1615,7 @@ void compile_type_of_expression(Compiler* const comp,
         }
 
         expr->node_type = base->node_type.unchecked_base<ArrayStructure>()->base;
-        expr->makes_call = index_expr->makes_call || base->makes_call;
+        expr->makes_call = index->makes_call || base->makes_call;
 
         compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
         if (comp->is_panic()) {
@@ -2346,10 +2349,12 @@ static void compile_type_of_decl(Compiler* const comp,
       }
     }
 
+    Type type = ((ASTTypeBase*)decl->type_ast)->type;
+
     if (!decl->expr->node_type.is_valid()) {
       TypeHint type_hint ={};
       type_hint.tht = THT::EXACT;
-      type_hint.type = decl->type_ast->node_type;
+      type_hint.type = type;
 
       compile_type_of_expression(comp, context, state, decl_expr, &type_hint);
       if (comp->is_panic()) {
@@ -2357,7 +2362,7 @@ static void compile_type_of_decl(Compiler* const comp,
       }
     }
 
-    decl->type = decl->type_ast->node_type;
+    decl->type = type;
   }
   else {
     if (!decl->expr->node_type.is_valid()) {
@@ -3509,8 +3514,9 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
 
   switch (expr->ast_type) {
-    case AST_TYPE::STRUCT: {
-        ASTStructBody* s = (ASTStructBody*)expr;
+    case AST_TYPE::STRUCT_EXPR: {
+        ASTStructExpr* se = (ASTStructExpr*)expr;
+        ASTStructBody* s = (ASTStructBody*)se->struct_body;
 
         ASSERT(state->comptime_compilation);
 
@@ -3526,8 +3532,9 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                   &hint->val);
         break;
       }
-    case AST_TYPE::LAMBDA: {
-        ASTLambda* l = (ASTLambda*)expr;
+    case AST_TYPE::LAMBDA_EXPR: {
+        ASTLambdaExpr* le = (ASTLambdaExpr*)expr;
+        ASTLambda* l = (ASTLambda*)le->lambda;
 
         ASSERT(state->comptime_compilation);
 
