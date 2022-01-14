@@ -19,7 +19,7 @@ Function* Compiler::new_function() {
 ImportUnit* Compiler::new_import_unit(NamespaceIndex ns) {
   ImportUnit* unit = import_units.allocate();
   unit->type  = COMPILATION_TYPE::IMPORT;
-  unit->stage = IMPORT_COMP_STAGE::UNTYPED;
+  unit->stage = IMPORT_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.insert(unit);
@@ -29,7 +29,7 @@ ImportUnit* Compiler::new_import_unit(NamespaceIndex ns) {
 ConstantExprUnit* Compiler::new_const_expr_unit(NamespaceIndex ns) {
   ConstantExprUnit* unit = const_expr_units.allocate();
   unit->type  = COMPILATION_TYPE::CONST_EXPR;
-  unit->stage = EXPR_COMP_STAGE::UNTYPED;
+  unit->stage = EXPR_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.insert(unit);
@@ -49,7 +49,7 @@ FunctionUnit* Compiler::new_function_unit(NamespaceIndex ns) {
 SignatureUnit* Compiler::new_signature_unit(NamespaceIndex ns) {
   SignatureUnit* unit = signature_units.allocate();
   unit->type  = COMPILATION_TYPE::SIGNATURE;
-  unit->stage = SIGNATURE_COMP_STAGE::UNTYPED;
+  unit->stage = SIGNATURE_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.insert(unit);
@@ -59,7 +59,7 @@ SignatureUnit* Compiler::new_signature_unit(NamespaceIndex ns) {
 StructureUnit* Compiler::new_structure_unit(NamespaceIndex ns) {
   StructureUnit* unit = structure_units.allocate();
   unit->type  = COMPILATION_TYPE::STRUCTURE;
-  unit->stage = STRUCTURE_COMP_STAGE::UNTYPED;
+  unit->stage = STRUCTURE_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.insert(unit);
@@ -69,7 +69,7 @@ StructureUnit* Compiler::new_structure_unit(NamespaceIndex ns) {
 GlobalUnit* Compiler::new_global_unit(NamespaceIndex ns) {
   GlobalUnit* unit = global_units.allocate();
   unit->type  = COMPILATION_TYPE::GLOBAL;
-  unit->stage = GLOBAL_COMP_STAGE::UNTYPED;
+  unit->stage = GLOBAL_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.insert(unit);
@@ -78,9 +78,9 @@ GlobalUnit* Compiler::new_global_unit(NamespaceIndex ns) {
 
 void Compiler::set_dep(Context* context, CompilationUnit* unit) {
   ASSERT(unit != nullptr);
-  unfound_deps.panic = true;
+  new_depends = true;
 
-  context->current_unit->dependencies.insert(unit);
+  context->current_unit->num_deps += 1;
   unit->dependency_of.insert(context->current_unit);
 }
 
@@ -528,9 +528,6 @@ void dependency_check_ast_node(Compiler* const comp,
         if (((ASTExpressionBase*)at->expr)->const_val == nullptr) {
           ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
 
-          unit->type = COMPILATION_TYPE::CONST_EXPR;
-          unit->stage = EXPR_COMP_STAGE::UNTYPED;
-          unit->available_names = context->current_namespace;
           unit->expr = (ASTExpressionBase*)at->expr;
           unit->cast_to = comp->services.builtin_types->t_u64;
 
@@ -615,8 +612,9 @@ void dependency_check_ast_node(Compiler* const comp,
                                  "'{}' was used but a it has no matching declaration",
                                  name);
         }
-      }
 
+        return;
+      }
     case AST_TYPE::FUNCTION_CALL: {
         ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)a;
 
@@ -813,16 +811,40 @@ void dependency_check_ast_node(Compiler* const comp,
         return;
       }
 
-    case AST_TYPE::LOCAL: {break; }
-    case AST_TYPE::GLOBAL: {break; }
-    case AST_TYPE::LAMBDA: {break; }
-    case AST_TYPE::STRUCT: { break; }
+    case AST_TYPE::LAMBDA: {
+        ASTLambda* l = (ASTLambda*)a;
+
+        const usize count = state->locals.size;
+
+        dependency_check_ast_node(comp, context, state, l->sig);
+        dependency_check_ast_node(comp, context, state, l->body);
+
+        state->locals.pop(state->locals.size - count);
+
+        return;
+      }
+    case AST_TYPE::STRUCT: {
+        ASTStructBody* s = (ASTStructBody*)a;
+
+        FOR_AST(s->elements, it) {
+          dependency_check_ast_node(comp, context, state, it);
+        }
+
+        return;
+      }
 
     case AST_TYPE::ASCII_CHAR:
     case AST_TYPE::ASCII_STRING:
     case AST_TYPE::NUMBER: {
         //No dependencies :)
         return;
+      }
+
+    case AST_TYPE::LOCAL:
+    case AST_TYPE::GLOBAL: {
+        // Dont dependency check these
+        // V break not return ;) - will fail
+        break;
       }
   }
 
@@ -836,7 +858,6 @@ void type_check_ast_node(Compiler* const comp,
   switch (a->ast_type) {
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
-
 
         const NamedElement* name = comp->services.names->find_name(context->current_namespace, nt->name);
 
@@ -884,48 +905,37 @@ void type_check_ast_node(Compiler* const comp,
 
         ASSERT(at->expr != nullptr);
 
-        if (((ASTExpressionBase*)at->expr)->const_val == nullptr) {
-          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+        ASSERT(((ASTExpressionBase*)at->expr)->const_val != nullptr);
 
-          unit->type = COMPILATION_TYPE::CONST_EXPR;
-          unit->stage = EXPR_COMP_STAGE::UNTYPED;
-          unit->available_names = context->current_namespace;
-          unit->expr = (ASTExpressionBase*)at->expr;
-          unit->cast_to = comp->services.builtin_types->t_u64;
 
-          comp->set_dep(context, unit);
+        if (!TYPE_TESTS::is_int(at->expr->node_type)) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
+                             "Expected an integer type value for array length\n"
+                             "Instead found: {}", at->expr->node_type.name);
           return;
         }
-        else {
-          if (!TYPE_TESTS::is_int(at->expr->node_type)) {
+
+        uint64_t length;
+        if (TYPE_TESTS::is_signed_int(at->expr->node_type)) {
+          int64_t i_length = *(const int64_t*)((ASTExpressionBase*)at->expr)->const_val;
+          if (i_length < 0) {
             comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
-                               "Expected an integer type value for array length\n"
-                               "Instead found: {}", at->expr->node_type.name);
+                               "Length of array must positive\n"
+                               "Instead found: {}", i_length);
             return;
           }
-
-          uint64_t length;
-          if (TYPE_TESTS::is_signed_int(at->expr->node_type)) {
-            int64_t i_length = *(const int64_t*)((ASTExpressionBase*)at->expr)->const_val;
-            if (i_length < 0) {
-              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
-                                 "Length of array must positive\n"
-                                 "Instead found: {}", i_length);
-              return;
-            }
-            else {
-              length = (uint64_t)i_length;
-            }
-          }
           else {
-            length = *(const int64_t*)((ASTExpressionBase*)at->expr)->const_val;
+            length = (uint64_t)i_length;
           }
-
-          const Structure* s = find_or_make_array_structure(comp, context, ((ASTTypeBase*)at->base)->type, length);
-
-          at->type.name = s->struct_name;
-          at->type.structure = s;
         }
+        else {
+          length = *(const int64_t*)((ASTExpressionBase*)at->expr)->const_val;
+        }
+
+        const Structure* s = find_or_make_array_structure(comp, context, ((ASTTypeBase*)at->base)->type, length);
+
+        at->type.name = s->struct_name;
+        at->type.structure = s;
 
         at->node_type = comp->services.builtin_types->t_type;
 
@@ -1120,6 +1130,8 @@ static OverloadSet generate_overload_set(Compiler* const comp,
       NamespaceIndex ns = n_i->ns_index;
 
       if (possible_func->unknowns > 0) {
+        INVALID_CODE_PATH("NO DEPENDS HERE");
+
         UnknownName unknown ={};
         unknown.all_names = true;
         unknown.ident = sig->name;
@@ -1196,11 +1208,14 @@ static void compile_find_function_call(Compiler* const comp,
   sig.arguments.shrink();
 
   OverloadSet set = generate_overload_set(comp, context, state, call->node_span, &sig);
+  ASSERT(!comp->is_depends());
   if (comp->is_panic()) {
     return;
   }
 
   if (set.valid_overloads.size == 0) {
+    INVALID_CODE_PATH("NO DEPENDS HERE");
+
     UnknownName unknown ={};
     unknown.all_names = true;
     unknown.ident = sig.name;
@@ -1418,39 +1433,6 @@ constexpr static bool can_compile_const_value(const ASTExpressionBase* const exp
   return expr->const_val == nullptr
     && TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)
     && !already_const_type(expr->ast_type);
-}
-
-void force_load_const_value(Compiler* const comp, ASTExpressionBase* expr) {
-  ASSERT(TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME));
-
-  if (expr->const_val != nullptr) {
-    return;
-  }
-
-  //If not already const then must be an "already const type"
-  ASSERT(already_const_type(expr->ast_type));
-
-  switch (expr->ast_type) {
-    case AST_TYPE::NUMBER: {
-        ASTNumber* num = (ASTNumber*)expr;
-        const size_t size = expr->node_type.structure->size;
-
-        uint8_t* val_c = comp->constants.alloc_no_construct(size);
-        memcpy_ts(val_c, size, (uint8_t*)&num->value, size);
-
-        expr->const_val = val_c;
-        break;
-      }
-    case AST_TYPE::ASCII_STRING: {
-        const auto* const arr_type = expr->node_type.extract_base<ArrayStructure>();
-        ASSERT(arr_type != nullptr);
-
-        char* string_c = (char*)comp->constants.alloc_no_construct(arr_type->size);
-
-        expr->const_val = (uint8_t*)string_c;
-        break;
-      }
-  }
 }
 
 static void do_literal_cast(Compiler* const comp,
@@ -1777,10 +1759,7 @@ void compile_type_of_expression(Compiler* const comp,
         ASTStructExpr* se = (ASTStructExpr*)expr;
         ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
 
-        if (!struct_body->type.is_valid()) {
-          comp->set_dep(context, struct_body->compilation_unit);
-          return;
-        }
+        ASSERT(struct_body->type.is_valid());
 
         SET_MASK(expr->meta_flags, META_FLAG::COMPTIME);
         expr->node_type = comp->services.builtin_types->t_type;
@@ -1793,10 +1772,7 @@ void compile_type_of_expression(Compiler* const comp,
         ASTLambda* lambda = (ASTLambda*)le->lambda;
         ASTFuncSig* sig = (ASTFuncSig*)lambda->sig;
 
-        if (sig->sig->sig_struct == nullptr) {
-          comp->set_dep(context, lambda->function->compilation_unit);
-          return;
-        }
+        ASSERT(sig->sig->sig_struct != nullptr);
 
         SET_MASK(expr->meta_flags, META_FLAG::COMPTIME);
         expr->node_type = to_type(sig->sig->sig_struct);
@@ -1979,7 +1955,7 @@ void compile_type_of_expression(Compiler* const comp,
                                            context,
                                            std::move(element_types));
 
-//Create the type
+          //Create the type
           expr->node_type = to_type(tuple_s);
         }
         else {
@@ -2311,20 +2287,9 @@ void compile_type_of_expression(Compiler* const comp,
         }
         else {
           NamedElement* non_local = comp->services.names->find_name(context->current_namespace, name);
-          if (non_local == nullptr || non_local->unknowns > 0) {
-            UnknownName unknown ={};
-            unknown.all_names = false;
-            unknown.ident = name;
-            unknown.namespace_index = context->current_namespace;
-            unknown.num_knowns = non_local == nullptr ? 0 : non_local->globals.size;
-            unknown.num_unknowns = non_local == nullptr ? 0 : non_local->unknowns;
 
-            comp->set_unfound_name(context, std::move(unknown),
-                                   ERROR_CODE::UNFOUND_DEPENDENCY, expr->node_span,
-                                   "'{}' was used but a it has not matching declaration",
-                                   name);
-            return;
-          }
+          //Must be true if this isnt a local variable
+          ASSERT(non_local != nullptr && non_local->unknowns == 0);
 
           if (non_local->globals.size != 1) {
             comp->report_error(ERROR_CODE::NAME_ERROR, expr->node_span,
@@ -2336,7 +2301,6 @@ void compile_type_of_expression(Compiler* const comp,
 
           if (!glob->decl.type.is_valid()) {
             comp->set_dep(context, glob->compilation_unit);
-            return;
           }
 
           ident->ast_type = AST_TYPE::GLOBAL;
@@ -2540,14 +2504,12 @@ void compile_type_of_expression(Compiler* const comp,
             unit->expr = left;
 
             comp->set_dep(context, unit);
-            return;//guaranteed to have panic
           }
           else if (can_compile_const_value(right)) {
             ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
             unit->expr = right;
 
             comp->set_dep(context, unit);
-            return;//guaranteed to have panic
           }
         }
 
@@ -2636,7 +2598,6 @@ void compile_type_of_expression(Compiler* const comp,
               unit->expr = i;
 
               comp->set_dep(context, unit);
-              return;
             }
           }
         }
@@ -2814,7 +2775,6 @@ static void compile_type_of_statement(Compiler* const comp,
           unit->expr = decl_expr;
 
           comp->set_dep(context, unit);
-          return;
         }
 
         assert_empty_name(comp, statement->node_span, context->current_namespace, decl->name);
@@ -2840,6 +2800,8 @@ static void compile_type_of_statement(Compiler* const comp,
         state->all_locals.insert_uninit(1);
         auto* loc = state->all_locals.back();
 
+        ASSERT(decl->type.is_valid());
+
         loc->decl.name = decl->name;
         loc->decl.type = decl->type;
         loc->decl.source = decl;
@@ -2852,20 +2814,11 @@ static void compile_type_of_statement(Compiler* const comp,
 
         ASSERT(loc->decl.type.is_valid());
 
-        if (TEST_MASK(loc->decl.meta_flags, META_FLAG::COMPTIME)) {
-          if (!TEST_MASK(decl_expr->meta_flags, META_FLAG::COMPTIME)) {
-            comp->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
-                               "Cannot initialize a compile time constant with "
-                               "a non compile time constant value");
-            return;
-          }
-
-          //Load as constant
-          force_load_const_value(comp, decl_expr);
-          ASSERT(decl_expr->const_val != nullptr);
-
-          loc->val.type = RVT::CONST;
-          loc->val.constant = ConstantVal{ decl_expr->const_val, loc->decl.type.structure->size };
+        if (TEST_MASK(loc->decl.meta_flags, META_FLAG::COMPTIME) && !TEST_MASK(decl_expr->meta_flags, META_FLAG::COMPTIME)) {
+          comp->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
+                             "Cannot initialize a compile time constant with "
+                             "a non compile time constant value");
+          return;
         }
 
         state->active_locals.insert(decl->local_index);
@@ -2890,7 +2843,6 @@ static void compile_type_of_statement(Compiler* const comp,
           unit->expr = expr;
 
           comp->set_dep(context, unit);
-          return;
         }
         return;
       }
@@ -5493,6 +5445,8 @@ void compile_function_body_init(Compiler* const comp,
     auto l_i = state->all_locals.data + index;
     state->active_locals.insert(index);
 
+    ASSERT(i->node_type.is_valid());
+
     l_i->decl.name = i->name;
     l_i->decl.type = i->node_type;
     l_i->decl.meta_flags |= META_FLAG::ASSIGNABLE;
@@ -5881,6 +5835,8 @@ static void compile_untyped_global(Compiler* comp, Context* context, State* stat
     return;
   }
 
+  ASSERT(decl->type.is_valid());
+
   global->decl.type = decl->type;
   if (decl->compile_time_const) {
     global->decl.meta_flags |= META_FLAG::COMPTIME;
@@ -6110,6 +6066,7 @@ void process_parsed_file(Compiler* const comp, FileAST* const file) {
           GlobalUnit* unit = comp->new_global_unit(file->namespace_index);
           Global* glob =  comp->globals.insert();
 
+          glob->compilation_unit = unit;
           glob->decl.name = i->name;
           glob->decl.source = i;
 
@@ -6155,35 +6112,6 @@ void add_comp_unit_for_struct(Compiler* const comp, NamespaceIndex namespace_ind
   struct_body->compilation_unit = unit;
 }
 
-void free_compilation_unit(Compiler* const comp, CompilationUnit* unit) {
-  FOR(unit->dependency_of, u) {
-    free_compilation_unit(comp, *u);
-  }
-
-  switch (unit->type) {
-    case COMPILATION_TYPE::FUNCTION:
-      comp->function_units.free((const FunctionUnit*)unit);
-      break;
-    case COMPILATION_TYPE::STRUCTURE:
-      comp->structure_units.free((const StructureUnit*)unit);
-      break;
-    case COMPILATION_TYPE::SIGNATURE:
-      comp->signature_units.free((const SignatureUnit*)unit);
-      break;
-    case COMPILATION_TYPE::CONST_EXPR:
-      comp->const_expr_units.free((const ConstantExprUnit*)unit);
-      break;
-    case COMPILATION_TYPE::GLOBAL:
-      comp->global_units.free((const GlobalUnit*)unit);
-      break;
-    case COMPILATION_TYPE::IMPORT:
-      comp->import_units.free((const ImportUnit*)unit);
-      break;
-    default:
-      INVALID_CODE_PATH("Invalid compilation type");
-  }
-}
-
 void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
   //Remove as dependency
   auto i = unit->dependency_of.begin();
@@ -6192,10 +6120,9 @@ void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
   for (; i < end; i++) {
     CompilationUnit* dep_of = *i;
 
-    const auto is_unit = [unit](const CompilationUnit* dep) -> bool { return dep == unit; };
-    dep_of->dependencies.remove_if(is_unit);
+    dep_of->num_deps -= 1;
 
-    if (dep_of->dependencies.size == 0) {
+    if (dep_of->num_deps == 0) {
       //No more dependencies - can add back to the compiling
       comp->to_compile.insert(dep_of);
     }
@@ -6229,21 +6156,6 @@ ERROR_CODE compile_all(Compiler* const comp) {
   Array<CompilationUnit*> to_compile ={};
   CompilationUnit** to_comp_i = nullptr;
   CompilationUnit** to_comp_end = nullptr;
-
-  DEFER(comp, &to_comp_i, &to_comp_end) {
-    for (; to_comp_i < to_comp_end; to_comp_i++) {
-      free_compilation_unit(comp, *to_comp_i);
-    }
-
-    FOR(comp->to_compile, it) {
-      free_compilation_unit(comp, *it);
-    }
-
-    //FOR(comp->unfound_deps.unfound, it) {
-    //  free_compilation_unit(comp, it->unit_waiting);
-    //}
-  };
-
 
   while (comp->is_compiling()) {
     //Compile waiting
@@ -6281,16 +6193,24 @@ ERROR_CODE compile_all(Compiler* const comp) {
               ImportUnit* const unit = (ImportUnit*)comp_u;
 
               switch (unit->stage) {
+                case IMPORT_COMP_STAGE::DEPENDING: {
+                    DependencyCheckState st ={};
+                    dependency_check_ast_node(comp, &context, &st, unit->import_ast);
+
+                    unit->stage = IMPORT_COMP_STAGE::UNTYPED;
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
+                    }
+                    else {
+                      comp->reset_panic();
+                    }
+                    break;
+                  }
                 case IMPORT_COMP_STAGE::UNTYPED: {
                     compile_import_expression_type(comp, &context, &unit->state,
                                                    (ASTExpressionBase*)unit->import_ast->expr_location);
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
-                      }
+                      return comp->services.errors->print_all();
                     }
                     else {
                       unit->stage = IMPORT_COMP_STAGE::UNPARSED;
@@ -6307,14 +6227,17 @@ ERROR_CODE compile_all(Compiler* const comp) {
                         const_u->cast_to ={};
 
                         comp->set_dep(&context, const_u);
-                        ASSERT(comp->is_panic() && !comp->is_fatal());
-                        comp->reset_panic();
+                        ASSERT(comp->is_depends() && !comp->is_panic());
 
                         //dont redo this one straight away as it has a dependency
                       }
-                      else {
+
+                      if (!comp->is_depends()) {
                         //redo this one straight away as already loaded
                         to_comp_i--;
+                      }
+                      else {
+                        comp->reset_panic();
                       }
 
                     }
@@ -6323,13 +6246,10 @@ ERROR_CODE compile_all(Compiler* const comp) {
                 case IMPORT_COMP_STAGE::UNPARSED: {
                     compile_import_file(comp, &context, unit->import_ast, unit->available_names);
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
-                      }
+                      return comp->services.errors->print_all();
                     }
+
+                    ASSERT(!comp->is_depends());
 
                     close_compilation_unit(comp, comp_u);
                     break;
@@ -6342,35 +6262,57 @@ ERROR_CODE compile_all(Compiler* const comp) {
               GlobalUnit* const unit = (GlobalUnit*)comp_u;
 
               switch (unit->stage) {
+                case GLOBAL_COMP_STAGE::DEPENDING: {
+                    DependencyCheckState st ={};
+                    dependency_check_ast_node(comp, &context, &st, unit->source);
+
+                    unit->stage = GLOBAL_COMP_STAGE::UNTYPED;
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
+                    }
+                    else {
+                      comp->reset_panic();
+                    }
+                    break;
+                  }
                 case GLOBAL_COMP_STAGE::UNTYPED: {
                     compile_untyped_global(comp, &context, &unit->state, unit->source, unit->global);
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
+                      return comp->services.errors->print_all();
+                    }
+
+                    if (TEST_MASK(unit->global->decl.meta_flags, META_FLAG::COMPTIME)) {
+                      ASTExpressionBase* decl_expr = (ASTExpressionBase*)unit->source->expr;
+
+                      if (decl_expr->const_val == nullptr) {
+                        ConstantExprUnit* unit = comp->new_const_expr_unit(context.current_namespace);
+                        unit->expr = decl_expr;
+
+                        comp->set_dep(&context, unit);
                       }
                     }
-                    else {
-                      unit->stage = GLOBAL_COMP_STAGE::TYPED;
+
+                    unit->stage = GLOBAL_COMP_STAGE::TYPED;
+                    if (!comp->is_depends()) {
                       to_comp_i--;//redo straight away
+                    }
+                    else {
+                      comp->reset_panic();
                     }
                     break;
                   }
                 case GLOBAL_COMP_STAGE::TYPED: {
+                    ASSERT(unit->global->decl.type.is_valid());
+                    
                     compile_init_expr_of_global(comp, &context, &unit->state, unit->source, unit->global);
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
-                      }
+                      return comp->services.errors->print_all();
+
                     }
-                    else {
-                      close_compilation_unit(comp, comp_u);
-                    }
+
+
+                    ASSERT(!comp->is_depends());
+                    close_compilation_unit(comp, comp_u);
                     break;
                   }
               }
@@ -6381,18 +6323,28 @@ ERROR_CODE compile_all(Compiler* const comp) {
               StructureUnit* const unit = (StructureUnit*)comp_u;
 
               switch (unit->stage) {
+                case STRUCTURE_COMP_STAGE::DEPENDING: {
+                    DependencyCheckState st ={};
+                    dependency_check_ast_node(comp, &context, &st, unit->source);
+
+                    unit->stage = STRUCTURE_COMP_STAGE::UNTYPED;
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
+                    }
+                    else {
+                      comp->reset_panic();
+                    }
+                    break;
+                  }
                 case STRUCTURE_COMP_STAGE::UNTYPED: {
                     compile_untyped_structure_declaration(comp, &context, &unit->untyped);
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
-                      }
+                      return comp->services.errors->print_all();
                     }
-                    else {
-                      unit->stage = STRUCTURE_COMP_STAGE::TYPED;
+
+                    unit->stage = STRUCTURE_COMP_STAGE::TYPED;
+
+                    if (!comp->is_depends()) {
                       to_comp_i--;//redo straight away
                     }
                     break;
@@ -6403,6 +6355,8 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       //Should only be called once
                       return comp->services.errors->print_all();
                     }
+
+                    ASSERT(!comp->is_depends());
 
                     //Finished
                     close_compilation_unit(comp, unit);
@@ -6420,37 +6374,47 @@ ERROR_CODE compile_all(Compiler* const comp) {
           case COMPILATION_TYPE::SIGNATURE: {
               SignatureUnit* const unit = (SignatureUnit*)comp_u;
 
-              if (unit->stage != SIGNATURE_COMP_STAGE::UNTYPED) {
-                comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
-                                   "A compilation unit was created for a completed signature");
-                return comp->services.errors->print_all();
-              }
+              switch (unit->stage) {
+                case SIGNATURE_COMP_STAGE::DEPENDING: {
+                    DependencyCheckState st ={};
+                    dependency_check_ast_node(comp, &context, &st, unit->source->sig);
 
-              compile_function_signature_type(comp, &context, (ASTFuncSig*)unit->source->sig, unit->sig);
-              //Error handling
-              if (comp->is_panic()) {
-                if (comp->is_fatal()) {
-                  return comp->services.errors->print_all();
-                }
-                else {
-                  comp->reset_panic();
-                }
-              }
-              else if (unit->func != nullptr) {
-                //Set up new compilation unit for the body
-                FunctionUnit* func_unit = comp->new_function_unit(unit->available_names);
-                func_unit->source = unit->source;
-                func_unit->func = unit->func;
+                    unit->stage = SIGNATURE_COMP_STAGE::UNTYPED;
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
+                    }
+                    else {
+                      comp->reset_panic();
+                    }
+                    break;
+                  }
+                case SIGNATURE_COMP_STAGE::UNTYPED: {
+                    compile_function_signature_type(comp, &context, (ASTFuncSig*)unit->source->sig, unit->sig);
+                    if (comp->is_panic()) {
+                      return comp->services.errors->print_all();
+                    }
 
-                unit->func->compilation_unit = func_unit;
-                default_init(&func_unit->state);
+                    ASSERT(!comp->is_depends());
 
-                //Finished
-                close_compilation_unit(comp, unit);
-              }
-              else {
-                //DLL functions should have no body
-                close_compilation_unit(comp, unit);
+                    if (unit->func != nullptr) {
+                      //Set up new compilation unit for the body
+                      FunctionUnit* func_unit = comp->new_function_unit(unit->available_names);
+                      func_unit->source = unit->source;
+                      func_unit->func = unit->func;
+
+                      unit->func->compilation_unit = func_unit;
+                      default_init(&func_unit->state);
+
+                      //Finished
+                      close_compilation_unit(comp, unit);
+                    }
+                    else {
+                      //DLL functions should have no body
+                      close_compilation_unit(comp, unit);
+                    }
+
+                    break;
+                  }
               }
               break;
             }
@@ -6466,18 +6430,31 @@ ERROR_CODE compile_all(Compiler* const comp) {
                                                &unit->untyped,
                                                &unit->state);
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
-                      }
-                    }
-                    else {
-                      unit->stage = FUNCTION_COMP_STAGE::UNTYPED_BODY;
-                      to_comp_i--;//Try it again straight away
+                      return comp->services.errors->print_all();
                     }
 
+                    unit->stage = FUNCTION_COMP_STAGE::DEPENDING;
+
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
+                    }
+                    else {
+                      comp->reset_panic();
+                    }
+
+                    break;
+                  }
+                case FUNCTION_COMP_STAGE::DEPENDING: {
+                    DependencyCheckState st ={};
+                    dependency_check_ast_node(comp, &context, &st, unit->source);
+
+                    unit->stage = FUNCTION_COMP_STAGE::UNTYPED_BODY;
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
+                    }
+                    else {
+                      comp->reset_panic();
+                    }
                     break;
                   }
                 case FUNCTION_COMP_STAGE::UNTYPED_BODY: {
@@ -6489,16 +6466,15 @@ ERROR_CODE compile_all(Compiler* const comp) {
                                                 &unit->state);
 
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
-                      }
+                      return comp->services.errors->print_all();
+                    }
+
+                    unit->stage = FUNCTION_COMP_STAGE::TYPED_BODY;
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
                     }
                     else {
-                      unit->stage = FUNCTION_COMP_STAGE::TYPED_BODY;
-                      to_comp_i--;//Try it again straight away
+                      comp->reset_panic();
                     }
                     break;
                   }
@@ -6510,17 +6486,13 @@ ERROR_CODE compile_all(Compiler* const comp) {
                                                &unit->state);
 
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
-                      }
+                      return comp->services.errors->print_all();
                     }
-                    else {
-                      //Finished
-                      close_compilation_unit(comp, unit);
-                    }
+
+                    ASSERT(!comp->is_depends());
+
+                    //Finished
+                    close_compilation_unit(comp, unit);
                     break;
                   }
               }
@@ -6530,6 +6502,22 @@ ERROR_CODE compile_all(Compiler* const comp) {
               ConstantExprUnit* const unit = (ConstantExprUnit*)comp_u;
 
               switch (unit->stage) {
+                case EXPR_COMP_STAGE::DEPENDING: {
+                    DependencyCheckState ds ={};
+                    dependency_check_ast_node(comp, &context, &ds, unit->expr);
+
+                    ASSERT(!comp->is_panic());
+
+                    unit->stage = EXPR_COMP_STAGE::UNTYPED;
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
+                    }
+                    else {
+                      comp->reset_panic();
+                    }
+                    break;
+                  }
+
                 case EXPR_COMP_STAGE::UNTYPED: {
                     TypeHint hint ={};
                     hint.tht = THT::EXACT;
@@ -6542,16 +6530,15 @@ ERROR_CODE compile_all(Compiler* const comp) {
                                                (unit->cast_to.is_valid() ?
                                                 &hint : nullptr));
                     if (comp->is_panic()) {
-                      if (comp->is_fatal()) {
-                        return comp->services.errors->print_all();
-                      }
-                      else {
-                        comp->reset_panic();
-                      }
+                      return comp->services.errors->print_all();
+                    }
+
+                    unit->stage = EXPR_COMP_STAGE::TYPED;
+                    if (!comp->is_depends()) {
+                      to_comp_i--;//Try it again straight away
                     }
                     else {
-                      unit->stage = EXPR_COMP_STAGE::TYPED;
-                      to_comp_i--;
+                      comp->reset_panic();
                     }
                     break;
                   }
@@ -6638,6 +6625,8 @@ ERROR_CODE compile_all(Compiler* const comp) {
                                                             unit->expr,
                                                             &state->return_val);
 
+                    ASSERT(!comp->is_panic() && !comp->is_depends());
+
                     if (state->return_val.type == RVT::REGISTER) {
                       state->use_value(state->return_val.reg);
                     }
@@ -6711,6 +6700,8 @@ ERROR_CODE compile_all(Compiler* const comp) {
                     //Swap back
                     std::swap(options, comp->build_options);
 
+                    ASSERT(!comp->is_panic() && !comp->is_depends());
+
                     //Finished
                     close_compilation_unit(comp, unit);
                     break;
@@ -6749,8 +6740,13 @@ ERROR_CODE compile_all(Compiler* const comp) {
           }
 
           if (globals != dep.name.num_knowns || unknowns != dep.name.num_unknowns) {
+            dep.unit_waiting->num_deps -= 1;
+
             //Success!
-            comp->to_compile.insert(dep.unit_waiting);
+            if (dep.unit_waiting->num_deps == 0) {
+              //No more dependencies - can add back to the compiling
+              comp->to_compile.insert(dep.unit_waiting);
+            }
             return true;
           }
           else {
@@ -6767,7 +6763,6 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
           for (; i < end; i++) {
             comp->services.errors->error_messages.insert(std::move(i->as_error));
-            free_compilation_unit(comp, i->unit_waiting);
           }
           return comp->services.errors->print_all();
         }
@@ -7074,10 +7069,6 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
   }
 }
 
-void build_data_section_for_exec(Program* prog, Compiler* const comp) {
-
-}
-
 void build_data_section_for_vm(Program* prog, Compiler* const comp) {
   InternHashTable<size_t> loaded_strings ={};
 
@@ -7162,7 +7153,6 @@ void build_data_section_for_vm(Program* prog, Compiler* const comp) {
       }
     }
   }
-
 
   Array<uint8_t> imports ={};
 

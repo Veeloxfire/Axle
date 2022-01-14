@@ -275,34 +275,34 @@ enum struct COMPILATION_TYPE : uint8_t {
 };
 
 enum struct STRUCTURE_COMP_STAGE : uint8_t {
-  UNTYPED, TYPED, FINISHED
+  DEPENDING, UNTYPED, TYPED, FINISHED
 };
 
 enum struct SIGNATURE_COMP_STAGE : uint8_t {
-  UNTYPED, FINISHED
+  DEPENDING, UNTYPED, FINISHED
 };
 
 enum struct GLOBAL_COMP_STAGE : uint8_t {
-  UNTYPED, TYPED, FINISHED
+  DEPENDING, UNTYPED, TYPED, FINISHED
 };
 
 enum struct EXPR_COMP_STAGE : uint8_t {
-  UNTYPED, TYPED, FINISHED
+  DEPENDING, UNTYPED, TYPED, FINISHED
 };
 
 enum struct FUNCTION_COMP_STAGE : uint8_t {
-  UNINIT, UNTYPED_BODY, TYPED_BODY, FINISHED
+  UNINIT, DEPENDING, UNTYPED_BODY, TYPED_BODY, FINISHED
 };
 
 enum struct IMPORT_COMP_STAGE : u8 {
-  UNTYPED, UNPARSED, FINISHED
+  DEPENDING, UNTYPED, UNPARSED, FINISHED
 };
 
 struct CompilationUnit {
   COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
 
   //units that we need to finish
-  Array<const CompilationUnit*> dependencies ={};
+  usize num_deps = 0;
 
   //units that are waiting for us to finish
   Array<CompilationUnit*> dependency_of ={};
@@ -311,7 +311,7 @@ struct CompilationUnit {
 };
 
 struct ImportUnit : public CompilationUnit {
-  IMPORT_COMP_STAGE stage = IMPORT_COMP_STAGE::UNTYPED;
+  IMPORT_COMP_STAGE stage = IMPORT_COMP_STAGE::DEPENDING;
 
   State state ={};
 
@@ -319,7 +319,7 @@ struct ImportUnit : public CompilationUnit {
 };
 
 struct SignatureUnit : public CompilationUnit {
-  SIGNATURE_COMP_STAGE stage = SIGNATURE_COMP_STAGE::UNTYPED;
+  SIGNATURE_COMP_STAGE stage = SIGNATURE_COMP_STAGE::DEPENDING;
 
   ASTLambda* source = nullptr;
   FunctionSignature* sig = nullptr;
@@ -327,14 +327,14 @@ struct SignatureUnit : public CompilationUnit {
 };
 
 struct StructureUnit : public CompilationUnit {
-  STRUCTURE_COMP_STAGE stage = STRUCTURE_COMP_STAGE::UNTYPED;
+  STRUCTURE_COMP_STAGE stage = STRUCTURE_COMP_STAGE::DEPENDING;
 
   ASTStructBody* source = nullptr;
   AST_LINKED* untyped ={};
 };
 
 struct GlobalUnit : public CompilationUnit {
-  GLOBAL_COMP_STAGE stage = GLOBAL_COMP_STAGE::UNTYPED;
+  GLOBAL_COMP_STAGE stage = GLOBAL_COMP_STAGE::DEPENDING;
 
   ASTDecl* source = nullptr;
   Global* global = nullptr;
@@ -353,7 +353,7 @@ struct FunctionUnit : public CompilationUnit {
 };
 
 struct ConstantExprUnit : public CompilationUnit {
-  EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::UNTYPED;
+  EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::DEPENDING;
 
   ASTExpressionBase* expr = nullptr;
   Type cast_to ={};
@@ -482,6 +482,8 @@ struct Compiler {
   BuildOptions           build_options        ={};
   APIOptimizationOptions optimization_options ={};
 
+  bool new_depends;
+
   SystemsAndConventionNames system_names ={};
   Intrinsics intrinsics ={};
 
@@ -521,9 +523,9 @@ struct Compiler {
   StructureUnit* new_structure_unit(NamespaceIndex ns);
   GlobalUnit* new_global_unit(NamespaceIndex ns);
 
-  inline constexpr bool is_panic() const { return services.errors->panic || unfound_deps.panic; }
-  inline constexpr bool is_fatal() const { return services.errors->panic; }
-  inline constexpr void reset_panic() { services.errors->panic = false; unfound_deps.panic = false; }
+  inline constexpr bool is_panic() const { return services.errors->panic; }
+  inline constexpr bool is_depends() const { return new_depends || unfound_deps.panic; }
+  inline constexpr void reset_panic() { services.errors->panic = false; unfound_deps.panic = false; new_depends = false; }
 
   inline constexpr bool is_compiling() const {
     return to_compile.size > 0
@@ -552,6 +554,8 @@ struct Compiler {
     dep->as_error.type = code;
     dep->as_error.span = span;
     dep->as_error.message = format(f_message, std::forward<T>(ts)...);
+
+    context->current_unit->num_deps += 1;
   }
 
   void set_dep(Context* context, CompilationUnit* unit);
