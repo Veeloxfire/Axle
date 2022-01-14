@@ -2514,7 +2514,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::LAMBDA_EXPR: {
         ASTLambdaExpr* le = (ASTLambdaExpr*)a;
         print_ast(printer, le->lambda);
-        break;
+        return;
       }
     case AST_TYPE::LAMBDA: {
         ASTLambda* ld = (ASTLambda*)a;
@@ -2525,7 +2525,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::STRUCT_EXPR: {
         ASTStructExpr* se = (ASTStructExpr*)a;
         print_ast(printer, se->struct_body);
-        break;
+        return;
       }
     case AST_TYPE::STRUCT: {
         ASTStructBody* s = (ASTStructBody*)a;

@@ -3589,7 +3589,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
 
         ASTIndexExpr* index = (ASTIndexExpr*)expr;
         ASTExpressionBase* index_expr = (ASTExpressionBase*)index->expr;
-        ASTExpressionBase* index_index = (ASTExpressionBase*)index->expr;
+        ASTExpressionBase* index_index = (ASTExpressionBase*)index->index;
 
         ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
 
