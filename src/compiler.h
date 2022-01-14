@@ -250,6 +250,14 @@ void new_scope(UntypedIterator*,
 
 AST_LOCAL advance_scopes(UntypedIterator* itr, State* state);
 
+struct DependencyCheckState {
+  Array<const InternString*> locals;
+  
+  inline bool is_local(const InternString* l) {
+    return locals.contains(l);
+  }
+
+};
 
 struct Global {
   CompilationUnit* compilation_unit = nullptr;

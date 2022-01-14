@@ -480,13 +480,13 @@ static void expect_type(Compiler* const comp, AST_LOCAL a) {
   }
 }
 
-void compile_type_of_node(Compiler* const comp,
-                          Context* const context,
-                          AST_LOCAL a) {
+void dependency_check_ast_node(Compiler* const comp,
+                               Context* const context,
+                               DependencyCheckState* const state,
+                               AST_LOCAL a) {
   switch (a->ast_type) {
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
-
 
         const NamedElement* name = comp->services.names->find_name(context->current_namespace, nt->name);
 
@@ -501,7 +501,6 @@ void compile_type_of_node(Compiler* const comp,
           comp->set_unfound_name(context, std::move(unknown),
                                  ERROR_CODE::NAME_ERROR, nt->node_span,
                                  "Could not find name '{}'", nt->name);
-          return;
         }
         else if (name->unknowns > 0) {
           UnknownName unknown ={};
@@ -516,32 +515,355 @@ void compile_type_of_node(Compiler* const comp,
                                  "Could not resolve name '{}'\n"
                                  "This name had multiple unknown dependencies",
                                  nt->name);
+        }
+
+        return;
+      }
+    case AST_TYPE::ARRAY_TYPE: {
+        ASTArrayType* at = (ASTArrayType*)a;
+
+        dependency_check_ast_node(comp, context, state, at->base);
+
+
+        if (((ASTExpressionBase*)at->expr)->const_val == nullptr) {
+          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+
+          unit->type = COMPILATION_TYPE::CONST_EXPR;
+          unit->stage = EXPR_COMP_STAGE::UNTYPED;
+          unit->available_names = context->current_namespace;
+          unit->expr = (ASTExpressionBase*)at->expr;
+          unit->cast_to = comp->services.builtin_types->t_u64;
+
+          comp->set_dep(context, unit);
+        }
+
+        return;
+      }
+    case AST_TYPE::PTR_TYPE: {
+        ASTPtrType* ptr = (ASTPtrType*)a;
+
+        dependency_check_ast_node(comp, context, state, ptr->base);
+
+        return;
+      }
+    case AST_TYPE::LAMBDA_TYPE: {
+        ASTLambdaType* lt = (ASTLambdaType*)a;
+
+        FOR_AST(lt->args, ty) {
+          dependency_check_ast_node(comp, context, state, ty);
+        }
+
+        dependency_check_ast_node(comp, context, state, lt->ret);
+
+        return;
+      }
+    case AST_TYPE::TUPLE_TYPE: {
+        ASTTupleType* tt = (ASTTupleType*)a;
+
+        FOR_AST(tt->types, ty) {
+          dependency_check_ast_node(comp, context, state, ty);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        return;
+      }
+    case AST_TYPE::CAST: {
+        ASTCastExpr* cast = (ASTCastExpr*)a;
+
+        dependency_check_ast_node(comp, context, state, cast->type);
+        dependency_check_ast_node(comp, context, state, cast->expr);
+        return;
+      }
+    case AST_TYPE::UNARY_OPERATOR: {
+        ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)a;
+
+        dependency_check_ast_node(comp, context, state, un_op->expr);
+        return;
+      }
+    case AST_TYPE::BINARY_OPERATOR: {
+        ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)a;
+
+        dependency_check_ast_node(comp, context, state, bin_op->left);
+        dependency_check_ast_node(comp, context, state, bin_op->right);
+        return;
+      }
+    case AST_TYPE::IDENTIFIER_EXPR: {
+        ASTIdentifier* ident = (ASTIdentifier*)a;
+        const InternString* name = ident->name;
+
+        const bool is_local = state->is_local(name);
+
+        if (is_local) {
+        //Can just return as its found
           return;
         }
-        else {
-          if (name->globals.size != 1) {
-            comp->report_error(ERROR_CODE::NAME_ERROR, nt->node_span,
-                               "'{}' is an ambiguous name",
-                               nt->name);
-            return;
-          }
 
-          const Global* global = name->globals.data[0];
+        NamedElement* non_local = comp->services.names->find_name(context->current_namespace, name);
 
-          if (global->decl.type.struct_type() != STRUCTURE_TYPE::TYPE) {
-            comp->report_error(ERROR_CODE::NAME_ERROR, nt->node_span,
-                               "'{}' was not a type",
-                               nt->name);
-            return;
-          }
+        if (non_local == nullptr || non_local->unknowns > 0) {
+          UnknownName unknown ={};
+          unknown.all_names = false;
+          unknown.ident = name;
+          unknown.namespace_index = context->current_namespace;
+          unknown.num_knowns = non_local == nullptr ? 0 : non_local->globals.size;
+          unknown.num_unknowns = non_local == nullptr ? 0 : non_local->unknowns;
 
-          if (global->constant_value.ptr == nullptr) {
-            comp->set_dep(context, global->compilation_unit);
-            return;
-          }
-
-          memcpy_ts(&nt->type, 1, (const Type*)global->constant_value.ptr, 1);
+          comp->set_unfound_name(context, std::move(unknown),
+                                 ERROR_CODE::UNFOUND_DEPENDENCY, a->node_span,
+                                 "'{}' was used but a it has no matching declaration",
+                                 name);
         }
+      }
+
+    case AST_TYPE::FUNCTION_CALL: {
+        ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)a;
+
+        FOR_AST(call->arguments, it) {
+          dependency_check_ast_node(comp, context, state, it);
+        }
+
+        bool is_local = state->is_local(call->function_name);
+
+        if (is_local) {
+          return;
+        }
+
+        Array<NamespaceElement> names = comp->services.names->find_all_names(context->current_namespace, call->function_name);
+
+        if (names.size == 0) {
+          UnknownName unknown ={};
+          unknown.all_names = true;
+          unknown.ident = call->function_name;
+          unknown.namespace_index = context->current_namespace;
+          unknown.num_knowns = 0;
+          unknown.num_unknowns = 0;
+
+          comp->set_unfound_name(context, std::move(unknown),
+                                 ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
+                                 "'{}' did not exist",
+                                 call->function_name);
+        }
+        else {
+          FOR(names, it) {
+            if (it->named_element->unknowns > 0) {
+              UnknownName unknown ={};
+              unknown.all_names = true;
+              unknown.ident = call->function_name;
+              unknown.namespace_index = context->current_namespace;
+              unknown.num_knowns = it->named_element->globals.size;
+              unknown.num_unknowns = it->named_element->unknowns;
+
+              comp->set_unfound_name(context, std::move(unknown),
+                                     ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
+                                     "'{}' did not exist",
+                                     call->function_name);
+            }
+          }
+        }
+
+        return;
+      }
+    case AST_TYPE::TUPLE_LIT: {
+        ASTTupleLitExpr* tup = (ASTTupleLitExpr*)a;
+        FOR_AST(tup->elements, it) {
+          dependency_check_ast_node(comp, context, state, it);
+        }
+        return;
+      }
+    case AST_TYPE::ARRAY_EXPR: {
+        ASTArrayExpr* arr = (ASTArrayExpr*)a;
+        FOR_AST(arr->elements, it) {
+          dependency_check_ast_node(comp, context, state, it);
+        }
+        return;
+      }
+
+    case AST_TYPE::INDEX_EXPR: {
+        ASTIndexExpr* index = (ASTIndexExpr*)a;
+
+        dependency_check_ast_node(comp, context, state, index->expr);
+        dependency_check_ast_node(comp, context, state, index->index);
+        return;
+      }
+    case AST_TYPE::MEMBER_ACCESS: {
+        ASTMemberAccessExpr* member = (ASTMemberAccessExpr*)a;
+
+        dependency_check_ast_node(comp, context, state, member->expr);
+        return;
+      }
+    case AST_TYPE::LAMBDA_EXPR: {
+        ASTLambdaExpr* le = (ASTLambdaExpr*)a;
+        ASTLambda* lambda = (ASTLambda*)le->lambda;
+        ASTFuncSig* sig = (ASTFuncSig*)lambda->sig;
+
+        if (sig->sig->sig_struct == nullptr) {
+          comp->set_dep(context, lambda->function->compilation_unit);
+        }
+
+        return;
+      }
+    case AST_TYPE::STRUCT_EXPR: {
+        ASTStructExpr* se = (ASTStructExpr*)a;
+        ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
+
+        if (!struct_body->type.is_valid()) {
+          comp->set_dep(context, struct_body->compilation_unit);
+        }
+
+        return;
+      }
+    case AST_TYPE::DECL: {
+        ASTDecl* decl = (ASTDecl*)a;
+
+        if (decl->type_ast != 0) {
+          dependency_check_ast_node(comp, context, state, decl->type_ast);
+        }
+
+        if (decl->expr != 0) {
+          dependency_check_ast_node(comp, context, state, decl->expr);
+        }
+
+        state->locals.insert(decl->name);
+
+        return;
+      }
+    case AST_TYPE::TYPED_NAME: {
+        ASTTypedName* tn = (ASTTypedName*)a;
+
+        if (tn->type != 0) {
+          dependency_check_ast_node(comp, context, state, tn->type);
+        }
+
+        state->locals.insert(tn->name);
+
+        return;
+      }
+    case AST_TYPE::ASSIGN: {
+        ASTAssign* assign = (ASTAssign*)a;
+
+        dependency_check_ast_node(comp, context, state, assign->assign_to);
+        dependency_check_ast_node(comp, context, state, assign->value);
+
+        return;
+      }
+    case AST_TYPE::BLOCK: {
+        ASTBlock* block = (ASTBlock*)a;
+
+        const usize count = state->locals.size;
+
+        FOR_AST(block->block, it) {
+          dependency_check_ast_node(comp, context, state, it);
+        }
+
+        state->locals.pop(state->locals.size - count);
+
+        return;
+      }
+    case AST_TYPE::IF_ELSE: {
+        ASTIfElse* if_else = (ASTIfElse*)a;
+
+        dependency_check_ast_node(comp, context, state, if_else->condition);
+
+        const usize count = state->locals.size;
+
+        dependency_check_ast_node(comp, context, state, if_else->if_statement);
+
+        state->locals.pop(state->locals.size - count);
+
+        if (if_else->else_statement != 0) {
+          dependency_check_ast_node(comp, context, state, if_else->else_statement);
+          state->locals.pop(state->locals.size - count);
+        }
+
+        return;
+      }
+    case AST_TYPE::WHILE: {
+        ASTWhile* while_s = (ASTWhile*)a;
+
+        dependency_check_ast_node(comp, context, state, while_s->condition);
+
+        const usize count = state->locals.size;
+        dependency_check_ast_node(comp, context, state, while_s->statement);
+        state->locals.pop(state->locals.size - count);
+        return;
+      }
+    case AST_TYPE::RETURN: {
+        ASTReturn* ret = (ASTReturn*)a;
+
+        dependency_check_ast_node(comp, context, state, ret->expr);
+        return;
+      }
+    case AST_TYPE::FUNCTION_SIGNATURE: {
+        ASTFuncSig* func_sig = (ASTFuncSig*)a;
+
+        FOR_AST(func_sig->parameters, it) {
+          dependency_check_ast_node(comp, context, state, it);
+        }
+
+        dependency_check_ast_node(comp, context, state, func_sig->return_type);
+
+        return;
+      }
+    case AST_TYPE::IMPORT: {
+        ASTImport* imp = (ASTImport*)a;
+
+        dependency_check_ast_node(comp, context, state, imp->expr_location);
+        return;
+      }
+
+    case AST_TYPE::LOCAL: {break; }
+    case AST_TYPE::GLOBAL: {break; }
+    case AST_TYPE::LAMBDA: {break; }
+    case AST_TYPE::STRUCT: { break; }
+
+    case AST_TYPE::ASCII_CHAR:
+    case AST_TYPE::ASCII_STRING:
+    case AST_TYPE::NUMBER: {
+        //No dependencies :)
+        return;
+      }
+  }
+
+  comp->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
+                     "Not yet implemented dependency checking for this node. Node ID: {}", (usize)a->ast_type);
+}
+
+void type_check_ast_node(Compiler* const comp,
+                         Context* const context,
+                         AST_LOCAL a) {
+  switch (a->ast_type) {
+    case AST_TYPE::NAMED_TYPE: {
+        ASTNamedType* nt = (ASTNamedType*)a;
+
+
+        const NamedElement* name = comp->services.names->find_name(context->current_namespace, nt->name);
+
+        assert(name != nullptr);
+
+        if (name->globals.size != 1) {
+          comp->report_error(ERROR_CODE::NAME_ERROR, nt->node_span,
+                             "'{}' is an ambiguous name",
+                             nt->name);
+          return;
+        }
+
+        const Global* global = name->globals.data[0];
+
+        if (global->decl.type.struct_type() != STRUCTURE_TYPE::TYPE) {
+          comp->report_error(ERROR_CODE::NAME_ERROR, nt->node_span,
+                             "'{}' was not a type",
+                             nt->name);
+          return;
+        }
+
+        if (global->constant_value.ptr == nullptr) {
+          comp->set_dep(context, global->compilation_unit);
+          return;
+        }
+
+        memcpy_ts(&nt->type, 1, (const Type*)global->constant_value.ptr, 1);
 
         nt->node_type = comp->services.builtin_types->t_type;
 
@@ -550,7 +872,7 @@ void compile_type_of_node(Compiler* const comp,
     case AST_TYPE::ARRAY_TYPE: {
         ASTArrayType* at = (ASTArrayType*)a;
 
-        compile_type_of_node(comp, context, at->base);
+        type_check_ast_node(comp, context, at->base);
         if (comp->is_panic()) {
           return;
         }
@@ -612,7 +934,7 @@ void compile_type_of_node(Compiler* const comp,
     case AST_TYPE::PTR_TYPE: {
         ASTPtrType* ptr = (ASTPtrType*)a;
 
-        compile_type_of_node(comp, context, ptr->base);
+        type_check_ast_node(comp, context, ptr->base);
         if (comp->is_panic()) {
           return;
         }
@@ -633,13 +955,13 @@ void compile_type_of_node(Compiler* const comp,
         ASTLambdaType* lt = (ASTLambdaType*)a;
 
         FOR_AST(lt->args, ty) {
-          compile_type_of_node(comp, context, ty);
+          type_check_ast_node(comp, context, ty);
           if (comp->is_panic()) {
             return;
           }
         }
 
-        compile_type_of_node(comp, context, lt->ret);
+        type_check_ast_node(comp, context, lt->ret);
         if (comp->is_panic()) {
           return;
         }
@@ -676,7 +998,7 @@ void compile_type_of_node(Compiler* const comp,
         ASTTupleType* tt = (ASTTupleType*)a;
 
         FOR_AST(tt->types, ty) {
-          compile_type_of_node(comp, context, ty);
+          type_check_ast_node(comp, context, ty);
           if (comp->is_panic()) {
             return;
           }
@@ -714,7 +1036,9 @@ void compile_type_of_node(Compiler* const comp,
     case AST_TYPE::ASCII_CHAR:
     case AST_TYPE::INDEX_EXPR:
     case AST_TYPE::MEMBER_ACCESS:
+    case AST_TYPE::LAMBDA_EXPR:
     case AST_TYPE::LAMBDA:
+    case AST_TYPE::STRUCT_EXPR:
     case AST_TYPE::STRUCT:
     case AST_TYPE::DECL:
     case AST_TYPE::TYPED_NAME:
@@ -724,11 +1048,13 @@ void compile_type_of_node(Compiler* const comp,
     case AST_TYPE::WHILE:
     case AST_TYPE::RETURN:
     case AST_TYPE::FUNCTION_SIGNATURE:
-    case AST_TYPE::IMPORT: comp->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
-                                              "Not yet implemented type checking for this node"); return;
+    case AST_TYPE::IMPORT: break;
   }
 
-  INVALID_CODE_PATH("Cannot be here");
+
+  comp->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
+                     "Not yet implemented type checking for this node. Node ID: {}", (usize)a->ast_type);
+  return;
 }
 
 static OverloadSet generate_overload_set(Compiler* const comp,
@@ -2069,7 +2395,7 @@ void compile_type_of_expression(Compiler* const comp,
         expr->meta_flags |= META_FLAG::COMPTIME;
 
         if (!ty->type.is_valid()) {
-          compile_type_of_node(comp, context, ty);
+          type_check_ast_node(comp, context, ty);
           if (comp->is_panic()) {
             return;
           }
@@ -2343,7 +2669,7 @@ static void compile_type_of_decl(Compiler* const comp,
 
   if (decl->type_ast != nullptr) {
     if (!decl->type_ast->node_type.is_valid()) {
-      compile_type_of_node(comp, context, decl->type_ast);
+      type_check_ast_node(comp, context, decl->type_ast);
       if (comp->is_panic()) {
         return;
       }
@@ -3440,7 +3766,6 @@ static void compile_function_call(Compiler* const comp,
 
 FOUND_FUNC:
   ASSERT(func != nullptr);
-
 
   func->is_called = true;
   ByteCode::EMIT::CALL(code->code, func);
@@ -5424,7 +5749,7 @@ static void compile_function_signature_type(Compiler* const comp,
   {
     FOR_AST(ast_sig->parameters, i) {
       ASTTypedName* n = (ASTTypedName*)i;
-      compile_type_of_node(comp, context, n->type);
+      type_check_ast_node(comp, context, n->type);
       if (comp->is_panic()) {
         return;
       }
@@ -5434,7 +5759,7 @@ static void compile_function_signature_type(Compiler* const comp,
     }
   }
 
-  compile_type_of_node(comp, context, ast_sig->return_type);
+  type_check_ast_node(comp, context, ast_sig->return_type);
   if (comp->is_panic()) {
     return;
   }
@@ -5456,7 +5781,7 @@ static void compile_function_signature_type(Compiler* const comp,
 void compile_untyped_structure_declaration(Compiler* comp, Context* context, AST_LINKED** untyped) {
   while (*untyped) {
     ASTTypedName* tn = (ASTTypedName*)(*untyped)->curr;
-    compile_type_of_node(comp, context, tn->type);
+    type_check_ast_node(comp, context, tn->type);
     if (comp->is_panic()) {
       return;
     }

@@ -223,10 +223,6 @@ struct ASTAsciiChar : public ASTExpressionBase {
   char character;
 };
 
-//struct ASTCompIntrinsic : public ASTExpressionBase {
-//  const InternString* name;
-//};
-
 struct ASTBlock : public AST {
   AST_ARR block ={};
 };
