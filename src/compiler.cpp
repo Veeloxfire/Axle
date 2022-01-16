@@ -1067,108 +1067,60 @@ void type_check_ast_node(Compiler* const comp,
   return;
 }
 
+static void test_function_overload(OverloadSet& set, const CallSignature* sig, const SignatureStructure* sig_struct) {
+  set.num_options_checked += 1;
+
+   //Correct name and number of args
+  if (sig->arguments.size == sig_struct->parameter_types.size) {
+    auto p_call = sig->arguments.begin();
+    const auto end_call = sig->arguments.end();
+
+    auto p_func = sig_struct->parameter_types.begin();
+
+    bool requires_cast = false;
+
+    while (p_call < end_call) {
+      if (p_call->type == *p_func) {
+        //Do nothing
+      }
+      else if (!set.complete_match
+               && TYPE_TESTS::check_implicit_cast(p_call->flags, p_call->type, *p_func)) {
+        requires_cast = true;
+      }
+      else {
+        //Escape out
+        return;
+      }
+
+      p_call++;
+      p_func++;
+    }
+
+    if (!set.complete_match && requires_cast) {
+      //Insert possible overload
+      set.valid_overloads.insert(sig_struct);
+    }
+    else {
+      //Complete match
+      if (!set.complete_match) {
+        set.complete_match = true;
+        set.valid_overloads.clear();
+      }
+
+      set.valid_overloads.insert(sig_struct);
+    }
+  }
+}
+
 static OverloadSet generate_overload_set(Compiler* const comp,
                                          Context* const context,
                                          State* const state,
                                          const Span& span,
                                          const CallSignature* sig) {
-  Array<NamespaceElement> names = comp->services.names->find_all_names(context->current_namespace, sig->name);
 
   OverloadSet set ={};
 
-  const auto test_func = [&](const SignatureStructure* sig_struct) {
-    set.num_options_checked += 1;
-
-    //Correct name and number of args
-    if (sig->arguments.size == sig_struct->parameter_types.size) {
-      auto p_call = sig->arguments.begin();
-      const auto end_call = sig->arguments.end();
-
-      auto p_func = sig_struct->parameter_types.begin();
-
-      bool requires_cast = false;
-
-      while (p_call < end_call) {
-        if (p_call->type == *p_func) {
-          //Do nothing
-        }
-        else if (!set.complete_match
-                 && TYPE_TESTS::check_implicit_cast(p_call->flags, p_call->type, *p_func)) {
-          requires_cast = true;
-        }
-        else {
-          //Escape out
-          return;
-        }
-
-        p_call++;
-        p_func++;
-      }
-
-      if (!set.complete_match && requires_cast) {
-        //Insert possible overload
-        set.valid_overloads.insert(sig_struct);
-      }
-      else {
-        //Complete match
-        if (!set.complete_match) {
-          set.complete_match = true;
-          set.valid_overloads.clear();
-        }
-
-        set.valid_overloads.insert(sig_struct);
-      }
-    }
-  };
-
-  //Globals
-  {
-    auto n_i = names.begin();
-    const auto n_end = names.end();
-    for (; n_i < n_end; n_i++) {
-      const NamedElement* possible_func = n_i->named_element;
-      NamespaceIndex ns = n_i->ns_index;
-
-      if (possible_func->unknowns > 0) {
-        INVALID_CODE_PATH("NO DEPENDS HERE");
-
-        UnknownName unknown ={};
-        unknown.all_names = true;
-        unknown.ident = sig->name;
-        unknown.namespace_index = context->current_namespace;
-        unknown.num_knowns = possible_func->globals.size;
-        unknown.num_unknowns = possible_func->unknowns;
-
-        comp->set_unfound_name(context, std::move(unknown),
-                               ERROR_CODE::NAME_ERROR, span,
-                               "'{}' has several meanings\n"
-                               "Some of these had unresolved dependencies",
-                               sig->name);
-      }
-
-      if (possible_func->globals.size > 0) {
-        auto f_i = possible_func->globals.begin();
-        auto f_end = possible_func->globals.end();
-
-        for (; f_i < f_end; f_i++) {
-          const Global* global = *f_i;
-
-          if (global->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) { continue; }
-
-          const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
-
-          /*if (global->constant_value == nullptr) {
-            comp->set_dep(context, global->compilation_unit);
-            return {};
-          }*/
-
-          test_func(sig_struct);
-        }
-      }
-    }
-  }
-
-  //Locals
+    //Locals
   {
     auto i = state->active_locals.begin();
     const auto end = state->active_locals.end();
@@ -1178,9 +1130,38 @@ static OverloadSet generate_overload_set(Compiler* const comp,
 
       if (loc->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
         const auto* sig_struct = loc->decl.type.unchecked_base<SignatureStructure>();
-        test_func(sig_struct);
+        test_function_overload(set, sig, sig_struct);
       }
 
+    }
+  }
+
+  Array<NamespaceElement> names = comp->services.names->find_all_names(context->current_namespace, sig->name);
+
+  ASSERT(set.num_options_checked > 0 || names.size > 0);
+
+  //Globals
+  {
+    auto n_i = names.begin();
+    const auto n_end = names.end();
+    for (; n_i < n_end; n_i++) {
+      const NamedElement* possible_func = n_i->named_element;
+      NamespaceIndex ns = n_i->ns_index;
+
+      ASSERT(possible_func->unknowns == 0);
+
+      auto f_i = possible_func->globals.begin();
+      auto f_end = possible_func->globals.end();
+
+      for (; f_i < f_end; f_i++) {
+        const Global* global = *f_i;
+
+        if (global->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) { continue; }
+
+        const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
+
+        test_function_overload(set, sig, sig_struct);
+      }
     }
   }
 
@@ -1208,38 +1189,19 @@ static void compile_find_function_call(Compiler* const comp,
   sig.arguments.shrink();
 
   OverloadSet set = generate_overload_set(comp, context, state, call->node_span, &sig);
-  ASSERT(!comp->is_depends());
-  if (comp->is_panic()) {
-    return;
-  }
 
-  if (set.valid_overloads.size == 0) {
-    INVALID_CODE_PATH("NO DEPENDS HERE");
+  ASSERT(set.num_options_checked > 0);//Must have check at least 1
 
-    UnknownName unknown ={};
-    unknown.all_names = true;
-    unknown.ident = sig.name;
-    unknown.namespace_index = context->current_namespace;
-    unknown.num_knowns = set.num_options_checked;
-    unknown.num_unknowns = 0;
-
-    comp->set_unfound_name(context, std::move(unknown),
-                           ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
-                           "'{}' has no valid overloads that match the call signature\n"
-                           "Call Signature: '{}'",
-                           sig.name, sig);
-    return;
-  }
-  else if (set.valid_overloads.size == 1) {
+  if (set.valid_overloads.size == 1) {
     //Success!
-    //Function* func = set.valid_overloads.data[0];
     call->sig = set.valid_overloads.data[0];
-    //func->is_called = true;//tell it to be included in the final result
   }
   else if (set.complete_match) {
+    ASSERT(set.valid_overloads.size != 1);
+
     comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
                        "More than one function exists that exactly matches signature '{}'",
-                       call->function_name);
+                       sig);
   }
   else {
     Array<char> options_message ={};
@@ -6303,7 +6265,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                   }
                 case GLOBAL_COMP_STAGE::TYPED: {
                     ASSERT(unit->global->decl.type.is_valid());
-                    
+
                     compile_init_expr_of_global(comp, &context, &unit->state, unit->source, unit->global);
                     if (comp->is_panic()) {
                       return comp->services.errors->print_all();
@@ -6793,7 +6755,6 @@ ERROR_CODE compile_all(Compiler* const comp) {
         }
       }
 
-      //Let it emit multiple errors
       if (comp->is_panic()) {
         return comp->services.errors->print_all();
       }
