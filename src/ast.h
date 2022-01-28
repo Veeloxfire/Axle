@@ -282,12 +282,18 @@ struct ASTImport : public AST {
   AST_LOCAL expr_location;
 };
 
+struct FileAST {
+  AST_ARR top_level;
+
+  NamespaceIndex namespace_index;
+  FileLocation file_loc;
+};
+
 struct Printer {
   size_t tabs = 0;
 
   void newline() const;
 };
 
-struct FileAST;
 void print_full_ast(const FileAST* file);
 void print_full_ast(AST_LOCAL expr);

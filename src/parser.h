@@ -4,6 +4,7 @@
 #include "utility.h"
 #include "files.h"
 #include "errors.h"
+#include "memory.h"
 
 #define AXLE_TOKEN_KEYWORDS \
 MODIFY(Return, "return") \
@@ -105,11 +106,8 @@ struct TokenStream {
   Token* end;
 };
 
-struct AstStorage;
-
 struct Parser {
-  AstStorage* store ={};
-
+  MemoryPool store ={};
 
   TokenStream stream;
   NamespaceIndex current_namespace;
@@ -119,7 +117,7 @@ struct Parser {
   Token next ={};
 };
 
-#define PARSER_ALLOC(T) parser->store->push<T>()
+#define PARSER_ALLOC(T) parser->store.push<T>()
 
 void reset_parser(struct Compiler* const comp,
                   const InternString* file_name,

@@ -10,6 +10,7 @@ struct AST;
 struct ASTExpressionBase;
 struct Local;
 struct Global;
+struct InternString;
 
 //New structures
 

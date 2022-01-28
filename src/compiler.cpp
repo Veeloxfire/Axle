@@ -6005,7 +6005,7 @@ void process_parsed_file(Compiler* const comp, FileAST* const file) {
 
   ns->source_file = file->file_loc;
 
-  FOR_AST(file->contents, it) {
+  FOR_AST(file->top_level, it) {
     switch (it->ast_type) {
       case AST_TYPE::IMPORT: {
           ASTImport* i = (ASTImport*)it;

@@ -421,17 +421,6 @@ struct ImportedDll {
   Array<SingleDllImport> imports ={};
 };
 
-
-#define INTRINSIC_MODS \
-MOD(import) \
-MOD(build_options) \
-
-struct Intrinsics {
-#define MOD(n) const InternString* n = nullptr;
-  INTRINSIC_MODS;
-#undef MOD
-};
-
 struct SystemsAndConventionNames {
   const InternString* sys_vm      = nullptr;
   const InternString* sys_x86_64  = nullptr;

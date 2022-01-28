@@ -2,6 +2,7 @@
 #include "parser.h"
 #include "format.h"
 #include "compiler.h"
+#include "memory.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -597,7 +598,9 @@ void reset_parser(Compiler* const comp,
   Parser* const parser = comp->services.parser;
 
   //TEMP
-  parser->store = new AstStorage();
+  parser->store.total = 1024 * 8;
+  parser->store.top = 0;
+  parser->store.mem = new u8[parser->store.total];
 
 
   lex->strings = comp->services.strings;
@@ -1071,11 +1074,11 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
         while (!comp->is_panic()) {
           if (curr_list == nullptr) {
-            curr_list = parser->store->push<AST_LINKED>();
+            curr_list = parser->store.push<AST_LINKED>();
             arr.start = curr_list;
           }
           else {
-            curr_list->next = parser->store->push<AST_LINKED>();
+            curr_list->next = parser->store.push<AST_LINKED>();
             curr_list = curr_list->next;
           }
           curr_list->next = nullptr;
@@ -1125,11 +1128,11 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
         while (!comp->is_panic()) {
           if (curr_list == nullptr) {
-            curr_list = parser->store->push<AST_LINKED>();
+            curr_list = parser->store.push<AST_LINKED>();
             elements.start = curr_list;
           }
           else {
-            curr_list->next = parser->store->push<AST_LINKED>();
+            curr_list->next = parser->store.push<AST_LINKED>();
             curr_list = curr_list->next;
           }
           curr_list->next = nullptr;
@@ -1299,11 +1302,11 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
           if (parser->current.type != AxleTokenType::Right_Bracket) {
             while (!comp->is_panic()) {
               if (curr_list == nullptr) {
-                curr_list = parser->store->push<AST_LINKED>();
+                curr_list = parser->store.push<AST_LINKED>();
                 arguments.start = curr_list;
               }
               else {
-                curr_list->next = parser->store->push<AST_LINKED>();
+                curr_list->next = parser->store.push<AST_LINKED>();
                 curr_list = curr_list->next;
               }
               curr_list->next = nullptr;
@@ -2320,7 +2323,7 @@ void parse_file(Compiler* const comp, Parser* const parser, FileAST* const file)
     }
   }
 
-  file->contents = top_level;
+  file->top_level = top_level;
 }
 
 void Printer::newline() const {
@@ -2678,7 +2681,7 @@ void print_full_ast(AST_LOCAL expr) {
 void print_full_ast(const FileAST* file) {
   Printer printer ={};
 
-  AST_LINKED* l = file->contents.start;
+  AST_LINKED* l = file->top_level.start;
 
   if (l) {
     print_ast(&printer, l->curr);
