@@ -45,22 +45,6 @@ constexpr inline _AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
   }
 }
 
-//Anything allocated via this structure will not be destroyed
-struct AstStorage {
-  constexpr static usize BLOCK_SIZE = 1024 * 8;
-  u8 ast_mem[BLOCK_SIZE];
-  usize top;
-
-  u8* push_alloc_bytes(usize size, usize align);
-
-  template<typename T>
-  T* push() {
-    T* ast = (T*)push_alloc_bytes(sizeof(T), alignof(T));
-    new (ast) T();
-    return ast;
-  }
-};
-
 enum struct AST_TYPE : u8 {
   NAMED_TYPE,
   ARRAY_TYPE,
@@ -298,19 +282,12 @@ struct ASTImport : public AST {
   AST_LOCAL expr_location;
 };
 
-struct FileAST {
-  FileLocation file_loc ={};
-  NamespaceIndex namespace_index = {};
-
-  //can be import or decl
-  AST_ARR contents = {};
-};
-
 struct Printer {
   size_t tabs = 0;
 
   void newline() const;
 };
 
+struct FileAST;
 void print_full_ast(const FileAST* file);
 void print_full_ast(AST_LOCAL expr);

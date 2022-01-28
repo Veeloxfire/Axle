@@ -126,6 +126,7 @@ MOD(NO_ERRORS)\
 MOD(UNFOUND_DEPENDENCY)\
 MOD(FOUND_DEPENDENCY)\
 MOD(SYNTAX_ERROR)\
+MOD(LEXING_ERROR)\
 MOD(LINK_ERROR)\
 MOD(TYPE_CHECK_ERROR)\
 MOD(NAME_ERROR)\
@@ -215,3 +216,13 @@ namespace UNARY_OP_STRING {
     }
   }
 }
+
+#define INTRINSIC_MODS \
+MOD(import) \
+MOD(build_options) \
+
+struct Intrinsics {
+#define MOD(n) const InternString* n = nullptr;
+  INTRINSIC_MODS;
+#undef MOD
+};
