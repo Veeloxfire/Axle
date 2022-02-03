@@ -86,7 +86,7 @@ constexpr auto operations_signed_cpp() -> uint64_t {
 constexpr auto fnv1_hash(const char* ptr, u64 len) -> u64 {
   u64 hash_v = 0xcbf29ce484222325;
 
-  while(len > 0) {
+  while (len > 0) {
     hash_v = hash_v * 0x100000001b3;
     hash_v = hash_v ^ (u64)*ptr;
 
@@ -191,7 +191,7 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const APIOpti
       std::cout << "\n--------------------------------\n";
       std::cout <<   "-- Testing with optimizations --\n";
       if (optimize.non_stack_locals) {
-        std::cout << "--      Non stack locals      --\n"; 
+        std::cout << "--      Non stack locals      --\n";
       }
       std::cout <<   "--------------------------------\n";
     }
@@ -305,6 +305,8 @@ int main() {
   else {
     std::cout << "All tests passed!!!" << std::endl;
   }
+
+  std::cout << "\n\n";
 
   return 0;
 }

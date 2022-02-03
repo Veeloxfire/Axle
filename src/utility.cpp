@@ -1,5 +1,6 @@
 #include "utility.h"
 #include "strings.h"
+#include "trace.h"
 
 void load_to_bytes(Array<uint8_t>& bytes,
                    const size_t offset,
@@ -362,25 +363,31 @@ uint8_t* BumpAllocator::allocate_no_construct(size_t bytes) {
 }
 
 void IO::print_impl(const char* string) {
+  TRACING_FUNCTION();
   fputs(string, stdout);
 }
 
 void IO::print_impl(const OwnedPtr<char>& string) {
+  TRACING_FUNCTION();
   fputs(string.ptr, stdout);
 }
 
 void IO::print_impl(const char c) {
+  TRACING_FUNCTION();
   putc(c, stdout);
 }
 
 void IO::err_print_impl(const char* string) {
+  TRACING_FUNCTION();
   fputs(string, stderr);
 }
 
 void IO::err_print_impl(const OwnedPtr<char>& string) {
+  TRACING_FUNCTION();
   fputs(string.ptr, stderr);
 }
 
 void IO::err_print_impl(const char c)  {
+  TRACING_FUNCTION();
   putc(c, stderr);
 }

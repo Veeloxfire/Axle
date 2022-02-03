@@ -37,6 +37,8 @@ static void relocation_fix(uint8_t* code,
 
 
 void compile_backend_single_func(Program* prog, const CodeBlock* code, Compiler* const comp, const System* system) {
+  TRACING_FUNCTION();
+
   Array<uint8_t> out_code ={};
 
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
@@ -74,6 +76,7 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
                            const CodeBlock* code,
                            size_t* label_indexes,
                            Array<Relocation>& relocations) {
+  TRACING_FUNCTION();
 
   auto code_i = code->code.begin();
   const auto code_end = code->code.end();
@@ -202,6 +205,7 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
 }
 
 void compile_backend(Program* prog, Compiler* comp, const System* system) {
+  TRACING_FUNCTION();
   Array<uint8_t> out_code ={};
 
   CodeBlock actual_entry_function ={};
@@ -999,6 +1003,8 @@ void x86_64_backend_code_block(Compiler* const comp,
                                const CodeBlock* code,
                                size_t* label_indexes,
                                Array<Relocation>& relocs) {
+  TRACING_FUNCTION();
+
   auto code_i = code->code.begin();
   const auto code_end = code->code.end();
 

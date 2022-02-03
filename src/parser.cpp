@@ -3,6 +3,7 @@
 #include "format.h"
 #include "compiler.h"
 #include "memory.h"
+#include "trace.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -2679,6 +2680,8 @@ void print_full_ast(AST_LOCAL expr) {
 }
 
 void print_full_ast(const FileAST* file) {
+  TRACING_SCOPE("Print full ast");
+
   Printer printer ={};
 
   AST_LINKED* l = file->top_level.start;

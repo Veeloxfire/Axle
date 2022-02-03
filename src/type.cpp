@@ -152,6 +152,7 @@ IntegerStructure* STRUCTS::new_int_structure(Compiler* comp, const InternString*
 }
 
 CompositeStructure* STRUCTS::new_composite_structure(Compiler* comp) {
+
   CompositeStructure* const type = comp->services.structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
   type->struct_name = comp->services.strings->intern("anoymous-struct");

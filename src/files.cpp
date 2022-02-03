@@ -1,11 +1,14 @@
 #include "files.h"
 #include "strings.h"
+#include "trace.h"
 
 namespace FILES {
 
   OpenedFile open(const char* name,
                   OPEN_MODE open_mode,
                   DATA_MODE data_mode) {
+    TRACING_FUNCTION();
+
     OpenedFile opened_file ={};
     char mode[3] ={ (char)open_mode, (char)data_mode, '\0' };
     opened_file.error_code = fopen_s(&opened_file.file, name, mode);
@@ -13,16 +16,22 @@ namespace FILES {
   }
 
   ErrorCode close(FILE* file) {
+    TRACING_FUNCTION();
     return fclose(file) == -1 ? ErrorCode::COULD_NOT_CLOSE_FILE
       : ErrorCode::OK;
   }
 
   ErrorCode read_as_string(FILE* file, size_t num_bytes, char** out_string) {
+    TRACING_FUNCTION();
+
+
     *out_string = allocate_default<char>(num_bytes + 1);
 
-    fread((void*)*out_string, sizeof(char), num_bytes, file);
 
+    fread((void*)*out_string, sizeof(char), num_bytes, file);
     (*out_string)[num_bytes] = '\0';
+
+
 
     //TODO: Error Codes
     return ErrorCode::OK;
@@ -68,6 +77,8 @@ namespace FILES {
   }
 
   OwnedPtr<const char> load_file_to_string(const char* file_name) {
+    TRACING_FUNCTION();
+
     const OpenedFile file = open(file_name, OPEN_MODE::READ, DATA_MODE::BINARY);
 
     if (file.error_code != 0) {

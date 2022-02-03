@@ -6,6 +6,8 @@
 
 #include <memory>
 
+#include "trace.h"
+
 using u8 = uint8_t;
 using u16 = uint16_t;
 using u32 = uint32_t;
@@ -264,6 +266,8 @@ struct ALLOC_COUNTER {
 
 template<typename T>
 T* allocate_default(const size_t num) {
+  TRACING_FUNCTION();
+
   T* t = (T*)std::malloc(sizeof(T) * num);
 
   ASSERT(t != nullptr);
@@ -283,6 +287,8 @@ inline T* allocate_default() {
 
 template<typename T, typename ... U>
 T* allocate_single_constructed(U&& ... u) {
+  TRACING_FUNCTION();
+
   T* t = (T*)std::malloc(sizeof(T));
 
   ASSERT(t != nullptr);
@@ -297,6 +303,8 @@ T* allocate_single_constructed(U&& ... u) {
 
 template<typename T>
 T* reallocate_default(T* ptr, const size_t old_size, const size_t new_size) {
+  TRACING_FUNCTION();
+
   T* val = (T*)std::realloc((void*)ptr, sizeof(T) * new_size);
   ASSERT(val != nullptr);
 
@@ -313,6 +321,8 @@ T* reallocate_default(T* ptr, const size_t old_size, const size_t new_size) {
 
 template<typename T>
 void free_destruct_single(T* ptr) {
+  TRACING_FUNCTION();
+
 #ifdef COUNT_ALLOC
   ALLOC_COUNTER::allocated().remove(ptr);
 #endif
@@ -325,6 +335,8 @@ void free_destruct_single(T* ptr) {
 
 template<typename T>
 void free_destruct_n(T* ptr, size_t num) {
+  TRACING_FUNCTION();
+
 #ifdef COUNT_ALLOC
   ALLOC_COUNTER::allocated().remove(ptr);
 #endif
@@ -340,6 +352,8 @@ void free_destruct_n(T* ptr, size_t num) {
 
 template<typename T>
 void free_no_destruct(T* ptr) {
+  TRACING_FUNCTION();
+
 #ifdef COUNT_ALLOC
   ALLOC_COUNTER::allocated().remove(ptr);
 #endif

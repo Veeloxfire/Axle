@@ -1,6 +1,7 @@
 #include "vm.h"
 #include "type.h"
 #include "windows_specifics.h"
+#include "trace.h"
 
 static_assert(sizeof(Reg64_8BL) == 8, "Must be 8 bytes");
 static_assert(sizeof(Reg64_8BH) == 8, "Must be 8 bytes");
@@ -74,6 +75,8 @@ void vm_call_native_x64(VM* const vm, const void* func_ptr, uint64_t stack_requi
 }
 
 void vm_rum(VM* const vm, Program* prog) noexcept {
+  TRACING_SCOPE("vm exec");
+
   //Load dlls
   Array<Windows::ActiveDll> actives = {};
 

@@ -4,11 +4,16 @@
 #include "windows_specifics.h"
 #include "backends.h"
 #include <iostream>
-#include <chrono>
+#include "trace.h"
 
 constexpr char output_file[] = "output.exe";
 
 int main(int argc, const char** args) {
+  Tracing::start_tracer_threaded("trace.json");
+  DEFER() {
+    Tracing::end_tracer_threaded();
+  };
+
 
   if (argc != 2) {
     std::cerr << "Invalid number of arguments!";
@@ -26,17 +31,18 @@ int main(int argc, const char** args) {
   options.build.output_file        = output_file;
   options.build.std_lib_folder = "D:\\GitHub\\Compiler\\stdlib";
   
-  options.print.ast             = true;
+  options.print.ast             = false;
   options.print.pre_reg_alloc   = false;
-  options.print.normal_bytecode = true;
+  options.print.normal_bytecode = false;
   options.print.comptime_res    = false;
   options.print.coalesce_values = false;
-  options.print.fully_compiled  = true;
+  options.print.fully_compiled  = false;
   options.print.run_headers     = false;
 
   options.optimize.non_stack_locals = true;
   
   Program program ={};
+
   int out = compile_file(options, &program);
   
   if (out == 0) {

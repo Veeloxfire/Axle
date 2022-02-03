@@ -1,5 +1,19 @@
 main :: () -> u64 {
-  a: [u64; 4] = [3, 2, 0, 1];
+  hash :: (ptr: *u8, len: u64) -> u64 {
+    hash_v : u64 = 0xcbf29ce484222325;
 
-  return a[a[a[a[0]]]];
+    while(len > 0) {
+      hash_v = hash_v * 0x100000001b3;
+      hash_v = hash_v ^ cast(u64, *ptr);
+
+      ptr = ptr + 1;
+      len = len - 1;
+    }
+
+    return hash_v;
+  };
+
+  arr :=  "abcdefg";
+
+  return hash(cast(*u8, arr), 5);
 }
