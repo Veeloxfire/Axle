@@ -3,8 +3,6 @@
 #include "comp_utilities.h"
 #include "type.h"
 
-struct TypeHint;
-
 enum struct MainOp : uint8_t {
   LEFT, RIGHT
 };
@@ -121,16 +119,14 @@ void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
-                             const SignAgnArithBinOp& op,
-                             const TypeHint* hint);
+                             const SignAgnArithBinOp& op);
 
 //Overload for operators that do care about sign
 void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
-                             const SignedArithBinOp& op,
-                             const TypeHint* hint);
+                             const SignedArithBinOp& op);
 
 //Overload for operators that return bools
 void compile_binary_operator(Compiler* comp,
@@ -144,8 +140,7 @@ void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
-                             const UnpositionedBinOpOptions& op,
-                             const TypeHint* hint);
+                             const UnpositionedBinOpOptions& op);
 
 //Overload for unbalanced operators
 void compile_binary_operator(Compiler* comp,

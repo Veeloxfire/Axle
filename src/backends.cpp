@@ -2,7 +2,7 @@
 #include "compiler.h"
 #include "calling_conventions.h"
 #include "format.h"
-
+#include "trace.h"
 #include <stdio.h>
 
 static void relocation_fix(uint8_t* code,

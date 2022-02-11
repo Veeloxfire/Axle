@@ -14,7 +14,6 @@
 #include "type.h"
 
 
-
 struct VM;
 
 struct TimePoint {
@@ -173,6 +172,8 @@ struct Local {
 };
 
 struct State {
+  Type return_type;
+
   Array<Local> all_locals ={};
   Array<size_t> active_locals ={};
 
@@ -213,42 +214,6 @@ struct State {
 };
 
 void init_state_regs(const CallingConvention* convention, State* state);
-
-//Type hint type
-enum struct THT : uint8_t {
-  EXACT, IMPLICIT, BASE, BASE_HINT
-};
-
-struct TypeHint {
-  THT tht = THT::EXACT;
-  union {
-    Type type ={};
-    const TypeHint* other_hint;
-  };
-};
-
-struct UntypedIterator {
-  struct Scope {
-    size_t num_outer_locals = 0;
-    AST_LINKED* scope ={};
-    AST_LOCAL next;
-  };
-
-  Array<Scope> scopes;
-};
-
-struct UntypedCode {
-  UntypedIterator itr;
-
-  AST_LOCAL current_statement;
-};
-
-void new_scope(UntypedIterator*,
-               AST_LINKED* l,
-               AST_LOCAL n,
-               State* state);
-
-AST_LOCAL advance_scopes(UntypedIterator* itr, State* state);
 
 struct DependencyCheckState {
   Array<const InternString*> locals;
@@ -298,14 +263,16 @@ enum struct IMPORT_COMP_STAGE : u8 {
   DEPENDING, UNTYPED, UNPARSED, FINISHED
 };
 
-struct CompilationUnit {
-  COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
-
-  //units that we need to finish
+struct Dependency {
   usize num_deps = 0;
 
-  //units that are waiting for us to finish
-  Array<CompilationUnit*> dependency_of ={};
+  Array<Dependency*> dependency_of;
+
+  CompilationUnit* waiting_unit;
+};
+
+struct CompilationUnit : public Dependency {
+  COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
 
   NamespaceIndex available_names ={};
 };
@@ -347,7 +314,6 @@ struct FunctionUnit : public CompilationUnit {
 
   ASTLambda* source = nullptr;
   Function* func = nullptr;
-  UntypedCode untyped = {};
 
   State state ={};
 };
@@ -355,7 +321,7 @@ struct FunctionUnit : public CompilationUnit {
 struct ConstantExprUnit : public CompilationUnit {
   EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::DEPENDING;
 
-  ASTExpressionBase* expr = nullptr;
+  AST_LOCAL expr = nullptr;
   Type cast_to ={};
 
   State state ={};
@@ -365,14 +331,6 @@ struct CallSignature {
   const InternString* name = nullptr;
   Array<TypeAndFlags> arguments ={};
 };
-
-struct OverloadSet {
-  bool complete_match = false;
-  Array<const SignatureStructure*> valid_overloads ={};
-
-  usize num_options_checked = 0;
-};
-
 
 struct UnknownName {
   bool all_names = false;
@@ -454,6 +412,22 @@ struct Context {
   NamespaceIndex current_namespace;
 };
 
+struct ToTypeCheckData {
+
+};
+
+struct ToByteCodeData {
+
+};
+
+struct ToExecData {
+
+};
+
+struct CompPipes {
+  Queue<ToTypeCheckData> type_check;
+};
+
 struct Services {
   Lexer* lexer = nullptr;
   Parser* parser = nullptr;
@@ -480,6 +454,9 @@ struct Compiler {
 
   Array<Token> current_stream ={};
 
+  //CompPipes comp_unit_pipes;
+  Queue<CompilationUnit*> to_compile ={};
+
   UnfoundDependencies unfound_deps ={};
 
   NamespaceIndex build_file_namespace ={};//needs to be saved for finding main
@@ -493,8 +470,6 @@ struct Compiler {
   FreelistBlockAllocator<ImportUnit> import_units ={};
   FreelistBlockAllocator<ConstantExprUnit> const_expr_units ={};
   FreelistBlockAllocator<GlobalUnit> global_units ={};
-
-  Array<CompilationUnit*> to_compile ={};
 
   BucketArray<Global> globals ={};
   BucketArray<Function> functions ={};
@@ -557,7 +532,7 @@ void init_compiler(const APIOptions& options, Compiler* comp);
 
 ERROR_CODE compile_all(Compiler* const comp);
 
-void set_runtime_flags(ASTExpressionBase* expr, State* const state,
+void set_runtime_flags(AST_LOCAL expr, State* const state,
                        bool modified, uint8_t valid_rvts);
 
 void cast_operator_type(Compiler* const comp,
@@ -596,9 +571,3 @@ const Structure* find_or_make_tuple_structure(Compiler* const comp,
                                             Array<Type>&& elements);
 
 void build_data_section_for_vm(Program* prog, Compiler* const comp);
-
-void compile_type_of_expression(Compiler* const comp,
-                                Context* const context,
-                                State* const state,
-                                ASTExpressionBase* const expr,
-                                const TypeHint* const hint);

@@ -1012,8 +1012,8 @@ struct ArenaAllocator {
   void free_no_destruct(void* val);
 
   template<typename T>
-  inline uint8_t* alloc_no_construct() {
-    return alloc_no_construct(sizeof(T));
+  inline T* alloc_no_construct() {
+    return (T*)alloc_no_construct(sizeof(T));
   }
 };
 

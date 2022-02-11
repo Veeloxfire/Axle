@@ -23,7 +23,7 @@ ImportUnit* Compiler::new_import_unit(NamespaceIndex ns) {
   unit->stage = IMPORT_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
-  to_compile.insert(unit);
+  to_compile.push_back(unit);
   return unit;
 }
 
@@ -33,7 +33,7 @@ ConstantExprUnit* Compiler::new_const_expr_unit(NamespaceIndex ns) {
   unit->stage = EXPR_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
-  to_compile.insert(unit);
+  to_compile.push_back(unit);
   return unit;
 }
 
@@ -43,7 +43,7 @@ FunctionUnit* Compiler::new_function_unit(NamespaceIndex ns) {
   unit->stage = FUNCTION_COMP_STAGE::UNINIT;
   unit->available_names = ns;
 
-  to_compile.insert(unit);
+  to_compile.push_back(unit);
   return unit;
 }
 
@@ -53,7 +53,7 @@ SignatureUnit* Compiler::new_signature_unit(NamespaceIndex ns) {
   unit->stage = SIGNATURE_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
-  to_compile.insert(unit);
+  to_compile.push_back(unit);
   return unit;
 }
 
@@ -63,7 +63,7 @@ StructureUnit* Compiler::new_structure_unit(NamespaceIndex ns) {
   unit->stage = STRUCTURE_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
-  to_compile.insert(unit);
+  to_compile.push_back(unit);
   return unit;
 }
 
@@ -73,7 +73,7 @@ GlobalUnit* Compiler::new_global_unit(NamespaceIndex ns) {
   unit->stage = GLOBAL_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
-  to_compile.insert(unit);
+  to_compile.push_back(unit);
   return unit;
 }
 
@@ -324,7 +324,7 @@ const Structure* find_or_make_array_structure(Compiler* const comp, Context* con
 static ConstantVal copy_constant_value(Compiler* comp, ConstantVal val) {
   u8* data = comp->constants.alloc_no_construct(val.size);
 
-  memcpy_ts(data, val.size, val.ptr, val.size);
+  memcpy_ts<u8>(data, val.size, (u8*)val.ptr, val.size);
   return { data, val.size };
 }
 
@@ -537,10 +537,10 @@ void dependency_check_ast_node(Compiler* const comp,
         dependency_check_ast_node(comp, context, state, at->base);
 
 
-        if (((ASTExpressionBase*)at->expr)->const_val == nullptr) {
+        if (at->expr->value == nullptr) {
           ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
 
-          unit->expr = (ASTExpressionBase*)at->expr;
+          unit->expr = at->expr;
           unit->cast_to = comp->services.builtin_types->t_u64;
 
           comp->set_dep(context, unit);
@@ -855,7 +855,8 @@ void dependency_check_ast_node(Compiler* const comp,
     case AST_TYPE::LOCAL:
     case AST_TYPE::GLOBAL: {
         // Dont dependency check these
-        // V break not return ;) - will fail
+
+        // break not return ;) - i.e. this will fail
         break;
       }
   }
@@ -864,8 +865,237 @@ void dependency_check_ast_node(Compiler* const comp,
                      "Not yet implemented dependency checking for this node. Node ID: {}", (usize)a->ast_type);
 }
 
+void set_runtime_flags(AST_LOCAL ast, State* const state, bool modified, uint8_t valid_rvts) {
+  if (modified) {
+    ast->meta_flags &= ~META_FLAG::COMPTIME;
+  }
+  ast->valid_rvts &= valid_rvts;
+
+  switch (ast->ast_type) {
+    case AST_TYPE::IDENTIFIER_EXPR: {
+        Local* local = state->all_locals.data + ((ASTIdentifier*)ast)->index;
+
+        local->valid_rvts &= ast->valid_rvts;
+        break;
+      }
+    case AST_TYPE::MEMBER_ACCESS: {
+        set_runtime_flags(((ASTMemberAccessExpr*)ast)->expr, state, modified, valid_rvts);
+        break;
+      }
+    case AST_TYPE::INDEX_EXPR: {
+        set_runtime_flags(((ASTIndexExpr*)ast)->expr, state, modified, valid_rvts);
+        break;
+      }
+  }
+}
+
+static void compile_unary_operator_emit(Compiler* const comp, Context* context, State* const state, ASTUnaryOperatorExpr* expr) {
+  TRACING_FUNCTION();
+  switch (expr->op) {
+    case UNARY_OPERATOR::NEG:
+      compile_unary_operator(comp, context, state, expr, neg_operators);
+      break;
+    case UNARY_OPERATOR::ADDRESS:
+      compile_take_address(comp, context, state, expr);
+      break;
+    case UNARY_OPERATOR::DEREF:
+      compile_deref(comp, expr);
+      break;
+    default: {
+        const char* name = UNARY_OP_STRING::get(expr->op);
+
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                           "Type checking is not implemented for unary operator '{}'",
+                           name);
+        return;
+      }
+  }
+}
+
+static void compile_binary_operator_emit(Compiler* const comp, Context* context, State* const state, ASTBinaryOperatorExpr* const expr) {
+  TRACING_FUNCTION();
+  switch (expr->op) {
+    case BINARY_OPERATOR::ADD:
+      compile_binary_operator(comp, context, state, expr, add_operators);
+      break;
+    case BINARY_OPERATOR::SUB:
+      compile_binary_operator(comp, context, state, expr, sub_operators);
+      break;
+    case BINARY_OPERATOR::MUL:
+      compile_binary_operator(comp, context, state, expr, mul_operators);
+      break;
+    case BINARY_OPERATOR::DIV:
+      compile_binary_operator(comp, context, state, expr, div_operators);
+      break;
+    case BINARY_OPERATOR::EQUIVALENT:
+      compile_binary_operator(comp, context, state, expr, eq_operators);
+      break;
+    case BINARY_OPERATOR::NOT_EQ:
+      compile_binary_operator(comp, context, state, expr, neq_operators);
+      break;
+    case BINARY_OPERATOR::LESSER:
+      compile_binary_operator(comp, context, state, expr, lesser_operators);
+      break;
+    case BINARY_OPERATOR::GREATER:
+      compile_binary_operator(comp, context, state, expr, greater_operators);
+      break;
+    case BINARY_OPERATOR::OR:
+      compile_binary_operator(comp, context, state, expr, or_operators);
+      break;
+    case BINARY_OPERATOR::XOR:
+      compile_binary_operator(comp, context, state, expr, xor_operators);
+      break;
+    case BINARY_OPERATOR::AND:
+      compile_binary_operator(comp, context, state, expr, and_operators);
+      break;
+    case BINARY_OPERATOR::LEFT_SHIFT:
+      compile_binary_operator(comp, context, state, expr, left_shift_operators);
+      break;
+    case BINARY_OPERATOR::RIGHT_SHIFT:
+      compile_binary_operator(comp, context, state, expr, right_shift_operators);
+      break;
+    default: {
+        const char* const name = BINARY_OP_STRING::get(expr->op);
+
+        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                           "Type Checking is not implemented for binary operator '{}'",
+                           name);
+        return;
+      }
+  }
+}
+
+constexpr static bool already_const_type(AST_TYPE at) {
+  return at == AST_TYPE::NUMBER
+    || at == AST_TYPE::ASCII_STRING
+    || at == AST_TYPE::ASCII_CHAR
+    || at == AST_TYPE::STRUCT;
+}
+
+constexpr static bool can_compile_const_value(AST_LOCAL expr) {
+  return expr->value == nullptr
+    && TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)
+    && !already_const_type(expr->ast_type);
+}
+
+static bool test_function_overload(const CallSignature* sig, const SignatureStructure* sig_struct) {
+  TRACING_FUNCTION();
+
+   //Correct name and number of args
+  if (sig->arguments.size == sig_struct->parameter_types.size) {
+    auto p_call = sig->arguments.begin();
+    const auto end_call = sig->arguments.end();
+
+    auto p_func = sig_struct->parameter_types.begin();
+
+    while (p_call < end_call) {
+      if (p_call->type == *p_func) {
+        //Do nothing
+      }
+      else {
+        //Escape out
+        return false;
+      }
+
+      p_call++;
+      p_func++;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
+static const SignatureStructure* match_function(Compiler* const comp,
+                                                Context* const context,
+                                                State* const state,
+                                                const Span& span,
+                                                const CallSignature* sig) {
+  TRACING_FUNCTION();
+
+    //Locals
+  {
+    auto i = state->active_locals.begin();
+    const auto end = state->active_locals.end();
+
+    for (; i < end; i++) {
+      const Local* loc = state->all_locals.data + *i;
+
+      if (loc->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
+        const auto* sig_struct = loc->decl.type.unchecked_base<SignatureStructure>();
+        if (test_function_overload(sig, sig_struct)) {
+          return sig_struct;
+        }
+      }
+    }
+  }
+
+  Array<NamespaceElement> names = comp->services.names->find_all_names(context->current_namespace, sig->name);
+
+  //Globals
+  {
+    auto n_i = names.begin();
+    const auto n_end = names.end();
+    for (; n_i < n_end; n_i++) {
+      const NamedElement* possible_func = n_i->named_element;
+      NamespaceIndex ns = n_i->ns_index;
+
+      ASSERT(possible_func->unknowns == 0);
+
+      auto f_i = possible_func->globals.begin();
+      auto f_end = possible_func->globals.end();
+
+      for (; f_i < f_end; f_i++) {
+        const Global* global = *f_i;
+
+        if (global->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) { continue; }
+
+        const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
+
+        if (test_function_overload(sig, sig_struct)) {
+          return sig_struct;
+        }
+      }
+    }
+  }
+
+  return nullptr;
+}
+
+static void compile_find_function_call(Compiler* const comp,
+                                       Context* context,
+                                       State* const state,
+                                       ASTFunctionCallExpr* const call) {
+  TRACING_FUNCTION();
+
+  //TODO: local functions
+
+  CallSignature sig ={};
+
+  sig.name = call->function_name;
+  sig.arguments.reserve_total(call->arguments.count);
+
+  //Load all the types
+  FOR_AST(call->arguments, it) {
+    sig.arguments.insert({ it->meta_flags, it->node_type });
+  }
+
+  sig.arguments.shrink();
+
+  call->sig = match_function(comp, context, state, call->node_span, &sig);
+
+  if (call->sig == nullptr) {
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
+                       "No visible function matches signature '{}'",
+                       sig);
+  }
+}
+
+
 void type_check_ast_node(Compiler* const comp,
                          Context* const context,
+                         State* const state,
                          AST_LOCAL a) {
   TRACING_FUNCTION();
   switch (a->ast_type) {
@@ -897,8 +1127,7 @@ void type_check_ast_node(Compiler* const comp,
           return;
         }
 
-        memcpy_ts(&nt->type, 1, (const Type*)global->constant_value.ptr, 1);
-
+        nt->value = global->constant_value.ptr;
         nt->node_type = comp->services.builtin_types->t_type;
 
         return;
@@ -906,7 +1135,7 @@ void type_check_ast_node(Compiler* const comp,
     case AST_TYPE::ARRAY_TYPE: {
         ASTArrayType* at = (ASTArrayType*)a;
 
-        type_check_ast_node(comp, context, at->base);
+        type_check_ast_node(comp, context, state, at->base);
         if (comp->is_panic()) {
           return;
         }
@@ -917,9 +1146,7 @@ void type_check_ast_node(Compiler* const comp,
         }
 
         ASSERT(at->expr != nullptr);
-
-        ASSERT(((ASTExpressionBase*)at->expr)->const_val != nullptr);
-
+        ASSERT(at->expr->value != nullptr);
 
         if (!TYPE_TESTS::is_int(at->expr->node_type)) {
           comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
@@ -930,7 +1157,7 @@ void type_check_ast_node(Compiler* const comp,
 
         uint64_t length;
         if (TYPE_TESTS::is_signed_int(at->expr->node_type)) {
-          int64_t i_length = *(const int64_t*)((ASTExpressionBase*)at->expr)->const_val;
+          int64_t i_length = *(const int64_t*)at->expr->value;
           if (i_length < 0) {
             comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
                                "Length of array must positive\n"
@@ -942,14 +1169,16 @@ void type_check_ast_node(Compiler* const comp,
           }
         }
         else {
-          length = *(const int64_t*)((ASTExpressionBase*)at->expr)->const_val;
+          length = *(const uint64_t*)at->expr->value;
         }
 
-        const Structure* s = find_or_make_array_structure(comp, context, ((ASTTypeBase*)at->base)->type, length);
+        const Structure* s = find_or_make_array_structure(comp, context, *(const Type*)at->base->value, length);
 
-        at->type.name = s->struct_name;
-        at->type.structure = s;
+        Type* type = comp->constants.alloc_no_construct<Type>();
+        type->name = s->struct_name;
+        type->structure = s;
 
+        at->value = type;
         at->node_type = comp->services.builtin_types->t_type;
 
         return;
@@ -957,7 +1186,7 @@ void type_check_ast_node(Compiler* const comp,
     case AST_TYPE::PTR_TYPE: {
         ASTPtrType* ptr = (ASTPtrType*)a;
 
-        type_check_ast_node(comp, context, ptr->base);
+        type_check_ast_node(comp, context, state, ptr->base);
         if (comp->is_panic()) {
           return;
         }
@@ -967,10 +1196,13 @@ void type_check_ast_node(Compiler* const comp,
           return;
         }
 
-        const Structure* s = find_or_make_pointer_structure(comp, context, ((ASTTypeBase*)ptr->base)->type);
+        const Structure* s = find_or_make_pointer_structure(comp, context, *(const Type*)(ptr->base->value));
 
-        ptr->type.name = s->struct_name;
-        ptr->type.structure = s;
+        Type* type = comp->constants.alloc_no_construct<Type>();
+        type->name = s->struct_name;
+        type->structure = s;
+
+        ptr->value = type;
         ptr->node_type = comp->services.builtin_types->t_type;
         return;
       }
@@ -978,13 +1210,13 @@ void type_check_ast_node(Compiler* const comp,
         ASTLambdaType* lt = (ASTLambdaType*)a;
 
         FOR_AST(lt->args, ty) {
-          type_check_ast_node(comp, context, ty);
+          type_check_ast_node(comp, context, state, ty);
           if (comp->is_panic()) {
             return;
           }
         }
 
-        type_check_ast_node(comp, context, lt->ret);
+        type_check_ast_node(comp, context, state, lt->ret);
         if (comp->is_panic()) {
           return;
         }
@@ -997,7 +1229,7 @@ void type_check_ast_node(Compiler* const comp,
             return;
           }
 
-          args.insert(((ASTTypeBase*)i)->type);
+          args.insert(*(const Type*)(i->value));
         }
 
         expect_type(comp, lt->ret);
@@ -1010,8 +1242,11 @@ void type_check_ast_node(Compiler* const comp,
 
         const Structure* s = find_or_make_lamdba_structure(comp, context, comp->build_options.default_calling_convention, std::move(args), ret);
 
-        lt->type.structure = s;
-        lt->type.name = s->struct_name;
+        Type* type = comp->constants.alloc_no_construct<Type>();
+        type->name = s->struct_name;
+        type->structure = s;
+
+        lt->value = type;
 
         lt->node_type = comp->services.builtin_types->t_type;
 
@@ -1021,7 +1256,7 @@ void type_check_ast_node(Compiler* const comp,
         ASTTupleType* tt = (ASTTupleType*)a;
 
         FOR_AST(tt->types, ty) {
-          type_check_ast_node(comp, context, ty);
+          type_check_ast_node(comp, context, state, ty);
           if (comp->is_panic()) {
             return;
           }
@@ -1035,43 +1270,793 @@ void type_check_ast_node(Compiler* const comp,
             return;
           }
 
-          args.insert(((ASTTypeBase*)i)->type);
+          args.insert(*(const Type*)(i->value));
         }
-
 
         const Structure* s = find_or_make_tuple_structure(comp, context, std::move(args));
 
-        tt->type.structure = s;
-        tt->type.name = s->struct_name;
+        Type* type = comp->constants.alloc_no_construct<Type>();
+        type->name = s->struct_name;
+        type->structure = s;
+
+        tt->value = type;
         tt->node_type = comp->services.builtin_types->t_type;
 
         return;
       }
-    case AST_TYPE::CAST:
-    case AST_TYPE::UNARY_OPERATOR:
-    case AST_TYPE::BINARY_OPERATOR:
-    case AST_TYPE::IDENTIFIER_EXPR:
-    case AST_TYPE::NUMBER:
-    case AST_TYPE::FUNCTION_CALL:
-    case AST_TYPE::TUPLE_LIT:
-    case AST_TYPE::ARRAY_EXPR:
-    case AST_TYPE::ASCII_STRING:
-    case AST_TYPE::ASCII_CHAR:
-    case AST_TYPE::INDEX_EXPR:
-    case AST_TYPE::MEMBER_ACCESS:
-    case AST_TYPE::LAMBDA_EXPR:
-    case AST_TYPE::LAMBDA:
-    case AST_TYPE::STRUCT_EXPR:
-    case AST_TYPE::STRUCT:
-    case AST_TYPE::DECL:
-    case AST_TYPE::TYPED_NAME:
-    case AST_TYPE::ASSIGN:
-    case AST_TYPE::BLOCK:
-    case AST_TYPE::IF_ELSE:
-    case AST_TYPE::WHILE:
-    case AST_TYPE::RETURN:
-    case AST_TYPE::FUNCTION_SIGNATURE:
-    case AST_TYPE::IMPORT: break;
+    case AST_TYPE::STRUCT_EXPR: {
+        ASTStructExpr* se = (ASTStructExpr*)a;
+        ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
+
+        ASSERT(struct_body->type.is_valid());
+
+        SET_MASK(se->meta_flags, META_FLAG::COMPTIME);
+        a->node_type = comp->services.builtin_types->t_type;
+
+        return;
+      }
+    case AST_TYPE::LAMBDA_EXPR: {
+        //Never type the actual lambda here, its typed elsewhere
+        ASTLambdaExpr* le = (ASTLambdaExpr*)a;
+        ASTLambda* lambda = (ASTLambda*)le->lambda;
+        ASTFuncSig* sig = (ASTFuncSig*)lambda->sig;
+
+        ASSERT(sig->sig->sig_struct != nullptr);
+
+        SET_MASK(le->meta_flags, META_FLAG::COMPTIME);
+        a->node_type = to_type(sig->sig->sig_struct);
+        return;
+      }
+    case AST_TYPE::MEMBER_ACCESS: {
+        ASTMemberAccessExpr* member = (ASTMemberAccessExpr*)a;
+        AST_LOCAL base = member->expr;
+
+        pass_meta_flags_up(a->meta_flags, &base->meta_flags);
+
+        //Compile the object first
+        type_check_ast_node(comp, context, state, base);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        pass_meta_flags_down(&a->meta_flags, base->meta_flags);
+
+        ASSERT(base->node_type.is_valid());
+
+        if (base->node_type.struct_type() != STRUCTURE_TYPE::COMPOSITE) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
+                             "Type '{}' does not have any members (it is not a composite type)",
+                             base->node_type.name);
+          return;
+        }
+
+        const Type& cmp_t = base->node_type;
+
+        const auto* cs = cmp_t.unchecked_base<CompositeStructure>();
+
+        auto i = cs->elements.begin();
+        auto end = cs->elements.end();
+
+        a->node_type.structure = nullptr;//reset
+
+        for (; i < end; i++) {
+          if (i->name == member->name) {
+            member->node_type = i->type;
+            member->offset = i->offset;
+            break;
+          }
+        }
+
+        if (!a->node_type.is_valid()) {
+          comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+                             "Type '{}' has no member '{}'",
+                             cmp_t.name, member->name);
+          return;
+        }
+
+        //TODO: Make this work for other types
+        set_runtime_flags(base, state, false, (uint8_t)RVT::MEMORY);
+        break;
+      }
+    case AST_TYPE::INDEX_EXPR: {
+        ASTIndexExpr* index_expr = (ASTIndexExpr*)a;
+        AST_LOCAL base = index_expr->expr;
+        AST_LOCAL index = index_expr->index;
+
+        pass_meta_flags_up(a->meta_flags, &base->meta_flags);
+
+        type_check_ast_node(comp, context, state, base);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        pass_meta_flags_down(&a->meta_flags, base->meta_flags);
+        ASSERT(base->node_type.is_valid());
+
+        pass_meta_flags_up(a->meta_flags, &index->meta_flags);
+
+        type_check_ast_node(comp, context, state, index);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        pass_meta_flags_down(&a->meta_flags, index->meta_flags);
+
+        ASSERT(index->node_type.is_valid());
+
+        if (!TYPE_TESTS::can_index(base->node_type)) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
+                             "Cannot take index of type: {}",
+                             base->node_type.name);
+          return;
+        }
+
+        if (!TYPE_TESTS::is_int(index->node_type)) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, index->node_span,
+                             "An index must be in integer\n"
+                             "Found non-integer type: {}",
+                             index->node_type.name);
+          return;
+        }
+
+        if (!TEST_MASK(index->meta_flags, META_FLAG::COMPTIME)) {
+          //If the index is not known at compile time then the array must be in memory or in a register
+          uint8_t valids = (uint8_t)RVT::MEMORY;
+
+          if (base->node_type.structure->size <= 8) {
+            //Can be in a register if it will fit
+            valids |= RVT::REGISTER;
+          }
+
+          set_runtime_flags(base, state, false, valids);
+        }
+
+
+        a->node_type = base->node_type.unchecked_base<ArrayStructure>()->base;
+
+        break;
+      }
+    case AST_TYPE::TUPLE_LIT: {
+        ASTTupleLitExpr* tup = (ASTTupleLitExpr*)a;
+
+
+        //Temp?
+        a->meta_flags &= ~META_FLAG::ASSIGNABLE;
+
+        //Assume comptime to start with
+        SET_MASK(a->meta_flags, META_FLAG::COMPTIME);
+
+        Array<Type> element_types ={};
+
+        FOR_AST(tup->elements, it) {
+          pass_meta_flags_up(a->meta_flags, &it->meta_flags);
+
+          type_check_ast_node(comp, context, state, it);
+          if (comp->is_panic()) {
+            return;
+          }
+
+          pass_meta_flags_down(&a->meta_flags, it->meta_flags);
+
+          ASSERT(it->node_type.is_valid());
+
+          element_types.insert(it->node_type);
+        }
+
+        const Structure* tuple_s
+          = find_or_make_tuple_structure(comp,
+                                         context,
+                                         std::move(element_types));
+
+        //Create the type
+        a->node_type = to_type(tuple_s);
+
+        //Can currently only load into memory
+        a->valid_rvts &= RVT::MEMORY;
+
+        break;
+      }
+    case AST_TYPE::ARRAY_EXPR: {
+        ASTArrayExpr* arr_expr = (ASTArrayExpr*)a;
+
+        arr_expr->meta_flags &= ~META_FLAG::ASSIGNABLE;
+
+        //Assume true to start with
+        a->meta_flags |= META_FLAG::COMPTIME;
+
+        AST_LINKED* l = arr_expr->elements.start;
+
+        Type base ={};
+
+        if (l) {
+          AST_LOCAL base_test = l->curr;
+
+          pass_meta_flags_up(a->meta_flags, &base_test->meta_flags);
+
+          type_check_ast_node(comp, context, state, base_test);
+          if (comp->is_panic()) {
+            return;
+          }
+
+          pass_meta_flags_down(&a->meta_flags, base_test->meta_flags);
+
+          ASSERT(base_test->node_type.is_valid());
+
+          assert(base.is_valid());
+
+          base = base_test->node_type;
+
+          u32 index = 0;
+
+          l->next;
+          for (; l; l = l->next) {
+            index++;
+            AST_LOCAL it = l->curr;
+
+            pass_meta_flags_up(a->meta_flags, &it->meta_flags);
+
+            type_check_ast_node(comp, context, state, it);
+            if (comp->is_panic()) {
+              return;
+            }
+
+            pass_meta_flags_down(&a->meta_flags, it->meta_flags);
+
+            if (it->node_type != base) {
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, it->node_span,
+                                 "Array type was inferred as '{}'\n"
+                                 "Array element {} has type '{}' which is not '{}'",
+                                 base.name, index, it->node_type.name, base.name);
+              return;
+            }
+          }
+        }
+
+        if (!base.is_valid()) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
+                             "Array type could not inferred\n"
+                             "This is probably because the array was empty (i.e. [])");
+          return;
+        }
+        break;
+      }
+    case AST_TYPE::ASCII_CHAR: {
+        a->node_type = comp->services.builtin_types->t_ascii;
+        a->meta_flags |= META_FLAG::COMPTIME;
+        break;
+      }
+    case AST_TYPE::ASCII_STRING: {
+        ASTAsciiString* ascii = (ASTAsciiString*)a;
+        const size_t len = ascii->string->len + 1;
+
+        a->node_type = to_type(find_or_make_array_structure(comp, context, comp->services.builtin_types->t_ascii, len));
+        a->meta_flags |= META_FLAG::COMPTIME;
+        break;
+      }
+    case AST_TYPE::NUMBER: {
+        ASTNumber* num = (ASTNumber*)a;
+
+        constexpr auto smallest_type_for_integer = [](const BuiltinTypes* types, u64 val) -> Type {
+          if (val < 0) {
+            if (val >= INT8_MIN) {
+              return types->t_i8;
+            }
+            /*else if (val >= INT8_MIN) {
+              return types->t_i16;
+            }*/
+            else if (val >= INT32_MIN) {
+              return types->t_i32;
+            }
+            else if (val >= INT64_MIN) {
+              return types->t_i64;
+            }
+            else {
+              INVALID_CODE_PATH("There isnt a big enough integer");
+            }
+          }
+          else {
+            if (val < UINT8_MAX) {
+              return types->t_u8;
+            }
+            /*else if (val <= UINT16_MAX) {
+              return types->t_u16;
+            }*/
+            else if (val <= UINT32_MAX) {
+              return types->t_u32;
+            }
+            else if (val <= UINT64_MAX) {
+              return types->t_u64;
+            }
+            else {
+              INVALID_CODE_PATH("There isnt a big enough integer");
+            }
+          }
+
+          return {};
+        };
+
+        a->meta_flags |= META_FLAG::COMPTIME;
+
+        if (num->suffix == nullptr) {
+          const Type min_size_int = smallest_type_for_integer(comp->services.builtin_types,
+                                                              num->value);
+
+
+          a->node_type = min_size_int;
+        }
+        else {
+          if (num->suffix == comp->services.builtin_types->t_i64.name) {
+            a->node_type = comp->services.builtin_types->t_i64;
+          }
+          else if (num->suffix == comp->services.builtin_types->t_u64.name) {
+            a->node_type = comp->services.builtin_types->t_u64;
+          }
+          else {
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
+                               "Invalid integer literal suffix type '{}'",
+                               num->suffix);
+            return;
+          }
+        }
+
+        break;
+      }
+    case AST_TYPE::IDENTIFIER_EXPR: {
+        INVALID_CODE_PATH("Should be removed in dependency check");
+
+        //ASTIdentifier* ident = (ASTIdentifier*)a;
+        //const InternString* name = ident->name;
+
+        //Local* const loc = state->find_local(name);
+
+        //const Decl* decl = nullptr;
+        //if (loc != nullptr) {
+        //  ident->ast_type = AST_TYPE::LOCAL;
+
+        //  ident->index = loc - state->all_locals.data;
+        //  a->node_type = loc->decl.type;
+
+        //  loc->valid_rvts &= a->valid_rvts;
+        //  decl = &loc->decl;
+        //}
+        //else {
+        //  NamedElement* non_local = comp->services.names->find_name(context->current_namespace, name);
+
+        //  //Must be true if this isnt a local variable
+        //  ASSERT(non_local != nullptr && non_local->unknowns == 0);
+
+        //  if (non_local->globals.size != 1) {
+        //    comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+        //                       "Name '{}' is ambiguous in this context", name);
+        //    return;
+        //  }
+
+        //  const Global* glob = non_local->globals.data[0];
+
+        //  if (!glob->decl.type.is_valid()) {
+        //    comp->set_dep(context, glob->compilation_unit);
+        //  }
+
+        //  ident->ast_type = AST_TYPE::GLOBAL;
+        //  ident->ptr      = (const void*)glob;
+        //  a->node_type    = glob->decl.type;
+
+        //  decl = &glob->decl;
+        //}
+
+        //ASSERT(a->node_type.is_valid());
+        //ASSERT(decl != nullptr);
+
+        //a->meta_flags = decl->meta_flags;
+
+        break;
+      }
+    case AST_TYPE::LOCAL: {
+        //Can be reached during type inference
+        ASTIdentifier* ident = (ASTIdentifier*)a;
+
+        Local* const loc = state->all_locals.data + ident->index;
+
+        a->node_type = loc->decl.type;
+        pass_meta_flags_down(&a->meta_flags, loc->decl.meta_flags);
+        break;
+      }
+    case AST_TYPE::GLOBAL: {
+        //Can be reached during type inference
+        ASTIdentifier* ident = (ASTIdentifier*)a;
+        const Global* glob = ((const Global*)ident->ptr);
+
+        a->node_type = glob->decl.type;
+        pass_meta_flags_down(&a->meta_flags, glob->decl.meta_flags);
+        break;
+      }
+    case AST_TYPE::CAST: {
+        ASTCastExpr* cast_expr = (ASTCastExpr*)a;
+        AST_LOCAL cast = cast_expr->expr;
+        AST_LOCAL ty = cast_expr->type;
+
+        type_check_ast_node(comp, context, state, ty);
+        if (comp->is_panic()) {
+          return;
+        }
+        ASSERT(ty->node_type == comp->services.builtin_types->t_type);
+
+        pass_meta_flags_up(a->meta_flags, &cast->meta_flags);
+
+
+        type_check_ast_node(comp, context, state, cast);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        ASSERT(cast->node_type.is_valid());
+
+        //may set comtime to false
+        cast_operator_type(comp, context, state, cast_expr);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        pass_meta_flags_down(&a->meta_flags, cast->meta_flags);
+
+        a->node_type = *(const Type*)ty->value;
+        break;
+      }
+    case AST_TYPE::UNARY_OPERATOR: {
+        ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)a;
+        AST_LOCAL prim = un_op->expr;
+
+        pass_meta_flags_up(a->meta_flags, &prim->meta_flags);
+
+        type_check_ast_node(comp, context, state, prim);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        compile_unary_operator_emit(comp, context, state, un_op);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        pass_meta_flags_down(&a->meta_flags, prim->meta_flags);
+
+        break;
+      }
+    case AST_TYPE::BINARY_OPERATOR: {
+        ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)a;
+
+        AST_LOCAL left = bin_op->left;
+        AST_LOCAL right = bin_op->right;
+
+        pass_meta_flags_up(a->meta_flags, &left->meta_flags);
+
+        type_check_ast_node(comp, context, state, left);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        pass_meta_flags_down(&a->meta_flags, left->meta_flags);
+
+        pass_meta_flags_up(a->meta_flags, &right->meta_flags);
+
+        type_check_ast_node(comp, context, state, right);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        pass_meta_flags_down(&a->meta_flags, right->meta_flags);
+
+        if (!TEST_MASK(a->meta_flags, META_FLAG::COMPTIME)) {
+          if (can_compile_const_value(left)) {
+            ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+            unit->expr = left;
+
+            comp->set_dep(context, unit);
+          }
+          else if (can_compile_const_value(right)) {
+            ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+            unit->expr = right;
+
+            comp->set_dep(context, unit);
+          }
+        }
+
+        compile_binary_operator_emit(comp, context, state, bin_op);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        break;
+      }
+    case AST_TYPE::FUNCTION_CALL: {
+        ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)a;
+
+        //TODO: Allow function execution at compile time
+        //Means we need to have a way to know which functions to load
+        //Currently it just expects to find a function but doesnt and calls the start of the code
+        a->meta_flags |= META_FLAG::MAKES_CALL;
+        a->meta_flags |= META_FLAG::CONST;
+
+        FOR_AST(call->arguments, it) {
+          pass_meta_flags_up(a->meta_flags, &it->meta_flags);
+
+          it->meta_flags |= META_FLAG::CALL_LEAF;
+
+          type_check_ast_node(comp, context, state, it);
+          if (comp->is_panic()) {
+            return;
+          }
+
+          pass_meta_flags_down(&a->meta_flags, it->meta_flags);
+        }
+
+
+        if (call->sig == nullptr) {
+          compile_find_function_call(comp, context, state, call);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        const auto* sig = call->sig;
+
+
+        const size_t size = sig->parameter_types.size;
+
+        if (call->arguments.count != size) {
+          comp->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
+                             "Compiler linked a function with {} parameters for a call with {} arguments!",
+                             size, call->arguments.count);
+          return;
+        }
+
+        if (!TEST_MASK(a->meta_flags, META_FLAG::COMPTIME)) {
+          FOR_AST(call->arguments, it) {
+            if (can_compile_const_value(it)) {
+              ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+              unit->expr = it;
+
+              comp->set_dep(context, unit);
+            }
+          }
+        }
+
+        //Last thing to do it set return type
+        a->node_type = sig->return_type;
+
+        return;
+      }
+    case AST_TYPE::ASSIGN: {
+        ASTAssign* assign = (ASTAssign*)a;
+        AST_LOCAL assign_to = assign->assign_to;
+        AST_LOCAL value = assign->value;
+
+        type_check_ast_node(comp, context, state, assign_to);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        if (!TEST_MASK(assign_to->meta_flags, META_FLAG::ASSIGNABLE)) {
+          comp->report_error(ERROR_CODE::CONST_ERROR, assign_to->node_span,
+                             "Cannot assign to non-assignable expression");
+          return;
+        }
+
+        set_runtime_flags(assign_to, state, true, (uint8_t)RVT::MEMORY);
+
+        type_check_ast_node(comp, context, state, value);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        if (assign_to->node_type != value->node_type) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, assign->node_span,
+                             "Cannot assign type '{}' to '{}'",
+                             value->node_type.name, assign_to->node_type.name);
+          return;
+        }
+
+        return;
+      }
+    case AST_TYPE::IF_ELSE: {
+        ASTIfElse* const if_else = (ASTIfElse*)a;
+
+        type_check_ast_node(comp, context, state, if_else->condition);
+        if (comp->is_panic()) {
+          return;
+        }
+
+
+        if (if_else->condition->node_type != comp->services.builtin_types->t_bool) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, if_else->condition->node_span,
+                             "'{}' Cannot be used to resolve a condition ... expected '{}'",
+                             if_else->condition->node_type.name,
+                             comp->services.builtin_types->t_bool.name);
+          return;
+        }
+
+        auto locals = state->active_locals.size;
+        type_check_ast_node(comp, context, state, if_else->if_statement);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        state->active_locals.size = locals;
+        type_check_ast_node(comp, context, state, if_else->else_statement);
+        if (comp->is_panic()) {
+          return;
+        }
+        state->active_locals.size = locals;
+        return;
+      }
+    case AST_TYPE::WHILE: {
+        ASTWhile* const while_loop = (ASTWhile*)a;
+
+        type_check_ast_node(comp, context, state, while_loop->condition);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        if (while_loop->condition->node_type != comp->services.builtin_types->t_bool) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, while_loop->condition->node_span,
+                             "'{}' Cannot be used to resolve a condition ... expected '{}'",
+                             while_loop->condition->node_type.name,
+                             comp->services.builtin_types->t_bool.name);
+          return;
+        }
+
+        auto locals = state->active_locals.size;
+        type_check_ast_node(comp, context, state, while_loop->statement);
+        if (comp->is_panic()) {
+          return;
+        }
+        state->active_locals.size = locals;
+
+        return;
+      }
+    case AST_TYPE::BLOCK: {
+        ASTBlock* block = (ASTBlock*)a;
+
+        auto locals = state->active_locals.size;
+
+        FOR_AST(block->block, it) {
+          type_check_ast_node(comp, context, state, it);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        state->active_locals.size = locals;
+
+        return;
+      }
+    case AST_TYPE::DECL: {
+        ASTDecl* const decl = (ASTDecl*)a;
+
+        AST_LOCAL decl_expr = decl->expr;
+
+        if (decl->type_ast != nullptr) {
+          if (!decl->type_ast->node_type.is_valid()) {
+            type_check_ast_node(comp, context, state, decl->type_ast);
+            if (comp->is_panic()) {
+              return;
+            }
+          }
+
+          Type type = *(const Type*)(decl->type_ast->value);
+
+          type_check_ast_node(comp, context, state, decl_expr);
+          if (comp->is_panic()) {
+            return;
+          }
+
+          if (type != decl_expr->node_type) {
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, decl->node_span,
+                               "Cannot assign type '{}' to '{}'",
+                               decl_expr->node_type.name, type.name);
+            return;
+          }
+
+          decl->type = type;
+        }
+        else {
+          type_check_ast_node(comp, context, state, decl_expr);
+          if (comp->is_panic()) {
+            return;
+          }
+
+          decl->type = decl->expr->node_type;
+        }
+
+        ASSERT(decl->type.is_valid());
+
+        if (decl->compile_time_const
+            && (decl_expr == nullptr || !TEST_MASK(decl_expr->meta_flags, META_FLAG::COMPTIME))) {
+          comp->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
+                             "Compile time declaration '{}' must be initialized by a compile time expression",
+                             decl->name);
+          return;
+        }
+
+        if (can_compile_const_value(decl_expr)) {
+          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+          unit->expr = decl_expr;
+
+          comp->set_dep(context, unit);
+        }
+
+        assert_empty_name(comp, a->node_span, context->current_namespace, decl->name);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        //Check for shadowing
+
+        const Local* shadowing = state->find_local(decl->name);
+
+        if (shadowing != nullptr) {
+          comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+                             "Attempted to shadow the local variable '{}'",
+                             decl->name);
+          return;
+        }
+
+
+        size_t loc_index = state->all_locals.size;
+        decl->local_index = loc_index;
+
+        state->all_locals.insert_uninit(1);
+        auto* loc = state->all_locals.back();
+
+        ASSERT(decl->type.is_valid());
+
+        loc->decl.name = decl->name;
+        loc->decl.type = decl->type;
+        loc->decl.source = decl;
+        if (decl->compile_time_const) {
+          loc->decl.meta_flags |= META_FLAG::COMPTIME;
+        }
+        else {
+          loc->decl.meta_flags |= META_FLAG::ASSIGNABLE;
+        }
+
+        ASSERT(loc->decl.type.is_valid());
+
+        if (TEST_MASK(loc->decl.meta_flags, META_FLAG::COMPTIME) && !TEST_MASK(decl_expr->meta_flags, META_FLAG::COMPTIME)) {
+          comp->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
+                             "Cannot initialize a compile time constant with "
+                             "a non compile time constant value");
+          return;
+        }
+
+        state->active_locals.insert(decl->local_index);
+
+        return;
+      }
+    case AST_TYPE::RETURN: {
+        ASTReturn* ret = (ASTReturn*)a;
+
+        type_check_ast_node(comp, context, state, ret->expr);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        if (ret->expr->node_type != state->return_type) {
+          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, ret->expr->node_span,
+                             "Return type did not match\n"
+                             "Returned '{}' ... Expected '{}'",
+                             ret->expr->node_type.name, state->return_type.name);
+          return;
+        }
+
+        if (can_compile_const_value(a)) {
+          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
+          unit->expr = a;
+
+          comp->set_dep(context, unit);
+        }
+        return;
+      }
   }
 
 
@@ -1080,166 +2065,6 @@ void type_check_ast_node(Compiler* const comp,
   return;
 }
 
-static void test_function_overload(OverloadSet& set, const CallSignature* sig, const SignatureStructure* sig_struct) {
-  TRACING_FUNCTION();
-  set.num_options_checked += 1;
-
-   //Correct name and number of args
-  if (sig->arguments.size == sig_struct->parameter_types.size) {
-    auto p_call = sig->arguments.begin();
-    const auto end_call = sig->arguments.end();
-
-    auto p_func = sig_struct->parameter_types.begin();
-
-    bool requires_cast = false;
-
-    while (p_call < end_call) {
-      if (p_call->type == *p_func) {
-        //Do nothing
-      }
-      else if (!set.complete_match
-               && TYPE_TESTS::check_implicit_cast(p_call->flags, p_call->type, *p_func)) {
-        requires_cast = true;
-      }
-      else {
-        //Escape out
-        return;
-      }
-
-      p_call++;
-      p_func++;
-    }
-
-    if (!set.complete_match && requires_cast) {
-      //Insert possible overload
-      set.valid_overloads.insert(sig_struct);
-    }
-    else {
-      //Complete match
-      if (!set.complete_match) {
-        set.complete_match = true;
-        set.valid_overloads.clear();
-      }
-
-      set.valid_overloads.insert(sig_struct);
-    }
-  }
-}
-
-static OverloadSet generate_overload_set(Compiler* const comp,
-                                         Context* const context,
-                                         State* const state,
-                                         const Span& span,
-                                         const CallSignature* sig) {
-  TRACING_FUNCTION();
-
-  OverloadSet set ={};
-
-    //Locals
-  {
-    auto i = state->active_locals.begin();
-    const auto end = state->active_locals.end();
-
-    for (; i < end; i++) {
-      const Local* loc = state->all_locals.data + *i;
-
-      if (loc->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
-        const auto* sig_struct = loc->decl.type.unchecked_base<SignatureStructure>();
-        test_function_overload(set, sig, sig_struct);
-      }
-
-    }
-  }
-
-  Array<NamespaceElement> names = comp->services.names->find_all_names(context->current_namespace, sig->name);
-
-  ASSERT(set.num_options_checked > 0 || names.size > 0);
-
-  //Globals
-  {
-    auto n_i = names.begin();
-    const auto n_end = names.end();
-    for (; n_i < n_end; n_i++) {
-      const NamedElement* possible_func = n_i->named_element;
-      NamespaceIndex ns = n_i->ns_index;
-
-      ASSERT(possible_func->unknowns == 0);
-
-      auto f_i = possible_func->globals.begin();
-      auto f_end = possible_func->globals.end();
-
-      for (; f_i < f_end; f_i++) {
-        const Global* global = *f_i;
-
-        if (global->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) { continue; }
-
-        const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
-
-        test_function_overload(set, sig, sig_struct);
-      }
-    }
-  }
-
-  return set;
-}
-
-static void compile_find_function_call(Compiler* const comp,
-                                       Context* context,
-                                       State* const state,
-                                       ASTFunctionCallExpr* const call) {
-  TRACING_FUNCTION();
-
-  //TODO: local functions
-
-  CallSignature sig ={};
-
-  sig.name = call->function_name;
-  sig.arguments.reserve_total(call->arguments.count);
-
-  //Load all the types
-  FOR_AST(call->arguments, it) {
-    ASTExpressionBase* i = (ASTExpressionBase*)it;
-    sig.arguments.insert({ i->meta_flags, i->node_type });
-  }
-
-  sig.arguments.shrink();
-
-  OverloadSet set = generate_overload_set(comp, context, state, call->node_span, &sig);
-
-  ASSERT(set.num_options_checked > 0);//Must have check at least 1
-
-  if (set.valid_overloads.size == 1) {
-    //Success!
-    call->sig = set.valid_overloads.data[0];
-  }
-  else if (set.complete_match) {
-    ASSERT(set.valid_overloads.size != 1);
-
-    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
-                       "More than one function exists that exactly matches signature '{}'",
-                       sig);
-  }
-  else {
-    Array<char> options_message ={};
-
-    //Load all the options into a string
-    for (size_t i = 0; i < set.valid_overloads.size; i++) {
-      const SignatureStructure* sig = set.valid_overloads.data[i];
-
-      format_to_array(options_message, "Option {}: {}\n", i + 1, PrintSignatureType{ sig });
-    }
-
-    //Format to array doesnt null terminate
-    //Instead replace the last '\n' with '\0'
-    *options_message.back() = '\0';
-
-    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
-                       "Found more than one function '{}' with signature that required implicit casts\n"
-                       "Expcted: {}\n"
-                       "{}", call->function_name, sig, options_message);
-  }
-
-}
 
 RuntimeValue take_address(Compiler* comp, State* state, CodeBlock* code, const RuntimeValue* val) {
   UnOpArgs args ={};
@@ -1259,9 +2084,9 @@ static void cast_operator_type(Compiler* const comp,
 
   const Structures* const structures = comp->services.structures;
 
-  const Type& cast_to = ((ASTTypeBase*)cast->type)->type;
-  META_FLAGS from_flags = ((ASTExpressionBase*)cast->expr)->meta_flags;
-  const Type& cast_from = ((ASTExpressionBase*)cast->expr)->node_type;
+  const Type& cast_to = *(const Type*)(cast->type->value);
+  META_FLAGS from_flags = cast->expr->meta_flags;
+  const Type& cast_from = cast->expr->node_type;
 
   DEFER(&) { if (!comp->is_panic()) ASSERT(cast->emit != nullptr); };
 
@@ -1270,19 +2095,6 @@ static void cast_operator_type(Compiler* const comp,
     cast->node_type = cast_to;
     cast->meta_flags = from_flags;
   };
-
-  if (TYPE_TESTS::check_implicit_cast(from_flags, cast_from, cast_to)) {
-    if (cast_from != cast_to) {
-      TypeHint hint  ={};
-      hint.tht = THT::EXACT;
-      hint.type = cast_to;
-
-      compile_type_of_expression(comp, context, state, (ASTExpressionBase*)cast->expr, &hint);
-    }
-
-    emit_cast_func(cast, CASTS::no_op);
-    return;
-  }
 
   switch (cast_from.struct_type()) {
     case STRUCTURE_TYPE::ENUM: {
@@ -1310,9 +2122,9 @@ static void cast_operator_type(Compiler* const comp,
         if (cast_to.struct_type() == STRUCTURE_TYPE::POINTER) {
           const auto* to_ptr = cast_to.unchecked_base<PointerStructure>();
 
-          if (TYPE_TESTS::check_implicit_cast(from_flags, from_arr->base, to_ptr->base)) {
+          if (from_arr->base == to_ptr->base) {
             //Must be in memory to cast like this
-            set_runtime_flags((ASTExpressionBase*)cast->expr, state, false, (uint8_t)RVT::MEMORY);
+            set_runtime_flags(cast->expr, state, false, (uint8_t)RVT::MEMORY);
             emit_cast_func(cast, take_address);
             return;
           }
@@ -1402,21 +2214,8 @@ static void cast_operator_type(Compiler* const comp,
   return;
 }
 
-constexpr static bool already_const_type(AST_TYPE at) {
-  return at == AST_TYPE::NUMBER
-    || at == AST_TYPE::ASCII_STRING
-    || at == AST_TYPE::ASCII_CHAR
-    || at == AST_TYPE::STRUCT;
-}
-
-constexpr static bool can_compile_const_value(const ASTExpressionBase* const expr) {
-  return expr->const_val == nullptr
-    && TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)
-    && !already_const_type(expr->ast_type);
-}
-
 static void do_literal_cast(Compiler* const comp,
-                            const ASTExpressionBase* expr, const Type& to_type,
+                            const AST_LOCAL expr, const Type& to_type,
                             const uint8_t* from, uint8_t* to) {
   TRACING_FUNCTION();
   //This should not be reached if the cast doesnt work
@@ -1445,7 +2244,7 @@ static void do_literal_cast(Compiler* const comp,
 
         usize count = 0;
         FOR_AST(arr_expr->elements, it) {
-          do_literal_cast(comp, (ASTExpressionBase*)it, to_arr->base, from + (count * from_base_size), to + (count * to_base_size));
+          do_literal_cast(comp, it, to_arr->base, from + (count * from_base_size), to + (count * to_base_size));
           if (comp->is_panic()) {
             return;
           }
@@ -1468,1381 +2267,6 @@ static void do_literal_cast(Compiler* const comp,
         return;
       }
   }
-}
-
-static void compile_unary_operator_emit(Compiler* const comp, Context* context, State* const state, ASTUnaryOperatorExpr* expr) {
-  TRACING_FUNCTION();
-  switch (expr->op) {
-    case UNARY_OPERATOR::NEG:
-      compile_unary_operator(comp, context, state, expr, neg_operators);
-      break;
-    case UNARY_OPERATOR::ADDRESS:
-      compile_take_address(comp, context, state, expr);
-      break;
-    case UNARY_OPERATOR::DEREF:
-      compile_deref(comp, expr);
-      break;
-    default: {
-        const char* name = UNARY_OP_STRING::get(expr->op);
-
-        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                           "Type checking is not implemented for unary operator '{}'",
-                           name);
-        return;
-      }
-  }
-}
-
-static void compile_binary_operator_emit(Compiler* const comp, Context* context, State* const state, ASTBinaryOperatorExpr* const expr,
-                                         const TypeHint* hint) {
-  TRACING_FUNCTION();
-  switch (expr->op) {
-    case BINARY_OPERATOR::ADD:
-      compile_binary_operator(comp, context, state, expr, add_operators, hint);
-      break;
-    case BINARY_OPERATOR::SUB:
-      compile_binary_operator(comp, context, state, expr, sub_operators, hint);
-      break;
-    case BINARY_OPERATOR::MUL:
-      compile_binary_operator(comp, context, state, expr, mul_operators, hint);
-      break;
-    case BINARY_OPERATOR::DIV:
-      compile_binary_operator(comp, context, state, expr, div_operators, hint);
-      break;
-    case BINARY_OPERATOR::EQUIVALENT:
-      compile_binary_operator(comp, context, state, expr, eq_operators);
-      break;
-    case BINARY_OPERATOR::NOT_EQ:
-      compile_binary_operator(comp, context, state, expr, neq_operators);
-      break;
-    case BINARY_OPERATOR::LESSER:
-      compile_binary_operator(comp, context, state, expr, lesser_operators);
-      break;
-    case BINARY_OPERATOR::GREATER:
-      compile_binary_operator(comp, context, state, expr, greater_operators);
-      break;
-    case BINARY_OPERATOR::OR:
-      compile_binary_operator(comp, context, state, expr, or_operators, hint);
-      break;
-    case BINARY_OPERATOR::XOR:
-      compile_binary_operator(comp, context, state, expr, xor_operators, hint);
-      break;
-    case BINARY_OPERATOR::AND:
-      compile_binary_operator(comp, context, state, expr, and_operators, hint);
-      break;
-    case BINARY_OPERATOR::LEFT_SHIFT:
-      compile_binary_operator(comp, context, state, expr, left_shift_operators);
-      break;
-    case BINARY_OPERATOR::RIGHT_SHIFT:
-      compile_binary_operator(comp, context, state, expr, right_shift_operators);
-      break;
-    default: {
-        const char* const name = BINARY_OP_STRING::get(expr->op);
-
-        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                           "Type Checking is not implemented for binary operator '{}'",
-                           name);
-        return;
-      }
-  }
-}
-
-void set_runtime_flags(ASTExpressionBase* const expr, State* const state, bool modified, uint8_t valid_rvts) {
-  if (modified) {
-    expr->meta_flags &= ~META_FLAG::COMPTIME;
-  }
-  expr->valid_rvts &= valid_rvts;
-
-  switch (expr->ast_type) {
-    case AST_TYPE::IDENTIFIER_EXPR: {
-        Local* local = state->all_locals.data + ((ASTIdentifier*)expr)->index;
-
-        local->valid_rvts &= expr->valid_rvts;
-        break;
-      }
-    case AST_TYPE::MEMBER_ACCESS: {
-        set_runtime_flags((ASTExpressionBase*)((ASTMemberAccessExpr*)expr)->expr, state, modified, valid_rvts);
-        break;
-      }
-    case AST_TYPE::INDEX_EXPR: {
-        set_runtime_flags((ASTExpressionBase*)((ASTIndexExpr*)expr)->expr, state, modified, valid_rvts);
-        break;
-      }
-  }
-}
-
-//Stub thing
-void set_runtime_flags(AST_LOCAL l, State* const state, bool modified, uint8_t valid_rvts) {
-  set_runtime_flags((ASTExpressionBase*)l, state, modified, valid_rvts);
-}
-
-static bool test_type_satisfies_hint(META_FLAGS flags, const Type& ty, const TypeHint* hint) {
-  ASSERT(ty.is_valid());
-
-  if (hint == nullptr) return true;
-
-
-  if (hint->tht == THT::EXACT) {
-    ASSERT(hint->type.is_valid());
-
-    return ty == hint->type;
-  }
-  else if (hint->tht == THT::IMPLICIT) {
-    ASSERT(hint->type.is_valid());
-
-    return TYPE_TESTS::check_implicit_cast(flags, ty, hint->type);
-  }
-  else if (hint->tht == THT::BASE) {
-    ASSERT(hint->type.is_valid());
-    const Type* base = nullptr;
-
-    switch (ty.struct_type()) {
-      case STRUCTURE_TYPE::FIXED_ARRAY:
-        base = &ty.unchecked_base<ArrayStructure>()->base;
-        break;
-      case STRUCTURE_TYPE::POINTER:
-        base = &ty.unchecked_base<PointerStructure>()->base;
-        break;
-      default:
-        return false;
-    }
-
-    return TYPE_TESTS::check_implicit_cast(flags, *base, hint->type);
-  }
-  else if (hint->tht == THT::BASE_HINT) {
-    const Type* ty_p = &ty;
-
-    do {
-      switch (ty_p->struct_type()) {
-        case STRUCTURE_TYPE::FIXED_ARRAY:
-          ty_p = &ty.unchecked_base<ArrayStructure>()->base;
-          break;
-        case STRUCTURE_TYPE::POINTER:
-          ty_p = &ty.unchecked_base<PointerStructure>()->base;
-          break;
-        default:
-          return false;
-      }
-
-      hint = hint->other_hint;
-      ASSERT(hint != nullptr);
-    } while (hint->tht == THT::BASE_HINT);
-
-    return test_type_satisfies_hint(flags, *ty_p, hint);
-  }
-
-  INVALID_CODE_PATH("Type hint union option not covered");
-}
-
-static void compile_test_type_satisfies_hint(Compiler* const comp, const Span& span,
-                                             META_FLAGS flags, const Type& ty, const TypeHint* hint) {
-  ASSERT(ty.is_valid());
-
-  if (hint == nullptr) return;
-
-  if (hint->tht == THT::EXACT) {
-    ASSERT(hint->type.is_valid());
-
-    if (ty != hint->type) {
-      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-                         "Expected type: '{}'. Found type: '{}'",
-                         ty.name, hint->type.name);
-      return;
-    }
-  }
-  else if (hint->tht == THT::IMPLICIT) {
-    ASSERT(hint->type.is_valid());
-
-    if (!TYPE_TESTS::check_implicit_cast(flags, ty, hint->type)) {
-      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-                         "Cannot implicitly case between type: '{}' and type: '{}'",
-                         ty.name, hint->type.name);
-      return;
-    }
-  }
-  else if (hint->tht == THT::BASE) {
-    ASSERT(hint->type.is_valid());
-    const Type* base = nullptr;
-
-    switch (ty.struct_type()) {
-      case STRUCTURE_TYPE::FIXED_ARRAY:
-        base = &ty.unchecked_base<ArrayStructure>()->base;
-        break;
-      case STRUCTURE_TYPE::POINTER:
-        base = &ty.unchecked_base<PointerStructure>()->base;
-        break;
-      default:
-        comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-                           "'{}' is not an array or pointer type so has no base type",
-                           ty.name);
-        return;
-    }
-
-    if (!TYPE_TESTS::check_implicit_cast(flags, *base, hint->type)) {
-      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-                         "Could not implicitly cast '{}' to '{}'",
-                         hint->type.name, base->name);
-      return;
-    }
-  }
-  else if (hint->tht == THT::BASE_HINT) {
-    const Type* ty_p = &ty;
-
-    do {
-      switch (ty_p->struct_type()) {
-        case STRUCTURE_TYPE::FIXED_ARRAY:
-          ty_p = &ty.unchecked_base<ArrayStructure>()->base;
-          break;
-        case STRUCTURE_TYPE::POINTER:
-          ty_p = &ty.unchecked_base<PointerStructure>()->base;
-          break;
-        default:
-          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-                             "'{}' is not an array or pointer type so has no base type",
-                             ty_p->name);
-          return;
-      }
-
-      hint = hint->other_hint;
-      ASSERT(hint != nullptr);
-    } while (hint->tht == THT::BASE_HINT);
-
-    compile_test_type_satisfies_hint(comp, span, flags, ty, hint);
-  }
-}
-
-static Type build_pointer_type_from_type_hint(Compiler* const comp, Context* context, const Span& span, const TypeHint* t_hint) {
-  if (t_hint->tht == THT::EXACT) {
-    return t_hint->type;
-  }
-  else if (t_hint->tht == THT::BASE) {
-    return to_type(find_or_make_pointer_structure(comp, context, t_hint->type));
-  }
-  else {
-    return to_type(find_or_make_pointer_structure(comp, context, build_pointer_type_from_type_hint(comp, context, span, t_hint->other_hint)));
-  }
-}
-
-//Note: Recursive
-void compile_type_of_expression(Compiler* const comp,
-                                Context* const context,
-                                State* const state,
-                                ASTExpressionBase* const expr,
-                                const TypeHint* const hint) {
-  TRACING_FUNCTION();
-
-  //Already typed
-  if (expr->node_type.is_valid() && test_type_satisfies_hint(expr->meta_flags, expr->node_type, hint)) {
-    return;
-  }
-
-  ASSERT(expr->valid_rvts != 0);//shouldnt start 0
-  DEFER(expr) { ASSERT(expr->valid_rvts != 0); };//shouldnt end 0
-
-  switch (expr->ast_type) {
-    case AST_TYPE::STRUCT_EXPR: {
-        ASTStructExpr* se = (ASTStructExpr*)expr;
-        ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
-
-        ASSERT(struct_body->type.is_valid());
-
-        SET_MASK(expr->meta_flags, META_FLAG::COMPTIME);
-        expr->node_type = comp->services.builtin_types->t_type;
-
-        break;
-      }
-    case AST_TYPE::LAMBDA_EXPR: {
-        //Never type the actual lambda here, its typed elsewhere
-        ASTLambdaExpr* le = (ASTLambdaExpr*)expr;
-        ASTLambda* lambda = (ASTLambda*)le->lambda;
-        ASTFuncSig* sig = (ASTFuncSig*)lambda->sig;
-
-        ASSERT(sig->sig->sig_struct != nullptr);
-
-        SET_MASK(expr->meta_flags, META_FLAG::COMPTIME);
-        expr->node_type = to_type(sig->sig->sig_struct);
-        break;
-      }
-    case AST_TYPE::MEMBER_ACCESS: {
-        ASTMemberAccessExpr* member = (ASTMemberAccessExpr*)expr;
-        ASTExpressionBase* base = ((ASTExpressionBase*)member->expr);
-
-        base->call_leaf = expr->call_leaf;
-
-        //Compile the object first
-        compile_type_of_expression(comp, context, state, base, nullptr);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        //Assignable if the base is assignable
-        expr->meta_flags = base->meta_flags;
-
-        ASSERT(base->node_type.is_valid());
-
-        if (base->node_type.struct_type() != STRUCTURE_TYPE::COMPOSITE) {
-          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                             "Type '{}' does not have any members (it is not a composite type)",
-                             base->node_type.name);
-          return;
-        }
-
-        const Type& cmp_t = base->node_type;
-
-        const auto* cs = cmp_t.unchecked_base<CompositeStructure>();
-
-        auto i = cs->elements.begin();
-        auto end = cs->elements.end();
-
-        expr->node_type.structure ={};//reset
-
-        for (; i < end; i++) {
-          if (i->name == member->name) {
-            member->node_type = i->type;
-            member->offset = i->offset;
-            break;
-          }
-        }
-
-        if (!expr->node_type.is_valid()) {
-          comp->report_error(ERROR_CODE::NAME_ERROR, expr->node_span,
-                             "Type '{}' has no member '{}'",
-                             cmp_t.name, member->name);
-          return;
-        }
-
-        //TODO: Make this work for other types
-        set_runtime_flags(base, state, false, (uint8_t)RVT::MEMORY);
-
-        expr->makes_call =  base->makes_call;
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        break;
-      }
-    case AST_TYPE::INDEX_EXPR: {
-        ASTIndexExpr* index_expr = (ASTIndexExpr*)expr;
-        ASTExpressionBase* base = (ASTExpressionBase*)index_expr->expr;
-        ASTExpressionBase* index = (ASTExpressionBase*)index_expr->index;
-
-        base->call_leaf = expr->call_leaf;
-        index->call_leaf = expr->call_leaf;
-
-        if (hint == nullptr) {
-          compile_type_of_expression(comp, context, state, base, nullptr);
-        }
-        else {
-          TypeHint index_hint ={};
-          if (hint->tht == THT::BASE || hint->tht == THT::BASE_HINT) {
-            index_hint.tht = THT::BASE_HINT;
-            index_hint.other_hint = hint;
-          }
-          else {
-            index_hint.tht = THT::BASE;
-            index_hint.type = hint->type;
-          }
-
-          compile_type_of_expression(comp, context, state, base, &index_hint);
-        }
-
-        if (comp->is_panic()) {
-          return;
-        }
-
-        expr->meta_flags = base->meta_flags;
-
-        ASSERT(base->node_type.is_valid());
-
-        compile_type_of_expression(comp, context, state, index, nullptr);
-        if (comp->is_panic()) {
-          return;
-        }
-        ASSERT(index->node_type.is_valid());
-
-        if (!TYPE_TESTS::can_index(base->node_type)) {
-          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
-                             "Cannot take index of type: {}",
-                             base->node_type.name);
-          return;
-        }
-
-        if (!TYPE_TESTS::is_int(index->node_type)) {
-          comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, index->node_span,
-                             "An index must be in integer\n"
-                             "Found non-integer type: {}",
-                             index->node_type.name);
-          return;
-        }
-
-
-        if (TEST_MASK(index->meta_flags, META_FLAG::LITERAL)) {
-          TypeHint inner_hint ={};
-          inner_hint.tht = THT::EXACT;
-          inner_hint.type = comp->services.builtin_types->t_u64;
-
-          compile_type_of_expression(comp, context, state, index, &inner_hint);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
-        if (!TEST_MASK(index->meta_flags, META_FLAG::COMPTIME)) {
-          //If the index is not known at compile time then the array must be in memory or in a register
-          uint8_t valids = (uint8_t)RVT::MEMORY;
-
-          if (base->node_type.structure->size <= 8) {
-            //Can be in a register if it will fit
-            valids |= RVT::REGISTER;
-          }
-
-          set_runtime_flags(base, state, false, valids);
-        }
-
-        expr->node_type = base->node_type.unchecked_base<ArrayStructure>()->base;
-        expr->makes_call = index->makes_call || base->makes_call;
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-        break;
-      }
-    case AST_TYPE::TUPLE_LIT: {
-        ASTTupleLitExpr* tup = (ASTTupleLitExpr*)expr;
-
-        //Assume comptime to start with
-        SET_MASK(expr->meta_flags, META_FLAG::COMPTIME);
-
-        if (hint == nullptr) {
-          Array<Type> element_types ={};
-
-          FOR_AST(tup->elements, it) {
-            ASTExpressionBase* i = (ASTExpressionBase*)it;
-            i->call_leaf = expr->call_leaf;
-
-            compile_type_of_expression(comp, context, state, i, nullptr);
-            if (comp->is_panic()) {
-              return;
-            }
-            ASSERT(i->node_type.is_valid());
-
-            element_types.insert(i->node_type);
-
-            expr->makes_call |= i->makes_call;
-            expr->meta_flags &= i->meta_flags;
-          }
-
-          const Structure* tuple_s
-            = find_or_make_tuple_structure(comp,
-                                           context,
-                                           std::move(element_types));
-
-          //Create the type
-          expr->node_type = to_type(tuple_s);
-        }
-        else {
-          if (hint->tht != THT::EXACT) {
-            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                               "Tuple expressions have no base type");
-            return;
-          }
-
-          if (hint->type.struct_type() != STRUCTURE_TYPE::COMPOSITE) {
-            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                               "'{}' is not a composite type",
-                               hint->type.name);
-            return;
-          }
-
-          const auto* s = hint->type.unchecked_base<CompositeStructure>();
-
-          auto s_i = s->elements.begin();
-
-          FOR_AST(tup->elements, it) {
-            ASTExpressionBase* i = (ASTExpressionBase*)it;
-            i->call_leaf = expr->call_leaf;
-
-            TypeHint inner_h ={};
-            inner_h.tht = THT::EXACT;
-            inner_h.type = s_i->type;
-
-            compile_type_of_expression(comp, context, state, i, &inner_h);
-            if (comp->is_panic()) {
-              return;
-            }
-            ASSERT(i->node_type.is_valid());
-
-            expr->makes_call |= i->makes_call;
-            expr->meta_flags &= i->meta_flags;
-
-            s_i++;
-          }
-
-          expr->node_type = hint->type;
-        }
-
-        //Temp?
-        expr->meta_flags &= ~META_FLAG::ASSIGNABLE;
-
-        //Can currently on load into memory
-        expr->valid_rvts &= RVT::MEMORY;
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        break;
-      }
-    case AST_TYPE::ARRAY_EXPR: {
-        ASTArrayExpr* arr_expr = (ASTArrayExpr*)expr;
-
-        arr_expr->meta_flags &= ~META_FLAG::ASSIGNABLE;
-
-        //Assume true to start with
-        expr->meta_flags |= META_FLAG::COMPTIME;
-
-        Type base ={};
-
-        TypeHint inner_hint_holder ={};
-
-        bool fixed_hint = false;
-
-        if (hint != nullptr) {
-          if (hint->tht == THT::BASE_HINT) {
-            const auto* b_h = hint->other_hint;
-
-            //Set inner_h_ptr
-            inner_hint_holder = *b_h;
-
-            fixed_hint = hint->other_hint->tht == THT::EXACT;
-          }
-          else if (hint->tht == THT::BASE) {
-            inner_hint_holder.tht = THT::EXACT;
-            inner_hint_holder.type = hint->type;
-            fixed_hint = true;
-          }
-          else if (hint->tht == THT::EXACT) {
-            if (hint->type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
-              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                                 "Could not implicity cast array to non-array type: '{}'",
-                                 hint->type.name);
-              return;
-            }
-
-            const auto* arr_s = hint->type.unchecked_base<ArrayStructure>();
-
-            inner_hint_holder.tht = THT::EXACT;
-            inner_hint_holder.type = arr_s->base;
-            base = arr_s->base;
-
-            fixed_hint = true;
-          }
-        }
-
-        const TypeHint* inner_hint = &inner_hint_holder;
-
-        if (!fixed_hint) {
-          if (arr_expr->elements.start) {
-            ASTExpressionBase* base_test = (ASTExpressionBase*)arr_expr->elements.start->curr;
-
-            base_test->call_leaf = expr->call_leaf;
-
-            compile_type_of_expression(comp, context, state, base_test, inner_hint);
-            if (comp->is_panic()) {
-              return;
-            }
-            ASSERT(base_test->node_type.is_valid());
-
-            if (!base.is_valid()) {
-              base = base_test->node_type;
-            }
-            else {
-              //Check new element matches
-              if (TYPE_TESTS::check_implicit_cast(base_test->meta_flags, base_test->node_type, base)) {
-                base = base_test->node_type;//Will always be either same or more specific
-              }
-            }
-
-            inner_hint_holder.tht = THT::EXACT;
-            inner_hint_holder.type = base;
-            inner_hint = &inner_hint_holder;
-
-            FOR_AST(arr_expr->elements, it) {
-              ASTExpressionBase* i = (ASTExpressionBase*)it;
-
-              if (i->node_type != base) {
-                if (!TYPE_TESTS::check_implicit_cast(i->meta_flags, i->node_type, base)) {
-                  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, i->node_span,
-                                     "Array type was inferred as '{}'\n"
-                                     "Cannot implicity cast '{}' to '{}'",
-                                     base.name, i->node_type.name, base.name);
-                  return;
-                }
-                else {
-                  compile_type_of_expression(comp, context, state, i, inner_hint);
-                  if (comp->is_panic()) {
-                    return;
-                  }
-                }
-              }
-            }
-
-            expr->makes_call |= base_test->makes_call;
-            expr->meta_flags &= base_test->meta_flags;
-          }
-
-          if (!base.is_valid()) {
-            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                               "Array type could not inferred\n"
-                               "This is probably because the array was empty (i.e. [])");
-            return;
-          }
-          else {
-            expr->node_type = to_type(find_or_make_array_structure(comp, context, base, arr_expr->elements.count));
-          }
-        }
-        else {
-          ASSERT(hint != nullptr);
-
-          FOR_AST(arr_expr->elements, it) {
-            ASTExpressionBase* i = (ASTExpressionBase*)it;
-            i->call_leaf = expr->call_leaf;
-
-            compile_type_of_expression(comp, context, state, i, inner_hint);
-            if (comp->is_panic()) {
-              return;
-            }
-            ASSERT(i->node_type.is_valid());
-
-            expr->makes_call |= i->makes_call;
-            expr->meta_flags &= i->meta_flags;
-          }
-
-          if (hint->tht == THT::EXACT) {
-            expr->node_type = hint->type;
-          }
-          else {
-            expr->node_type = to_type(find_or_make_array_structure(comp, context, base, arr_expr->elements.count));
-          }
-        }
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        break;
-      }
-    case AST_TYPE::ASCII_CHAR: {
-        expr->node_type = comp->services.builtin_types->t_ascii;
-        expr->meta_flags |= META_FLAG::COMPTIME;
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-        break;
-      }
-    case AST_TYPE::ASCII_STRING: {
-        ASTAsciiString* ascii = (ASTAsciiString*)expr;
-        const size_t len = ascii->string->len + 1;
-
-        expr->node_type = to_type(find_or_make_array_structure(comp, context, comp->services.builtin_types->t_ascii, len));
-        expr->meta_flags |= META_FLAG::COMPTIME;
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        break;
-      }
-    case AST_TYPE::NUMBER: {
-        ASTNumber* num = (ASTNumber*)expr;
-
-        constexpr auto smallest_type_for_integer = [](const BuiltinTypes* types, u64 val) -> Type {
-          if (val < 0) {
-            if (val >= INT8_MIN) {
-              return types->t_i8;
-            }
-            /*else if (val >= INT8_MIN) {
-              return types->t_i16;
-            }*/
-            else if (val >= INT32_MIN) {
-              return types->t_i32;
-            }
-            else if (val >= INT64_MIN) {
-              return types->t_i64;
-            }
-            else {
-              INVALID_CODE_PATH("There isnt a big enough integer");
-            }
-          }
-          else {
-            if (val < UINT8_MAX) {
-              return types->t_u8;
-            }
-            /*else if (val <= UINT16_MAX) {
-              return types->t_u16;
-            }*/
-            else if (val <= UINT32_MAX) {
-              return types->t_u32;
-            }
-            else if (val <= UINT64_MAX) {
-              return types->t_u64;
-            }
-            else {
-              INVALID_CODE_PATH("There isnt a big enough integer");
-            }
-          }
-
-          return {};
-        };
-
-        expr->meta_flags |= META_FLAG::LITERAL;
-        expr->meta_flags |= META_FLAG::COMPTIME;
-
-        if (num->suffix == nullptr) {
-          const Type min_size_int = smallest_type_for_integer(comp->services.builtin_types,
-                                                              num->value);
-
-          if (hint != nullptr) {
-            if (hint->tht != THT::EXACT) {
-              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                                 "This literal has no base type");
-              return;
-            }
-
-            expr->node_type = hint->type;
-
-            if (!TYPE_TESTS::check_implicit_cast(expr->meta_flags, min_size_int, expr->node_type)) {
-              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                                 "Could not implicity cast literal of type '{}' to type '{}'\n"
-                                 "Integer types are decided by the smallest value that can hold it\n"
-                                 "If you want a different value try using an integer suffix",
-                                 min_size_int.name, expr->node_type.name);
-              return;
-            }
-          }
-          else {
-            expr->node_type = min_size_int;
-          }
-        }
-        else {
-          if (num->suffix == comp->services.builtin_types->t_i64.name) {
-            expr->node_type = comp->services.builtin_types->t_i64;
-          }
-          else if (num->suffix == comp->services.builtin_types->t_u64.name) {
-            expr->node_type = comp->services.builtin_types->t_u64;
-          }
-          else {
-            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                               "Invalid integer literal suffix type '{}'",
-                               num->suffix);
-            return;
-          }
-
-          compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
-        break;
-      }
-    case AST_TYPE::IDENTIFIER_EXPR: {
-        ASTIdentifier* ident = (ASTIdentifier*)expr;
-        const InternString* name = ident->name;
-
-        Local* const loc = state->find_local(name);
-
-        const Decl* decl = nullptr;
-        if (loc != nullptr) {
-          ident->ast_type = AST_TYPE::LOCAL;
-
-          ident->index = loc - state->all_locals.data;
-          expr->node_type = loc->decl.type;
-
-          loc->valid_rvts &= expr->valid_rvts;
-          decl = &loc->decl;
-        }
-        else {
-          NamedElement* non_local = comp->services.names->find_name(context->current_namespace, name);
-
-          //Must be true if this isnt a local variable
-          ASSERT(non_local != nullptr && non_local->unknowns == 0);
-
-          if (non_local->globals.size != 1) {
-            comp->report_error(ERROR_CODE::NAME_ERROR, expr->node_span,
-                               "Name '{}' is ambiguous in this context", name);
-            return;
-          }
-
-          const Global* glob = non_local->globals.data[0];
-
-          if (!glob->decl.type.is_valid()) {
-            comp->set_dep(context, glob->compilation_unit);
-          }
-
-          ident->ast_type = AST_TYPE::GLOBAL;
-          ident->ptr = (const void*)glob;
-          expr->node_type   = glob->decl.type;
-
-          decl = &glob->decl;
-        }
-
-        ASSERT(expr->node_type.is_valid());
-        ASSERT(decl != nullptr);
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        //Can be comptime
-        expr->meta_flags = decl->meta_flags;
-
-        break;
-      }
-    case AST_TYPE::LOCAL: {
-        //Can be reached during type inference
-        ASTIdentifier* ident = (ASTIdentifier*)expr;
-
-        Local* const loc = state->all_locals.data + ident->index;
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, loc->decl.meta_flags, loc->decl.type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        expr->meta_flags = loc->decl.meta_flags;
-        break;
-      }
-    case AST_TYPE::GLOBAL: {
-        //Can be reached during type inference
-        ASTIdentifier* ident = (ASTIdentifier*)expr;
-        const Global* glob = ((const Global*)ident->ptr);
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, glob->decl.meta_flags, glob->decl.type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        expr->meta_flags = glob->decl.meta_flags;
-        break;
-      }
-    case AST_TYPE::CAST: {
-        ASTCastExpr* cast_expr = (ASTCastExpr*)expr;
-        ASTExpressionBase* cast = (ASTExpressionBase*)cast_expr->expr;
-        ASTTypeBase* ty = (ASTTypeBase*)cast_expr->type;
-
-        cast->call_leaf = expr->call_leaf;
-        expr->meta_flags |= META_FLAG::COMPTIME;
-
-        if (!ty->type.is_valid()) {
-          type_check_ast_node(comp, context, ty);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
-        compile_type_of_expression(comp, context, state, cast, nullptr);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        ASSERT(cast->node_type.is_valid());
-
-        //may set comtime to false
-        cast_operator_type(comp, context, state, cast_expr);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        expr->meta_flags &= cast->meta_flags;
-        expr->makes_call = cast->makes_call;
-        expr->node_type = ty->type;
-        break;
-      }
-    case AST_TYPE::UNARY_OPERATOR: {
-        ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)expr;
-        ASTExpressionBase* prim = (ASTExpressionBase*)un_op->expr;
-        prim->call_leaf = expr->call_leaf;
-
-        TypeHint inner_hint_holder ={};
-        const TypeHint* inner_hint = nullptr;
-
-        if (hint != nullptr) {
-          inner_hint = &inner_hint_holder;
-
-          switch (un_op->op) {
-            case UNARY_OPERATOR::NEG: {
-                if (hint->tht == THT::EXACT) {
-                  //TODO: This may be wrong
-                  inner_hint = hint;
-                }
-                else {
-                  //Whatever this might entail
-                  //No idea how this can even be called but maybe it will
-                  INVALID_CODE_PATH("Some weird stuff with type hints is happening");
-                }
-                break;
-              }
-            case UNARY_OPERATOR::ADDRESS: {
-                switch (hint->tht) {
-                  case THT::EXACT: {
-                      if (hint->type.struct_type() != STRUCTURE_TYPE::POINTER) {
-                        inner_hint = nullptr;
-                      }
-                      else {
-                        inner_hint_holder.tht = THT::EXACT;
-                        const auto* ps = hint->type.unchecked_base<PointerStructure>();
-                        inner_hint_holder.type = ps->base;
-                      }
-
-                      break;
-                    }
-                  case THT::BASE_HINT: {
-                      inner_hint = hint->other_hint;
-                      break;
-                    }
-                  case THT::BASE: {
-                      inner_hint_holder.tht = THT::EXACT;
-                      inner_hint_holder.type = hint->type;
-                      break;
-                    }
-                }
-                break;
-              }
-            case UNARY_OPERATOR::DEREF: {
-                expr->meta_flags |= META_FLAG::ASSIGNABLE;
-
-                if (hint->tht == THT::EXACT) {
-                  inner_hint_holder.tht = THT::EXACT;
-                  inner_hint_holder.type = to_type(find_or_make_pointer_structure(comp, context, hint->type));
-                }
-                else {
-                  inner_hint_holder.tht = THT::BASE_HINT;
-                  inner_hint_holder.other_hint = hint;
-                }
-                break;
-              }
-          }
-        }
-
-        compile_type_of_expression(comp, context, state, prim, inner_hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        expr->meta_flags = prim->meta_flags;
-        expr->makes_call = prim->makes_call;
-
-        compile_unary_operator_emit(comp, context, state, un_op);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        break;
-      }
-    case AST_TYPE::BINARY_OPERATOR: {
-        ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)expr;
-
-        ASTExpressionBase* left = (ASTExpressionBase*)bin_op->left;
-        ASTExpressionBase* right = (ASTExpressionBase*)bin_op->right;
-
-        left->call_leaf = expr->call_leaf;
-        right->call_leaf = expr->call_leaf;
-
-        //Do hints later
-
-        compile_type_of_expression(comp, context, state, left, nullptr);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        compile_type_of_expression(comp, context, state, right, nullptr);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        expr->meta_flags = left->meta_flags & right->meta_flags;
-        expr->makes_call = left->makes_call || right->makes_call;
-
-        if (!TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)) {
-          if (can_compile_const_value(left)) {
-            ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
-            unit->expr = left;
-
-            comp->set_dep(context, unit);
-          }
-          else if (can_compile_const_value(right)) {
-            ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
-            unit->expr = right;
-
-            comp->set_dep(context, unit);
-          }
-        }
-
-        //pass in the hint for some operands
-        compile_binary_operator_emit(comp, context, state, bin_op, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        break;
-      }
-    case AST_TYPE::FUNCTION_CALL: {
-        ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)expr;
-
-        //TODO: Allow function execution at compile time
-        //Means we need to have a way to know which functions to load
-        //Currently it just expects to find a function but doesnt and calls the start of the code
-        expr->meta_flags |= ~META_FLAG::COMPTIME;
-
-        expr->makes_call = true;
-
-        FOR_AST(call->arguments, it) {
-          ASTExpressionBase* i = (ASTExpressionBase*)it;
-
-          i->call_leaf = true;
-
-          compile_type_of_expression(comp, context, state, i, nullptr);
-          if (comp->is_panic()) {
-            return;
-          }
-
-          expr->meta_flags &= i->meta_flags;
-        }
-
-
-        if (call->sig == nullptr) {
-          compile_find_function_call(comp, context, state, call);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
-        const auto* sig = call->sig;
-
-        {
-          const size_t size = sig->parameter_types.size;
-
-          if (call->arguments.count != size) {
-            comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                               "Compiler linked a function with {} parameters for a call with {} arguments!",
-                               size, call->arguments.count);
-            return;
-          }
-
-          //Do implicit casts
-          auto sig_it = sig->parameter_types.begin();
-
-          FOR_AST(call->arguments, it) {
-            ASTExpressionBase* i = (ASTExpressionBase*)it;
-
-            TypeHint inner_hint ={};
-
-            inner_hint.tht = THT::EXACT;
-            inner_hint.type = *sig_it;
-
-            compile_type_of_expression(comp, context, state, i, &inner_hint);
-            if (comp->is_panic()) {
-              return;
-            }
-
-            sig_it++;
-          }
-        }
-
-        if (!TEST_MASK(expr->meta_flags, META_FLAG::COMPTIME)) {
-          FOR_AST(call->arguments, it) {
-            ASTExpressionBase* i = (ASTExpressionBase*)it;
-
-            if (can_compile_const_value(i)) {
-              ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
-              unit->expr = i;
-
-              comp->set_dep(context, unit);
-            }
-          }
-        }
-
-        //Last thing to do it set return type
-        expr->node_type = sig->return_type;
-
-        compile_test_type_satisfies_hint(comp, expr->node_span, expr->meta_flags, expr->node_type, hint);
-        if (comp->is_panic()) {
-          return;
-        }
-        break;
-      }
-    default: {
-        comp->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                           "Invalid Expression type found! AST id: '{}'",
-                           (usize)expr->ast_type);
-        return;
-      }
-  }
-
-  ASSERT(expr->node_type.is_valid());
-}
-
-static void compile_type_of_decl(Compiler* const comp,
-                                 Context* const context,
-                                 State* const state,
-                                 ASTDecl* const decl) {
-  TRACING_FUNCTION();
-  ASTExpressionBase* decl_expr = (ASTExpressionBase*)decl->expr;
-
-  if (decl->type_ast != nullptr) {
-    if (!decl->type_ast->node_type.is_valid()) {
-      type_check_ast_node(comp, context, decl->type_ast);
-      if (comp->is_panic()) {
-        return;
-      }
-    }
-
-    Type type = ((ASTTypeBase*)decl->type_ast)->type;
-
-    if (!decl->expr->node_type.is_valid()) {
-      TypeHint type_hint ={};
-      type_hint.tht = THT::EXACT;
-      type_hint.type = type;
-
-      compile_type_of_expression(comp, context, state, decl_expr, &type_hint);
-      if (comp->is_panic()) {
-        return;
-      }
-    }
-
-    decl->type = type;
-  }
-  else {
-    if (!decl->expr->node_type.is_valid()) {
-      compile_type_of_expression(comp, context, state, decl_expr, nullptr);
-      if (comp->is_panic()) {
-        return;
-      }
-    }
-
-    decl->type = decl->expr->node_type;
-  }
-
-  ASSERT(decl->type.is_valid());
-
-  //if (decl->structure->type == STRUCTURE_TYPE::SIMPLE_LITERAL
-  //    || decl->structure->type == STRUCTURE_TYPE::TUPLE_LITERAL) {
-
-  //  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, decl->node_span,
-  //                     "The type of '{}' was infered as '{}' which does not have a given size\n"
-  //                     "Please use a different type (hopefully temporary)",
-  //                     decl->name, decl->structure->name);
-  //  return;
-  //}
-
-  if (decl->compile_time_const
-      && (decl_expr == nullptr || !TEST_MASK(decl_expr->meta_flags, META_FLAG::COMPTIME))) {
-    comp->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
-                       "Compile time declaration '{}' must be initialized by a compile time expression",
-                       decl->name);
-    return;
-  }
-}
-
-static void compile_type_of_statement(Compiler* const comp,
-                                      Context* context,
-                                      Function* const func,
-                                      State* const state,
-                                      UntypedCode* untyped,
-                                      AST* const statement) {
-  TRACING_FUNCTION();
-
-  switch (statement->ast_type) {
-    case AST_TYPE::ASSIGN: {
-        ASTAssign* assign = (ASTAssign*)statement;
-        ASTExpressionBase* assign_to = (ASTExpressionBase*)assign->assign_to;
-        ASTExpressionBase* value = (ASTExpressionBase*)assign->value;
-
-        compile_type_of_expression(comp, context, state, assign_to, nullptr);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        if (!TEST_MASK(assign_to->meta_flags, META_FLAG::ASSIGNABLE)) {
-          comp->report_error(ERROR_CODE::CONST_ERROR, assign_to->node_span,
-                             "Cannot assign to non-assignable expression");
-          return;
-        }
-
-        set_runtime_flags(assign_to, state, true, (uint8_t)RVT::MEMORY);
-
-        TypeHint hint ={};
-        hint.tht = THT::EXACT;
-        hint.type = assign_to->node_type;
-
-        compile_type_of_expression(comp, context, state, value, &hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        return;
-      }
-    case AST_TYPE::IF_ELSE: {
-        ASTIfElse* const if_else = (ASTIfElse*)statement;
-
-        TypeHint hint ={};
-        hint.tht = THT::EXACT;
-        hint.type = comp->services.builtin_types->t_bool;
-
-        compile_type_of_expression(comp, context, state, (ASTExpressionBase*)if_else->condition, &hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-
-        new_scope(&untyped->itr, nullptr, if_else->if_statement, state);
-        new_scope(&untyped->itr, nullptr, if_else->else_statement, state);
-        return;
-      }
-    case AST_TYPE::WHILE: {
-        ASTWhile* const while_loop = (ASTWhile*)statement;
-
-        TypeHint hint ={};
-        hint.tht = THT::EXACT;
-        hint.type = comp->services.builtin_types->t_bool;
-
-        compile_type_of_expression(comp, context, state, (ASTExpressionBase*)while_loop->condition, &hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        new_scope(&untyped->itr, nullptr, while_loop->statement, state);
-        return;
-      }
-    case AST_TYPE::BLOCK: {
-        ASTBlock* block = (ASTBlock*)statement;
-
-        auto locals = state->active_locals.size;
-        DEFER(&) { state->active_locals.size = locals; };
-
-        new_scope(&untyped->itr, block->block.start, nullptr, state);
-        return;
-      }
-    case AST_TYPE::DECL: {
-        ASTDecl* const decl = (ASTDecl*)statement;
-
-        compile_type_of_decl(comp, context, state, decl);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        ASTExpressionBase* decl_expr = (ASTExpressionBase*)decl->expr;
-
-        if (can_compile_const_value(decl_expr)) {
-          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
-          unit->expr = decl_expr;
-
-          comp->set_dep(context, unit);
-        }
-
-        assert_empty_name(comp, statement->node_span, context->current_namespace, decl->name);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        //Check for shadowing
-
-        const Local* shadowing = state->find_local(decl->name);
-
-        if (shadowing != nullptr) {
-          comp->report_error(ERROR_CODE::NAME_ERROR, statement->node_span,
-                             "Attempted to shadow the local variable '{}'",
-                             decl->name);
-          return;
-        }
-
-
-        size_t loc_index = state->all_locals.size;
-        decl->local_index = loc_index;
-
-        state->all_locals.insert_uninit(1);
-        auto* loc = state->all_locals.back();
-
-        ASSERT(decl->type.is_valid());
-
-        loc->decl.name = decl->name;
-        loc->decl.type = decl->type;
-        loc->decl.source = decl;
-        if (decl->compile_time_const) {
-          loc->decl.meta_flags |= META_FLAG::COMPTIME;
-        }
-        else {
-          loc->decl.meta_flags |= META_FLAG::ASSIGNABLE;
-        }
-
-        ASSERT(loc->decl.type.is_valid());
-
-        if (TEST_MASK(loc->decl.meta_flags, META_FLAG::COMPTIME) && !TEST_MASK(decl_expr->meta_flags, META_FLAG::COMPTIME)) {
-          comp->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
-                             "Cannot initialize a compile time constant with "
-                             "a non compile time constant value");
-          return;
-        }
-
-        state->active_locals.insert(decl->local_index);
-
-        return;
-      }
-    case AST_TYPE::RETURN: {
-        ASTReturn* ret = (ASTReturn*)statement;
-
-        TypeHint hint ={};
-        hint.tht  = THT::EXACT;
-        hint.type = func->signature.sig_struct->return_type;
-
-        ASTExpressionBase* const expr = (ASTExpressionBase*)ret->expr;
-        compile_type_of_expression(comp, context, state, expr, &hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        if (can_compile_const_value(expr)) {
-          ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
-          unit->expr = expr;
-
-          comp->set_dep(context, unit);
-        }
-        return;
-      }
-    default: {
-        //Assume its an expression for now
-        compile_type_of_expression(comp, context, state, (ASTExpressionBase*)statement, nullptr);
-      }
-  }
-
-  comp->report_error(ERROR_CODE::INTERNAL_ERROR, statement->node_span,
-                     "Reached end of statement type checking without exiting\n"
-                     "Statement type: {}\n", (usize)statement->ast_type);
 }
 
 static RuntimeValue advance_runtime_arg(State* state,
@@ -3265,22 +2689,22 @@ static void load_const_to_reg(Compiler* const comp,
 
   switch (constant.size) {
     case 1: {
-        uint8_t u8 = *constant.ptr;
+        uint8_t u8 = *(const uint8_t*)constant.ptr;
         ByteCode::EMIT::SET_R8_TO_8(code->code, (uint8_t)reg.val, u8);
         break;
       }
     case 2: {
-        uint16_t u16 = x16_from_bytes(constant.ptr);
+        uint16_t u16 = x16_from_bytes((const uint8_t*)constant.ptr);
         ByteCode::EMIT::SET_R16_TO_16(code->code, (uint8_t)reg.val, u16);
         break;
       }
     case 4: {
-        uint32_t u32 = x32_from_bytes(constant.ptr);
+        uint32_t u32 = x32_from_bytes((const uint8_t*)constant.ptr);
         ByteCode::EMIT::SET_R32_TO_32(code->code, (uint8_t)reg.val, u32);
         break;
       }
     case 8: {
-        uint64_t u64 = x64_from_bytes(constant.ptr);
+        uint64_t u64 = x64_from_bytes((const uint8_t*)constant.ptr);
         ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)reg.val, u64);
         break;
       }
@@ -3528,14 +2952,14 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                            Context* const context,
                                            State* const state,
                                            CodeBlock* const code,
-                                           const ASTExpressionBase* const expr,
+                                           AST_LOCAL expr,
                                            RuntimeHint* hint);
 
 static RuntimeValue compile_bytecode_of_expression_new(Compiler* const comp,
                                                        Context* const context,
                                                        State* const state,
                                                        CodeBlock* const code,
-                                                       const ASTExpressionBase* const expr,
+                                                       AST_LOCAL expr,
                                                        uint8_t hint) {
   RuntimeHint rt_hint ={};
   rt_hint.is_hint = true;
@@ -3551,7 +2975,7 @@ static void compile_bytecode_of_expression_existing(Compiler* const comp,
                                                     Context* const context,
                                                     State* const state,
                                                     CodeBlock* const code,
-                                                    const ASTExpressionBase* const expr,
+                                                    AST_LOCAL expr,
                                                     RuntimeValue* hint) {
   ASSERT(hint->type != RVT::CONST);//Cant load to an existing constant
 
@@ -3600,11 +3024,9 @@ static void compile_function_call(Compiler* const comp,
   {
     usize i = 0;
     FOR_AST(call->arguments, it) {
-      const ASTExpressionBase* inner_expr = (const ASTExpressionBase*)it;
       const Type call_type = call->sig->parameter_types.data[i];
 
-
-      const RuntimeValue val = compile_bytecode_of_expression_new(comp, context, state, code, inner_expr, ALL_RVTS);
+      const RuntimeValue val = compile_bytecode_of_expression_new(comp, context, state, code, it, ALL_RVTS);
 
       parameter_vals.insert({ val, call_type.structure });
       i++;
@@ -3747,7 +3169,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                            Context* const context,
                                            State* const state,
                                            CodeBlock* const code,
-                                           const ASTExpressionBase* const expr,
+                                           AST_LOCAL expr,
                                            RuntimeHint* hint) {
   TRACING_FUNCTION();
 
@@ -3759,14 +3181,14 @@ static void compile_bytecode_of_expression(Compiler* const comp,
     state->control_flow.expression_num++;
   };
 
-  if (expr->const_val != nullptr) {
+  if (expr->value != nullptr) {
     //Compile time expression
 
     //Copy the value to a new constant
     const size_t size = expr->node_type.structure->size;
 
     uint8_t* bytes = (uint8_t*)comp->constants.alloc_no_construct(size);
-    const uint8_t* c_bytes = (const uint8_t*)expr->const_val;
+    const uint8_t* c_bytes = (const uint8_t*)expr->value;
 
     memcpy_ts(bytes, size, c_bytes, size);
 
@@ -3822,7 +3244,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         ASSERT(hint != nullptr);
 
         ASTMemberAccessExpr* member_e = (ASTMemberAccessExpr*)expr;
-        ASTExpressionBase* m_expr = (ASTExpressionBase*)member_e->expr;
+        AST_LOCAL m_expr = member_e->expr;
 
         RuntimeValue obj = compile_bytecode_of_expression_new(comp,
                                                               context,
@@ -3856,8 +3278,8 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         const size_t base_size = expr->node_type.structure->size;
 
         ASTIndexExpr* index = (ASTIndexExpr*)expr;
-        ASTExpressionBase* index_expr = (ASTExpressionBase*)index->expr;
-        ASTExpressionBase* index_index = (ASTExpressionBase*)index->index;
+        AST_LOCAL index_expr = index->expr;
+        AST_LOCAL index_index = index->index;
 
         ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
 
@@ -4024,7 +3446,6 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         auto save_stack = state->stack.current;
 
         FOR_AST(lit->elements, it) {
-          ASTExpressionBase* i = (ASTExpressionBase*)it;
           //Set the correct offset
           MemValue* el_mem = state->get_mem(tup_single.mem);
 
@@ -4032,7 +3453,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           el_mem->size = i_t->type.structure->size;
 
           //Load to that location
-          compile_bytecode_of_expression_existing(comp, context, state, code, i, &tup_single);
+          compile_bytecode_of_expression_existing(comp, context, state, code, it, &tup_single);
 
           state->stack.current = save_stack;//reset stack
           i_t++;
@@ -4094,7 +3515,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                                                 context,
                                                                 state,
                                                                 code,
-                                                                (ASTExpressionBase*)l->curr,
+                                                                l->curr,
                                                                 (uint8_t)RVT::REGISTER);
 
           args.left = &res;
@@ -4107,7 +3528,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           l = l->next;
 
           while (l) {
-            ASTExpressionBase* i = (ASTExpressionBase*)l->curr;
+            AST_LOCAL i = l->curr;
             l = l->next;
 
             ASSERT(full_size > base_size);
@@ -4170,8 +3591,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           auto save_stack = state->stack.current;
 
           FOR_AST(arr_expr->elements, it) {
-            ASTExpressionBase* i = (ASTExpressionBase*)it;
-            compile_bytecode_of_expression_existing(comp, context, state, code, i, &arr_single);
+            compile_bytecode_of_expression_existing(comp, context, state, code, it, &arr_single);
 
             state->stack.current = save_stack;//reset stack
             state->get_mem(arr_single.mem)->mem.disp += (int32_t)base_size;
@@ -4249,7 +3669,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           copy_to.ptr = comp->constants.alloc_no_construct(to_copy.size);
           copy_to.size = to_copy.size;
 
-          memcpy_ts(copy_to.ptr, copy_to.size, to_copy.ptr, copy_to.size);
+          memcpy_ts((u8*)copy_to.ptr, copy_to.size, (const u8*)to_copy.ptr, copy_to.size);
 
           local_val.constant = copy_to;
         }
@@ -4302,7 +3722,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                                               context,
                                                               state,
                                                               code,
-                                                              (ASTExpressionBase*)cast->expr, ALL_RVTS);
+                                                              cast->expr, ALL_RVTS);
 
         val = cast->emit(comp, state, code, &val);
 
@@ -4317,7 +3737,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                                                context,
                                                                state,
                                                                code,
-                                                               (ASTExpressionBase*)un_op->expr,
+                                                               un_op->expr,
                                                                ALL_RVTS);
 
         UnOpArgs args ={};
@@ -4334,8 +3754,8 @@ static void compile_bytecode_of_expression(Compiler* const comp,
     case AST_TYPE::BINARY_OPERATOR: {
         ASSERT(hint != nullptr);
         const ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)expr;
-        const ASTExpressionBase* const left = (const ASTExpressionBase*)bin_op->left;
-        const ASTExpressionBase* const right = (const ASTExpressionBase*)bin_op->right;
+        AST_LOCAL left = bin_op->left;
+        AST_LOCAL right = bin_op->right;
 
         RuntimeValue temp_left = compile_bytecode_of_expression_new(comp,
                                                                     context,
@@ -4389,7 +3809,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                                     context,
                                                                     state,
                                                                     code,
-                                                                    (ASTExpressionBase*)assign->assign_to,
+                                                                    assign->assign_to,
                                                                     (uint8_t)RVT::MEMORY);
 
         //Load into 'assign_to'
@@ -4397,7 +3817,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                 context,
                                                 state,
                                                 code,
-                                                (ASTExpressionBase*)assign->value,
+                                                assign->value,
                                                 &assign_to);
         return;
       }
@@ -4420,7 +3840,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                 context,
                                                 state,
                                                 code,
-                                                (ASTExpressionBase*)ret->expr,
+                                                ret->expr,
                                                 &state->return_val);
 
         if (state->return_val.type == RVT::REGISTER) {
@@ -4440,7 +3860,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                                context,
                                                                state,
                                                                code,
-                                                               (ASTExpressionBase*)while_loop->condition,
+                                                               while_loop->condition,
                                                                RVT::CONST | RVT::REGISTER);
 
         if (cond.type == RVT::CONST) {
@@ -4492,7 +3912,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                                context,
                                                                state,
                                                                code,
-                                                               (ASTExpressionBase*)if_else->condition,
+                                                               if_else->condition,
                                                                RVT::CONST | RVT::REGISTER);
 
         if (cond.type == RVT::CONST) {
@@ -4575,7 +3995,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                   context,
                                                   state,
                                                   code,
-                                                  (ASTExpressionBase*)decl->expr,
+                                                  decl->expr,
                                                   &local->val);
         }
         else {
@@ -4583,7 +4003,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
                                                           context,
                                                           state,
                                                           code,
-                                                          (ASTExpressionBase*)decl->expr,
+                                                          decl->expr,
                                                           (u8)RVT::CONST);
         }
 
@@ -4593,7 +4013,7 @@ void compile_bytecode_of_statement(Compiler* const comp,
         return;
       }
     default: {
-        ASTExpressionBase* expr = (ASTExpressionBase*)statement;
+        AST_LOCAL expr = statement;
         if (expr->node_type == comp->services.builtin_types->t_void) {
           compile_bytecode_of_expression(comp, context, state, code, expr, nullptr);
         }
@@ -5343,92 +4763,9 @@ void graph_colour_algo(Compiler* const comp,
   }
 }
 
-void new_scope(UntypedIterator* itr,
-               AST_LINKED* l,
-               AST_LOCAL n,
-               State* state) {
-  itr->scopes.insert_uninit(1);
-
-  auto* sc = itr->scopes.back();
-
-  sc->num_outer_locals = state->active_locals.size;
-
-  if (n == nullptr) {
-    if (l != nullptr) {
-      sc->next = l->curr;
-      l = l->next;
-    }
-    else {
-      sc->next = nullptr;
-    }
-  }
-  else {
-    sc->next = n;
-  }
-
-  sc->scope = l;
-}
-
-AST_LOCAL advance_scopes(UntypedIterator* itr, State* state) {
-  if (itr->scopes.size == 0) {
-    return nullptr;
-  }
-
-  auto* current_scope = itr->scopes.back();
-
-  while (current_scope->next == nullptr) {
-    // Pop Locals
-    state->active_locals.size = current_scope->num_outer_locals;
-
-    // Pop scope
-    itr->scopes.pop();
-
-    //Finished?
-    if (itr->scopes.size == 0) {
-      return nullptr;
-    }
-
-    //Old scope
-    current_scope = itr->scopes.back();
-  }
-
-  //return the statement
-  AST_LOCAL n = current_scope->next;
-
-  if (current_scope->scope != nullptr) {
-    current_scope->next = current_scope->scope->curr;
-    current_scope->scope = current_scope->scope->next;
-  }
-  else {
-    current_scope->next = nullptr;
-  }
-
-  return n;
-}
-
-void compile_function_body_types(Compiler* const comp,
-                                 Context* const context,
-                                 ASTLambda* const ast_lambda,
-                                 Function* const func,
-                                 UntypedCode* const untyped,
-                                 State* const state) {
-  TRACING_FUNCTION();
-
-  while (untyped->current_statement != nullptr) {
-    compile_type_of_statement(comp, context, func, state, untyped, untyped->current_statement);
-    if (comp->is_panic()) {
-      return;
-    }
-
-    //Next statement!
-    untyped->current_statement = advance_scopes(&untyped->itr, state);
-  }
-}
-
 void compile_function_body_init(Compiler* const comp,
                                 ASTLambda* const ast_lambda,
-                                Function* const func,
-                                UntypedCode* const untyped,
+                                Function* const fun,
                                 State* const state) {
   TRACING_FUNCTION();
 
@@ -5459,10 +4796,6 @@ void compile_function_body_init(Compiler* const comp,
 
     index += 1;
   }
-
-  //Set up the scopes
-  new_scope(&untyped->itr, ((ASTBlock*)ast_lambda->body)->block.start, nullptr, state);
-  untyped->current_statement = advance_scopes(&untyped->itr, state);
 }
 
 void init_state_regs(const CallingConvention* convention, State* state) {
@@ -5706,20 +5039,18 @@ static void compile_function_signature_type(Compiler* const comp,
                                             FunctionSignature* const sig) {
   TRACING_FUNCTION();
 
-  {
-    FOR_AST(ast_sig->parameters, i) {
-      ASTTypedName* n = (ASTTypedName*)i;
-      type_check_ast_node(comp, context, n->type);
-      if (comp->is_panic()) {
-        return;
-      }
-
-      //Need to load the type
-      n->node_type = ((ASTTypeBase*)n->type)->type;
+  FOR_AST(ast_sig->parameters, i) {
+    ASTTypedName* n = (ASTTypedName*)i;
+    type_check_ast_node(comp, context, nullptr, n->type);
+    if (comp->is_panic()) {
+      return;
     }
+
+    //Need to load the type
+    n->node_type = *(const Type*)(n->type->value);
   }
 
-  type_check_ast_node(comp, context, ast_sig->return_type);
+  type_check_ast_node(comp, context, nullptr, ast_sig->return_type);
   if (comp->is_panic()) {
     return;
   }
@@ -5728,35 +5059,21 @@ static void compile_function_signature_type(Compiler* const comp,
   params.reserve_total(ast_sig->parameters.count);
 
   FOR_AST(ast_sig->parameters, i) {
-    params.insert(((ASTTypedName*)i)->node_type);
+    params.insert(i->node_type);
   }
 
   sig->sig_struct = find_or_make_lamdba_structure(comp,
                                                   context,
                                                   ast_sig->convention,
                                                   std::move(params),
-                                                  ((ASTTypeBase*)ast_sig->return_type)->type);
-}
-
-void compile_untyped_structure_declaration(Compiler* comp, Context* context, AST_LINKED** untyped) {
-  TRACING_FUNCTION();
-
-  while (*untyped) {
-    ASTTypedName* tn = (ASTTypedName*)(*untyped)->curr;
-    type_check_ast_node(comp, context, tn->type);
-    if (comp->is_panic()) {
-      return;
-    }
-
-    *untyped = (*untyped)->next;
-  }
+                                                  *(const Type*)(ast_sig->return_type->value));
 }
 
 void compile_import_expression_type(Compiler* comp, Context* context, State* state,
-                                    ASTExpressionBase* expr) {
+                                    AST_LOCAL expr) {
   TRACING_FUNCTION();
 
-  compile_type_of_expression(comp, context, state, expr, nullptr);
+  type_check_ast_node(comp, context, state, expr);
   if (comp->is_panic()) { return; }
 
   if (expr->node_type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
@@ -5788,10 +5105,10 @@ void compile_import_expression_type(Compiler* comp, Context* context, State* sta
 
 static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp, NamespaceIndex import_to) {
   TRACING_FUNCTION();
-  
+
   const char* path = nullptr;
 
-  ASTExpressionBase* expr = (ASTAsciiString*)imp->expr_location;
+  AST_LOCAL expr = imp->expr_location;
 
   if (already_const_type(imp->expr_location->ast_type)) {
     //Temp
@@ -5801,9 +5118,9 @@ static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp
     path = str->string->string;
   }
   else {
-    ASSERT(expr->const_val != nullptr);
+    ASSERT(expr->value != nullptr);
 
-    path = (const char*)expr->const_val;
+    path = (const char*)expr->value;
   }
 
   ASSERT(path != nullptr);
@@ -5813,9 +5130,9 @@ static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp
   FileLocation loc = parse_file_location(ns->source_file.directory->string, path,
                                          comp->services.strings);
 
-  if (expr->const_val != nullptr) {
-    comp->constants.free_no_destruct(expr->const_val);
-    expr->const_val = nullptr;
+  if (expr->value != nullptr) {
+    comp->constants.free_no_destruct(expr->value);
+    expr->value = nullptr;
   }
 
   const auto is_correct_file =[&loc](const FileAST* f) {
@@ -5843,7 +5160,8 @@ static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp
 
 static void compile_untyped_global(Compiler* comp, Context* context, State* state, ASTDecl* decl, Global* global) {
   TRACING_FUNCTION();
-  compile_type_of_decl(comp, context, state, decl);
+
+  type_check_ast_node(comp, context, state, (AST_LOCAL)decl);
   if (comp->is_panic()) {
     return;
   }
@@ -5861,20 +5179,20 @@ static void compile_untyped_global(Compiler* comp, Context* context, State* stat
 
 void compile_init_expr_of_global(Compiler* comp, Context* context, State* state, ASTDecl* decl, Global* global) {
   TRACING_FUNCTION();
-  ASTExpressionBase* decl_expr = (ASTExpressionBase*)decl->expr;
+  AST_LOCAL decl_expr = decl->expr;
 
   if (TEST_MASK(global->decl.meta_flags, META_FLAG::COMPTIME)) {
-    if (decl_expr->const_val == nullptr) {
+    if (decl_expr->value == nullptr) {
       ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
-      unit->expr = (ASTExpressionBase*)decl->expr;
+      unit->expr = decl->expr;
 
       comp->set_dep(context, unit);
       return;
     }
 
-    global->constant_value.ptr = decl_expr->const_val;
+    global->constant_value.ptr = decl_expr->value;
     global->constant_value.size = global->decl.type.structure->size;
-    decl_expr->const_val = nullptr;
+    decl_expr->value = nullptr;
   }
   else {
     ASSERT(global->decl.type.is_valid());
@@ -5949,12 +5267,12 @@ void compile_new_composite_structure(Compiler* comp, Context* context, ASTStruct
 
   FOR_AST(struct_body->elements, it) {
     ASTTypedName* tn = (ASTTypedName*)it;
-    ASTTypeBase* ty = (ASTTypeBase*)tn->type;
+    AST_LOCAL ty = tn->type;
 
     cmp_s->elements.insert_uninit(1);
     auto* b = cmp_s->elements.back();
 
-    b->type = ty->type;
+    b->type = *(const Type*)ty->value;
     b->name = tn->name;
     b->offset = current_size;
 
@@ -6141,13 +5459,13 @@ void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
   const auto end = unit->dependency_of.end();
 
   for (; i < end; i++) {
-    CompilationUnit* dep_of = *i;
+    CompilationUnit* dep_of = (CompilationUnit*)*i;
 
     dep_of->num_deps -= 1;
 
     if (dep_of->num_deps == 0) {
       //No more dependencies - can add back to the compiling
-      comp->to_compile.insert(dep_of);
+      comp->to_compile.push_back(dep_of);
     }
   }
 
@@ -6178,10 +5496,6 @@ void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
 ERROR_CODE compile_all(Compiler* const comp) {
   TRACING_FUNCTION();
 
-  Array<CompilationUnit*> to_compile ={};
-  CompilationUnit** to_comp_i = nullptr;
-  CompilationUnit** to_comp_end = nullptr;
-
   while (comp->is_compiling()) {
     TRACING_SCOPE("is_compiling loop");
 
@@ -6194,19 +5508,14 @@ ERROR_CODE compile_all(Compiler* const comp) {
         }
       }
 
-      to_compile = std::move(comp->to_compile);
-
-      to_comp_i = to_compile.mut_begin();
-      to_comp_end = to_compile.mut_end();
-
       {
         TRACING_SCOPE("Compilation unit loop");
 
 
-        for (; to_comp_i < to_comp_end; to_comp_i++) {
+        while (comp->to_compile.size > 0) {
           TRACING_SCOPE("Single Compilation Unit");
 
-          CompilationUnit* comp_u = *to_comp_i;
+          CompilationUnit* comp_u = comp->to_compile.pop_front();
 
           Context context ={};
           context.current_unit = comp_u;
@@ -6230,9 +5539,11 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       DependencyCheckState st ={};
                       dependency_check_ast_node(comp, &context, &st, unit->import_ast);
 
+
+
                       unit->stage = IMPORT_COMP_STAGE::UNTYPED;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);
                       }
                       else {
                         comp->reset_panic();
@@ -6241,14 +5552,14 @@ ERROR_CODE compile_all(Compiler* const comp) {
                     }
                   case IMPORT_COMP_STAGE::UNTYPED: {
                       compile_import_expression_type(comp, &context, &unit->state,
-                                                     (ASTExpressionBase*)unit->import_ast->expr_location);
+                                                     unit->import_ast->expr_location);
                       if (comp->is_panic()) {
                         return comp->services.errors->print_all();
                       }
                       else {
                         unit->stage = IMPORT_COMP_STAGE::UNPARSED;
 
-                        ASTExpressionBase* expr = (ASTExpressionBase*)unit->import_ast->expr_location;
+                        AST_LOCAL expr = unit->import_ast->expr_location;
 
                         //Only called if this isnt already a constant literal
                         if (can_compile_const_value(expr)) {
@@ -6267,7 +5578,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
                         if (!comp->is_depends()) {
                           //redo this one straight away as already loaded
-                          to_comp_i--;
+                          comp->to_compile.push_front(comp_u);
                         }
                         else {
                           comp->reset_panic();
@@ -6301,7 +5612,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
                       unit->stage = GLOBAL_COMP_STAGE::UNTYPED;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);//Try it again straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6315,9 +5626,9 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       }
 
                       if (TEST_MASK(unit->global->decl.meta_flags, META_FLAG::COMPTIME)) {
-                        ASTExpressionBase* decl_expr = (ASTExpressionBase*)unit->source->expr;
+                        AST_LOCAL decl_expr = unit->source->expr;
 
-                        if (decl_expr->const_val == nullptr) {
+                        if (decl_expr->value == nullptr) {
                           ConstantExprUnit* unit = comp->new_const_expr_unit(context.current_namespace);
                           unit->expr = decl_expr;
 
@@ -6327,7 +5638,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
                       unit->stage = GLOBAL_COMP_STAGE::TYPED;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//redo straight away
+                        comp->to_compile.push_front(comp_u);//redo straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6362,7 +5673,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
                       unit->stage = STRUCTURE_COMP_STAGE::UNTYPED;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);//Try it again straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6370,7 +5681,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       break;
                     }
                   case STRUCTURE_COMP_STAGE::UNTYPED: {
-                      compile_untyped_structure_declaration(comp, &context, &unit->untyped);
+                      type_check_ast_node(comp, &context, nullptr, unit->source);
                       if (comp->is_panic()) {
                         return comp->services.errors->print_all();
                       }
@@ -6378,7 +5689,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       unit->stage = STRUCTURE_COMP_STAGE::TYPED;
 
                       if (!comp->is_depends()) {
-                        to_comp_i--;//redo straight away
+                        comp->to_compile.push_front(comp_u);//redo straight away
                       }
                       break;
                     }
@@ -6414,7 +5725,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
                       unit->stage = SIGNATURE_COMP_STAGE::UNTYPED;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);//Try it again straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6460,7 +5771,6 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       compile_function_body_init(comp,
                                                  unit->source,
                                                  unit->func,
-                                                 &unit->untyped,
                                                  &unit->state);
                       if (comp->is_panic()) {
                         return comp->services.errors->print_all();
@@ -6469,7 +5779,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       unit->stage = FUNCTION_COMP_STAGE::DEPENDING;
 
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);//Try it again straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6483,7 +5793,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
                       unit->stage = FUNCTION_COMP_STAGE::UNTYPED_BODY;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);//Try it again straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6491,20 +5801,14 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       break;
                     }
                   case FUNCTION_COMP_STAGE::UNTYPED_BODY: {
-                      compile_function_body_types(comp,
-                                                  &context,
-                                                  unit->source,
-                                                  unit->func,
-                                                  &unit->untyped,
-                                                  &unit->state);
-
+                      type_check_ast_node(comp, &context, &unit->state, unit->source->body);
                       if (comp->is_panic()) {
                         return comp->services.errors->print_all();
                       }
 
                       unit->stage = FUNCTION_COMP_STAGE::TYPED_BODY;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);//Try it again straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6543,7 +5847,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
                       unit->stage = EXPR_COMP_STAGE::UNTYPED;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);//Try it again straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6552,23 +5856,17 @@ ERROR_CODE compile_all(Compiler* const comp) {
                     }
 
                   case EXPR_COMP_STAGE::UNTYPED: {
-                      TypeHint hint ={};
-                      hint.tht = THT::EXACT;
-                      hint.type = unit->cast_to;
-
-                      compile_type_of_expression(comp,
-                                                 &context,
-                                                 &unit->state,
-                                                 unit->expr,
-                                                 (unit->cast_to.is_valid() ?
-                                                  &hint : nullptr));
+                      type_check_ast_node(comp,
+                                          &context,
+                                          &unit->state,
+                                          unit->expr);
                       if (comp->is_panic()) {
                         return comp->services.errors->print_all();
                       }
 
                       unit->stage = EXPR_COMP_STAGE::TYPED;
                       if (!comp->is_depends()) {
-                        to_comp_i--;//Try it again straight away
+                        comp->to_compile.push_front(comp_u);//Try it again straight away
                       }
                       else {
                         comp->reset_panic();
@@ -6730,7 +6028,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                         unit->expr->node_type = unit->cast_to;
                       }
 
-                      unit->expr->const_val = const_val;
+                      unit->expr->value = const_val;
 
                       //Swap back
                       std::swap(options, comp->build_options);
@@ -6783,7 +6081,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
             //Success!
             if (dep.unit_waiting->num_deps == 0) {
               //No more dependencies - can add back to the compiling
-              comp->to_compile.insert(dep.unit_waiting);
+              comp->to_compile.push_back(dep.unit_waiting);
             }
             return true;
           }

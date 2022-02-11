@@ -503,17 +503,18 @@ static bool can_literal_cast(const Type& from, const Type& to) {
   return false;
 }
 
-bool TYPE_TESTS::check_implicit_cast(META_FLAGS flags, const Type& from, const Type& to) {
-  if (TEST_MASK(flags, META_FLAG::LITERAL)
-      && can_literal_cast(from, to)) {
-    return true;
-  }
-  else if (can_implicit_cast(from, to)) {
-     return true;
-  }
-  
-  return false;
-}
+//No longer supported
+//bool TYPE_TESTS::check_implicit_cast(META_FLAGS flags, const Type& from, const Type& to) {
+//  if (TEST_MASK(flags, META_FLAG::LITERAL)
+//      && can_literal_cast(from, to)) {
+//    return true;
+//  }
+//  else if (can_implicit_cast(from, to)) {
+//     return true;
+//  }
+//  
+//  return false;
+//}
 
 bool TYPE_TESTS::is_negatable(const Structure* s) {
   return is_signed_int(s);
