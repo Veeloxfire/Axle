@@ -21,9 +21,11 @@ using usize = size_t;
 #define STR_REPLAC2(a) #a
 #define STR_REPLACE(a) STR_REPLAC2(a)
 
+void throw_testing_assertion(const char* message);
+
 #ifdef ASSERT_EXCEPTIONS
 #define ASSERT(expr) do { if(!(expr))\
-throw std::exception("Assertion failed in at line " STR_REPLACE(__LINE__) ", file " __FILE__ ":\n" #expr); } while(false)
+throw_testing_assertion("Assertion failed in at line " STR_REPLACE(__LINE__) ", file " __FILE__ ":\n" #expr); } while(false)
 
 #define INVALID_CODE_PATH(reason) throw std::exception("Invalid Code path \"" reason "\"")
 

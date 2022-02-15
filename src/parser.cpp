@@ -1057,6 +1057,74 @@ static const Token* step_scope(Compiler* comp, const Token* tok, const Token* en
 static AST_LOCAL parse_structure(Compiler* const comp, Parser* const parser);
 static AST_LOCAL parse_lambda(Compiler* const comp, Parser* const parser);
 
+static AST_LOCAL parse_tup_literal(Compiler* const comp, Parser* const parser) {
+    //Will always be a primary so can elevate span stuff out of the switch
+  Span span ={};
+  SPAN_START;
+
+  const InternString* name = nullptr;
+
+  if (parser->current.type == AxleTokenType::Identifier) {
+    name = parser->current.string;
+    advance(comp, parser);
+  }
+
+  expect(comp, parser, AxleTokenType::Left_Brace);
+  if (comp->is_panic()) {
+    return nullptr;
+  }
+
+
+  AST_ARR arr ={};
+
+  AST_LINKED* curr_list = nullptr;
+
+  while (!comp->is_panic()) {
+    if (curr_list == nullptr) {
+      curr_list = parser->store.push<AST_LINKED>();
+      arr.start = curr_list;
+    }
+    else {
+      curr_list->next = parser->store.push<AST_LINKED>();
+      curr_list = curr_list->next;
+    }
+    curr_list->next = nullptr;
+    arr.count += 1;
+
+    curr_list->curr = parse_expression(comp, parser);
+    if (comp->is_panic()) {
+      return nullptr;
+    }
+
+    if (parser->current.type == AxleTokenType::Comma) {
+      advance(comp, parser);
+    }
+    else {
+      break;
+    }
+  }
+
+
+  if (comp->is_panic()) {
+    return nullptr;
+  }
+
+  expect(comp, parser, AxleTokenType::Right_Brace);
+  if (comp->is_panic()) {
+    return nullptr;
+  }
+
+  SPAN_END;
+
+  ASTTupleLitExpr* tup_lit = PARSER_ALLOC(ASTTupleLitExpr);
+  tup_lit->name = name;
+  tup_lit->ast_type = AST_TYPE::TUPLE_LIT;
+  tup_lit->elements = arr;
+  tup_lit->node_span = span;
+
+  return (AST*)tup_lit;
+}
+
 static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
   //Will always be a primary so can elevate span stuff out of the switch
   Span span ={};
@@ -1064,58 +1132,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
   switch (parser->current.type) {
     case AxleTokenType::Left_Brace: {
-        //Tuple literal
-        // { ... }
-
-        advance(comp, parser);
-
-        AST_ARR arr ={};
-
-        AST_LINKED* curr_list = nullptr;
-
-        while (!comp->is_panic()) {
-          if (curr_list == nullptr) {
-            curr_list = parser->store.push<AST_LINKED>();
-            arr.start = curr_list;
-          }
-          else {
-            curr_list->next = parser->store.push<AST_LINKED>();
-            curr_list = curr_list->next;
-          }
-          curr_list->next = nullptr;
-          arr.count += 1;
-
-          curr_list->curr = parse_expression(comp, parser);
-          if (comp->is_panic()) {
-            return nullptr;
-          }
-
-          if (parser->current.type == AxleTokenType::Comma) {
-            advance(comp, parser);
-          }
-          else {
-            break;
-          }
-        }
-
-
-        if (comp->is_panic()) {
-          return nullptr;
-        }
-
-        expect(comp, parser, AxleTokenType::Right_Brace);
-        if (comp->is_panic()) {
-          return nullptr;
-        }
-
-        SPAN_END;
-
-        ASTTupleLitExpr* tup_lit = PARSER_ALLOC(ASTTupleLitExpr);
-        tup_lit->ast_type = AST_TYPE::TUPLE_LIT;
-        tup_lit->elements = arr;
-        tup_lit->node_span = span;
-
-        return (AST*)tup_lit;
+        return parse_tup_literal(comp, parser);
       }
     case AxleTokenType::Left_Square: {
         // Array expression
@@ -1278,7 +1295,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
         return num;
       }
     case AxleTokenType::Identifier: {
-        //Name or function call
+        //Name, function call, struct init
 
         if (parser->next.type == AxleTokenType::Left_Bracket) {
           //Is function call
@@ -1351,6 +1368,10 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
           call->arguments = arguments;
 
           return call;
+        }
+        else if (parser->next.type == AxleTokenType::Left_Brace) {
+          //Named struct assignment
+          return parse_tup_literal(comp, parser);
         }
         else {
           const InternString* name = parser->current.string;

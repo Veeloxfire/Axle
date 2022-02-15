@@ -17,63 +17,69 @@ Function* Compiler::new_function() {
   return func;
 }
 
-ImportUnit* Compiler::new_import_unit(NamespaceIndex ns) {
+ImportUnit* Compiler::new_import_unit(Namespace* ns) {
   ImportUnit* unit = import_units.allocate();
   unit->type  = COMPILATION_TYPE::IMPORT;
   unit->stage = IMPORT_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.push_back(unit);
+  in_flight_units += 1;
   return unit;
 }
 
-ConstantExprUnit* Compiler::new_const_expr_unit(NamespaceIndex ns) {
+ConstantExprUnit* Compiler::new_const_expr_unit(Namespace* ns) {
   ConstantExprUnit* unit = const_expr_units.allocate();
   unit->type  = COMPILATION_TYPE::CONST_EXPR;
   unit->stage = EXPR_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.push_back(unit);
+  in_flight_units += 1;
   return unit;
 }
 
-FunctionUnit* Compiler::new_function_unit(NamespaceIndex ns) {
+FunctionUnit* Compiler::new_function_unit(Namespace* ns) {
   FunctionUnit* unit = function_units.allocate();
   unit->type  = COMPILATION_TYPE::FUNCTION;
   unit->stage = FUNCTION_COMP_STAGE::UNINIT;
   unit->available_names = ns;
 
   to_compile.push_back(unit);
+  in_flight_units += 1;
   return unit;
 }
 
-SignatureUnit* Compiler::new_signature_unit(NamespaceIndex ns) {
+SignatureUnit* Compiler::new_signature_unit(Namespace* ns) {
   SignatureUnit* unit = signature_units.allocate();
   unit->type  = COMPILATION_TYPE::SIGNATURE;
   unit->stage = SIGNATURE_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.push_back(unit);
+  in_flight_units += 1;
   return unit;
 }
 
-StructureUnit* Compiler::new_structure_unit(NamespaceIndex ns) {
+StructureUnit* Compiler::new_structure_unit(Namespace* ns) {
   StructureUnit* unit = structure_units.allocate();
   unit->type  = COMPILATION_TYPE::STRUCTURE;
   unit->stage = STRUCTURE_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.push_back(unit);
+  in_flight_units += 1;
   return unit;
 }
 
-GlobalUnit* Compiler::new_global_unit(NamespaceIndex ns) {
+GlobalUnit* Compiler::new_global_unit(Namespace* ns) {
   GlobalUnit* unit = global_units.allocate();
   unit->type  = COMPILATION_TYPE::GLOBAL;
   unit->stage = GLOBAL_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
 
   to_compile.push_back(unit);
+  in_flight_units += 1;
   return unit;
 }
 
@@ -490,6 +496,10 @@ static void expect_type(Compiler* const comp, AST_LOCAL a) {
   }
 }
 
+inline constexpr bool is_global_depend(const GlobalName* g) {
+  return (g->global == nullptr || g->global->constant_value.ptr == nullptr) && g->unit != nullptr;
+}
+
 void dependency_check_ast_node(Compiler* const comp,
                                Context* const context,
                                DependencyCheckState* const state,
@@ -500,34 +510,21 @@ void dependency_check_ast_node(Compiler* const comp,
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
 
-        const NamedElement* name = comp->services.names->find_name(context->current_namespace, nt->name);
+        const GlobalName* name = find_global_name(context->current_namespace, nt->name);
 
         if (name == nullptr) {
           UnknownName unknown ={};
-          unknown.all_names = false;
           unknown.ident = nt->name;
-          unknown.namespace_index = context->current_namespace;
-          unknown.num_knowns = name == 0;
-          unknown.num_unknowns = name == 0;
+          unknown.ns = context->current_namespace;
 
           comp->set_unfound_name(context, std::move(unknown),
                                  ERROR_CODE::NAME_ERROR, nt->node_span,
                                  "Could not find name '{}'", nt->name);
         }
-        else if (name->unknowns > 0) {
-          UnknownName unknown ={};
-          unknown.all_names = false;
-          unknown.ident = nt->name;
-          unknown.namespace_index = context->current_namespace;
-          unknown.num_knowns = name->globals.size;
-          unknown.num_unknowns = name->unknowns;
-
-          comp->set_unfound_name(context, std::move(unknown),
-                                 ERROR_CODE::NAME_ERROR, nt->node_span,
-                                 "Could not resolve name '{}'\n"
-                                 "This name had multiple unknown dependencies",
-                                 nt->name);
+        else if (is_global_depend(name)) {
+          comp->set_dep(context, name->unit);
         }
+
 
         return;
       }
@@ -542,6 +539,7 @@ void dependency_check_ast_node(Compiler* const comp,
 
           unit->expr = at->expr;
           unit->cast_to = comp->services.builtin_types->t_u64;
+          unit->stage = EXPR_COMP_STAGE::UNTYPED;
 
           comp->set_dep(context, unit);
         }
@@ -562,7 +560,10 @@ void dependency_check_ast_node(Compiler* const comp,
           dependency_check_ast_node(comp, context, state, ty);
         }
 
-        dependency_check_ast_node(comp, context, state, lt->ret);
+        DependencyCheckState new_s ={};
+        new_s.local_context = true;
+        //new_s.outer = state;
+        dependency_check_ast_node(comp, context, &new_s, lt->ret);
 
         return;
       }
@@ -605,24 +606,26 @@ void dependency_check_ast_node(Compiler* const comp,
         const bool is_local = state->is_local(name);
 
         if (is_local) {
-        //Can just return as its found
+          //Can just return as its found
+          ident->ast_type = AST_TYPE::LOCAL;
           return;
         }
 
-        NamedElement* non_local = comp->services.names->find_name(context->current_namespace, name);
+        const GlobalName* non_local = find_global_name(context->current_namespace, name);
 
-        if (non_local == nullptr || non_local->unknowns > 0) {
+        if (non_local == nullptr) {
           UnknownName unknown ={};
-          unknown.all_names = false;
           unknown.ident = name;
-          unknown.namespace_index = context->current_namespace;
-          unknown.num_knowns = non_local == nullptr ? 0 : non_local->globals.size;
-          unknown.num_unknowns = non_local == nullptr ? 0 : non_local->unknowns;
+          unknown.ns = context->current_namespace;
 
           comp->set_unfound_name(context, std::move(unknown),
                                  ERROR_CODE::UNFOUND_DEPENDENCY, a->node_span,
                                  "'{}' was used but a it has no matching declaration",
                                  name);
+        }
+        else {
+          ident->ast_type = AST_TYPE::GLOBAL;
+          return;
         }
 
         return;
@@ -630,53 +633,52 @@ void dependency_check_ast_node(Compiler* const comp,
     case AST_TYPE::FUNCTION_CALL: {
         ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)a;
 
-        FOR_AST(call->arguments, it) {
-          dependency_check_ast_node(comp, context, state, it);
-        }
+        //TODO: Local functions
 
-        bool is_local = state->is_local(call->function_name);
+        const GlobalName* g = find_global_name(context->current_namespace, call->function_name);
 
-        if (is_local) {
-          return;
-        }
-
-        Array<NamespaceElement> names = comp->services.names->find_all_names(context->current_namespace, call->function_name);
-
-        if (names.size == 0) {
+        if (g == nullptr) {
           UnknownName unknown ={};
-          unknown.all_names = true;
           unknown.ident = call->function_name;
-          unknown.namespace_index = context->current_namespace;
-          unknown.num_knowns = 0;
-          unknown.num_unknowns = 0;
+          unknown.ns = context->current_namespace;
 
           comp->set_unfound_name(context, std::move(unknown),
                                  ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
                                  "'{}' did not exist",
                                  call->function_name);
         }
-        else {
-          FOR(names, it) {
-            if (it->named_element->unknowns > 0) {
-              UnknownName unknown ={};
-              unknown.all_names = true;
-              unknown.ident = call->function_name;
-              unknown.namespace_index = context->current_namespace;
-              unknown.num_knowns = it->named_element->globals.size;
-              unknown.num_unknowns = it->named_element->unknowns;
+        else if (is_global_depend(g)) {
+          comp->set_dep(context, g->unit);
+        }
 
-              comp->set_unfound_name(context, std::move(unknown),
-                                     ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
-                                     "'{}' did not exist",
-                                     call->function_name);
-            }
-          }
+
+        FOR_AST(call->arguments, it) {
+          dependency_check_ast_node(comp, context, state, it);
         }
 
         return;
       }
     case AST_TYPE::TUPLE_LIT: {
         ASTTupleLitExpr* tup = (ASTTupleLitExpr*)a;
+
+        if (tup->name != nullptr) {
+          const GlobalName* g = find_global_name(context->current_namespace, tup->name);
+
+          if (g == nullptr) {
+            UnknownName unknown ={};
+            unknown.ident = tup->name;
+            unknown.ns = context->current_namespace;
+
+            comp->set_unfound_name(context, std::move(unknown),
+                                   ERROR_CODE::TYPE_CHECK_ERROR, tup->node_span,
+                                   "'{}' did not exist",
+                                   tup->name);
+          }
+          else if (is_global_depend(g)) {
+            comp->set_dep(context, g->unit);
+          }
+        }
+
         FOR_AST(tup->elements, it) {
           dependency_check_ast_node(comp, context, state, it);
         }
@@ -718,7 +720,8 @@ void dependency_check_ast_node(Compiler* const comp,
         ASTStructExpr* se = (ASTStructExpr*)a;
         ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
 
-        if (!struct_body->type.is_valid()) {
+        if (struct_body->value == nullptr || !((const Type*)struct_body->value)->is_valid()) {
+          //Doesnt exist or is not valid so need to wait for that
           comp->set_dep(context, struct_body->compilation_unit);
         }
 
@@ -735,7 +738,9 @@ void dependency_check_ast_node(Compiler* const comp,
           dependency_check_ast_node(comp, context, state, decl->expr);
         }
 
-        state->locals.insert(decl->name);
+        if (state->local_context) {
+          state->locals.insert(decl->name);
+        }
 
         return;
       }
@@ -746,7 +751,9 @@ void dependency_check_ast_node(Compiler* const comp,
           dependency_check_ast_node(comp, context, state, tn->type);
         }
 
-        state->locals.insert(tn->name);
+        if (state->local_context) {
+          state->locals.insert(tn->name);
+        }
 
         return;
       }
@@ -872,8 +879,8 @@ void set_runtime_flags(AST_LOCAL ast, State* const state, bool modified, uint8_t
   ast->valid_rvts &= valid_rvts;
 
   switch (ast->ast_type) {
-    case AST_TYPE::IDENTIFIER_EXPR: {
-        Local* local = state->all_locals.data + ((ASTIdentifier*)ast)->index;
+    case AST_TYPE::LOCAL: {
+        Local* local = state->find_local(((ASTIdentifier*)ast)->name);
 
         local->valid_rvts &= ast->valid_rvts;
         break;
@@ -1007,15 +1014,16 @@ static bool test_function_overload(const CallSignature* sig, const SignatureStru
   return false;
 }
 
-static const SignatureStructure* match_function(Compiler* const comp,
-                                                Context* const context,
-                                                State* const state,
-                                                const Span& span,
-                                                const CallSignature* sig) {
+static Function* match_function(Compiler* const comp,
+                                Context* const context,
+                                State* const state,
+                                const Span& span,
+                                const CallSignature* sig) {
   TRACING_FUNCTION();
 
     //Locals
-  {
+  //TODO: Fix local functions
+    /*{
     auto i = state->active_locals.begin();
     const auto end = state->active_locals.end();
 
@@ -1025,41 +1033,43 @@ static const SignatureStructure* match_function(Compiler* const comp,
       if (loc->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
         const auto* sig_struct = loc->decl.type.unchecked_base<SignatureStructure>();
         if (test_function_overload(sig, sig_struct)) {
-          return sig_struct;
+          ASSERT(loc->val.type == RVT::CONST);
+          ASSERT(loc->val.constant.ptr != nullptr);
+          ASSERT(loc->val.constant.size == sizeof(Function*));
+
+          return *(Function**)loc->val.constant.ptr;
         }
       }
     }
-  }
+  }*/
 
-  Array<NamespaceElement> names = comp->services.names->find_all_names(context->current_namespace, sig->name);
+  GlobalName* name = find_global_name(context->current_namespace, sig->name);
+  ASSERT(name != nullptr);
 
-  //Globals
-  {
-    auto n_i = names.begin();
-    const auto n_end = names.end();
-    for (; n_i < n_end; n_i++) {
-      const NamedElement* possible_func = n_i->named_element;
-      NamespaceIndex ns = n_i->ns_index;
+  const Global* global = name->global;
+  ASSERT(name->global != nullptr);
 
-      ASSERT(possible_func->unknowns == 0);
+  if (global->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
+    const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
 
-      auto f_i = possible_func->globals.begin();
-      auto f_end = possible_func->globals.end();
+    if (test_function_overload(sig, sig_struct)) {
+      ASSERT(global->constant_value.ptr != nullptr);
+      ASSERT(global->constant_value.size == sizeof(Function*));
 
-      for (; f_i < f_end; f_i++) {
-        const Global* global = *f_i;
-
-        if (global->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) { continue; }
-
-        const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
-
-        if (test_function_overload(sig, sig_struct)) {
-          return sig_struct;
-        }
-      }
+      return *(Function**)global->constant_value.ptr;
+    }
+    else {
+      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
+                         "Arguments mismatch\nArgs: {}\nDecl: {}", *sig, PrintSignatureType{ sig_struct });
+      return nullptr;
     }
   }
 
+
+
+  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
+                     "No visible function matches signature '{}'",
+                     *sig);
   return nullptr;
 }
 
@@ -1083,13 +1093,9 @@ static void compile_find_function_call(Compiler* const comp,
 
   sig.arguments.shrink();
 
-  call->sig = match_function(comp, context, state, call->node_span, &sig);
-
-  if (call->sig == nullptr) {
-    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
-                       "No visible function matches signature '{}'",
-                       sig);
-  }
+  //Might fail
+  call->func = match_function(comp, context, state, call->node_span, &sig);
+  //if(comp->is_panic()) //Currently not needed because this is the last thing
 }
 
 
@@ -1102,18 +1108,13 @@ void type_check_ast_node(Compiler* const comp,
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
 
-        const NamedElement* name = comp->services.names->find_name(context->current_namespace, nt->name);
 
-        assert(name != nullptr);
+        GlobalName* g = find_global_name(context->current_namespace, nt->name);
 
-        if (name->globals.size != 1) {
-          comp->report_error(ERROR_CODE::NAME_ERROR, nt->node_span,
-                             "'{}' is an ambiguous name",
-                             nt->name);
-          return;
-        }
+        ASSERT(g != nullptr);
 
-        const Global* global = name->globals.data[0];
+        const Global* global = g->global;
+        ASSERT(g != nullptr);
 
         if (global->decl.type.struct_type() != STRUCTURE_TYPE::TYPE) {
           comp->report_error(ERROR_CODE::NAME_ERROR, nt->node_span,
@@ -1123,7 +1124,8 @@ void type_check_ast_node(Compiler* const comp,
         }
 
         if (global->constant_value.ptr == nullptr) {
-          comp->set_dep(context, global->compilation_unit);
+          ASSERT(g->unit != nullptr);
+          comp->set_dep(context, g->unit);
           return;
         }
 
@@ -1288,7 +1290,7 @@ void type_check_ast_node(Compiler* const comp,
         ASTStructExpr* se = (ASTStructExpr*)a;
         ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
 
-        ASSERT(struct_body->type.is_valid());
+        ASSERT(struct_body->value != nullptr && ((const Type*)struct_body->value)->is_valid());
 
         SET_MASK(se->meta_flags, META_FLAG::COMPTIME);
         a->node_type = comp->services.builtin_types->t_type;
@@ -1356,7 +1358,7 @@ void type_check_ast_node(Compiler* const comp,
 
         //TODO: Make this work for other types
         set_runtime_flags(base, state, false, (uint8_t)RVT::MEMORY);
-        break;
+        return;
       }
     case AST_TYPE::INDEX_EXPR: {
         ASTIndexExpr* index_expr = (ASTIndexExpr*)a;
@@ -1414,11 +1416,10 @@ void type_check_ast_node(Compiler* const comp,
 
         a->node_type = base->node_type.unchecked_base<ArrayStructure>()->base;
 
-        break;
+        return;
       }
     case AST_TYPE::TUPLE_LIT: {
         ASTTupleLitExpr* tup = (ASTTupleLitExpr*)a;
-
 
         //Temp?
         a->meta_flags &= ~META_FLAG::ASSIGNABLE;
@@ -1443,18 +1444,58 @@ void type_check_ast_node(Compiler* const comp,
           element_types.insert(it->node_type);
         }
 
-        const Structure* tuple_s
-          = find_or_make_tuple_structure(comp,
-                                         context,
-                                         std::move(element_types));
+        if (tup->name != nullptr) {
+          //Need to check that the types match
+          const GlobalName* nm = find_global_name(context->current_namespace, tup->name);
+          ASSERT(nm != nullptr);
+          const Global* ty_g = nm->global;
+          ASSERT(ty_g != nullptr);
 
-        //Create the type
-        a->node_type = to_type(tuple_s);
+          if (ty_g->decl.type != comp->services.builtin_types->t_type) {
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, tup->node_span,
+                               "'{}' was not a type", tup->name);
+            return;
+          }
+
+          ASSERT(ty_g->constant_value.ptr != nullptr && ty_g->constant_value.size == sizeof(Type));
+          Type ty = *(const Type*)ty_g->constant_value.ptr;
+
+          const CompositeStructure* cmp = ty.extract_base<CompositeStructure>();
+
+          if (cmp->elements.size != element_types.size) {
+            comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, tup->node_span,
+                               "struct '{}' expected '{}' elements but found '{}'",
+                               tup->name, cmp->elements.size, element_types.size);
+            return;
+          }
+
+          auto cmp_i = cmp->elements.begin();
+          const auto cmp_end = cmp->elements.end();
+          auto el_i = element_types.begin();
+
+          for (; cmp_i < cmp_end; cmp_i++, el_i++) {
+            if (cmp_i->type != *el_i) {
+              comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, tup->node_span,
+                                 "Element {} of the literal expected '{}' but found '{}'",
+                                 cmp_i - cmp->elements.data, cmp_i->type.name, el_i->name);
+              return;
+            }
+          }
+
+          //All works
+          a->node_type = ty;
+        }
+        else {
+          a->node_type = to_type(find_or_make_tuple_structure(comp,
+                                                              context,
+                                                              std::move(element_types)));
+        }
+
 
         //Can currently only load into memory
         a->valid_rvts &= RVT::MEMORY;
 
-        break;
+        return;
       }
     case AST_TYPE::ARRAY_EXPR: {
         ASTArrayExpr* arr_expr = (ASTArrayExpr*)a;
@@ -1482,9 +1523,9 @@ void type_check_ast_node(Compiler* const comp,
 
           ASSERT(base_test->node_type.is_valid());
 
-          assert(base.is_valid());
-
           base = base_test->node_type;
+          ASSERT(base.is_valid());
+
 
           u32 index = 0;
 
@@ -1518,12 +1559,23 @@ void type_check_ast_node(Compiler* const comp,
                              "This is probably because the array was empty (i.e. [])");
           return;
         }
-        break;
+
+
+        const Structure* arr_s
+          = find_or_make_array_structure(comp, context, base, arr_expr->elements.count);
+
+        //Create the type
+        a->node_type = to_type(arr_s);
+
+        //Can currently only load into memory
+        a->valid_rvts &= RVT::MEMORY;
+
+        return;
       }
     case AST_TYPE::ASCII_CHAR: {
         a->node_type = comp->services.builtin_types->t_ascii;
         a->meta_flags |= META_FLAG::COMPTIME;
-        break;
+        return;
       }
     case AST_TYPE::ASCII_STRING: {
         ASTAsciiString* ascii = (ASTAsciiString*)a;
@@ -1531,58 +1583,19 @@ void type_check_ast_node(Compiler* const comp,
 
         a->node_type = to_type(find_or_make_array_structure(comp, context, comp->services.builtin_types->t_ascii, len));
         a->meta_flags |= META_FLAG::COMPTIME;
-        break;
+        return;
       }
     case AST_TYPE::NUMBER: {
         ASTNumber* num = (ASTNumber*)a;
 
-        constexpr auto smallest_type_for_integer = [](const BuiltinTypes* types, u64 val) -> Type {
-          if (val < 0) {
-            if (val >= INT8_MIN) {
-              return types->t_i8;
-            }
-            /*else if (val >= INT8_MIN) {
-              return types->t_i16;
-            }*/
-            else if (val >= INT32_MIN) {
-              return types->t_i32;
-            }
-            else if (val >= INT64_MIN) {
-              return types->t_i64;
-            }
-            else {
-              INVALID_CODE_PATH("There isnt a big enough integer");
-            }
-          }
-          else {
-            if (val < UINT8_MAX) {
-              return types->t_u8;
-            }
-            /*else if (val <= UINT16_MAX) {
-              return types->t_u16;
-            }*/
-            else if (val <= UINT32_MAX) {
-              return types->t_u32;
-            }
-            else if (val <= UINT64_MAX) {
-              return types->t_u64;
-            }
-            else {
-              INVALID_CODE_PATH("There isnt a big enough integer");
-            }
-          }
-
-          return {};
-        };
-
         a->meta_flags |= META_FLAG::COMPTIME;
 
         if (num->suffix == nullptr) {
-          const Type min_size_int = smallest_type_for_integer(comp->services.builtin_types,
-                                                              num->value);
+          //const Type min_size_int = smallest_type_for_integer(comp->services.builtin_types,
+          //                                                    num->value);
 
 
-          a->node_type = min_size_int;
+          a->node_type = comp->services.builtin_types->t_u64;
         }
         else {
           if (num->suffix == comp->services.builtin_types->t_i64.name) {
@@ -1599,7 +1612,7 @@ void type_check_ast_node(Compiler* const comp,
           }
         }
 
-        break;
+        return;
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
         INVALID_CODE_PATH("Should be removed in dependency check");
@@ -1649,26 +1662,41 @@ void type_check_ast_node(Compiler* const comp,
 
         //a->meta_flags = decl->meta_flags;
 
-        break;
+        return;
       }
     case AST_TYPE::LOCAL: {
         //Can be reached during type inference
         ASTIdentifier* ident = (ASTIdentifier*)a;
 
-        Local* const loc = state->all_locals.data + ident->index;
+        Local* const loc = state->find_local(ident->name);
+
+        //Default flags
+        a->meta_flags |= META_FLAG::ASSIGNABLE;
+        a->meta_flags |= META_FLAG::COMPTIME;
+        a->meta_flags |= META_FLAG::CONST;
 
         a->node_type = loc->decl.type;
         pass_meta_flags_down(&a->meta_flags, loc->decl.meta_flags);
-        break;
+        return;
       }
     case AST_TYPE::GLOBAL: {
         //Can be reached during type inference
         ASTIdentifier* ident = (ASTIdentifier*)a;
-        const Global* glob = ((const Global*)ident->ptr);
+
+        const GlobalName* nm = find_global_name(context->current_namespace, ident->name);
+        ASSERT(nm != nullptr);
+
+        const Global* glob = nm->global;
+        ASSERT(glob != nullptr);
+
+        //Default flags
+        a->meta_flags |= META_FLAG::ASSIGNABLE;
+        a->meta_flags |= META_FLAG::COMPTIME;
+        a->meta_flags |= META_FLAG::CONST;
 
         a->node_type = glob->decl.type;
         pass_meta_flags_down(&a->meta_flags, glob->decl.meta_flags);
-        break;
+        return;
       }
     case AST_TYPE::CAST: {
         ASTCastExpr* cast_expr = (ASTCastExpr*)a;
@@ -1700,7 +1728,7 @@ void type_check_ast_node(Compiler* const comp,
         pass_meta_flags_down(&a->meta_flags, cast->meta_flags);
 
         a->node_type = *(const Type*)ty->value;
-        break;
+        return;
       }
     case AST_TYPE::UNARY_OPERATOR: {
         ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)a;
@@ -1720,7 +1748,7 @@ void type_check_ast_node(Compiler* const comp,
 
         pass_meta_flags_down(&a->meta_flags, prim->meta_flags);
 
-        break;
+        return;
       }
     case AST_TYPE::BINARY_OPERATOR: {
         ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)a;
@@ -1750,12 +1778,14 @@ void type_check_ast_node(Compiler* const comp,
           if (can_compile_const_value(left)) {
             ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
             unit->expr = left;
+            unit->stage = EXPR_COMP_STAGE::TYPED;
 
             comp->set_dep(context, unit);
           }
           else if (can_compile_const_value(right)) {
             ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
             unit->expr = right;
+            unit->stage = EXPR_COMP_STAGE::TYPED;
 
             comp->set_dep(context, unit);
           }
@@ -1766,7 +1796,7 @@ void type_check_ast_node(Compiler* const comp,
           return;
         }
 
-        break;
+        return;
       }
     case AST_TYPE::FUNCTION_CALL: {
         ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)a;
@@ -1791,15 +1821,13 @@ void type_check_ast_node(Compiler* const comp,
         }
 
 
-        if (call->sig == nullptr) {
-          compile_find_function_call(comp, context, state, call);
-          if (comp->is_panic()) {
-            return;
-          }
+        compile_find_function_call(comp, context, state, call);
+        if (comp->is_panic()) {
+          return;
         }
 
-        const auto* sig = call->sig;
-
+        const auto* sig = call->func->signature.sig_struct;
+        ASSERT(sig);
 
         const size_t size = sig->parameter_types.size;
 
@@ -1815,6 +1843,7 @@ void type_check_ast_node(Compiler* const comp,
             if (can_compile_const_value(it)) {
               ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
               unit->expr = it;
+              unit->stage = EXPR_COMP_STAGE::TYPED;
 
               comp->set_dep(context, unit);
             }
@@ -1981,13 +2010,10 @@ void type_check_ast_node(Compiler* const comp,
         if (can_compile_const_value(decl_expr)) {
           ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
           unit->expr = decl_expr;
+          //Already typed
+          unit->stage = EXPR_COMP_STAGE::TYPED;
 
           comp->set_dep(context, unit);
-        }
-
-        assert_empty_name(comp, a->node_span, context->current_namespace, decl->name);
-        if (comp->is_panic()) {
-          return;
         }
 
         //Check for shadowing
@@ -2012,7 +2038,7 @@ void type_check_ast_node(Compiler* const comp,
 
         loc->decl.name = decl->name;
         loc->decl.type = decl->type;
-        loc->decl.source = decl;
+        loc->decl.span = decl->node_span;
         if (decl->compile_time_const) {
           loc->decl.meta_flags |= META_FLAG::COMPTIME;
         }
@@ -2052,9 +2078,74 @@ void type_check_ast_node(Compiler* const comp,
         if (can_compile_const_value(a)) {
           ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
           unit->expr = a;
+          unit->stage = EXPR_COMP_STAGE::TYPED;
 
           comp->set_dep(context, unit);
         }
+        return;
+      }
+
+    case AST_TYPE::STRUCT: {
+        ASTStructBody* body = (ASTStructBody*)a;
+
+        FOR_AST(body->elements, it) {
+          type_check_ast_node(comp, context, state, it);
+          if (comp->is_panic()) {
+            return;
+          }
+        }
+
+        ASSERT(body->value == nullptr);
+
+        //Build the new structure
+        {
+          CompositeStructure* cmp_s = STRUCTS::new_composite_structure(comp);
+
+          uint32_t current_size = 0;
+          uint32_t current_alignment = 0;
+
+          FOR_AST(body->elements, it) {
+            ASTTypedName* tn = (ASTTypedName*)it;
+            AST_LOCAL ty = tn->type;
+
+            cmp_s->elements.insert_uninit(1);
+            auto* b = cmp_s->elements.back();
+
+            b->type = *(const Type*)ty->value;
+            b->name = tn->name;
+            b->offset = current_size;
+
+            uint32_t this_align = b->type.structure->alignment;
+
+            current_size = (uint32_t)ceil_to_n(current_size, this_align);
+            current_size += b->type.structure->size;
+
+            current_alignment = larger(this_align, current_alignment);
+          }
+
+          cmp_s->declaration = body;
+          cmp_s->size = current_size;
+          cmp_s->alignment = current_alignment;
+
+          Type* ty = comp->constants.alloc_no_construct<Type>();
+          *ty = to_type(cmp_s);
+
+          body->value = ty;
+        }
+
+        body->node_type = comp->services.builtin_types->t_type;
+
+        return;
+      }
+    case AST_TYPE::TYPED_NAME: {
+        ASTTypedName* name = (ASTTypedName*)a;
+
+        type_check_ast_node(comp, context, state, name->type);
+        if (comp->is_panic()) {
+          return;
+        }
+
+        name->node_type = name->type->node_type;
         return;
       }
   }
@@ -2996,16 +3087,18 @@ static void compile_function_call(Compiler* const comp,
                                   RuntimeHint* hint) {
   TRACING_FUNCTION();
 
+  const auto* sig_struct = call->func->signature.sig_struct;
+
   auto save_stack_params = state->stack.current_passed;
   DEFER(&) { state->stack.current_passed = save_stack_params; };
 
   state->made_call = true;
   state->stack.require_call_alignment(16);//TODO: Actually work out the alignment
 
-  const CallingConvention* convention = call->sig->calling_convention;
+  const CallingConvention* convention = sig_struct->calling_convention;
 
-  bool has_return = call->sig->return_type != comp->services.builtin_types->t_void;
-  bool return_via_pointer = has_return && register_passed_as_pointer(call->sig->return_type);
+  bool has_return = sig_struct->return_type != comp->services.builtin_types->t_void;
+  bool return_via_pointer = has_return && register_passed_as_pointer(sig_struct->return_type);
 
   struct StructuredVal {
     RuntimeValue rv ={};
@@ -3024,7 +3117,7 @@ static void compile_function_call(Compiler* const comp,
   {
     usize i = 0;
     FOR_AST(call->arguments, it) {
-      const Type call_type = call->sig->parameter_types.data[i];
+      const Type call_type = sig_struct->parameter_types.data[i];
 
       const RuntimeValue val = compile_bytecode_of_expression_new(comp, context, state, code, it, ALL_RVTS);
 
@@ -3041,7 +3134,7 @@ static void compile_function_call(Compiler* const comp,
   if (return_via_pointer) {
     ASSERT(hint != nullptr);
     //Load the return on the stack and then pass a pointer
-    load_runtime_hint(comp, state, call->sig->return_type.structure, hint, (uint8_t)RVT::MEMORY);
+    load_runtime_hint(comp, state, sig_struct->return_type.structure, hint, (uint8_t)RVT::MEMORY);
 
     UnOpArgs args ={};
     args.comp = comp;
@@ -3088,46 +3181,8 @@ static void compile_function_call(Compiler* const comp,
 
   size_t stack_params = state->stack.current_passed;
 
-  Function* func = nullptr;
-  {
-    const auto names = comp->services.names->find_all_names(context->current_namespace, call->function_name);
-    auto ni = names.begin();
-    const auto nend = names.end();
+  Function* func = call->func;
 
-    for (; ni < nend; ni++) {
-      const auto& globals = ni->named_element->globals;
-      auto gi = globals.begin();
-      const auto gend = globals.end();
-
-      for (; gi < gend; gi++) {
-        const Global* glob = *gi;
-        if (glob->decl.type.structure == call->sig) {
-          ASSERT(glob->constant_value.ptr != nullptr);
-          func = *(Function**)glob->constant_value.ptr;
-          goto FOUND_FUNC;
-        }
-      }
-    }
-  }
-
-  {
-    auto li = state->active_locals.begin();
-    const auto lend = state->active_locals.end();
-
-    for (; li < lend; li++) {
-      const Local* loc = state->all_locals.data + *li;
-
-      if (loc->decl.type.structure == call->sig && loc->decl.name == call->function_name) {
-        ASSERT(TEST_MASK(loc->decl.meta_flags, META_FLAG::COMPTIME));
-        ASSERT(loc->val.type == RVT::CONST);
-        ASSERT(loc->val.constant.size == 8);
-        func = *(Function**)loc->val.constant.ptr;
-        goto FOUND_FUNC;
-      }
-    }
-  }
-
-FOUND_FUNC:
   ASSERT(func != nullptr);
 
   func->is_called = true;
@@ -3176,6 +3231,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
   ASSERT(hint != nullptr);
 
   DEFER(&) {
+    ASSERT(hint != nullptr);
     ASSERT(!hint->is_hint);
 
     state->control_flow.expression_num++;
@@ -3215,7 +3271,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         }
 
         Type* struct_c = (Type*)comp->constants.alloc_no_construct(sizeof(Type));
-        memcpy_ts(struct_c, 1, &s->type, 1);
+        memcpy_ts(struct_c, 1, (const Type*)s->value, 1);
 
         load_const_to_runtime_val(comp, state, code, expr->node_type.structure,
                                   ConstantVal{ (uint8_t*)struct_c, sizeof(Type) },
@@ -3658,7 +3714,8 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         ASSERT(hint != nullptr);
         ASTIdentifier* ident = (ASTIdentifier*)expr;
 
-        Local* local = state->all_locals.data + ident->index;
+        Local* local = state->find_local(ident->name);
+        ASSERT(local != nullptr);
 
         RuntimeValue local_val = local->val;
         if (local_val.type == RVT::CONST) {
@@ -3680,7 +3737,12 @@ static void compile_bytecode_of_expression(Compiler* const comp,
     case AST_TYPE::GLOBAL: {
         ASSERT(hint != nullptr);
         ASTIdentifier* ident = (ASTIdentifier*)expr;
-        const Global* glob = (const Global*)ident->ptr;
+
+        const GlobalName* gn = find_global_name(context->current_namespace, ident->name);
+        ASSERT(gn != nullptr);
+
+        const Global* glob = gn->global;
+        ASSERT(glob != nullptr);
 
         if (glob->constant_value.ptr != nullptr) {
           if (hint->is_hint) {
@@ -4771,6 +4833,8 @@ void compile_function_body_init(Compiler* const comp,
 
   ASTFuncSig* ast_sig = (ASTFuncSig*)ast_lambda->sig;
 
+  state->return_type = *(const Type*)ast_sig->return_type->value;
+
   //Enter the body
   state->control_flow.new_flow();
 
@@ -5103,7 +5167,7 @@ void compile_import_expression_type(Compiler* comp, Context* context, State* sta
   }
 }
 
-static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp, NamespaceIndex import_to) {
+static void compile_import_file(Compiler* comp, Context* context, const FileLocation* src_loc, ASTImport* imp, Namespace* import_to) {
   TRACING_FUNCTION();
 
   const char* path = nullptr;
@@ -5125,9 +5189,7 @@ static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp
 
   ASSERT(path != nullptr);
 
-  Namespace* ns = comp->services.names->get_raw_namespace(import_to);
-
-  FileLocation loc = parse_file_location(ns->source_file.directory->string, path,
+  FileLocation loc = parse_file_location(src_loc->directory->string, path,
                                          comp->services.strings);
 
   if (expr->value != nullptr) {
@@ -5141,18 +5203,17 @@ static void compile_import_file(Compiler* comp, Context* context, ASTImport* imp
 
   const FileAST* imported_file = comp->parsed_files.find_if(is_correct_file);
 
-  if (imported_file) {
-    ns = comp->services.names->get_raw_namespace(import_to);
-    ns->imported.insert(imported_file->namespace_index);
+  if (imported_file != nullptr) {
+    add_global_import(comp, import_to, imported_file->ns, imp->node_span);
   }
   else {
     FileImport file_import ={};
     file_import.file_loc = std::move(loc);
-    file_import.ns_index = comp->services.names->new_namespace();
+    file_import.ns = comp->namespaces.insert();
     file_import.span = imp->node_span;
 
-    ns = comp->services.names->get_raw_namespace(import_to);
-    ns->imported.insert(file_import.ns_index);
+    //Might error but its probs fine to just leave it as the error will be caught at some point
+    add_global_import(comp, import_to, file_import.ns, imp->node_span);
 
     comp->services.file_loader->unparsed_files.insert(std::move(file_import));
   }
@@ -5185,6 +5246,7 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
     if (decl_expr->value == nullptr) {
       ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
       unit->expr = decl->expr;
+      unit->stage = EXPR_COMP_STAGE::TYPED;
 
       comp->set_dep(context, unit);
       return;
@@ -5222,73 +5284,39 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
     graph_colour_algo(comp, comp->build_options.default_calling_convention, &global->init, state);
   }
 
-  //Now it can exist
-  NamedElement* el = comp->services.names->find_name(context->current_namespace, decl->name);
+  ////Now it can exist
+  //NamedElement* el = comp->services.names->find_name(context->current_namespace, decl->name);
 
-  if (decl->type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
-    //Special stuff to allow overloads
+  //if (decl->type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
+  //  //Special stuff to allow overloads
 
-    {
-      auto i = el->globals.begin();
-      auto end = el->globals.end();
+  //  {
+  //    auto i = el->globals.begin();
+  //    auto end = el->globals.end();
 
-      for (; i < end; i++) {
-        const Global* g = *i;
-        if (g->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
-          comp->report_error(ERROR_CODE::NAME_ERROR, g->decl.source->node_span,
-                             "Cannot overload the non-function '{}'", decl->name);
-          return;
-        }
+  //    for (; i < end; i++) {
+  //      const Global* g = *i;
+  //      if (g->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
+  //        comp->report_error(ERROR_CODE::NAME_ERROR, g->decl.source->node_span,
+  //                           "Cannot overload the non-function '{}'", decl->name);
+  //        return;
+  //      }
 
-        //TODO: check the functions are ok to be overloaded
-      }
-    }
+  //      //TODO: check the functions are ok to be overloaded
+  //    }
+  //  }
 
-  }
-  else {
-    if (el->globals.size + el->unknowns != 1) {
-      comp->report_error(ERROR_CODE::NAME_ERROR, decl->node_span,
-                         "Cannot overload the non-function '{}'", decl->name);
-      return;
-    }
-  }
+  //}
+  //else {
+  //  if (el->globals.size + el->unknowns != 1) {
+  //    comp->report_error(ERROR_CODE::NAME_ERROR, decl->node_span,
+  //                       "Cannot overload the non-function '{}'", decl->name);
+  //    return;
+  //  }
+  //}
 
-  el->unknowns--;
-  el->globals.insert(global);
-}
-
-void compile_new_composite_structure(Compiler* comp, Context* context, ASTStructBody* struct_body) {
-  TRACING_FUNCTION();
-
-  CompositeStructure* cmp_s = STRUCTS::new_composite_structure(comp);
-
-  uint32_t current_size = 0;
-  uint32_t current_alignment = 0;
-
-  FOR_AST(struct_body->elements, it) {
-    ASTTypedName* tn = (ASTTypedName*)it;
-    AST_LOCAL ty = tn->type;
-
-    cmp_s->elements.insert_uninit(1);
-    auto* b = cmp_s->elements.back();
-
-    b->type = *(const Type*)ty->value;
-    b->name = tn->name;
-    b->offset = current_size;
-
-    uint32_t this_align = b->type.structure->alignment;
-
-    current_size = (uint32_t)ceil_to_n(current_size, this_align);
-    current_size += b->type.structure->size;
-
-    current_alignment = larger(this_align, current_alignment);
-  }
-
-  cmp_s->declaration = struct_body;
-  cmp_s->size = current_size;
-  cmp_s->alignment = current_alignment;
-
-  struct_body->type = to_type(cmp_s);
+  //el->unknowns--;
+  //el->globals.insert(global);
 }
 
 
@@ -5338,8 +5366,8 @@ void compile_current_unparsed_files(Compiler* const comp) {
       FileAST* ast_file = comp->parsed_files.back();
       ast_file->file_loc = file_import->file_loc;
 
-      ast_file->namespace_index = file_import->ns_index;
-      comp->services.parser->current_namespace = file_import->ns_index;
+      ast_file->ns = file_import->ns;
+      comp->services.parser->current_namespace = file_import->ns;
 
       {
         TRACING_SCOPE("Parsing");
@@ -5380,39 +5408,38 @@ void compile_current_unparsed_files(Compiler* const comp) {
 void process_parsed_file(Compiler* const comp, FileAST* const file) {
   TRACING_FUNCTION();
 
-  Namespace* ns = comp->services.names->get_raw_namespace(file->namespace_index);
+  ASSERT(file->top_level.start != nullptr && file->top_level.start->curr != nullptr);
 
-  ns->source_file = file->file_loc;
+  //Always include the builtin namespace
+  file->ns->imported.insert(comp->builtin_namespace);
 
   FOR_AST(file->top_level, it) {
     switch (it->ast_type) {
       case AST_TYPE::IMPORT: {
           ASTImport* i = (ASTImport*)it;
 
-          ImportUnit* imp = comp->new_import_unit(file->namespace_index);
+          ImportUnit* imp = comp->new_import_unit(file->ns);
           imp->import_ast = i;
+          imp->src_loc = file->file_loc;
           break;
         }
       case AST_TYPE::DECL: {
           ASTDecl* i = (ASTDecl*)it;
 
-          NamedElement* el = ns->names.get_val(i->name);
-          if (el == nullptr) {
-            el = ns->names.insert(i->name);
-          }
-
-          //Not typed yet
-          el->unknowns++;
-
-          GlobalUnit* unit = comp->new_global_unit(file->namespace_index);
+          GlobalUnit* unit = comp->new_global_unit(file->ns);
           Global* glob =  comp->globals.insert();
 
-          glob->compilation_unit = unit;
           glob->decl.name = i->name;
-          glob->decl.source = i;
+          glob->decl.span = i->node_span;
 
           unit->global = glob;
           unit->source = i;
+
+          add_global_name(comp, file->ns, i->name, unit, glob);
+          if (comp->is_panic()) {
+            return;
+          }
+
           break;
         }
       default: {
@@ -5424,11 +5451,11 @@ void process_parsed_file(Compiler* const comp, FileAST* const file) {
   }
 }
 
-void add_comp_unit_for_lambda(Compiler* const comp, NamespaceIndex namespace_index, ASTLambda* lambda) noexcept {
+void add_comp_unit_for_lambda(Compiler* const comp, Namespace* ns, ASTLambda* lambda) noexcept {
   //Make  new function
   Function* const func = comp->new_function();
 
-  SignatureUnit* const unit = comp->new_signature_unit(namespace_index);
+  SignatureUnit* const unit = comp->new_signature_unit(ns);
 
   func->compilation_unit = unit;
 
@@ -5444,8 +5471,8 @@ void add_comp_unit_for_lambda(Compiler* const comp, NamespaceIndex namespace_ind
   ((ASTFuncSig*)lambda->sig)->convention = comp->build_options.default_calling_convention;
 }
 
-void add_comp_unit_for_struct(Compiler* const comp, NamespaceIndex namespace_index, ASTStructBody* struct_body) noexcept {
-  StructureUnit* const unit = comp->new_structure_unit(namespace_index);
+void add_comp_unit_for_struct(Compiler* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept {
+  StructureUnit* const unit = comp->new_structure_unit(ns);
 
   unit->source = struct_body;
   unit->untyped = struct_body->elements.start;
@@ -5468,6 +5495,9 @@ void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
       comp->to_compile.push_back(dep_of);
     }
   }
+
+  ASSERT(comp->in_flight_units != 0);
+  comp->in_flight_units -= 1;
 
   switch (unit->type) {
     case COMPILATION_TYPE::FUNCTION:
@@ -5564,6 +5594,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                         //Only called if this isnt already a constant literal
                         if (can_compile_const_value(expr)) {
                           ConstantExprUnit* const_u = comp->new_const_expr_unit(unit->available_names);
+                          const_u->stage = EXPR_COMP_STAGE::TYPED;
 
                           const_u->expr = expr;
                           const_u->state = std::move(unit->state);
@@ -5588,7 +5619,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       break;
                     }
                   case IMPORT_COMP_STAGE::UNPARSED: {
-                      compile_import_file(comp, &context, unit->import_ast, unit->available_names);
+                      compile_import_file(comp, &context, &unit->src_loc, unit->import_ast, unit->available_names);
                       if (comp->is_panic()) {
                         return comp->services.errors->print_all();
                       }
@@ -5608,6 +5639,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                 switch (unit->stage) {
                   case GLOBAL_COMP_STAGE::DEPENDING: {
                       DependencyCheckState st ={};
+                      st.local_context = false;
                       dependency_check_ast_node(comp, &context, &st, unit->source);
 
                       unit->stage = GLOBAL_COMP_STAGE::UNTYPED;
@@ -5631,6 +5663,7 @@ ERROR_CODE compile_all(Compiler* const comp) {
                         if (decl_expr->value == nullptr) {
                           ConstantExprUnit* unit = comp->new_const_expr_unit(context.current_namespace);
                           unit->expr = decl_expr;
+                          unit->stage = EXPR_COMP_STAGE::TYPED;
 
                           comp->set_dep(&context, unit);
                         }
@@ -5687,20 +5720,6 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       }
 
                       unit->stage = STRUCTURE_COMP_STAGE::TYPED;
-
-                      if (!comp->is_depends()) {
-                        comp->to_compile.push_front(comp_u);//redo straight away
-                      }
-                      break;
-                    }
-                  case STRUCTURE_COMP_STAGE::TYPED: {
-                      compile_new_composite_structure(comp, &context, unit->source);
-                      if (comp->is_panic()) {
-                        //Should only be called once
-                        return comp->services.errors->print_all();
-                      }
-
-                      ASSERT(!comp->is_depends());
 
                       //Finished
                       close_compilation_unit(comp, unit);
@@ -5789,6 +5808,21 @@ ERROR_CODE compile_all(Compiler* const comp) {
                     }
                   case FUNCTION_COMP_STAGE::DEPENDING: {
                       DependencyCheckState st ={};
+
+                      //Load the parameters to the dependencies
+                      {
+                        ASSERT(unit->source->sig->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
+                        ASTFuncSig* sig = (ASTFuncSig*)unit->source->sig;
+
+                        FOR_AST(sig->parameters, it) {
+                          ASSERT(it->ast_type == AST_TYPE::TYPED_NAME);
+                          ASTTypedName* nm = (ASTTypedName*)it;
+                          st.locals.insert(nm->name);
+                        }
+                      }
+
+                      st.local_context = true;
+
                       dependency_check_ast_node(comp, &context, &st, unit->source);
 
                       unit->stage = FUNCTION_COMP_STAGE::UNTYPED_BODY;
@@ -6054,41 +6088,15 @@ ERROR_CODE compile_all(Compiler* const comp) {
         TRACING_SCOPE("check unfound dependencies");
 
         const size_t num_deps = comp->unfound_deps.unfound.size;
+
+        constexpr auto found_dep_l = [](const UnfoundDep& dep) -> bool {
+          const GlobalName* gn = find_global_name(dep.name.ns, dep.name.ident);
+
+          return gn != nullptr;
+        };
+
         //Remove units if dependency has been found
-        comp->unfound_deps.unfound.remove_if([comp](const UnfoundDep& dep) {
-          usize globals = 0;
-          usize unknowns = 0;
-
-          if (dep.name.all_names) {
-            Array<NamespaceElement> el = comp->services.names->find_all_names(dep.name.namespace_index, dep.name.ident);
-
-            FOR(el, it) {
-              unknowns += it->named_element->unknowns;
-              globals += it->named_element->globals.size;
-            }
-          }
-          else {
-            NamedElement* el = comp->services.names->find_name(dep.name.namespace_index, dep.name.ident);
-            if (el != nullptr) {
-              unknowns += el->unknowns;
-              globals += el->globals.size;
-            }
-          }
-
-          if (globals != dep.name.num_knowns || unknowns != dep.name.num_unknowns) {
-            dep.unit_waiting->num_deps -= 1;
-
-            //Success!
-            if (dep.unit_waiting->num_deps == 0) {
-              //No more dependencies - can add back to the compiling
-              comp->to_compile.push_back(dep.unit_waiting);
-            }
-            return true;
-          }
-          else {
-            return false;
-          }
-                                             });
+        comp->unfound_deps.unfound.remove_if(found_dep_l);
 
         if (num_deps == comp->unfound_deps.unfound.size) {
           //All dependencies are still unfound
@@ -6106,8 +6114,10 @@ ERROR_CODE compile_all(Compiler* const comp) {
     }
   }
 
+  ASSERT(comp->in_flight_units == 0);
+
   {
-    TRACING_SCOPE("load dlls");
+    TRACING_SCOPE("test load dlls");
 
     auto i = comp->dlls_import.begin();
     auto end = comp->dlls_import.end();
@@ -6124,7 +6134,6 @@ ERROR_CODE compile_all(Compiler* const comp) {
       auto end_el = end->imports.begin();
       for (; i_el < end_el; i_el++) {
         if (!single_dll.export_table.names.contains(i_el->name)) {
-          //Now thats a lot of indirection
           comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i_el->ptr->declaration->sig->node_span,
                              "Dll '{}' does export anything named '{}'",
                              i->name, i_el->name);
@@ -6154,17 +6163,8 @@ void print_compiled_functions(const Compiler* const comp) {
 }
 
 //Make sure that t_struct is already created!!!
-Type create_named_type(Compiler* comp, const Span& span, NamespaceIndex ns,
+Type create_named_type(Compiler* comp, const Span& span, Namespace* ns,
                        const InternString* name, const Structure* s) {
-  NamedElement* ne = comp->services.names->create_name(ns, name);
-
-  if (ne == nullptr) {
-    comp->report_error(ERROR_CODE::NAME_ERROR, span,
-                       "Tried to create a type of name '{}', but this name is already used",
-                       name);
-    return { nullptr, nullptr };
-  }
-
   Global* g = comp->globals.insert();
 
   ASSERT(comp->services.builtin_types->t_type.is_valid());
@@ -6174,26 +6174,18 @@ Type create_named_type(Compiler* comp, const Span& span, NamespaceIndex ns,
   g->decl.meta_flags = (u8)META_FLAG::COMPTIME;
   g->decl.name = name;
   g->decl.type = comp->services.builtin_types->t_type;
+  g->decl.span = span;
   g->constant_value.ptr = comp->constants.alloc_no_construct<Type>();
   g->constant_value.size = sizeof(Type);
 
   memcpy_ts((Type*)g->constant_value.ptr, 1, &type, 1);
 
-  ne->globals.insert(g);
+  add_global_name(comp, ns, name, nullptr, g);
 
   return type;
 }
 
-void create_named_enum_value(Compiler* comp, const Span& span, NamespaceIndex ns, const EnumValue* v) {
-  NamedElement* ne = comp->services.names->create_name(ns, v->name);
-
-  if (ne == nullptr) {
-    comp->report_error(ERROR_CODE::NAME_ERROR, span,
-                       "Tried to create an enum value of name '{}', but this name is already used",
-                       v->name);
-    return;
-  }
-
+void create_named_enum_value(Compiler* comp, const Span& span, Namespace* ns, const EnumValue* v) {
   Global* g = comp->globals.insert();
 
   ASSERT(v->type.is_valid());
@@ -6201,21 +6193,21 @@ void create_named_enum_value(Compiler* comp, const Span& span, NamespaceIndex ns
   g->decl.meta_flags = (u8)META_FLAG::COMPTIME;
   g->decl.name = v->name;
   g->decl.type = v->type;
+  g->decl.span = span;
   g->constant_value.ptr = comp->constants.alloc_no_construct<const EnumValue*>();
   g->constant_value.size = sizeof(const EnumValue*);
 
   memcpy_ts((const EnumValue**)g->constant_value.ptr, 1, &v, 1);
 
-  ne->globals.insert(g);
+  add_global_name(comp, ns, v->name, nullptr, g);
 }
 
 void init_compiler(const APIOptions& options, Compiler* comp) {
   TRACING_FUNCTION();
 
   //Setup the built in namespace
-  //comp->builtin_namespace = comp->names->builtin_namespace;
-
-  NamespaceIndex builtin_namespace = comp->services.names->builtin_namespace;
+  Namespace* builtin_namespace = comp->namespaces.insert();
+  comp->builtin_namespace = builtin_namespace;
 
   //Init the types
   auto* structures = comp->services.structures;

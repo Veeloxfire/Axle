@@ -21,10 +21,6 @@ struct ValueIndex {
   }
 };
 
-struct NamespaceIndex {
-  size_t index;
-};
-
 struct ConstantVal {
   void* ptr;
   size_t size;

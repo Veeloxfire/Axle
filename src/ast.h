@@ -12,6 +12,7 @@ struct EnumValue;
 struct State;
 struct Global;
 struct AST;
+struct Namespace;
 
 using AST_LOCAL = AST*;
 
@@ -135,6 +136,7 @@ struct ASTBinaryOperatorExpr : public AST {
 };
 
 struct ASTTupleLitExpr : public AST {
+  const InternString* name;
   AST_ARR elements = {};
 };
 
@@ -142,8 +144,7 @@ struct ASTFunctionCallExpr : public AST {
   AST_ARR arguments ={};
 
   const InternString* function_name = nullptr;
-  const SignatureStructure* sig = nullptr;
-  //const Function* function = nullptr;
+  Function* func = nullptr;
 };
 
 struct ASTUnaryOperatorExpr : public AST {
@@ -175,11 +176,6 @@ struct ASTArrayExpr : public AST {
 
 struct ASTIdentifier : public AST {
   const InternString* name;
-
-  union {
-    const void* ptr;
-    usize index;
-  };
 };
 
 struct ASTMemberAccessExpr : public AST {
@@ -244,7 +240,6 @@ struct ASTTypedName : public AST {
 
 struct ASTStructBody : public AST {
   CompilationUnit* compilation_unit;
-  Type type{};
   AST_ARR elements = {};
 };
 
@@ -275,7 +270,7 @@ struct ASTImport : public AST {
 struct FileAST {
   AST_ARR top_level;
 
-  NamespaceIndex namespace_index;
+  Namespace* ns;
   FileLocation file_loc;
 };
 

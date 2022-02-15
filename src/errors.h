@@ -26,9 +26,9 @@ struct Errors {
   Array<ErrorMessage> error_messages ={};
 
   template<typename ... T>
-  void register_error(ERROR_CODE code, const Span& span, const char* f_message, T&& ... ts) noexcept {
+  void register_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) noexcept {
 
-    OwnedPtr<char> message = format(f_message, std::forward<T>(ts)...);
+    OwnedPtr<char> message = format(f_message, ts...);
     error_messages.insert({ code, span, std::move(message) });
   }
 

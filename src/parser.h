@@ -106,11 +106,13 @@ struct TokenStream {
   Token* end;
 };
 
+struct Namespace;
+
 struct Parser {
   MemoryPool store ={};
 
   TokenStream stream;
-  NamespaceIndex current_namespace;
+  Namespace* current_namespace;
 
   Token prev = {};
   Token current ={};

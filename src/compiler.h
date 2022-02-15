@@ -152,7 +152,7 @@ struct StackState {
 };
 
 struct Decl {
-  ASTDecl* source = nullptr;
+  Span span ={};
 
   const InternString* name ={};
   META_FLAGS meta_flags ={};
@@ -216,8 +216,10 @@ struct State {
 void init_state_regs(const CallingConvention* convention, State* state);
 
 struct DependencyCheckState {
+  bool local_context;
+  //DependencyCheckState* outer;
   Array<const InternString*> locals;
-  
+
   inline bool is_local(const InternString* l) {
     return locals.contains(l);
   }
@@ -225,8 +227,6 @@ struct DependencyCheckState {
 };
 
 struct Global {
-  CompilationUnit* compilation_unit = nullptr;
-
   Decl decl;
 
   size_t data_index = 0;
@@ -274,14 +274,14 @@ struct Dependency {
 struct CompilationUnit : public Dependency {
   COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
 
-  NamespaceIndex available_names ={};
+  Namespace* available_names = nullptr;
 };
 
 struct ImportUnit : public CompilationUnit {
   IMPORT_COMP_STAGE stage = IMPORT_COMP_STAGE::DEPENDING;
 
   State state ={};
-
+  FileLocation src_loc ={};
   ASTImport* import_ast;
 };
 
@@ -333,11 +333,8 @@ struct CallSignature {
 };
 
 struct UnknownName {
-  bool all_names = false;
   const InternString* ident = nullptr;
-  NamespaceIndex namespace_index ={};
-  usize num_knowns = 0;
-  usize num_unknowns = 0;
+  Namespace* ns ={};
 };
 
 
@@ -356,7 +353,7 @@ struct UnfoundDependencies {
 
 struct FileImport {
   FileLocation file_loc ={};
-  NamespaceIndex ns_index ={};
+  Namespace* ns = nullptr;
   Span span ={};
 };
 
@@ -409,31 +406,30 @@ struct Context {
   Span span;
 
   CompilationUnit* current_unit;
-  NamespaceIndex current_namespace;
+  Namespace* current_namespace;
 };
 
-struct ToTypeCheckData {
-
-};
-
-struct ToByteCodeData {
-
-};
-
-struct ToExecData {
-
-};
-
-struct CompPipes {
-  Queue<ToTypeCheckData> type_check;
-};
+//struct ToTypeCheckData {
+//
+//};
+//
+//struct ToByteCodeData {
+//
+//};
+//
+//struct ToExecData {
+//
+//};
+//
+//struct CompPipes {
+//  Queue<ToTypeCheckData> type_check;
+//};
 
 struct Services {
   Lexer* lexer = nullptr;
   Parser* parser = nullptr;
   VM* vm = nullptr;
   Errors* errors = nullptr;
-  NamesHandler* names = nullptr;
   FileLoader* file_loader = nullptr;
   Structures* structures = nullptr;
   BuiltinTypes* builtin_types = nullptr;
@@ -445,7 +441,8 @@ struct Compiler {
   BuildOptions           build_options        ={};
   APIOptimizationOptions optimization_options ={};
 
-  bool new_depends;
+  bool new_depends = false;
+  u32 in_flight_units = 0;
 
   SystemsAndConventionNames system_names ={};
   Intrinsics intrinsics ={};
@@ -459,7 +456,8 @@ struct Compiler {
 
   UnfoundDependencies unfound_deps ={};
 
-  NamespaceIndex build_file_namespace ={};//needs to be saved for finding main
+  Namespace* build_file_namespace ={};//needs to be saved for finding main
+  Namespace* builtin_namespace ={};
 
   Array<ImportedDll> dlls_import ={};
   Array<FileAST> parsed_files ={};
@@ -473,6 +471,7 @@ struct Compiler {
 
   BucketArray<Global> globals ={};
   BucketArray<Function> functions ={};
+  BucketArray<Namespace> namespaces ={};
 
   ArenaAllocator constants ={};
 
@@ -480,12 +479,12 @@ struct Compiler {
 
   Function* new_function();
 
-  ImportUnit* new_import_unit(NamespaceIndex ns);
-  ConstantExprUnit* new_const_expr_unit(NamespaceIndex ns);
-  FunctionUnit* new_function_unit(NamespaceIndex ns);
-  SignatureUnit* new_signature_unit(NamespaceIndex ns);
-  StructureUnit* new_structure_unit(NamespaceIndex ns);
-  GlobalUnit* new_global_unit(NamespaceIndex ns);
+  ImportUnit* new_import_unit(Namespace* ns);
+  ConstantExprUnit* new_const_expr_unit(Namespace* ns);
+  FunctionUnit* new_function_unit(Namespace* ns);
+  SignatureUnit* new_signature_unit(Namespace* ns);
+  StructureUnit* new_structure_unit(Namespace* ns);
+  GlobalUnit* new_global_unit(Namespace* ns);
 
   inline constexpr bool is_panic() const { return services.errors->panic; }
   inline constexpr bool is_depends() const { return new_depends || unfound_deps.panic; }
@@ -497,8 +496,8 @@ struct Compiler {
   }
 
   template<typename ... T>
-  void report_error(ERROR_CODE code, const Span& span, const char* f_message, T&& ... ts) {
-    services.errors->register_error(code, span, f_message, std::forward<T>(ts)...);
+  void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) {
+    services.errors->register_error(code, span, f_message, ts...);
 
     services.errors->panic = true;
   }
@@ -525,8 +524,8 @@ struct Compiler {
   void set_dep(Context* context, CompilationUnit* unit);
 };
 
-void add_comp_unit_for_lambda(Compiler* const comp, NamespaceIndex ns_index, ASTLambda* lambda) noexcept;
-void add_comp_unit_for_struct(Compiler* const comp, NamespaceIndex ns_index, ASTStructBody* struct_body) noexcept;
+void add_comp_unit_for_lambda(Compiler* const comp, Namespace* ns, ASTLambda* lambda) noexcept;
+void add_comp_unit_for_struct(Compiler* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;
 
 void init_compiler(const APIOptions& options, Compiler* comp);
 
