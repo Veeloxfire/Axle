@@ -2,6 +2,12 @@
 #include "strings.h"
 #include "trace.h"
 
+void throw_testing_assertion(const char* message) {
+  if (std::uncaught_exceptions() == 0) {
+    throw std::exception(message);
+  }
+}
+
 void load_to_bytes(Array<uint8_t>& bytes,
                    const size_t offset,
                    const uint8_t* in_bytes,

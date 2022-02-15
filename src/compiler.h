@@ -14,7 +14,6 @@
 #include "type.h"
 
 
-
 struct VM;
 
 struct TimePoint {
@@ -153,7 +152,7 @@ struct StackState {
 };
 
 struct Decl {
-  ASTDecl* source = nullptr;
+  Span span ={};
 
   const InternString* name ={};
   META_FLAGS meta_flags ={};
@@ -173,6 +172,8 @@ struct Local {
 };
 
 struct State {
+  Type return_type;
+
   Array<Local> all_locals ={};
   Array<size_t> active_locals ={};
 
@@ -214,45 +215,11 @@ struct State {
 
 void init_state_regs(const CallingConvention* convention, State* state);
 
-//Type hint type
-enum struct THT : uint8_t {
-  EXACT, IMPLICIT, BASE, BASE_HINT
-};
-
-struct TypeHint {
-  THT tht = THT::EXACT;
-  union {
-    Type type ={};
-    const TypeHint* other_hint;
-  };
-};
-
-struct UntypedIterator {
-  struct Scope {
-    size_t num_outer_locals = 0;
-    AST_LINKED* scope ={};
-    AST_LOCAL next;
-  };
-
-  Array<Scope> scopes;
-};
-
-struct UntypedCode {
-  UntypedIterator itr;
-
-  AST_LOCAL current_statement;
-};
-
-void new_scope(UntypedIterator*,
-               AST_LINKED* l,
-               AST_LOCAL n,
-               State* state);
-
-AST_LOCAL advance_scopes(UntypedIterator* itr, State* state);
-
 struct DependencyCheckState {
+  bool local_context;
+  //DependencyCheckState* outer;
   Array<const InternString*> locals;
-  
+
   inline bool is_local(const InternString* l) {
     return locals.contains(l);
   }
@@ -260,8 +227,6 @@ struct DependencyCheckState {
 };
 
 struct Global {
-  CompilationUnit* compilation_unit = nullptr;
-
   Decl decl;
 
   size_t data_index = 0;
@@ -298,23 +263,25 @@ enum struct IMPORT_COMP_STAGE : u8 {
   DEPENDING, UNTYPED, UNPARSED, FINISHED
 };
 
-struct CompilationUnit {
-  COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
-
-  //units that we need to finish
+struct Dependency {
   usize num_deps = 0;
 
-  //units that are waiting for us to finish
-  Array<CompilationUnit*> dependency_of ={};
+  Array<Dependency*> dependency_of;
 
-  NamespaceIndex available_names ={};
+  CompilationUnit* waiting_unit;
+};
+
+struct CompilationUnit : public Dependency {
+  COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
+
+  Namespace* available_names = nullptr;
 };
 
 struct ImportUnit : public CompilationUnit {
   IMPORT_COMP_STAGE stage = IMPORT_COMP_STAGE::DEPENDING;
 
   State state ={};
-
+  FileLocation src_loc ={};
   ASTImport* import_ast;
 };
 
@@ -347,7 +314,6 @@ struct FunctionUnit : public CompilationUnit {
 
   ASTLambda* source = nullptr;
   Function* func = nullptr;
-  UntypedCode untyped = {};
 
   State state ={};
 };
@@ -355,7 +321,7 @@ struct FunctionUnit : public CompilationUnit {
 struct ConstantExprUnit : public CompilationUnit {
   EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::DEPENDING;
 
-  ASTExpressionBase* expr = nullptr;
+  AST_LOCAL expr = nullptr;
   Type cast_to ={};
 
   State state ={};
@@ -366,20 +332,9 @@ struct CallSignature {
   Array<TypeAndFlags> arguments ={};
 };
 
-struct OverloadSet {
-  bool complete_match = false;
-  Array<const SignatureStructure*> valid_overloads ={};
-
-  usize num_options_checked = 0;
-};
-
-
 struct UnknownName {
-  bool all_names = false;
   const InternString* ident = nullptr;
-  NamespaceIndex namespace_index ={};
-  usize num_knowns = 0;
-  usize num_unknowns = 0;
+  Namespace* ns ={};
 };
 
 
@@ -398,7 +353,7 @@ struct UnfoundDependencies {
 
 struct FileImport {
   FileLocation file_loc ={};
-  NamespaceIndex ns_index ={};
+  Namespace* ns = nullptr;
   Span span ={};
 };
 
@@ -451,15 +406,30 @@ struct Context {
   Span span;
 
   CompilationUnit* current_unit;
-  NamespaceIndex current_namespace;
+  Namespace* current_namespace;
 };
+
+//struct ToTypeCheckData {
+//
+//};
+//
+//struct ToByteCodeData {
+//
+//};
+//
+//struct ToExecData {
+//
+//};
+//
+//struct CompPipes {
+//  Queue<ToTypeCheckData> type_check;
+//};
 
 struct Services {
   Lexer* lexer = nullptr;
   Parser* parser = nullptr;
   VM* vm = nullptr;
   Errors* errors = nullptr;
-  NamesHandler* names = nullptr;
   FileLoader* file_loader = nullptr;
   Structures* structures = nullptr;
   BuiltinTypes* builtin_types = nullptr;
@@ -471,7 +441,8 @@ struct Compiler {
   BuildOptions           build_options        ={};
   APIOptimizationOptions optimization_options ={};
 
-  bool new_depends;
+  bool new_depends = false;
+  u32 in_flight_units = 0;
 
   SystemsAndConventionNames system_names ={};
   Intrinsics intrinsics ={};
@@ -480,9 +451,13 @@ struct Compiler {
 
   Array<Token> current_stream ={};
 
+  //CompPipes comp_unit_pipes;
+  Queue<CompilationUnit*> to_compile ={};
+
   UnfoundDependencies unfound_deps ={};
 
-  NamespaceIndex build_file_namespace ={};//needs to be saved for finding main
+  Namespace* build_file_namespace ={};//needs to be saved for finding main
+  Namespace* builtin_namespace ={};
 
   Array<ImportedDll> dlls_import ={};
   Array<FileAST> parsed_files ={};
@@ -494,10 +469,9 @@ struct Compiler {
   FreelistBlockAllocator<ConstantExprUnit> const_expr_units ={};
   FreelistBlockAllocator<GlobalUnit> global_units ={};
 
-  Array<CompilationUnit*> to_compile ={};
-
   BucketArray<Global> globals ={};
   BucketArray<Function> functions ={};
+  BucketArray<Namespace> namespaces ={};
 
   ArenaAllocator constants ={};
 
@@ -505,12 +479,12 @@ struct Compiler {
 
   Function* new_function();
 
-  ImportUnit* new_import_unit(NamespaceIndex ns);
-  ConstantExprUnit* new_const_expr_unit(NamespaceIndex ns);
-  FunctionUnit* new_function_unit(NamespaceIndex ns);
-  SignatureUnit* new_signature_unit(NamespaceIndex ns);
-  StructureUnit* new_structure_unit(NamespaceIndex ns);
-  GlobalUnit* new_global_unit(NamespaceIndex ns);
+  ImportUnit* new_import_unit(Namespace* ns);
+  ConstantExprUnit* new_const_expr_unit(Namespace* ns);
+  FunctionUnit* new_function_unit(Namespace* ns);
+  SignatureUnit* new_signature_unit(Namespace* ns);
+  StructureUnit* new_structure_unit(Namespace* ns);
+  GlobalUnit* new_global_unit(Namespace* ns);
 
   inline constexpr bool is_panic() const { return services.errors->panic; }
   inline constexpr bool is_depends() const { return new_depends || unfound_deps.panic; }
@@ -522,8 +496,8 @@ struct Compiler {
   }
 
   template<typename ... T>
-  void report_error(ERROR_CODE code, const Span& span, const char* f_message, T&& ... ts) {
-    services.errors->register_error(code, span, f_message, std::forward<T>(ts)...);
+  void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) {
+    services.errors->register_error(code, span, f_message, ts...);
 
     services.errors->panic = true;
   }
@@ -550,14 +524,14 @@ struct Compiler {
   void set_dep(Context* context, CompilationUnit* unit);
 };
 
-void add_comp_unit_for_lambda(Compiler* const comp, NamespaceIndex ns_index, ASTLambda* lambda) noexcept;
-void add_comp_unit_for_struct(Compiler* const comp, NamespaceIndex ns_index, ASTStructBody* struct_body) noexcept;
+void add_comp_unit_for_lambda(Compiler* const comp, Namespace* ns, ASTLambda* lambda) noexcept;
+void add_comp_unit_for_struct(Compiler* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;
 
 void init_compiler(const APIOptions& options, Compiler* comp);
 
 ERROR_CODE compile_all(Compiler* const comp);
 
-void set_runtime_flags(ASTExpressionBase* expr, State* const state,
+void set_runtime_flags(AST_LOCAL expr, State* const state,
                        bool modified, uint8_t valid_rvts);
 
 void cast_operator_type(Compiler* const comp,
@@ -596,9 +570,3 @@ const Structure* find_or_make_tuple_structure(Compiler* const comp,
                                             Array<Type>&& elements);
 
 void build_data_section_for_vm(Program* prog, Compiler* const comp);
-
-void compile_type_of_expression(Compiler* const comp,
-                                Context* const context,
-                                State* const state,
-                                ASTExpressionBase* const expr,
-                                const TypeHint* const hint);

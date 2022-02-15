@@ -88,7 +88,6 @@ int compile_file(const APIOptions& options,
   Lexer lexer ={};
   Parser parser ={};
   VM vm = {};
-  NamesHandler names = {};
   Errors errors ={};
   FileLoader file_loader ={};
 
@@ -98,7 +97,6 @@ int compile_file(const APIOptions& options,
   compiler.services.parser = &parser;
   compiler.services.vm = &vm;
   compiler.services.errors = &errors;
-  compiler.services.names = &names;
   compiler.services.file_loader = &file_loader;
   compiler.services.builtin_types = &builtin_types;
   compiler.services.structures = &structures;
@@ -114,12 +112,10 @@ int compile_file(const APIOptions& options,
   {
     FileLocation loc = parse_file_location(compiler.build_options.file_name->string, nullptr, compiler.services.strings);
 
-
-    NamespaceIndex ns_index = compiler.services.names->new_namespace();
-    compiler.build_file_namespace = ns_index;
+    compiler.build_file_namespace = compiler.namespaces.insert();
 
 
-    compiler.services.file_loader->unparsed_files.insert(FileImport{ loc, ns_index, Span{} });//use null span
+    compiler.services.file_loader->unparsed_files.insert(FileImport{ loc, compiler.build_file_namespace, Span{} });//use null span
 
     ////Parsing/loading
     //ERROR_CODE ret = parse_all_unparsed_files_with_imports(&compiler);

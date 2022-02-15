@@ -1,51 +1,27 @@
 #pragma once
+
 #include "utility.h"
-#include "comp_utilities.h"
-#include "strings.h"
-#include "type.h"
-#include "files.h"
 
-struct Global;
-struct ASTDecl;
+struct Compiler;
+struct InternString;
 struct Span;
+struct Global;
+struct CompilationUnit;
 
-struct NamedElement {
-  Array<const Global*> globals;
-
-  u64 unknowns;
+struct GlobalName {
+  //Can be null in some cases
+  CompilationUnit* unit;
+  const InternString* name;
+  Global* global;
 };
 
 struct Namespace {
-  bool is_sub_namespace = false;
-  NamespaceIndex inside ={};
-  FileLocation source_file ={};
-
-  InternHashTable<NamedElement> names ={};
-  Array<NamespaceIndex> imported ={};
+  Array<GlobalName> globals ={};
+  Array<Namespace*> imported ={};
 };
 
-struct NamespaceElement {
-  NamedElement* named_element;
-  NamespaceIndex ns_index;
-};
+GlobalName* add_global_name(Compiler* const comp, Namespace* ns, const InternString* name, CompilationUnit* unit, Global* g);
 
-struct NamesHandler {
-  //Namespace that is available everywhere in the program (contains the language primitives)
-  NamespaceIndex builtin_namespace ={};
-  Array<Namespace> all_namespaces ={};
+void add_global_import(Compiler* const comp, Namespace* ns, Namespace* imp, const Span& s);
 
-  NamesHandler();
-
-  NamespaceIndex new_namespace();
-  Namespace* get_raw_namespace(NamespaceIndex index);
-
-  NamedElement* find_name(NamespaceIndex ns_index, const InternString* name) const noexcept;
-  NamedElement* find_unimported_name(NamespaceIndex ns_index, const InternString* name) const noexcept;
-
-  //Same as 'find_name' but returns all of the possible options - useful for overload sets
-  Array<NamespaceElement> find_all_names(NamespaceIndex ns_index, const InternString* name) const noexcept;
-
-  NamedElement* create_name(NamespaceIndex ns_index, const InternString* name) noexcept;
-};
-
-void assert_empty_name(Compiler* comp, const Span& span, NamespaceIndex ns, const InternString* name);
+GlobalName* find_global_name(Namespace* ns, const InternString* name);

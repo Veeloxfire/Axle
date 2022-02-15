@@ -2,7 +2,7 @@
 #include "compiler.h"
 #include "calling_conventions.h"
 #include "format.h"
-
+#include "trace.h"
 #include <stdio.h>
 
 static void relocation_fix(uint8_t* code,
@@ -222,9 +222,9 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
   {
     const InternString* entry_name = comp->build_options.entry_point;
 
-    NamedElement* el = comp->services.names->find_unimported_name(comp->build_file_namespace, entry_name);
+    GlobalName* nm = find_global_name(comp->build_file_namespace, entry_name);
 
-    if (el == nullptr) {
+    if (nm == nullptr) {
       CallSignature sig ={};
       sig.name = entry_name;
 
@@ -234,44 +234,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
       return;
     }
 
-    if (el->unknowns > 0) {
-      comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
-                         "Some declarations with name '{}' were not compiled\n"
-                         "The compiler should not be linking if this is the case ...",
-                         entry_name);
-      return;
-    }
-
-    Function* entry_point_func = nullptr;
-
-    {
-      auto i = el->globals.begin();
-      auto end = el->globals.end();
-
-      for (; i < end; i++) {
-        const Global* g = *i;
-
-        if (g->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
-          continue;
-        }
-
-        const auto* sig = g->decl.type.unchecked_base<SignatureStructure>();
-
-        if (!(sig->parameter_types.size == 0 && sig->return_type == comp->services.builtin_types->t_u64)) {
-          continue;
-        }
-
-        //The function will be correct from now on
-
-        if (entry_point_func != nullptr) {
-          comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
-                             "There are multiple functions elligble to be the entry point");
-          return;
-        }
-
-        entry_point_func = *(Function**)g->constant_value.ptr;
-      }
-    }
+    Function* entry_point_func = *(Function**)nm->global->constant_value.ptr;
 
     if (entry_point_func == nullptr) {
       comp->report_error(ERROR_CODE::NAME_ERROR, Span{},

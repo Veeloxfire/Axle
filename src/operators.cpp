@@ -464,7 +464,7 @@ RuntimeValue UnOpArgs::emit_deref() {
     case RVT::CONST: {
         ValueIndex r = state->new_value();
 
-        const uint64_t ptr_v = x64_from_bytes(prim->constant.ptr);
+        const uint64_t ptr_v = x64_from_bytes((const u8*)prim->constant.ptr);
 
         ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)r.val, ptr_v);
         state->set_value(r);
@@ -494,11 +494,8 @@ void impl_compile_balanced_binary_op(Compiler* comp,
 
 #define SHOULD_RET comp->is_panic() || expr->emit != nullptr
 
-  const auto try_normal_options = [&](ASTExpressionBase* main, ASTExpressionBase* other) {
+  const auto try_normal_options = [&](AST_LOCAL main, AST_LOCAL other) {
     expr->info.main_type = main->node_type;
-
-    //Main cannot be liteal
-    if (TEST_MASK(main->meta_flags, META_FLAG::LITERAL)) return;
 
     if (op.u64_emit != nullptr && main->node_type == types->t_u64) {
       //is a valid unsigned type
@@ -553,37 +550,8 @@ void impl_compile_balanced_binary_op(Compiler* comp,
     }
   };
 
-  const auto try_literal_options = [&](ASTExpressionBase* main, ASTExpressionBase* other) {
-    expr->info.main_type = main->node_type;
-
-    ASSERT(TEST_MASK(main->meta_flags, META_FLAG::LITERAL));
-    ASSERT(TEST_MASK(other->meta_flags, META_FLAG::LITERAL));
-
-    if (op.u64_emit != nullptr
-        && TYPE_TESTS::is_unsigned_int(main->node_type)
-        && TYPE_TESTS::is_unsigned_int(other->node_type)
-        && main->node_type.structure->size > other->node_type.structure->size) {
-
-      try_emit(main, other, main->node_type, op.u64_emit);
-      if (SHOULD_RET) {
-        return;
-      }
-    }
-
-    if (op.i64_emit != nullptr
-        && TYPE_TESTS::is_int(main->node_type)
-        && TYPE_TESTS::is_int(other->node_type)
-        && main->node_type.structure->size > other->node_type.structure->size) {
-
-      try_emit(main, other, main->node_type, op.i64_emit);
-      if (SHOULD_RET) {
-        return;
-      }
-    }
-  };
-
-  ASTExpressionBase* const left = (ASTExpressionBase*)expr->left;
-  ASTExpressionBase* const right =(ASTExpressionBase*) expr->right;
+  AST_LOCAL const left = expr->left;
+  AST_LOCAL const right = expr->right;
 
   expr->info.main_op = MainOp::LEFT;
   try_normal_options(left, right);
@@ -597,22 +565,6 @@ void impl_compile_balanced_binary_op(Compiler* comp,
     return;
   }
 
-  //Check the literal options
-  if (TYPE_TESTS::is_literal(left->meta_flags)
-      && TYPE_TESTS::is_literal(right->meta_flags)) {
-    expr->info.main_op = MainOp::LEFT;
-    try_literal_options(left, right);
-    if (SHOULD_RET) {
-      return;
-    }
-
-    expr->info.main_op = MainOp::RIGHT;
-    try_literal_options(right, left);
-    if (SHOULD_RET) {
-      return;
-    }
-  }
-
   const char* const op_string = BINARY_OP_STRING::get(expr->op);
 
   comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
@@ -620,33 +572,21 @@ void impl_compile_balanced_binary_op(Compiler* comp,
                      op_string, left->node_type.name, right->node_type.name);
 }
 
-void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State* state, ASTBinaryOperatorExpr* expr, const UnpositionedBinOpOptions& op,
-                                         const TypeHint* hint) {
+void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State* state, ASTBinaryOperatorExpr* expr, const UnpositionedBinOpOptions& op) {
 
   //Reset
   expr->emit = nullptr;
 
   const BuiltinTypes* const types = comp->services.builtin_types;
 
-  ASTExpressionBase* const left = (ASTExpressionBase*)expr->left;
-  ASTExpressionBase* const right = (ASTExpressionBase*)expr->right;
+  AST_LOCAL left = expr->left;
+  AST_LOCAL right = expr->right;
 
-  const auto try_non_positioned_options = [&](ASTExpressionBase* main, ASTExpressionBase* other) {
+  const auto try_non_positioned_options = [&](AST_LOCAL main, AST_LOCAL other) {
     expr->info.main_type = main->node_type;
 
     if (op.r64_and_r64_emit != nullptr && main->node_type == types->t_u64) {
-      if (TYPE_TESTS::check_implicit_cast(other->meta_flags, other->node_type, main->node_type)) {
-        if (other->node_type != main->node_type) {
-          TypeHint inner_hint ={};
-          inner_hint.tht = THT::EXACT;
-          inner_hint.type = main->node_type;
-
-          compile_type_of_expression(comp, context, state, right, &inner_hint);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
+      if (other->node_type == main->node_type) {
         expr->emit = op.r64_and_r64_emit;
         expr->node_type        = main->node_type;
         return;
@@ -654,18 +594,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State
     }
 
     if (op.r64_and_r64_emit != nullptr && main->node_type == types->t_i64) {
-      if (TYPE_TESTS::check_implicit_cast(other->meta_flags, other->node_type, main->node_type)) {
-        if (other->node_type != main->node_type) {
-          TypeHint inner_hint ={};
-          inner_hint.tht = THT::EXACT;
-          inner_hint.type = main->node_type;
-
-          compile_type_of_expression(comp, context, state, right, &inner_hint);
-          if (comp->is_panic()) {
-            return;
-          }
-        }
-
+      if (other->node_type == main->node_type) {
         expr->emit = op.r64_and_r64_emit;
         expr->node_type        = main->node_type;
         return;
@@ -674,60 +603,12 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State
 
     if (op.ptr_and_r64_emit != nullptr
         && main->node_type.struct_type() == STRUCTURE_TYPE::POINTER
-        && TYPE_TESTS::is_int(other->node_type)
-        && TEST_MASK(other->meta_flags, META_FLAG::LITERAL)) {
-      TypeHint inner_hint ={};
-      inner_hint.tht = THT::EXACT;
-      inner_hint.type = types->t_u64;
-
-      compile_type_of_expression(comp, context, state, right, &inner_hint);
-      if (comp->is_panic()) {
-        return;
-      }
-
+        && other->node_type == types->t_u64) {
       expr->emit = op.ptr_and_r64_emit;
       expr->node_type        = main->node_type;
       return;
     }
   };
-
-  const auto try_literal_non_positioned_options = [&](AST* main, ASTExpressionBase* other) {
-    expr->info.main_type = main->node_type;
-
-    if (op.r64_and_r64_emit != nullptr
-        && TYPE_TESTS::is_int(main->node_type)
-        && TYPE_TESTS::is_int(other->node_type)
-        && TEST_MASK(other->meta_flags, META_FLAG::LITERAL)) {
-
-      TypeHint inner_hint ={};
-      inner_hint.tht = THT::EXACT;
-      inner_hint.type = types->t_u64;
-
-      compile_type_of_expression(comp, context, state, right, &inner_hint);
-      if (comp->is_panic()) {
-        return;
-      }
-
-      expr->emit = op.ptr_and_r64_emit;
-      expr->node_type        = main->node_type;
-      return;
-    }
-  };
-
-  if (hint != nullptr
-      && TEST_MASK(left->meta_flags, META_FLAG::LITERAL)
-      && TEST_MASK(right->meta_flags, META_FLAG::LITERAL)) {
-
-    compile_type_of_expression(comp, context, state, left, hint);
-    if (comp->is_panic()) {
-      return;
-    }
-
-    compile_type_of_expression(comp, context, state, right, hint);
-    if (comp->is_panic()) {
-      return;
-    }
-  }
 
   expr->info.main_op = MainOp::LEFT;
   try_non_positioned_options(left, right);
@@ -741,16 +622,10 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State
     return;
   }
 
-  expr->info.main_op = MainOp::LEFT;
-  try_literal_non_positioned_options(left, right);
-  if (comp->is_panic() || expr->emit != nullptr) {
-    return;
-  }
-
-  expr->info.main_op = MainOp::RIGHT;
-  try_literal_non_positioned_options(right, left);
-  if (comp->is_panic() || expr->emit != nullptr) {
-    return;
+  if (expr->emit == nullptr) {
+    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+                       "No supported operator for '{}' and '{}'",
+                       left->node_type.name, right->node_type.name);
   }
 }
 
@@ -761,28 +636,12 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, Context* context, State* 
   //Reset
   expr->emit = nullptr;
 
-  ASTExpressionBase* const left = (ASTExpressionBase*)expr->left;
-  ASTExpressionBase* const right = (ASTExpressionBase*)expr->right;
+  AST_LOCAL left = expr->left;
+  AST_LOCAL right = expr->right;
 
   if (op.Lu64_Ru8_emit != nullptr
       && left->node_type == types->t_u64) {
     if (right->node_type == types->t_u8) {
-      expr->emit = op.Lu64_Ru8_emit;
-      expr->node_type        = left->node_type;
-      return;
-    }
-    else if (TYPE_TESTS::check_implicit_cast(right->meta_flags,
-                                             right->node_type,
-                                             types->t_u8)) {
-      TypeHint inner_hint ={};
-      inner_hint.tht = THT::EXACT;
-      inner_hint.type = types->t_u8;
-
-      compile_type_of_expression(comp, context, state, right, &inner_hint);
-      if (comp->is_panic()) {
-        return;
-      }
-
       expr->emit = op.Lu64_Ru8_emit;
       expr->node_type        = left->node_type;
       return;
@@ -792,20 +651,6 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, Context* context, State* 
   if (op.Li64_Ru8_emit != nullptr
       && left->node_type == types->t_i64) {
     if (right->node_type == types->t_u8) {
-      expr->emit = op.Lu64_Ru8_emit;
-      expr->node_type        = left->node_type;
-      return;
-    }
-    else if (right->node_type == types->t_u8) {
-      TypeHint inner_hint ={};
-      inner_hint.tht = THT::EXACT;
-      inner_hint.type = types->t_u8;
-
-      compile_type_of_expression(comp, context, state, right, &inner_hint);
-      if (comp->is_panic()) {
-        return;
-      }
-
       expr->emit = op.Lu64_Ru8_emit;
       expr->node_type        = left->node_type;
       return;
@@ -822,7 +667,7 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, Context* context, State* 
 void impl_compile_unary_op(Compiler* comp, Context* context, State* state, ASTUnaryOperatorExpr* expr, const UnaryOpOptions& op) {
   const BuiltinTypes* const types = comp->services.builtin_types;
 
-  ASTExpressionBase* const prim = (ASTExpressionBase*)expr->expr;
+  AST_LOCAL prim = expr->expr;
 
   //Reset
   expr->emit = nullptr;
@@ -832,25 +677,6 @@ void impl_compile_unary_op(Compiler* comp, Context* context, State* state, ASTUn
       expr->emit = op.i64_emit;
       expr->node_type       =  types->t_i64;
       return;
-    }
-  }
-
-  if (TEST_MASK(expr->meta_flags, META_FLAG::LITERAL)) {
-    if (op.i64_emit != nullptr) {
-      if (TYPE_TESTS::check_implicit_cast(expr->meta_flags, prim->node_type, types->t_i64)) {
-        TypeHint inner_hint ={};
-        inner_hint.tht = THT::EXACT;
-        inner_hint.type = types->t_i64;
-
-        compile_type_of_expression(comp, context, state, prim, &inner_hint);
-        if (comp->is_panic()) {
-          return;
-        }
-
-        expr->emit = op.i64_emit;
-        expr->node_type       =  types->t_i64;
-        return;
-      }
     }
   }
 
@@ -866,9 +692,8 @@ void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
-                             const UnpositionedBinOpOptions& op,
-                             const TypeHint* hint) {
-  impl_compile_unpositioned_binary_op(comp, context, state, expr, op, hint);
+                             const UnpositionedBinOpOptions& op) {
+  impl_compile_unpositioned_binary_op(comp, context, state, expr, op);
 }
 
 //Overload for unbalanced operators
@@ -903,19 +728,11 @@ void compile_binary_operator(Compiler* comp,
                              const EqOpBin& op) {
 
   //returns bool instead of main->node_type
-  const auto try_emit = [&](ASTExpressionBase* main, ASTExpressionBase* other,
+  const auto try_emit = [&](AST_LOCAL main, AST_LOCAL other,
                             const Type& expect,
                             BINARY_OPERATOR_FUNCTION emit_op)
   {
-    if (TYPE_TESTS::check_implicit_cast(other->meta_flags, other->node_type, expect)) {
-      if (expect != other->node_type) {
-        TypeHint hint ={};
-        hint.tht = THT::EXACT;
-        hint.type = expect;
-
-        compile_type_of_expression(comp, context, state, other, &hint);
-      }
-
+    if (expect == other->node_type) {
       expr->emit = emit_op;
       expr->node_type        = comp->services.builtin_types->t_bool;
     }
@@ -935,43 +752,17 @@ void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
-                             const SignAgnArithBinOp& op,
-                             const TypeHint* hint) {
+                             const SignAgnArithBinOp& op) {
 
-  const auto try_emit = [&](ASTExpressionBase* main, ASTExpressionBase* other,
+  const auto try_emit = [&](AST_LOCAL main, AST_LOCAL other,
                             const Type& expect,
                             BINARY_OPERATOR_FUNCTION emit_op)
   {
-    if (TYPE_TESTS::check_implicit_cast(other->meta_flags, other->node_type, expect)) {
-      if (expect != other->node_type) {
-        TypeHint hint ={};
-        hint.tht = THT::EXACT;
-        hint.type = expect;
-
-        compile_type_of_expression(comp, context, state, other, &hint);
-      }
-
+    if (expect == other->node_type) {
       expr->emit = emit_op;
       expr->node_type        = main->node_type;
     }
   };
-
-  ASTExpressionBase* left = (ASTExpressionBase*)expr->left;
-  ASTExpressionBase* right = (ASTExpressionBase*)expr->right;
-
-  if (TYPE_TESTS::is_literal(left->meta_flags) && hint != nullptr) {
-    compile_type_of_expression(comp, context, state, left, hint);
-    if (comp->is_panic()) {
-      return;
-    }
-  }
-
-  if (TYPE_TESTS::is_literal(right->meta_flags) && hint != nullptr) {
-    compile_type_of_expression(comp, context, state, right, hint);
-    if (comp->is_panic()) {
-      return;
-    }
-  }
 
   BalancedBinOpOptions balanced_op ={};
   balanced_op.ptrs_emit = op.ptrs_emit;
@@ -987,42 +778,16 @@ void compile_binary_operator(Compiler* comp,
                              Context* context,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
-                             const SignedArithBinOp& op,
-                             const TypeHint* hint) {
-  const auto try_emit = [&](ASTExpressionBase* main, ASTExpressionBase* other,
+                             const SignedArithBinOp& op) {
+  const auto try_emit = [&](AST_LOCAL main, AST_LOCAL other,
                             const Type& expect,
                             BINARY_OPERATOR_FUNCTION emit_op)
   {
-    if (TYPE_TESTS::check_implicit_cast(other->meta_flags, other->node_type, expect)) {
-      if (expect != other->node_type) {
-        TypeHint hint ={};
-        hint.tht = THT::EXACT;
-        hint.type = expect;
-
-        compile_type_of_expression(comp, context, state, other, &hint);
-      }
-
+    if (expect == other->node_type) {
       expr->emit = emit_op;
-      expr->node_type        = main->node_type;
+      expr->node_type = main->node_type;
     }
   };
-
-  ASTExpressionBase* left = (ASTExpressionBase*)expr->left;
-  ASTExpressionBase* right = (ASTExpressionBase*)expr->right;
-
-  if (TYPE_TESTS::is_literal(left->meta_flags) && hint != nullptr) {
-    compile_type_of_expression(comp, context, state, left, hint);
-    if (comp->is_panic()) {
-      return;
-    }
-  }
-
-  if (TYPE_TESTS::is_literal(right->meta_flags) && hint != nullptr) {
-    compile_type_of_expression(comp, context, state, right, hint);
-    if (comp->is_panic()) {
-      return;
-    }
-  }
 
   BalancedBinOpOptions balanced_op ={};
   balanced_op.u64_emit = op.u64_emit;
@@ -1046,7 +811,7 @@ void compile_take_address(Compiler* comp,
                           Context* context,
                           State* state,
                           ASTUnaryOperatorExpr* expr) {
- 
+
   const Structure* ptr = find_or_make_pointer_structure(comp, context, expr->expr->node_type);
   expr->node_type = to_type(ptr);
   expr->emit = &UnOpArgs::emit_address;
@@ -1055,14 +820,14 @@ void compile_take_address(Compiler* comp,
   expr->meta_flags &= ~META_FLAG::COMPTIME;
 
   //Can only load the address of somewhere in memory
-  set_runtime_flags((ASTExpressionBase*)expr->expr, state, false, (uint8_t)RVT::MEMORY);
+  set_runtime_flags(expr->expr, state, false, (uint8_t)RVT::MEMORY);
 }
 
 //Overload for dereferencing
 void compile_deref(Compiler* comp,
                    ASTUnaryOperatorExpr* expr) {
- 
-  ASTExpressionBase* prim = (ASTExpressionBase*)expr->expr;
+
+  AST_LOCAL prim = expr->expr;
 
   if (prim->node_type.struct_type() == STRUCTURE_TYPE::POINTER) {
     const auto* ptr = prim->node_type.unchecked_base<PointerStructure>();

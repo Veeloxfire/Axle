@@ -22,10 +22,12 @@ using META_FLAGS = u8;
 
 #define FLAGS_DECL(num) (1 << num)
 enum struct META_FLAG : META_FLAGS {
-  CONST      = FLAGS_DECL(1),
-  COMPTIME   = FLAGS_DECL(2),
-  LITERAL    = FLAGS_DECL(3),
-  ASSIGNABLE = FLAGS_DECL(4),
+  CONST      = FLAGS_DECL(0),
+  COMPTIME   = FLAGS_DECL(1),
+  //LITERAL    = FLAGS_DECL(2),
+  ASSIGNABLE = FLAGS_DECL(3),
+  CALL_LEAF  = FLAGS_DECL(4),
+  MAKES_CALL = FLAGS_DECL(5),
 };
 #undef FLAGS_DECL
 
@@ -70,6 +72,24 @@ inline constexpr auto operator&(META_FLAGS u, META_FLAG t) -> META_FLAGS {
 inline constexpr auto operator&=(META_FLAGS& u, META_FLAG t) -> META_FLAGS& {
   u &= ((META_FLAGS)t);
   return u;
+}
+
+constexpr inline META_FLAGS META_UP_FLAGS = 0
+| META_FLAG::CALL_LEAF;
+
+constexpr inline META_FLAGS META_DOWN_FLAGS = 0
+| META_FLAG::CONST
+| META_FLAG::COMPTIME
+//| META_FLAG::LITERAL
+| META_FLAG::ASSIGNABLE
+| META_FLAG::MAKES_CALL;
+
+inline constexpr void pass_meta_flags_up(META_FLAGS low, META_FLAGS* high) {
+  *high |= low & META_UP_FLAGS;
+}
+
+inline constexpr void pass_meta_flags_down(META_FLAGS* low, META_FLAGS high) {
+  *low &= high & META_DOWN_FLAGS;
 }
 
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;
@@ -316,16 +336,12 @@ namespace CASTS {
 }
 
 namespace TYPE_TESTS {
-  constexpr inline bool is_literal(META_FLAGS f) {
-    return TEST_MASK(f, META_FLAG::LITERAL);
-  }
-
   constexpr inline bool match_sizes(const Structure* a, const Structure* b) {
     return a->size == b->size && a->alignment == b->alignment;
   }
 
-  //Check the casts with that can only be done at compile time
-  bool check_implicit_cast(META_FLAGS flags, const Type& from, const Type& to);
+  //No longer support implicit casts?
+  //bool check_implicit_cast(META_FLAGS flags, const Type& from, const Type& to);
 
   bool is_negatable(const Structure* s);
   //bool is_logical(const Structure* s);

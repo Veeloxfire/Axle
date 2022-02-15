@@ -12,6 +12,7 @@ struct EnumValue;
 struct State;
 struct Global;
 struct AST;
+struct Namespace;
 
 using AST_LOCAL = AST*;
 
@@ -92,49 +93,39 @@ constexpr bool valid_type_node(AST_TYPE t) {
 }
 
 struct AST {
+  META_FLAGS meta_flags = 0;
+  uint8_t valid_rvts = ALL_RVTS;
+
+  void* value = nullptr;
+
   AST_TYPE ast_type;
   Type node_type ={};
   Span node_span ={};
 };
 
-struct ASTTypeBase : public AST {
-  Type type ={};
-};
-
-struct ASTExpressionBase : public AST {
-  uint8_t valid_rvts = ALL_RVTS;
-
-  bool makes_call = false;
-  bool call_leaf = false;
-
-  META_FLAGS meta_flags = 0;
-
-  uint8_t* const_val = nullptr;
-};
-
-struct ASTNamedType : public ASTTypeBase {
+struct ASTNamedType : public AST {
   const InternString* name ={};
 };
 
-struct ASTArrayType : public ASTTypeBase {
+struct ASTArrayType : public AST {
   AST_LOCAL base = 0;
   AST_LOCAL expr = 0;
 };
 
-struct ASTPtrType : public ASTTypeBase {
+struct ASTPtrType : public AST {
   AST_LOCAL base = 0;
 };
 
-struct ASTLambdaType : public ASTTypeBase {
+struct ASTLambdaType : public AST {
   AST_LOCAL ret = 0;
   AST_ARR args ={};
 };
 
-struct ASTTupleType : public ASTTypeBase {
+struct ASTTupleType : public AST {
   AST_ARR types ={};
 };
 
-struct ASTBinaryOperatorExpr : public ASTExpressionBase {
+struct ASTBinaryOperatorExpr : public AST {
   BINARY_OPERATOR op;
 
   AST_LOCAL left = 0;
@@ -144,66 +135,61 @@ struct ASTBinaryOperatorExpr : public ASTExpressionBase {
   BINARY_OPERATOR_FUNCTION emit = nullptr;
 };
 
-struct ASTTupleLitExpr : public ASTExpressionBase {
+struct ASTTupleLitExpr : public AST {
+  const InternString* name;
   AST_ARR elements = {};
 };
 
-struct ASTFunctionCallExpr : public ASTExpressionBase {
+struct ASTFunctionCallExpr : public AST {
   AST_ARR arguments ={};
 
   const InternString* function_name = nullptr;
-  const SignatureStructure* sig = nullptr;
-  //const Function* function = nullptr;
+  Function* func = nullptr;
 };
 
-struct ASTUnaryOperatorExpr : public ASTExpressionBase {
+struct ASTUnaryOperatorExpr : public AST {
   UNARY_OPERATOR op;
   AST_LOCAL expr = 0;
 
   UNARY_OPERATOR_FUNCTION emit = nullptr;
 };
 
-struct ASTCastExpr : public ASTExpressionBase {
+struct ASTCastExpr : public AST {
   AST_LOCAL type = 0;
   AST_LOCAL expr = 0;
   CAST_FUNCTION emit = nullptr;
 };
 
-struct ASTIndexExpr : public ASTExpressionBase {
+struct ASTIndexExpr : public AST {
   AST_LOCAL expr = 0;
   AST_LOCAL index = 0;
 };
 
-struct ASTNumber : public ASTExpressionBase {
+struct ASTNumber : public AST {
   uint64_t value = 0;
   const InternString* suffix =nullptr;
 };
 
-struct ASTArrayExpr : public ASTExpressionBase {
+struct ASTArrayExpr : public AST {
   AST_ARR elements ={};
 };
 
-struct ASTIdentifier : public ASTExpressionBase {
+struct ASTIdentifier : public AST {
   const InternString* name;
-
-  union {
-    const void* ptr;
-    usize index;
-  };
 };
 
-struct ASTMemberAccessExpr : public ASTExpressionBase {
+struct ASTMemberAccessExpr : public AST {
   AST_LOCAL expr = 0;
 
   uint32_t offset = 0;
   const InternString* name = nullptr;
 };
 
-struct ASTAsciiString : public ASTExpressionBase {
+struct ASTAsciiString : public AST {
   const InternString* string;
 };
 
-struct ASTAsciiChar : public ASTExpressionBase {
+struct ASTAsciiChar : public AST {
   char character;
 };
 
@@ -231,11 +217,11 @@ struct ASTFuncSig : public AST {
   AST_ARR parameters ={};
 };
 
-struct ASTLambdaExpr : public ASTExpressionBase {
+struct ASTLambdaExpr : public AST {
   AST_LOCAL lambda;
 };
 
-struct ASTStructExpr : public ASTExpressionBase {
+struct ASTStructExpr : public AST {
   AST_LOCAL struct_body;
 };
 
@@ -254,7 +240,6 @@ struct ASTTypedName : public AST {
 
 struct ASTStructBody : public AST {
   CompilationUnit* compilation_unit;
-  Type type{};
   AST_ARR elements = {};
 };
 
@@ -285,7 +270,7 @@ struct ASTImport : public AST {
 struct FileAST {
   AST_ARR top_level;
 
-  NamespaceIndex namespace_index;
+  Namespace* ns;
   FileLocation file_loc;
 };
 

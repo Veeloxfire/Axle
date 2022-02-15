@@ -7,7 +7,6 @@ struct Context;
 struct State;
 struct CodeBlock;
 struct AST;
-struct ASTExpressionBase;
 struct Local;
 struct Global;
 struct InternString;
@@ -22,12 +21,8 @@ struct ValueIndex {
   }
 };
 
-struct NamespaceIndex {
-  size_t index;
-};
-
 struct ConstantVal {
-  uint8_t* ptr;
+  void* ptr;
   size_t size;
 
   constexpr bool operator==(const ConstantVal& cv) const {

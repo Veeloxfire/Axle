@@ -8,7 +8,7 @@ add :: (p: Pair) -> u64 {
 }
 
 main :: () -> u64 {
-  p : Pair = {1, 2};
+  p := Pair{1, 2};
 
   return add(p);
 }
