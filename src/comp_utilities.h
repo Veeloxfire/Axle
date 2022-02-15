@@ -216,6 +216,8 @@ namespace UNARY_OP_STRING {
 #define INTRINSIC_MODS \
 MOD(import) \
 MOD(build_options) \
+MOD(lib_import) \
+MOD(type) \
 
 struct Intrinsics {
 #define MOD(n) const InternString* n = nullptr;

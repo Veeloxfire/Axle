@@ -92,3 +92,25 @@ TEST_FUNCTION(Util_Queue_Insert_Remove) {
     ASSERT(a.pop_back() == (i ^ (i + 1)));
   }
 }
+
+TEST_FUNCTION(sort) {
+  Array<int> ints ={};
+
+  ints.insert(1);
+  ints.insert(2);
+  ints.insert(6);
+  ints.insert(7);
+  ints.insert(4);
+  ints.insert(3);
+  ints.insert(5);
+
+  sort_range(ints.mut_begin(), ints.mut_end(), [](int l, int r) { return l < r; });
+
+  ASSERT(ints.data[0] == 1);
+  ASSERT(ints.data[1] == 2);
+  ASSERT(ints.data[2] == 3);
+  ASSERT(ints.data[3] == 4);
+  ASSERT(ints.data[4] == 5);
+  ASSERT(ints.data[5] == 6);
+  ASSERT(ints.data[6] == 7);
+}

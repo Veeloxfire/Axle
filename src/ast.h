@@ -79,6 +79,7 @@ enum struct AST_TYPE : u8 {
   RETURN,
   FUNCTION_SIGNATURE,
   IMPORT,
+  LIB_IMPORT,
 };
 
 constexpr bool valid_type_node(AST_TYPE t) {
@@ -265,6 +266,12 @@ struct ASTAssign : public AST {
 
 struct ASTImport : public AST {
   AST_LOCAL expr_location;
+};
+
+struct ASTLibImport : public AST {
+  const InternString* lib_file;
+  const InternString* name;
+  size_t data_holder_index;
 };
 
 struct FileAST {

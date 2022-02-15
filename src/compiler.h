@@ -226,10 +226,16 @@ struct DependencyCheckState {
 
 };
 
+struct DataHolder {
+  size_t size = 0;
+  size_t alignment = 0;
+  size_t data_index = 0;
+};
+
 struct Global {
   Decl decl;
 
-  size_t data_index = 0;
+  size_t data_holder_index = 0;
   ConstantVal constant_value ={};
 
   CodeBlock init ={};
@@ -358,22 +364,15 @@ struct FileImport {
 };
 
 struct FileLoader {
-  const InternString* dll = nullptr;
   const InternString* axl = nullptr;
 
   Array<FileImport> unparsed_files ={};
 };
 
-struct SingleDllImport {
-  Function* ptr;
-  uint32_t rva_hint;
+struct LibraryImport {
+  const InternString* path;
   const InternString* name;
-};
-
-struct ImportedDll {
-  const InternString* name = nullptr;
-  Span span ={};
-  Array<SingleDllImport> imports ={};
+  size_t data_holder_index;
 };
 
 struct SystemsAndConventionNames {
@@ -459,8 +458,9 @@ struct Compiler {
   Namespace* build_file_namespace ={};//needs to be saved for finding main
   Namespace* builtin_namespace ={};
 
-  Array<ImportedDll> dlls_import ={};
+  Array<LibraryImport> lib_import ={};
   Array<FileAST> parsed_files ={};
+  Array<DataHolder> data_holders ={};
 
   FreelistBlockAllocator<SignatureUnit> signature_units ={};
   FreelistBlockAllocator<StructureUnit> structure_units ={};

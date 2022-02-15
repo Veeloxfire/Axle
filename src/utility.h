@@ -365,6 +365,59 @@ constexpr inline uint64_t absolute(int64_t i) {
   }
 }
 
+template<typename T, typename L>
+size_t _sort_range_part(T* base, size_t lo, size_t hi, const L& pred) {
+  size_t pivot = (hi + lo) / 2llu;
+
+  size_t i = lo;
+  size_t j = hi;
+
+  while (true) {
+    while (pred(base[i], base[pivot])) {
+      i += 1;
+    }
+
+    while (pred(base[pivot], base[j])) {
+      j -= 1;
+    }
+
+    if (i >= j) return j;
+
+    //Account for the moving things
+    //means we dont have to copy
+    if (i == pivot) {
+      pivot = j;
+    }
+    else if (j == pivot) {
+      pivot = i;
+    }
+
+    T hold = std::move(base[i]);
+
+    base[i] = std::move(base[j]);
+    base[j] = std::move(hold);
+  }
+
+}
+
+template<typename T, typename L>
+void _sort_range_impl(T* base, size_t lo, size_t hi, const L& pred) {
+  if (lo < hi) {
+    size_t p = _sort_range_part(base, lo, hi, pred);
+    _sort_range_impl(base, lo, p, pred);
+    _sort_range_impl(base, p + 1, hi, pred);
+  }
+}
+
+template<typename T, typename L>
+void sort_range(T* start, T* end, const L& pred) {
+  size_t num = (end - start);
+
+  if (num != 0) {
+    _sort_range_impl<T, L>(start, 0, num - 1, pred);
+  }
+}
+
 template<typename T>
 struct Array {
   T* data     = nullptr;// ptr to data in the array

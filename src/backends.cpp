@@ -70,7 +70,7 @@ void compile_backend_single_func(Program* prog, const CodeBlock* code, Compiler*
   prog->code = std::move(out_code);
 }
 
-void vm_backend_code_block(Compiler* const,//compiler is currently not used in this version but is in the x86_64
+void vm_backend_code_block(Compiler* const comp,
                            Program* prog,
                            Array<uint8_t>& out_code,
                            const CodeBlock* code,
@@ -83,17 +83,17 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
 
   while (code_i < code_end) {
     switch (*code_i) {
-      case ByteCode::LOAD_GLOBAL_MEM: {
+      case ByteCode::LOAD_DATA_MEM: {
           //Load the global as an index into the data
-          const auto p_g = ByteCode::PARSE::LOAD_GLOBAL_MEM(code_i);
+          const auto p_g = ByteCode::PARSE::LOAD_DATA_MEM(code_i);
 
-          const Global* glob = p_g.u64;
+          const DataHolder* d = (comp->data_holders.data + p_g.u64);
 
           const auto offset = out_code.size + 2;
-          ByteCode::EMIT::SET_R64_TO_64(out_code, p_g.val, glob->data_index);
+          ByteCode::EMIT::SET_R64_TO_64(out_code, p_g.val, d->data_index);
           relocations.insert({ RELOCATION_TYPE::U64_DATA_OFFSET, offset, out_code.size });
 
-          code_i += ByteCode::SIZE_OF::LOAD_GLOBAL_MEM;
+          code_i += ByteCode::SIZE_OF::LOAD_DATA_MEM;
           break;
         }
       case ByteCode::RESERVE: {
@@ -994,14 +994,11 @@ void x86_64_backend_code_block(Compiler* const comp,
           code_i += ByteCode::SIZE_OF::COPY_R8_TO_R8;
           break;
         }
-      case ByteCode::LOAD_GLOBAL_MEM: {
+      case ByteCode::LOAD_DATA_MEM: {
           const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
-          const Global* glob = (const Global*)p.u64.vptr;
+          const DataHolder* d = comp->data_holders.data + p.u64;
 
-          ASSERT(glob->constant_value.ptr == nullptr);
-          ASSERT( glob->data_index != 0);
-
-          X64::mov(out_code, X64::R{ p.val }, glob->data_index);
+          X64::mov(out_code, X64::R{ p.val }, d->data_index);
 
           relocs.insert({RELOCATION_TYPE::U64_DATA_OFFSET, out_code.size - 8, out_code.size});
 

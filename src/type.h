@@ -89,7 +89,7 @@ inline constexpr void pass_meta_flags_up(META_FLAGS low, META_FLAGS* high) {
 }
 
 inline constexpr void pass_meta_flags_down(META_FLAGS* low, META_FLAGS high) {
-  *low &= high & META_DOWN_FLAGS;
+  *low |= high & META_DOWN_FLAGS;
 }
 
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;

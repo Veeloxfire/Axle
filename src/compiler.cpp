@@ -829,6 +829,13 @@ void dependency_check_ast_node(Compiler* const comp,
         dependency_check_ast_node(comp, context, state, imp->expr_location);
         return;
       }
+    case AST_TYPE::LIB_IMPORT: {
+        ASTLibImport* imp = (ASTLibImport*)a;
+
+        //TODO: Any depends?
+
+        return;
+      }
 
     case AST_TYPE::LAMBDA: {
         ASTLambda* l = (ASTLambda*)a;
@@ -1131,6 +1138,9 @@ void type_check_ast_node(Compiler* const comp,
 
         nt->value = global->constant_value.ptr;
         nt->node_type = comp->services.builtin_types->t_type;
+        nt->meta_flags |= META_FLAG::COMPTIME;
+        nt->meta_flags |= META_FLAG::CONST;
+        nt->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
         return;
       }
@@ -1182,6 +1192,9 @@ void type_check_ast_node(Compiler* const comp,
 
         at->value = type;
         at->node_type = comp->services.builtin_types->t_type;
+        at->meta_flags |= META_FLAG::COMPTIME;
+        at->meta_flags |= META_FLAG::CONST;
+        at->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
         return;
       }
@@ -1206,6 +1219,10 @@ void type_check_ast_node(Compiler* const comp,
 
         ptr->value = type;
         ptr->node_type = comp->services.builtin_types->t_type;
+
+        ptr->meta_flags |= META_FLAG::COMPTIME;
+        ptr->meta_flags |= META_FLAG::CONST;
+        ptr->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return;
       }
     case AST_TYPE::LAMBDA_TYPE: {
@@ -1251,7 +1268,9 @@ void type_check_ast_node(Compiler* const comp,
         lt->value = type;
 
         lt->node_type = comp->services.builtin_types->t_type;
-
+        lt->meta_flags |= META_FLAG::COMPTIME;
+        lt->meta_flags |= META_FLAG::CONST;
+        lt->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return;
       }
     case AST_TYPE::TUPLE_TYPE: {
@@ -1283,7 +1302,9 @@ void type_check_ast_node(Compiler* const comp,
 
         tt->value = type;
         tt->node_type = comp->services.builtin_types->t_type;
-
+        tt->meta_flags |= META_FLAG::COMPTIME;
+        tt->meta_flags |= META_FLAG::CONST;
+        tt->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return;
       }
     case AST_TYPE::STRUCT_EXPR: {
@@ -1294,7 +1315,9 @@ void type_check_ast_node(Compiler* const comp,
 
         SET_MASK(se->meta_flags, META_FLAG::COMPTIME);
         a->node_type = comp->services.builtin_types->t_type;
-
+        a->meta_flags |= META_FLAG::COMPTIME;
+        a->meta_flags |= META_FLAG::CONST;
+        a->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return;
       }
     case AST_TYPE::LAMBDA_EXPR: {
@@ -1614,6 +1637,47 @@ void type_check_ast_node(Compiler* const comp,
 
         return;
       }
+
+    case AST_TYPE::LIB_IMPORT: {
+        a->node_type = comp->services.builtin_types->t_void_ptr;
+
+        a->meta_flags &= ~META_FLAG::COMPTIME;//Not compile time
+        a->meta_flags |= META_FLAG::CONST;//Is const
+        a->meta_flags &= ~META_FLAG::ASSIGNABLE;
+
+        //Not constant
+        a->valid_rvts &= ~(u8)RVT::CONST;
+
+        ASTLibImport* imp = (ASTLibImport*)a;
+
+        FileLocation loc = parse_file_location(comp->build_options.std_lib_folder->string, imp->lib_file->string,
+                                               comp->services.strings);
+
+        FOR(comp->lib_import, it) {
+          if (it->path == loc.full_name
+              && imp->name == it->name) {
+            //Already imported
+          }
+        }
+
+        size_t data_holder_index = comp->data_holders.size;
+        imp->data_holder_index = data_holder_index;
+
+        DataHolder holder ={};
+        holder.size = a->node_type.structure->size;
+        holder.alignment = a->node_type.structure->alignment;
+
+        comp->data_holders.insert(holder);
+
+        LibraryImport import_lib ={};
+        import_lib.data_holder_index = data_holder_index;
+        import_lib.name = imp->name;
+        import_lib.path = loc.full_name;
+
+        comp->lib_import.insert(std::move(import_lib));
+        return;
+      }
+
     case AST_TYPE::IDENTIFIER_EXPR: {
         INVALID_CODE_PATH("Should be removed in dependency check");
 
@@ -3734,6 +3798,28 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &local->val, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
+    case AST_TYPE::LIB_IMPORT: {
+        ASTLibImport* li = (ASTLibImport*)expr;
+
+        const auto reg_mem = state->new_value();
+
+        ByteCode::EMIT::LOAD_DATA_MEM(code->code, (uint8_t)reg_mem.val, li->data_holder_index);//changed later to be the actual location
+        state->set_value(reg_mem);
+
+        state->control_flow.expression_num++;
+
+        RuntimeValue global_mem ={};
+        global_mem.type = RVT::MEMORY;
+        global_mem.mem = state->new_mem();
+
+        MemValue* mem_val = state->get_mem(global_mem.mem);
+        mem_val->size = expr->node_type.structure->size;
+        mem_val->mem.base = (uint8_t)reg_mem.val;
+
+        copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
+
+        break;
+      }
     case AST_TYPE::GLOBAL: {
         ASSERT(hint != nullptr);
         ASTIdentifier* ident = (ASTIdentifier*)expr;
@@ -3760,7 +3846,8 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         else {
           const auto reg_mem = state->new_value();
 
-          ByteCode::EMIT::LOAD_GLOBAL_MEM(code->code, (uint8_t)reg_mem.val, glob);//changed later to be the actual location
+
+          ByteCode::EMIT::LOAD_DATA_MEM(code->code, (uint8_t)reg_mem.val, glob->data_holder_index);//changed later to be the actual location
           state->set_value(reg_mem);
 
           state->control_flow.expression_num++;
@@ -5264,9 +5351,19 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
     global->init.label = comp->labels++;
     state->return_label = comp->labels++;
 
+    {
+      size_t data_holder_index = comp->data_holders.size;
+      DataHolder holder ={};
+      holder.size = global->decl.type.structure->size;
+      holder.alignment = global->decl.type.structure->alignment;
+      comp->data_holders.insert(holder);
+
+      global->data_holder_index = data_holder_index;
+    }
+
     ValueIndex reg_mem = state->new_value();
 
-    ByteCode::EMIT::LOAD_GLOBAL_MEM(global->init.code, (uint8_t)reg_mem.val, global);//changed later to be the actual location
+    ByteCode::EMIT::LOAD_DATA_MEM(global->init.code, (uint8_t)reg_mem.val, global->data_holder_index);//changed later to be the actual location
     state->set_value(reg_mem);
 
     state->control_flow.expression_num++;
@@ -6119,25 +6216,34 @@ ERROR_CODE compile_all(Compiler* const comp) {
   {
     TRACING_SCOPE("test load dlls");
 
-    auto i = comp->dlls_import.begin();
-    auto end = comp->dlls_import.end();
+    //Sort the dlls
+    constexpr auto import_sorter = [](const LibraryImport& l, const LibraryImport& r) {
+      return is_alphabetical_order(l.path, r.path);
+    };
 
-    for (; i < end; i++) {
+    sort_range(comp->lib_import.mut_begin(), comp->lib_import.mut_end(), import_sorter);
+
+
+    auto i = comp->lib_import.begin();
+    auto end = comp->lib_import.end();
+
+    while (i < end) {
+      const InternString* path = i->path;
       PEFile single_dll ={};
 
-      load_portable_executable_from_file(comp, i->span, &single_dll, i->name->string);
+      load_portable_executable_from_file(comp, Span{}, &single_dll, path->string);
       if (comp->is_panic()) {
         return comp->services.errors->print_all();
       }
 
-      auto i_el = i->imports.begin();
-      auto end_el = end->imports.begin();
-      for (; i_el < end_el; i_el++) {
-        if (!single_dll.export_table.names.contains(i_el->name)) {
-          comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i_el->ptr->declaration->sig->node_span,
+      while (i < end && i->path == path) {
+        if (!single_dll.export_table.names.contains(i->name)) {
+          comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                              "Dll '{}' does export anything named '{}'",
-                             i->name, i_el->name);
+                             i->path, i->name);
         }
+
+        i++;
       }
 
       if (comp->is_panic()) {
@@ -6271,6 +6377,7 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
 
   {
     Structure* const s_void_ptr = STRUCTS::new_pointer_structure(comp, builtin_types->t_void);
+    builtin_types->t_void_ptr = register_builtin_type(s_void_ptr);
   }
 
   {
@@ -6308,7 +6415,6 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
 
   //File extensions
   comp->services.file_loader->axl = strings->intern("axl");
-  comp->services.file_loader->dll = strings->intern("dll");
 
   //Systems
   comp->system_names.sys_vm = strings->intern(system_vm.name);
@@ -6473,17 +6579,13 @@ void build_data_section_for_vm(Program* prog, Compiler* const comp) {
     }
   }
 
-  // Globals
+  // Reserved Data Sections
   {
-    auto i = comp->globals.begin_iter();
-    auto end = comp->globals.end_iter();
+    auto i = comp->data_holders.mut_begin();
+    const auto end = comp->data_holders.end();
 
-    for (; i != end; i.next()) {
-      Global* glob = i.get();
-
-      if (glob->constant_value.ptr == nullptr) {
-        glob->data_index = write_num_bytes(data, glob->decl.type.structure->size, glob->decl.type.structure->alignment);
-      }
+    for (; i < end; i++) {
+      i->data_index = write_num_bytes(data, i->size, i->alignment);
     }
   }
 
@@ -6491,43 +6593,36 @@ void build_data_section_for_vm(Program* prog, Compiler* const comp) {
 
   //Dll imports
   {
-    auto i_dll = comp->dlls_import.begin();
-    auto end_dll = comp->dlls_import.end();
+  //Shoudl be sorted ...
+
+    auto i_dll = comp->lib_import.begin();
+    auto end_dll = comp->lib_import.end();
+
+    const InternString* path = nullptr;
 
     for (; i_dll < end_dll; i_dll++) {
-      //Dont need to write the header unless a function is used
-      bool written_header = false;
-
-      auto i_func = i_dll->imports.begin();
-      const auto end_func = i_dll->imports.end();
-
-      for (; i_func < end_func; i_func++) {
-        Function* func = i_func->ptr;
-        const InternString* name = i_func->name;
-
-        if (func->is_called && func->func_type == FUNCTION_TYPE::EXTERN) {
-          //Function is used in this dll
-          if (!written_header) {
-            //Need to put in the name of the dll before any functions
-            //Dont know we need it until this point (might not use any of the functions)
-            written_header = true;
-            size_t name_position = write_string(data, i_dll->name);
-
-            //write header
-            write_u64(imports, name_position);
-          }
-
-          //Write the function name
-          size_t name_position = write_string(data, name);
-          write_u64(imports, name_position);
-
-          //The write the data index
-          write_u64(imports, func->data_index);
+      if (path != i_dll->path) {
+        if (path != nullptr) {
+          //Null terminate for previous functions in a dll
+          write_u64(imports, 0);
         }
+
+        path = i_dll->path;
+
+        size_t name_position = write_string(data, path);
+
+        //write header
+        write_u64(imports, name_position);
       }
 
-      //Null terminate for functions in a dll
-      write_u64(imports, 0);
+
+
+      //Write the function name
+      size_t name_position = write_string(data, i_dll->name);
+      write_u64(imports, name_position);
+
+      //The write the data index
+      write_u64(imports, (comp->data_holders.data + i_dll->data_holder_index)->data_index);
     }
 
     //2nd null terminate for dlls in import
