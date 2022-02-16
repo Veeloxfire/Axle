@@ -526,15 +526,28 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::POP_FRAME;
           break;
         }
-      case ByteCode::CALL: {
-          const auto i = ByteCode::PARSE::CALL(vm->IP);
+      case ByteCode::CALL_CONST: {
+          const auto i = ByteCode::PARSE::CALL_CONST(vm->IP);
 
-          vm->push(vm->IP + ByteCode::SIZE_OF::CALL);
+          vm->push(vm->IP + ByteCode::SIZE_OF::CALL_CONST);
           if (vm->errors->panic) {
             return;
           }
 
           vm->IP = prog->code.ptr + i.u64.val;
+          break;
+        }
+      case ByteCode::CALL_MEM: {
+          const auto i = ByteCode::PARSE::CALL_MEM(vm->IP);
+
+          vm->push(vm->IP + ByteCode::SIZE_OF::CALL_MEM);
+          if (vm->errors->panic) {
+            return;
+          }
+
+          u64 abs = x64_from_bytes(vm->load_mem(i.mem));
+
+          vm->IP = prog->code.ptr + abs;
           break;
         }
       case ByteCode::CALL_NATIVE_X64: {

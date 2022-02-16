@@ -279,7 +279,7 @@ struct Dependency {
 
 struct CompilationUnit : public Dependency {
   COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
-
+  u64 id;
   Namespace* available_names = nullptr;
 };
 
@@ -391,6 +391,7 @@ struct BuildOptions {
   const InternString* entry_point = nullptr;
   const InternString* output_file = nullptr;
 
+  const InternString* lib_folder = nullptr;
   const InternString* std_lib_folder = nullptr;
 
   const System* endpoint_system = nullptr;
@@ -442,6 +443,7 @@ struct Compiler {
 
   bool new_depends = false;
   u32 in_flight_units = 0;
+  u64 comp_unit_counter = 0;
 
   SystemsAndConventionNames system_names ={};
   Intrinsics intrinsics ={};

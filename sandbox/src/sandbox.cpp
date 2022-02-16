@@ -30,6 +30,7 @@ int main(int argc, const char** args) {
   options.build.default_calling_convention = "x64";
   options.build.output_file        = output_file;
   options.build.std_lib_folder = "D:\\GitHub\\Compiler\\stdlib";
+  options.build.lib_folder = "D:\\GitHub\\Compiler\\lib";
   
   options.print.ast             = false;
   options.print.pre_reg_alloc   = false;
@@ -38,6 +39,8 @@ int main(int argc, const char** args) {
   options.print.coalesce_values = false;
   options.print.fully_compiled  = false;
   options.print.run_headers     = false;
+  options.print.comp_units      = false;
+  options.print.comptime_exec   = true;
 
   options.optimize.non_stack_locals = true;
   

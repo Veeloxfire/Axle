@@ -151,19 +151,19 @@ void vm_backend_code_block(Compiler* const comp,
           code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
           break;
         }*/
-      case ByteCode::CALL: {
-          const auto p_c = ByteCode::PARSE::CALL(code_i);
+      case ByteCode::CALL_CONST: {
+          const auto p_c = ByteCode::PARSE::CALL_CONST(code_i);
           const Function* func = p_c.u64;
 
           {
             const size_t offset = out_code.size + 1;
             //Switch to a code label rather than func ptr
-            ByteCode::EMIT::CALL(out_code, func->code_block.label);
+            ByteCode::EMIT::CALL_CONST(out_code, func->code_block.label);
             relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
           }
 
 
-          code_i += ByteCode::SIZE_OF::CALL;
+          code_i += ByteCode::SIZE_OF::CALL_CONST;
           break;
         }
       case ByteCode::CALL_LABEL: {
@@ -171,7 +171,7 @@ void vm_backend_code_block(Compiler* const comp,
 
           {
             const size_t offset = out_code.size + 1;
-            ByteCode::EMIT::CALL(out_code, p_c.u64);
+            ByteCode::EMIT::CALL_LABEL(out_code, p_c.u64);
             relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
           }
 
@@ -1374,14 +1374,22 @@ void x86_64_backend_code_block(Compiler* const comp,
           code_i += ByteCode::SIZE_OF::RETURN;
           break;
         }
-      case ByteCode::CALL: {
-          const auto p = ByteCode::PARSE::CALL(code_i);
+      case ByteCode::CALL_CONST: {
+          const auto p = ByteCode::PARSE::CALL_CONST(code_i);
           const Function* func = p.u64;
           //Switch to a code label rather than func ptr
           call_near(relocs, out_code, (int32_t)func->code_block.label);
 
+          code_i += ByteCode::SIZE_OF::CALL_CONST;
+          break;
+        }
+      case ByteCode::CALL_MEM: {
+          const auto p = ByteCode::PARSE::CALL_MEM(code_i);
 
-          code_i += ByteCode::SIZE_OF::CALL;
+          out_code.insert(X64::CALL_NEAR_ABS);
+          emit_mod_rm(out_code, X64::R{ 2 }, X64::rm_from_mem_complex(p.mem));
+
+          code_i += ByteCode::SIZE_OF::CALL_MEM;
           break;
         }
       case ByteCode::CALL_LABEL: {

@@ -372,14 +372,40 @@ size_t _sort_range_part(T* base, size_t lo, size_t hi, const L& pred) {
   size_t i = lo;
   size_t j = hi;
 
-  while (true) {
-    while (pred(base[i], base[pivot])) {
-      i += 1;
-    }
+  while (pred(base[i], base[pivot])) {
+    i += 1;
+  }
 
-    while (pred(base[pivot], base[j])) {
+  while (pred(base[pivot], base[j])) {
+    j -= 1;
+  }
+
+  if (i >= j) return j;
+
+  //Account for the moving things
+  //means we dont have to copy
+  if (i == pivot) {
+    pivot = j;
+  }
+  else if (j == pivot) {
+    pivot = i;
+  }
+
+  {
+    T hold = std::move(base[i]);
+
+    base[i] = std::move(base[j]);
+    base[j] = std::move(hold);
+  }
+
+  while (true) {
+    do {
+      i += 1;
+    } while (pred(base[i], base[pivot]));
+
+    do {
       j -= 1;
-    }
+    } while (pred(base[pivot], base[j]));
 
     if (i >= j) return j;
 
@@ -392,10 +418,12 @@ size_t _sort_range_part(T* base, size_t lo, size_t hi, const L& pred) {
       pivot = i;
     }
 
-    T hold = std::move(base[i]);
+    {
+      T hold = std::move(base[i]);
 
-    base[i] = std::move(base[j]);
-    base[j] = std::move(hold);
+      base[i] = std::move(base[j]);
+      base[j] = std::move(hold);
+    }
   }
 
 }

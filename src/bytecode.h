@@ -70,7 +70,8 @@ struct MemComplex {
 
 #define BYTECODES_X \
 X(RETURN, OP)\
-X(CALL, OP_64)\
+X(CALL_CONST, OP_64)\
+X(CALL_MEM, OP_MEM)\
 X(CALL_LABEL, OP_64)\
 X(CALL_NATIVE_X64, OP_64_64)\
 X(LABEL, OP_64)\
@@ -460,6 +461,35 @@ namespace ByteCode {
     }
   };
 
+  struct OP_MEM {
+    uint8_t op;
+    MemComplex mem;
+
+    static constexpr OP_MEM parse(const uint8_t* bytecode) {
+      OP_MEM ret ={};
+
+      ret.op = bytecode[0];
+      ret.mem = MemComplex::parse(bytecode + 1);
+
+      return ret;
+    }
+
+    static constexpr size_t INSTRUCTION_SIZE = 1 + MemComplex::SERIAL_SIZE;
+
+    constexpr static void write(uint8_t* ptr, uint8_t op, const MemComplex& mem) {
+      ptr[0] = op;
+      MemComplex::write(ptr + 1, mem);
+    }
+
+    inline static void emit(Array<uint8_t>& arr, uint8_t opcode, const MemComplex& mem) {
+      arr.reserve_extra(INSTRUCTION_SIZE);
+
+      write(arr.data + arr.size, opcode, mem);
+
+      arr.size += INSTRUCTION_SIZE;
+    }
+  };
+
   struct OP_R_MEM {
     uint8_t op;
     uint8_t val;
@@ -691,6 +721,11 @@ namespace ByteCode {
       ByteCode::OP_R_MEM::emit(arr, op, val, mem);
     }
 
+    template<ByteCodeOp op>
+    void OP_MEM(Array<uint8_t>& arr, const MemComplex& mem) {
+      ByteCode::OP_MEM::emit(arr, op, mem);
+    }
+
   #define X(name, structure) constexpr auto name = structure<ByteCode:: ## name>;
     BYTECODES_X
     #undef X
@@ -782,6 +817,11 @@ namespace ByteCode {
     template<ByteCodeOp op>
     void OP_R_R(uint8_t* arr, uint8_t val1, uint8_t val2) {
       ByteCode::OP_R_R::write(arr, op, val1, val2);
+    }
+
+    template<ByteCodeOp op>
+    void OP_MEM(uint8_t* arr, const MemComplex& mem) {
+      ByteCode::OP_MEM::write(arr, op, mem);
     }
 
     template<ByteCodeOp op>

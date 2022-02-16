@@ -2509,6 +2509,8 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         print_ast(printer, bin_op->right);
         return;
       }
+    case AST_TYPE::LOCAL:
+    case AST_TYPE::GLOBAL:
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* i = (ASTIdentifier*)a;
         IO::print(i->name->string);
@@ -2761,6 +2763,12 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
 
         IO::print("#import ");
         print_ast(printer, i->expr_location);
+        return;
+      }
+    case AST_TYPE::LIB_IMPORT: {
+        ASTLibImport* imp = (ASTLibImport*)a;
+
+        IO::print("#lib_import(", imp->lib_file->string, ", ", imp->name->string, ")");
         return;
       }
   }

@@ -212,6 +212,7 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const APIOpti
     options.build.entry_point        = "main";
     options.build.file_name          = test.file_name;
     options.build.std_lib_folder     = "D:\\Github\\Compiler\\stdlib";
+    options.build.lib_folder         = "D:\\Github\\Compiler\\lib";
 
     //options.print.ast             = true;
     //options.print.fully_compiled  = true;

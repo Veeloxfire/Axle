@@ -145,7 +145,9 @@ struct ASTFunctionCallExpr : public AST {
   AST_ARR arguments ={};
 
   const InternString* function_name = nullptr;
+  const SignatureStructure* sig = nullptr;
   Function* func = nullptr;
+  size_t data_index_holder = 0;
 };
 
 struct ASTUnaryOperatorExpr : public AST {

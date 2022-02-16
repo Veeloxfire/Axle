@@ -5,13 +5,13 @@ T_GetStdHandle :: #type *(i32) -> u64;
 T_WriteConsoleA :: #type *(HANDLE, *void, u32, *u32, *void) -> u64;
 
 GetStdHandle := cast(T_GetStdHandle, #lib_import("kernel32.lib", "GetStdHandle"));
-WriteConsoleA := cast(T_GetStdHandle, #lib_import("kernel32.lib", "WriteConsoleA"));
+WriteConsoleA := cast(T_WriteConsoleA, #lib_import("kernel32.lib", "WriteConsoleA"));
 
 
 WIN_STD_OUT_REF :: cast(i32, -11i64);
 
 stdout_handle : u64 = GetStdHandle(WIN_STD_OUT_REF);
 
-print :: (std: *ascii, len: u64) -> void {
-  WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), nulltpr, nullptr);
+print :: (string: *ascii, len: u64) -> void {
+  WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*u32, nullptr), nullptr);
 }

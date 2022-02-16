@@ -70,6 +70,10 @@ namespace ByteCode {
                         print_mem_complex(reg_name_from_num, p.mem);\
                         printf("\n")
 
+  #define OP_MEM printf(": ");\
+                        print_mem_complex(reg_name_from_num, p.mem);\
+                        printf("\n")
+
   #define OP_64 printf(": 0x%llx\n", p.u64.val)
 
   #define OP_64_64 printf(": 0x%llx, 0x%llx\n", p.u64_1.val, p.u64_2.val)

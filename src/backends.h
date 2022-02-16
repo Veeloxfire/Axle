@@ -190,6 +190,7 @@ namespace X64 {
     MUL_RM_TO_RAX = 0xF7,// r = 4
     DIV_RM_TO_RAX = 0xF7,// r = 6
     IDIV_RM_TO_RAX = 0xF7,// r = 7
+    CALL_NEAR_ABS = 0xFF,//r = 2
   };
 
   void mov(Array<uint8_t>& arr,
