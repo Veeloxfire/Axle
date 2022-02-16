@@ -1,7 +1,6 @@
 #include "PE_file_format.h"
 #include "files.h"
 #include "compiler.h"
-#include <stdio.h>
 #include <time.h>
 
 //// Sizes ////
@@ -301,11 +300,11 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
     important_vals.size_of_image = section_VA;
   }
 
-  FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::WRITE, FILES::DATA_MODE::BINARY);
+  FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::WRITE);
 
-  if (file.error_code != 0) return ErrorCode::COULD_NOT_CREATE_FILE;
+  if (file.error_code != ErrorCode::OK) return file.error_code;
 
-  FILE* const out = file.file;
+  FileData* const out = file.file;
 
   {
     //MS-DOS header and stub
@@ -593,9 +592,9 @@ void load_portable_executable_from_file(Compiler* const comp,
                                         PEFile* pe_file,
                                         const char* file_name) {
 
-  FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::READ, FILES::DATA_MODE::BINARY);
+  FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::READ);
 
-  if (file.error_code != 0) {
+  if (file.error_code != ErrorCode::OK) {
     comp->report_error(ERROR_CODE::FILE_ERROR, span,
                        "Could not open file '{}'\n"
                        "Perhaps it does not exist",
@@ -618,7 +617,7 @@ void load_portable_executable_from_file(Compiler* const comp,
     return;
   }
 
-  FILES::seek(file.file, FILES::SEEK_MODE::BEGIN, pe_file->header.ms_dos.actual_start_of_header);
+  FILES::seek_from_start(file.file, pe_file->header.ms_dos.actual_start_of_header);
   FILES::read(file.file, (uint8_t*)pe_file->header.signature, SIGNATURE_SIZE);
 
   {
@@ -640,7 +639,7 @@ void load_portable_executable_from_file(Compiler* const comp,
   }
 
   FILES::read(file.file, &pe_file->header.coff, 1);
-  const size_t opt_header_pos = FILES::current_pos(file.file);
+  const size_t opt_header_pos = FILES::get_current_pos(file.file);
   FILES::read(file.file, &pe_file->header.pe32, 1);
 
   if (pe_file->header.pe32.magic_number != MAGIC_NUMBER::PE32_PLUS) {
@@ -672,7 +671,7 @@ void load_portable_executable_from_file(Compiler* const comp,
                               num_dirs);
 
   {
-    size_t currpos = FILES::current_pos(file.file);
+    size_t currpos = FILES::get_current_pos(file.file);
     size_t expected = pe_file->header.coff.size_of_optional_header + opt_header_pos;
 
     if (currpos != expected) {
@@ -702,7 +701,7 @@ void load_portable_executable_from_file(Compiler* const comp,
 
 
     //Seek to export table
-    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN, resolver.load_rva_ptr(export_table.virtual_address));
+    FILES::seek_from_start(file.file, resolver.load_rva_ptr(export_table.virtual_address));
 
     //Load directory table
     FILES::read(file.file, &pe_file->export_table.directory_table, 1);
@@ -718,7 +717,7 @@ void load_portable_executable_from_file(Compiler* const comp,
 
 
     //Load all exports
-    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN, resolver.load_rva_ptr(directory_table.export_table_address));
+    FILES::seek_from_start(file.file, resolver.load_rva_ptr(directory_table.export_table_address));
 
     const size_t num_exports = directory_table.num_export_entries;
     pe_file->export_table.address_table.insert_uninit(num_exports);
@@ -726,8 +725,7 @@ void load_portable_executable_from_file(Compiler* const comp,
     FILES::read(file.file, pe_file->export_table.address_table.data, num_exports);
 
     //Load name pointers
-    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN,
-                resolver.load_rva_ptr(directory_table.name_pointer_table_address));
+    FILES::seek_from_start(file.file, resolver.load_rva_ptr(directory_table.name_pointer_table_address));
 
 
     const size_t num_ordinals = directory_table.num_name_pointers;
@@ -736,8 +734,7 @@ void load_portable_executable_from_file(Compiler* const comp,
     Array<RVA> name_rvas ={};
     name_rvas.insert_uninit(num_ordinals);
     //Seek to names
-    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN,
-                resolver.load_rva_ptr(directory_table.name_pointer_table_address));
+    FILES::seek_from_start(file.file, resolver.load_rva_ptr(directory_table.name_pointer_table_address));
     //Read names
     FILES::read(file.file, name_rvas.data, num_ordinals);
 
@@ -745,8 +742,7 @@ void load_portable_executable_from_file(Compiler* const comp,
     Array<uint16_t> ordinals ={};
     ordinals.insert_uninit(num_ordinals);
     //Seek to ordinals
-    FILES::seek(file.file, FILES::SEEK_MODE::BEGIN,
-                resolver.load_rva_ptr(directory_table.ordinal_table_address));
+    FILES::seek_from_start(file.file, resolver.load_rva_ptr(directory_table.ordinal_table_address));
     //Read ordinals
     FILES::read(file.file, ordinals.data, num_ordinals);
 
@@ -773,7 +769,7 @@ void load_portable_executable_from_file(Compiler* const comp,
         //These is a name we can load!
 
         //Start of the string
-        FILES::seek(file.file, FILES::SEEK_MODE::BEGIN, resolver.load_rva_ptr(name));
+        FILES::seek_from_start(file.file, resolver.load_rva_ptr(name));
 
         //load each character
         char c = FILES::read_byte(file.file);

@@ -1544,6 +1544,7 @@ void reverse_array(Array<T>& arr) noexcept {
 #define ERROR_CODES_X \
 modify(OK)\
 modify(COULD_NOT_CREATE_FILE)\
+modify(COULD_NOT_OPEN_FILE)\
 modify(COULD_NOT_CLOSE_FILE)\
 modify(UNDEFINED_INSTRUCTION)\
 modify(STACK_OVERFLOW)

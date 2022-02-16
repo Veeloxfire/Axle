@@ -1,133 +1,193 @@
 #include "files.h"
 #include "strings.h"
 #include "trace.h"
+#include <Windows.h>
 
-namespace FILES {
+FILES::OpenedFile FILES::open(const char* name,
+                OPEN_MODE open_mode) {
+  TRACING_FUNCTION();
 
-  OpenedFile open(const char* name,
-                  OPEN_MODE open_mode,
-                  DATA_MODE data_mode) {
-    TRACING_FUNCTION();
+  OpenedFile opened_file ={};
 
-    OpenedFile opened_file ={};
-    char mode[3] ={ (char)open_mode, (char)data_mode, '\0' };
-    opened_file.error_code = fopen_s(&opened_file.file, name, mode);
-    return opened_file;
+  DWORD access;
+  DWORD share;
+
+  switch (open_mode) {
+    case OPEN_MODE::READ: {
+        access = GENERIC_READ;
+        share = FILE_SHARE_READ;
+        break;
+      }
+    case OPEN_MODE::WRITE: {
+        access = GENERIC_WRITE;
+        share = 0;
+        break;
+      }
   }
 
-  ErrorCode close(FILE* file) {
-    TRACING_FUNCTION();
-    return fclose(file) == -1 ? ErrorCode::COULD_NOT_CLOSE_FILE
-      : ErrorCode::OK;
+
+  opened_file.file = (FileData*)CreateFileA(name, access, share, 0, OPEN_EXISTING, 0, 0);
+  if (opened_file.file == INVALID_HANDLE_VALUE) {
+    opened_file.error_code = ErrorCode::COULD_NOT_OPEN_FILE;
+  }
+  else {
+    opened_file.error_code = ErrorCode::OK;
   }
 
-  ErrorCode read_as_string(FILE* file, size_t num_bytes, char** out_string) {
-    TRACING_FUNCTION();
+  return opened_file;
+}
 
+FILES::OpenedFile FILES::create(const char* name,
+                              OPEN_MODE open_mode) {
+  TRACING_FUNCTION();
 
-    *out_string = allocate_default<char>(num_bytes + 1);
+  OpenedFile opened_file ={};
 
+  DWORD access;
+  DWORD share;
 
-    fread((void*)*out_string, sizeof(char), num_bytes, file);
-    (*out_string)[num_bytes] = '\0';
-
-
-
-    //TODO: Error Codes
-    return ErrorCode::OK;
+  switch (open_mode) {
+    case OPEN_MODE::READ: {
+        access = GENERIC_READ;
+        share = FILE_SHARE_READ;
+        break;
+      }
+    case OPEN_MODE::WRITE: {
+        access = GENERIC_WRITE;
+        share = 0;
+        break;
+      }
   }
 
-  ErrorCode read_to_bytes(FILE* file, uint8_t* bytes, size_t num_bytes) {
-    size_t i = fread(bytes, sizeof(uint8_t), num_bytes, file);
 
-    return ErrorCode::OK;
+  opened_file.file = (FileData*)CreateFileA(name, access, share, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+  if (opened_file.file == INVALID_HANDLE_VALUE) {
+    opened_file.error_code = ErrorCode::COULD_NOT_CREATE_FILE;
+  }
+  else {
+    opened_file.error_code = ErrorCode::OK;
   }
 
-  ErrorCode read_to_structure(FILE* file,
-                              uint8_t* ptr_to_s,
-                              size_t size_of_s, size_t num_of_s) {
-    size_t i = fread(ptr_to_s, size_of_s, num_of_s, file);
+  return opened_file;
+}
 
-    return ErrorCode::OK;
+ErrorCode FILES::close(FileData* file) {
+  TRACING_FUNCTION();
+  CloseHandle(file);
+
+  return ErrorCode::OK;
+}
+
+ErrorCode FILES::read_as_string(FileData* file, size_t num_bytes, char** out_string) {
+  TRACING_FUNCTION();
+
+
+  *out_string = allocate_default<char>(num_bytes + 1);
+
+  ReadFile(file, *out_string, (DWORD)num_bytes, 0, 0);
+
+  (*out_string)[num_bytes] = '\0';
+
+
+  //TODO: Error Codes
+  return ErrorCode::OK;
+}
+
+ErrorCode FILES::read_to_bytes(FileData* file, uint8_t* bytes, size_t num_bytes) {
+  ReadFile(file, bytes, (DWORD)num_bytes, 0, 0);
+
+  return ErrorCode::OK;
+}
+
+ErrorCode FILES::read_to_structures(FileData* file,
+                             uint8_t* ptr_to_s,
+                             size_t size_of_s, size_t num_of_s) {
+  ReadFile(file, ptr_to_s, (DWORD)(size_of_s * num_of_s), 0, 0);
+  return ErrorCode::OK;
+}
+
+uint8_t FILES::read_byte(FileData* file) {
+  uint8_t v = 0;
+  ReadFile(file, &v, 1, 0, 0);
+
+  return v;
+}
+
+size_t FILES::size_of_file(FileData* file) {
+  LARGE_INTEGER li ={};
+
+  GetFileSizeEx(file, &li);
+
+  return (size_t)li.QuadPart;
+}
+
+OwnedPtr<const char> FILES::load_file_to_string(const char* file_name) {
+  TRACING_FUNCTION();
+
+  const OpenedFile file = open(file_name, OPEN_MODE::READ);
+
+  if (file.error_code != ErrorCode::OK) {
+    return nullptr;
   }
 
-  uint8_t read_byte(FILE* file) {
-    return (uint8_t)fgetc(file);
+  const size_t file_size = size_of_file(file.file);
+
+  char* string = nullptr;
+  read_as_string(file.file, file_size, &string);
+
+  close(file.file);
+
+  return string;
+}
+
+ErrorCode FILES::write(FileData* file, const uint8_t* arr, size_t length) {
+  WriteFile(file, arr, (DWORD)length, 0, 0);
+
+  return ErrorCode::OK;
+}
+
+ErrorCode FILES::write_padding_bytes(FileData* file, uint8_t byte, size_t num) {
+  for (size_t i = 0; i < num; i++) {
+    WriteFile(file, &byte, 1, 0, 0);
   }
 
-  ErrorCode seek(FILE* file, SEEK_MODE mode, int32_t location) {
-    static_assert(sizeof(int32_t) == sizeof(long), "Must be same");
-    int err = fseek(file, static_cast<long>(location), static_cast<int>(mode));
 
-    return ErrorCode::OK;
+  return ErrorCode::OK;
+}
+
+ErrorCode FILES::write_aligned_array(FileData* file, const uint8_t* arr, const size_t size, const size_t align) {
+  //Write the data
+  write(file, arr, size);
+
+  //Padding
+  const size_t size_mod_align = size % align;
+
+  if (size_mod_align != 0) {
+    return write_padding_bytes(file, '\0', align - size_mod_align);
   }
-
-  long current_pos(FILE* file) {
-    return ftell(file);
-  }
-
-  size_t size_of_file(FILE* file) {
-    const long cur = ftell(file);
-
-    fseek(file, 0, SEEK_END);
-    const size_t size = ftell(file);
-
-    fseek(file, cur, SEEK_SET);
-    return size;
-  }
-
-  OwnedPtr<const char> load_file_to_string(const char* file_name) {
-    TRACING_FUNCTION();
-
-    const OpenedFile file = open(file_name, OPEN_MODE::READ, DATA_MODE::BINARY);
-
-    if (file.error_code != 0) {
-      return nullptr;
-    }
-
-    const size_t file_size = size_of_file(file.file);
-
-    char* string = nullptr;
-    read_as_string(file.file, file_size, &string);
-
-    fclose(file.file);
-
-    return string;
-  }
-
-  ErrorCode write(FILE* file, const uint8_t* arr, size_t length) {
-    fwrite(arr, 1, length, file);
+  else {
     //TODO: Error Codes from fwrite
     return ErrorCode::OK;
   }
-
-  ErrorCode write_padding_bytes(FILE* file, uint8_t byte, size_t num) {
-    for (size_t i = 0; i < num; i++) {
-      fputc(byte, file);
-    }
-    return ErrorCode::OK;
-  }
-
-  ErrorCode write_aligned_array(FILE* file, const uint8_t* arr, const size_t size, const size_t align) {
-    //Write the data
-    fwrite(arr, 1, size, file);
-
-    //Padding
-    const size_t size_mod_align = size % align;
-
-    if (size_mod_align != 0) {
-      return write_padding_bytes(file, '\0', align - size_mod_align);
-    }
-    else {
-      //TODO: Error Codes from fwrite
-      return ErrorCode::OK;
-    }
-  }
-
-  ErrorCode write_aligned_array(FILE* file, const Array<uint8_t>& arr, const size_t align) {
-    return write_aligned_array(file, arr.data, arr.size, align);
-  }
 }
+
+ErrorCode FILES::write_aligned_array(FileData* file, const Array<uint8_t>& arr, const size_t align) {
+  return write_aligned_array(file, arr.data, arr.size, align);
+}
+
+void FILES::seek_from_start(FileData* file, size_t offset) {
+  LARGE_INTEGER li ={};
+  li.QuadPart = (LONGLONG)offset;
+  SetFilePointerEx(file, li, NULL, FILE_BEGIN);
+}
+
+size_t FILES::get_current_pos(FileData* file) {
+  LARGE_INTEGER li ={};
+  SetFilePointerEx(file, {}, &li, FILE_CURRENT);
+
+  return (size_t)li.QuadPart;
+}
+
 
 FileLocation parse_file_location(const char* path_str,
                                  const char* file_str,

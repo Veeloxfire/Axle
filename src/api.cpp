@@ -17,6 +17,8 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 #include "files.h"
 #include "backends.h"
 
+#include "trace.h"
+
 #include <utility>
 #include <iostream>
 
@@ -80,6 +82,8 @@ RunOutput run_as_machine_code(Program* prog) {
 
 int compile_file(const APIOptions& options,
                  Program* out_program) {
+  TRACING_FUNCTION();
+
 
   //Setup
   StringInterner strings ={};

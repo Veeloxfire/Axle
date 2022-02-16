@@ -40,7 +40,7 @@ int main(int argc, const char** args) {
   options.print.fully_compiled  = false;
   options.print.run_headers     = false;
   options.print.comp_units      = false;
-  options.print.comptime_exec   = true;
+  options.print.comptime_exec   = false;
 
   options.optimize.non_stack_locals = true;
   
