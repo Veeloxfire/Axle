@@ -19,6 +19,8 @@ namespace FILES {
                   OPEN_MODE open_mode);
   OpenedFile create(const char* name,
                   OPEN_MODE open_mode);
+  OpenedFile replace(const char* name,
+                    OPEN_MODE open_mode);
 
   ErrorCode close(FileData* file);
 
@@ -48,8 +50,13 @@ namespace FILES {
   ErrorCode write_aligned_array(FileData* file, const Array<uint8_t>& arr, const size_t align);
 
   template<typename T>
-  ErrorCode write(FileData* file, const T& t) {
-    return write(file, (uint8_t*)&t, sizeof(T));
+  ErrorCode write_obj(FileData* file, const T& t) {
+    return write(file, (const uint8_t*)&t, sizeof(T));
+  }
+
+  template<usize N>
+  ErrorCode write_str(FileData* file, const char(&str)[N]) {
+    return write(file, (const uint8_t*)str, N - 1);
   }
 }
 

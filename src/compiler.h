@@ -227,6 +227,7 @@ struct DependencyCheckState {
 };
 
 struct DataHolder {
+  const InternString* name;
   size_t size = 0;
   size_t alignment = 0;
   size_t data_index = 0;
@@ -370,9 +371,9 @@ struct FileLoader {
 };
 
 struct LibraryImport {
+  size_t label;
   const InternString* path;
   const InternString* name;
-  size_t data_holder_index;
 };
 
 struct SystemsAndConventionNames {
@@ -407,6 +408,16 @@ struct Context {
 
   CompilationUnit* current_unit;
   Namespace* current_namespace;
+};
+
+#define IMPORTANT_NAMES_INC \
+MOD(ptr) \
+MOD(len) \
+
+struct ImportantNames {
+#define MOD(n) const InternString* n;
+  IMPORTANT_NAMES_INC;
+#undef MOD
 };
 
 //struct ToTypeCheckData {
@@ -447,6 +458,7 @@ struct Compiler {
 
   SystemsAndConventionNames system_names ={};
   Intrinsics intrinsics ={};
+  ImportantNames important_names ={};
 
   Services services;
 
@@ -499,9 +511,7 @@ struct Compiler {
 
   template<typename ... T>
   void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) {
-    services.errors->register_error(code, span, f_message, ts...);
-
-    services.errors->panic = true;
+    services.errors->report_error(code, span, f_message, ts...);
   }
 
   template<typename ... T>

@@ -13,7 +13,10 @@
 
 Function* Compiler::new_function() {
   Function* func =  functions.insert();
-  func->func_type = FUNCTION_TYPE::DEFAULT;
+  //func->func_type = FUNCTION_TYPE::DEFAULT;
+
+  func->code_block.label = labels++;
+
   return func;
 }
 
@@ -375,8 +378,9 @@ static ConstantVal copy_constant_value(Compiler* comp, ConstantVal val) {
   return { data, val.size };
 }
 
-static size_t new_data_object(Compiler* const comp, u32 size, u32 alignment) {
+static size_t new_data_object(Compiler* const comp, const InternString* name, u32 size, u32 alignment) {
   DataHolder holder ={};
+  holder.name = name;
   holder.size = size;
   holder.alignment = alignment;
 
@@ -881,10 +885,10 @@ void dependency_check_ast_node(Compiler* const comp,
         dependency_check_ast_node(comp, context, state, imp->expr_location);
         return;
       }
-    case AST_TYPE::LIB_IMPORT: {
-        ASTLibImport* imp = (ASTLibImport*)a;
+    case AST_TYPE::STATIC_LINK: {
+        ASTStaticLink* imp = (ASTStaticLink*)a;
 
-        //TODO: Any depends?
+        dependency_check_ast_node(comp, context, state, imp->import_type);
 
         return;
       }
@@ -1104,10 +1108,10 @@ static void compile_find_function_call(Compiler* const comp,
 
     if (test_function_overload(&sig, sig_struct)) {
       ASSERT(global->constant_value.ptr != nullptr);
-      ASSERT(global->constant_value.size == sizeof(Function*));
+      ASSERT(global->constant_value.size == sizeof(usize));
 
       call->sig = sig_struct;
-      call->func = *(Function**)global->constant_value.ptr;
+      call->label = *(usize*)global->constant_value.ptr;
       return;
     }
     else {
@@ -1116,34 +1120,6 @@ static void compile_find_function_call(Compiler* const comp,
       return;
     }
   }
-  else if (global->decl.type.struct_type() == STRUCTURE_TYPE::POINTER) {
-    const auto* ptr_struct = global->decl.type.extract_base<PointerStructure>();
-    if (ptr_struct->base.struct_type() == STRUCTURE_TYPE::LAMBDA) {
-      const auto* sig_struct = ptr_struct->base.extract_base<SignatureStructure>();
-
-      if (test_function_overload(&sig, sig_struct)) {
-        call->sig = sig_struct;
-        
-        if (global->constant_value.ptr == nullptr) {
-          ASSERT(global->data_holder_index != 0);
-          call->data_index_holder = global->data_holder_index;
-          return;
-        }
-        else {
-          ASSERT(global->constant_value.size == sizeof(Function*));
-          call->func = *(Function**)global->constant_value.ptr;
-          return;
-        }
-      }
-      else {
-        comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
-                           "Arguments mismatch\nArgs: {}\nDecl: {}", sig, PrintSignatureType{ sig_struct });
-        return;
-      }
-    }
-  }
-
-
 
   comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
                      "No visible function matches signature '{}'",
@@ -1400,34 +1376,59 @@ void type_check_ast_node(Compiler* const comp,
 
         ASSERT(base->node_type.is_valid());
 
-        if (base->node_type.struct_type() != STRUCTURE_TYPE::COMPOSITE) {
+        STRUCTURE_TYPE struct_type = base->node_type.struct_type();
+
+
+        if (struct_type == STRUCTURE_TYPE::COMPOSITE) {
+          const Type& cmp_t = base->node_type;
+
+          const auto* cs = cmp_t.unchecked_base<CompositeStructure>();
+
+          auto i = cs->elements.begin();
+          auto end = cs->elements.end();
+
+          a->node_type.structure = nullptr;//reset
+
+          for (; i < end; i++) {
+            if (i->name == member->name) {
+              member->node_type = i->type;
+              member->offset = i->offset;
+              break;
+            }
+          }
+
+          if (!a->node_type.is_valid()) {
+            comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+                               "Type '{}' has no member '{}'",
+                               cmp_t.name, member->name);
+            return;
+          }
+        }
+        else if (struct_type == STRUCTURE_TYPE::FIXED_ARRAY) {
+          const Type& arr_t = base->node_type;
+
+          const ArrayStructure* as = arr_t.unchecked_base<ArrayStructure>();
+
+          if (member->name == comp->important_names.ptr) {
+            a->node_type = to_type(find_or_make_pointer_structure(comp, context, as->base));
+
+            //TODO: do this outside of memory
+            set_runtime_flags(base, state, false, (u8)RVT::MEMORY);
+          }
+          else  if (member->name == comp->important_names.len) {
+            a->node_type = comp->services.builtin_types->t_u64;
+          }
+          else {
+            comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+                               "Type '{}' has no member '{}'",
+                               arr_t.name, member->name);
+            return;
+          }
+        }
+        else {
           comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
                              "Type '{}' does not have any members (it is not a composite type)",
                              base->node_type.name);
-          return;
-        }
-
-        const Type& cmp_t = base->node_type;
-
-        const auto* cs = cmp_t.unchecked_base<CompositeStructure>();
-
-        auto i = cs->elements.begin();
-        auto end = cs->elements.end();
-
-        a->node_type.structure = nullptr;//reset
-
-        for (; i < end; i++) {
-          if (i->name == member->name) {
-            member->node_type = i->type;
-            member->offset = i->offset;
-            break;
-          }
-        }
-
-        if (!a->node_type.is_valid()) {
-          comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
-                             "Type '{}' has no member '{}'",
-                             cmp_t.name, member->name);
           return;
         }
 
@@ -1690,17 +1691,18 @@ void type_check_ast_node(Compiler* const comp,
         return;
       }
 
-    case AST_TYPE::LIB_IMPORT: {
-        a->node_type = comp->services.builtin_types->t_void_ptr;
-
-        a->meta_flags &= ~META_FLAG::COMPTIME;//Not compile time
-        a->meta_flags |= META_FLAG::CONST;//Is const
+    case AST_TYPE::STATIC_LINK: {
+        a->meta_flags |= META_FLAG::COMPTIME;
+        a->meta_flags |= META_FLAG::CONST;
         a->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
-        //Not constant
-        a->valid_rvts &= ~(u8)RVT::CONST;
 
-        ASTLibImport* imp = (ASTLibImport*)a;
+        ASTStaticLink* imp = (ASTStaticLink*)a;
+        type_check_ast_node(comp, context, state, imp->import_type);
+
+        ASSERT(imp->import_type->node_type == comp->services.builtin_types->t_type);
+
+        imp->node_type = *(const Type*)imp->import_type->value;
 
         FileLocation loc = parse_file_location(comp->build_options.lib_folder->string, imp->lib_file->string,
                                                comp->services.strings);
@@ -1709,21 +1711,21 @@ void type_check_ast_node(Compiler* const comp,
           if (it->path == loc.full_name
               && imp->name == it->name) {
             //Already imported
+            goto ALREADY_IMPORTED;
           }
         }
 
-        size_t data_holder_index = new_data_object(comp, a->node_type.structure->size, a->node_type.structure->alignment);
+        {
+          LibraryImport import_lib ={};
+          import_lib.name = imp->name;
+          import_lib.path = loc.full_name;
+          import_lib.label = comp->labels++;
 
-        imp->data_holder_index = data_holder_index;
+          comp->lib_import.insert(std::move(import_lib));
+          imp->import_index = comp->lib_import.size;
+        }
 
-
-
-        LibraryImport import_lib ={};
-        import_lib.data_holder_index = data_holder_index;
-        import_lib.name = imp->name;
-        import_lib.path = loc.full_name;
-
-        comp->lib_import.insert(std::move(import_lib));
+      ALREADY_IMPORTED:
         return;
       }
 
@@ -3316,22 +3318,7 @@ static void compile_function_call(Compiler* const comp,
 
   size_t stack_params = state->stack.current_passed;
 
-
-  if (call->func != nullptr) {
-    Function* func = call->func;
-
-    func->is_called = true;
-    ByteCode::EMIT::CALL_CONST(code->code, func);
-  }
-  else {
-    //Func ptr?
-    ASSERT(call->data_index_holder != 0);
-
-    RuntimeValue v = load_data_memory(state, sig_struct->size, call->data_index_holder - 1, code);
-
-    ByteCode::EMIT::CALL_MEM(code->code, state->get_mem(v.mem)->mem);
-  }
-
+  ByteCode::EMIT::CALL_LABEL(code->code, call->label);
 
   state->control_flow.had_call = true;
   state->control_flow.last_call = state->control_flow.expression_num;
@@ -3436,11 +3423,11 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           load_runtime_hint(comp, state, expr->node_type.structure, hint, expr->valid_rvts);
         }
 
-        Function** func_c = (Function**)comp->constants.alloc_no_construct(8);
-        *func_c = l->function;
+        usize* label = (usize*)comp->constants.alloc_no_construct(8);
+        *label = l->function->code_block.label;
 
         load_const_to_runtime_val(comp, state, code, expr->node_type.structure,
-                                  ConstantVal{ (uint8_t*)func_c, 8 },
+                                  ConstantVal{ (uint8_t*)label, sizeof(usize) },
                                   &hint->val);
         break;
       }
@@ -3448,33 +3435,78 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         ASSERT(hint != nullptr);
 
         ASTMemberAccessExpr* member_e = (ASTMemberAccessExpr*)expr;
-        AST_LOCAL m_expr = member_e->expr;
+        AST_LOCAL m_base = member_e->expr;
 
-        RuntimeValue obj = compile_bytecode_of_expression_new(comp,
-                                                              context,
-                                                              state,
-                                                              code,
-                                                              m_expr,
-                                                              (uint8_t)RVT::MEMORY);
+        STRUCTURE_TYPE st = m_base->node_type.struct_type();
+        if (st == STRUCTURE_TYPE::COMPOSITE) {
 
-        ASSERT(obj.type == RVT::MEMORY);
 
-        RuntimeValue member ={};
-        member.type = RVT::MEMORY;
-        member.mem = state->new_mem();
+          RuntimeValue obj = compile_bytecode_of_expression_new(comp,
+                                                                context,
+                                                                state,
+                                                                code,
+                                                                m_base,
+                                                                (uint8_t)RVT::MEMORY);
 
-        //Set up memory as offset from the original object memory
-        {
-          MemValue* member_mem = state->get_mem(member.mem);
-          const MemValue* obj_mem = state->get_mem(obj.mem);
+          ASSERT(obj.type == RVT::MEMORY);
 
-          member_mem->mem = obj_mem->mem;
+          RuntimeValue member ={};
+          member.type = RVT::MEMORY;
+          member.mem = state->new_mem();
 
-          member_mem->mem.disp += member_e->offset;
-          member_mem->size = expr->node_type.structure->size;
+          //Set up memory as offset from the original object memory
+          {
+            MemValue* member_mem = state->get_mem(member.mem);
+            const MemValue* obj_mem = state->get_mem(obj.mem);
+
+            member_mem->mem = obj_mem->mem;
+
+            member_mem->mem.disp += member_e->offset;
+            member_mem->size = expr->node_type.structure->size;
+          }
+
+          copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &member, hint, expr->valid_rvts & NON_CONST_RVTS);
+        }
+        else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
+          if (member_e->name == comp->important_names.ptr) {
+            RuntimeValue obj = compile_bytecode_of_expression_new(comp,
+                                                                  context,
+                                                                  state,
+                                                                  code,
+                                                                  m_base,
+                                                                  (uint8_t)RVT::MEMORY);
+
+            ASSERT(obj.type == RVT::MEMORY);
+
+            RuntimeValue val = take_address(comp, state, code, &obj);
+            copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &val, hint, expr->valid_rvts & NON_CONST_RVTS);
+          }
+          else if (member_e->name == comp->important_names.len) {
+            const ArrayStructure* as = m_base->node_type.unchecked_base<ArrayStructure>();
+
+            u64 val = as->length;
+
+            const size_t size = sizeof(val);
+
+            uint8_t* val_c = comp->constants.alloc_no_construct(size);
+            memcpy_ts(val_c, size, (uint8_t*)&val, size);
+
+            const ConstantVal constant ={ val_c, size };
+
+            if (hint->is_hint) {
+              load_runtime_hint(comp, state, expr->node_type.structure, hint, expr->valid_rvts);
+            }
+
+            load_const_to_runtime_val(comp, state, code, expr->node_type.structure, constant, &hint->val);
+          }
+          else {
+            INVALID_CODE_PATH("Not a valid name");
+          }
+        }
+        else {
+          INVALID_CODE_PATH("Type does not have members");
         }
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &member, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
     case AST_TYPE::INDEX_EXPR: {
@@ -3882,12 +3914,27 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &local->val, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
-    case AST_TYPE::LIB_IMPORT: {
-        ASTLibImport* li = (ASTLibImport*)expr;
+    case AST_TYPE::STATIC_LINK: {
+        ASTStaticLink* li = (ASTStaticLink*)expr;
 
-        RuntimeValue global_mem = load_data_memory(state, li->node_type.structure->size, li->data_holder_index - 1, code);
+        LibraryImport* imp = comp->lib_import.data + (li->import_index - 1);
+        
+        usize* label_holder = comp->constants.alloc_no_construct<usize>();
+        *label_holder = imp->label;
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
+        ConstantVal val ={};
+        val.ptr = label_holder;
+        val.size = sizeof(usize);
+
+        if (hint->is_hint) {
+          load_runtime_hint(comp, state, expr->node_type.structure, hint, expr->valid_rvts);
+        }
+
+        load_const_to_runtime_val(comp,
+                                  state,
+                                  code,
+                                  ((const Type*)li->import_type->value)->structure, val,
+                                  &hint->val);
 
         break;
       }
@@ -5037,7 +5084,7 @@ void compile_function_body_code(Compiler* const comp,
   ASSERT(func->code_block.code.size == 0);
 
   //Enter the body - setup
-  func->code_block.label = comp->labels++;
+  //func->code_block.label = comp->labels++;//already set
   state->return_label = comp->labels++;
   state->control_flow.new_flow();
 
@@ -5407,7 +5454,7 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
     global->init.label = comp->labels++;
     state->return_label = comp->labels++;
 
-    global->data_holder_index = new_data_object(comp, global->decl.type.structure->size, global->decl.type.structure->alignment);
+    global->data_holder_index = new_data_object(comp, global->decl.name, global->decl.type.structure->size, global->decl.type.structure->alignment);
 
     ValueIndex reg_mem = state->new_value();
 
@@ -6265,44 +6312,47 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
   ASSERT(comp->in_flight_units == 0);
 
-  {
-    TRACING_SCOPE("test load dlls");
+  constexpr auto import_sorter = [](const LibraryImport& l, const LibraryImport& r) {
+    return !is_alphabetical_order(r.path, l.path);
+  };
 
-    //Sort the dlls
-    constexpr auto import_sorter = [](const LibraryImport& l, const LibraryImport& r) {
-      return !is_alphabetical_order(r.path, l.path);
-    };
+  sort_range(comp->lib_import.mut_begin(), comp->lib_import.mut_end(), import_sorter);
 
-    sort_range(comp->lib_import.mut_begin(), comp->lib_import.mut_end(), import_sorter);
+  //{
+  //  TRACING_SCOPE("test load dlls");
 
+  //  //Sort the dlls
+  //  constexpr auto import_sorter = [](const LibraryImport& l, const LibraryImport& r) {
+  //    return !is_alphabetical_order(r.path, l.path);
+  //  };
 
-    auto i = comp->lib_import.begin();
-    auto end = comp->lib_import.end();
+  //  auto i = comp->lib_import.begin();
+  //  auto end = comp->lib_import.end();
 
-    while (i < end) {
-      const InternString* path = i->path;
-      PEFile single_dll ={};
+  //  while (i < end) {
+  //    const InternString* path = i->path;
+  //    PEFile single_dll ={};
 
-      load_portable_executable_from_file(comp, Span{}, &single_dll, path->string);
-      if (comp->is_panic()) {
-        return comp->services.errors->print_all();
-      }
+  //    load_portable_executable_from_file(comp, Span{}, &single_dll, path->string);
+  //    if (comp->is_panic()) {
+  //      return comp->services.errors->print_all();
+  //    }
 
-      while (i < end && i->path == path) {
-        if (!single_dll.export_table.names.contains(i->name)) {
-          comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
-                             "Dll '{}' does export anything named '{}'",
-                             i->path, i->name);
-        }
+  //    while (i < end && i->path == path) {
+  //      if (!single_dll.export_table.names.contains(i->name)) {
+  //        comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
+  //                           "Dll '{}' does export anything named '{}'",
+  //                           i->path, i->name);
+  //      }
 
-        i++;
-      }
+  //      i++;
+  //    }
 
-      if (comp->is_panic()) {
-        return comp->services.errors->print_all();
-      }
-    }
-  }
+  //    if (comp->is_panic()) {
+  //      return comp->services.errors->print_all();
+  //    }
+  //  }
+  //}
 
   return ERROR_CODE::NO_ERRORS;
 }
@@ -6482,6 +6532,12 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
   INTRINSIC_MODS;
 #undef MOD
 
+  //Other important names
+#define MOD(n) comp->important_names. ## n = strings->intern(#n);
+  IMPORTANT_NAMES_INC;
+#undef MOD
+
+
   //File extensions
   comp->services.file_loader->axl = strings->intern("axl");
 
@@ -6579,135 +6635,5 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
       comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                          "Invalid default calling convention '{}'", conv_name);
     }
-  }
-}
-
-void build_data_section_for_vm(Program* prog, Compiler* const comp) {
-  TRACING_FUNCTION();
-
-  InternHashTable<size_t> loaded_strings ={};
-
-  Array<uint8_t> data ={};
-
-  //Writes a string if its not alread written
-  const auto write_string = [&](Array<uint8_t>& bytes, const InternString* s) -> size_t {
-    if (!loaded_strings.contains(s)) {
-      //doesnt contain this string
-      //have to write it to data
-
-      bytes.reserve_extra(s->len + 1);
-
-      size_t position = bytes.size;
-
-      memcpy_ts(bytes.data + bytes.size, bytes.capacity - bytes.size, (const uint8_t*)s->string, s->len + 1);
-      bytes.size += s->len + 1;
-
-
-      size_t ret_position = position;
-
-      loaded_strings.insert(s, std::move(position));
-      return ret_position;
-    }
-    else {
-      //Already written
-      return *loaded_strings.get_val(s);
-    }
-  };
-
-  //Write a 64 bit number aligned to a 64 bit boundary
-  const auto write_u64 = [](Array<uint8_t>& bytes, uint64_t a)->size_t {
-    //Align
-    const auto align_to = ceil_to_8(bytes.size);
-    bytes.insert_uninit(align_to - bytes.size);
-
-    size_t position = bytes.size;
-    serialise_to_array(bytes, a);
-
-    return position;
-  };
-
-  const auto write_num_bytes = [](Array<uint8_t>& bytes, size_t num_bytes, size_t alignment)->size_t {
-    //Align
-    const auto align_to = ceil_to_n(bytes.size, alignment);
-    bytes.insert_uninit(align_to - bytes.size);
-
-    size_t position = bytes.size;
-    bytes.insert_uninit(num_bytes);
-
-    return position;
-  };
-
-  //0 is an invalid position
-  write_u64(data, 0);
-
-  //Function pointers
-  {
-    auto i = comp->functions.begin_iter();
-    auto end = comp->functions.end_iter();
-
-    for (; i != end; i.next()) {
-      Function* func = i.get();
-
-      if (func->is_called && func->func_type == FUNCTION_TYPE::EXTERN) {
-        //Reserve the location
-        func->data_index = write_u64(data, 0);
-      }
-    }
-  }
-
-  // Reserved Data Sections
-  {
-    auto i = comp->data_holders.mut_begin();
-    const auto end = comp->data_holders.end();
-
-    for (; i < end; i++) {
-      i->data_index = write_num_bytes(data, i->size, i->alignment);
-    }
-  }
-
-  Array<uint8_t> imports ={};
-
-  //Dll imports
-  {
-  //Shoudl be sorted ...
-
-    auto i_dll = comp->lib_import.begin();
-    auto end_dll = comp->lib_import.end();
-
-    const InternString* path = nullptr;
-
-    for (; i_dll < end_dll; i_dll++) {
-      if (path != i_dll->path) {
-        if (path != nullptr) {
-          //Null terminate for previous functions in a dll
-          write_u64(imports, 0);
-        }
-
-        path = i_dll->path;
-
-        size_t name_position = write_string(data, path);
-
-        //write header
-        write_u64(imports, name_position);
-      }
-
-
-
-      //Write the function name
-      size_t name_position = write_string(data, i_dll->name);
-      write_u64(imports, name_position);
-
-      //The write the data index
-      write_u64(imports, (comp->data_holders.data + i_dll->data_holder_index - 1)->data_index);
-    }
-
-    //2nd null terminate for dlls in import
-    write_u64(imports, 0);
-  }
-
-  prog->data_size = data.size;
-  prog->data = std::move(data);
-  if (imports.size != 8) {
-    prog->imports = std::move(imports);
   }
 }

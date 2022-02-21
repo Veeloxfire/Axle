@@ -1,7 +1,8 @@
-#import "D:\\GitHub\\Compiler\\stdlib\\io.axl";
+#import "D:\\Github\\Compiler\\stdlib\\io.axl";
 
 main :: () -> u64 {
-  arr :=  "abcdefg";
+  arr:= "Hello World!";
 
-  print(cast(*ascii, arr), 7);
+  print(arr.ptr, arr.len - 1);
 }
+

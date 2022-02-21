@@ -199,7 +199,7 @@ static void import_names_to_bytes(VA va, Array<ImportNameEntry>& import_names, A
   }
 }
 
-ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const char* file_name) {
+ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name) {
 
   if (pe_file->imports != nullptr) {
     ASSERT(pe_file->constants != nullptr);
@@ -312,8 +312,8 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
 
     ms.header.actual_start_of_header = MS_DO_HEADER_SIZE + MS_DOS_STUB_SIZE;
 
-    FILES::write(out, ms.header);
-    FILES::write(out, ms.stub);
+    FILES::write_obj(out, ms.header);
+    FILES::write_obj(out, ms.stub);
   }
 
   {
@@ -334,15 +334,15 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
     coff.size_of_optional_header = important_vals.size_of_optional_header;
     coff.characteristics = COFF_Characteristics::EXECUTABLE_IMAGE | COFF_Characteristics::LARGE_ADDRESS_AWARE;
 
-    FILES::write(out, coff);
+    FILES::write_obj(out, coff);
   }
 
   //PE32 Optional header
   {
     PE32Plus_optional_header pe32 ={};
     pe32.magic_number = MAGIC_NUMBER::PE32_PLUS;
-    pe32.major_linker_version = 0;
-    pe32.minor_linker_version = 0;
+    pe32.major_linker_version = 14;
+    pe32.minor_linker_version = 30;
     pe32.size_of_code = round_to_file_alignment(important_vals.code_raw_size);
 
     pe32.size_of_initialized_data
@@ -358,7 +358,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
     }
     pe32.base_of_code = important_vals.code_rva;
 
-    FILES::write(out, pe32);
+    FILES::write_obj(out, pe32);
   }
 
   //PE32 Optional Windows specific header
@@ -373,7 +373,8 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
 
     pe32_win.major_os_version = 6;
     pe32_win.minor_os_version = 0;
-    pe32_win.major_image_version = 6;
+
+    pe32_win.major_image_version = 0;
     pe32_win.minor_image_version = 0;
 
     pe32_win.major_sub_version = 6;
@@ -383,8 +384,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
     pe32_win.size_of_header = round_to_file_alignment(important_vals.size_of_header);
     pe32_win.subsystem = 3;
 
-    //TODO: Actually mean something
-    pe32_win.DLL_characteristics = 0;// 0x8160;
+    pe32_win.DLL_characteristics = DLL_Characteristics::NX_COMPAT | DLL_Characteristics::TERMINAL_SERVER_AWARE;
 
     pe32_win.size_of_stack_reserve = 0x100000;
     pe32_win.size_of_stack_commit = 0x1000;
@@ -394,7 +394,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
 
     pe32_win.number_of_rva_and_sizes = ALL_DATA_DIRECTORIES_NUM;
 
-    FILES::write(out, pe32_win);
+    FILES::write_obj(out, pe32_win);
   }
 
   //Optional Header Directories
@@ -406,7 +406,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
       data_directories.import_table.size = important_vals.imports_raw_size;
     }
 
-    FILES::write(out, data_directories);
+    FILES::write_obj(out, data_directories);
   }
 
 
@@ -438,7 +438,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
 
     code_header.characteristics = Section_Flags::CONTAINS_CODE | Section_Flags::EXECTUTABLE | Section_Flags::READABLE;
 
-    FILES::write(out, code_header);
+    FILES::write_obj(out, code_header);
   }
 
   if (pe_file->constants != nullptr) {
@@ -467,7 +467,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
 
     constants_header.characteristics = Section_Flags::READABLE | Section_Flags::CONTAINS_INITIALIZED;
 
-    FILES::write(out, constants_header);
+    FILES::write_obj(out, constants_header);
   }
 
   if (pe_file->imports != nullptr) {
@@ -495,7 +495,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
 
     imports_header.characteristics = Section_Flags::READABLE | Section_Flags::CONTAINS_INITIALIZED;
 
-    FILES::write(out, imports_header);
+    FILES::write_obj(out, imports_header);
   }
 
   FILES::write_padding_bytes(out, '\0', important_vals.header_padding);
@@ -525,7 +525,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
         data_directory.name_rva = pe_file->constants->get_constant_va(i->DLL_name);
         data_directory.import_address_table = i->lookup_table2;
 
-        FILES::write(out, data_directory);
+        FILES::write_obj(out, data_directory);
       }
 
       //Null terminated
@@ -546,7 +546,7 @@ ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const 
             uint64_t entry = 0;
             //31 bits for some reason
             entry |= (entries[imp].va & 0x7fffffff);
-            FILES::write(out, entry);
+            FILES::write_obj(out, entry);
           }
           FILES::write_padding_bytes(out, '\0', 8);
         }
@@ -612,8 +612,8 @@ void load_portable_executable_from_file(Compiler* const comp,
                        "File '{}' did not have correct type\n"
                        "Magic numbers did not match\n"
                        "Expected '{}'. Found '{}'",
-                       file_name, (uint16_t)MAGIC_NUMBER::MZ,
-                       (uint16_t)pe_file->header.ms_dos.magic);
+                       file_name, MagicNumber{ MAGIC_NUMBER::MZ },
+                       MagicNumber{ pe_file->header.ms_dos.magic });
     return;
   }
 

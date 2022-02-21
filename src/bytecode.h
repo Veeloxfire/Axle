@@ -70,8 +70,6 @@ struct MemComplex {
 
 #define BYTECODES_X \
 X(RETURN, OP)\
-X(CALL_CONST, OP_64)\
-X(CALL_MEM, OP_MEM)\
 X(CALL_LABEL, OP_64)\
 X(CALL_NATIVE_X64, OP_64_64)\
 X(LABEL, OP_64)\

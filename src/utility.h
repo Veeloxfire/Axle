@@ -1860,3 +1860,16 @@ constexpr bool slow_string_eq(const char* str1, const char* str2) {
 #else
 #define assert_if(cond, expression) if(cond) ASSERT(expression)
 #endif
+
+void serialize_bytes(Array<u8>& bytes, const u8* data, usize size, usize alignment);
+void serialize_zeros(Array<u8>& bytes, usize size, usize alignment);
+
+template<typename T>
+inline void serialize_structs(Array<u8>& bytes, const T* data, usize num) {
+  serialize_bytes(bytes, (u8*)data, sizeof(T) * num, alignof(T));
+}
+
+template<typename T>
+inline void serialize_struct(Array<u8>& bytes, const T* data) {
+  serialize_bytes(bytes, (u8*)data, sizeof(T), alignof(T));
+}

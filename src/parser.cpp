@@ -1132,7 +1132,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
   switch (parser->current.type) {
     case AxleTokenType::Intrinsic: {
-        if (parser->current.string == comp->intrinsics.lib_import) {
+        if (parser->current.string == comp->intrinsics.static_link) {
           advance(comp, parser);
           if (comp->is_panic()) {
             return 0;
@@ -1143,9 +1143,19 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
             return 0;
           }
 
+          AST_LOCAL it = parse_type(comp, parser);
+          if (comp->is_panic()) {
+            return 0;
+          }
+
+          expect(comp, parser, AxleTokenType::Comma);
+          if (comp->is_panic()) {
+            return 0;
+          }
+
           if (parser->current.type != AxleTokenType::String) {
             comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                               "Expected syntax: #{}(\"...\", \"...\")", comp->intrinsics.lib_import);
+                               "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", comp->intrinsics.static_link);
             return 0;
           }
 
@@ -1162,7 +1172,7 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
           if (parser->current.type != AxleTokenType::String) {
             comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                               "Expected syntax: #{}(\"...\", \"...\")", comp->intrinsics.lib_import);
+                               "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", comp->intrinsics.static_link);
             return 0;
           }
 
@@ -1179,9 +1189,10 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
 
           SPAN_END;
 
-          ASTLibImport* li = PARSER_ALLOC(ASTLibImport);
+          ASTStaticLink* li = PARSER_ALLOC(ASTStaticLink);
+          li->import_type = it;
           li->node_span = span;
-          li->ast_type = AST_TYPE::LIB_IMPORT;
+          li->ast_type = AST_TYPE::STATIC_LINK;
           li->lib_file = lib;
           li->name = imp;
 
@@ -2765,10 +2776,13 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         print_ast(printer, i->expr_location);
         return;
       }
-    case AST_TYPE::LIB_IMPORT: {
-        ASTLibImport* imp = (ASTLibImport*)a;
+    case AST_TYPE::STATIC_LINK: {
+        ASTStaticLink* imp = (ASTStaticLink*)a;
 
-        IO::print("#lib_import(", imp->lib_file->string, ", ", imp->name->string, ")");
+        IO::print("#lib_import(");
+        print_ast(printer, imp->import_type);
+
+        IO::print(", ", imp->lib_file->string, ", ", imp->name->string, ")");
         return;
       }
   }

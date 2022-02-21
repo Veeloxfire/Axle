@@ -7,6 +7,11 @@
 #include "utility.h"
 #include "type.h"
 
+#ifdef TRACING_ENABLE
+#error Cannot trace the tests
+
+#endif
+
 #ifdef COUNT_ALLOC
 void print_still_allocated_and_reset() {
   ALLOC_COUNTER& a = ALLOC_COUNTER::allocated();

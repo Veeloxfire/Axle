@@ -215,7 +215,7 @@ namespace UNARY_OP_STRING {
 
 #define INTRINSIC_MODS \
 MOD(import) \
-MOD(lib_import) \
+MOD(static_link) \
 MOD(type) \
 
 struct Intrinsics {

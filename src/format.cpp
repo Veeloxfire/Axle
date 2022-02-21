@@ -42,6 +42,27 @@ void load_string(Array<char>& res, DisplayChar c) {
 
 }
 
+void load_string(Array<char>& res, MagicNumber c) {
+  char chars[5] ={};
+
+  constexpr auto display_char = [](int c) -> char {
+    if (0 <= c && c <= 9) {
+      return c + '0';
+    }
+    else if (0xa <= c && c <= 0xf) {
+      return (c - 0xa) + 'a';
+    }
+    return '\0';
+  };
+
+  chars[0] = display_char(((int)c.num & 0x00f0) >> 4);
+  chars[1] = display_char(((int)c.num & 0x000f));
+  chars[2] = display_char(((int)c.num & 0xf000) >> 12);
+  chars[3] = display_char(((int)c.num & 0x0f00) >> 8);
+
+  load_string(res, chars);
+}
+
 void load_string(Array<char>& res, const char* str) {
   const size_t size = strlen_ts(str);
 

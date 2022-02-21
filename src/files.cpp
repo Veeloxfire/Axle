@@ -71,6 +71,39 @@ FILES::OpenedFile FILES::create(const char* name,
   return opened_file;
 }
 
+FILES::OpenedFile FILES::replace(const char* name,
+                                OPEN_MODE open_mode) {
+  TRACING_FUNCTION();
+
+  OpenedFile opened_file ={};
+
+  DWORD access;
+  DWORD share;
+
+  switch (open_mode) {
+    case OPEN_MODE::READ: {
+        access = GENERIC_READ;
+        share = FILE_SHARE_READ;
+        break;
+      }
+    case OPEN_MODE::WRITE: {
+        access = GENERIC_WRITE;
+        share = 0;
+        break;
+      }
+  }
+
+  opened_file.file = (FileData*)CreateFileA(name, access, share, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+  if (opened_file.file == INVALID_HANDLE_VALUE) {
+    opened_file.error_code = ErrorCode::COULD_NOT_CREATE_FILE;
+  }
+  else {
+    opened_file.error_code = ErrorCode::OK;
+  }
+
+  return opened_file;
+}
+
 ErrorCode FILES::close(FileData* file) {
   TRACING_FUNCTION();
   CloseHandle(file);

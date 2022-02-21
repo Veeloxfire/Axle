@@ -1,12 +1,8 @@
 HANDLE :: #type u64;
 DWORD :: #type u32;
 
-T_GetStdHandle :: #type *(i32) -> u64;
-T_WriteConsoleA :: #type *(HANDLE, *void, u32, *u32, *void) -> u64;
-
-GetStdHandle := cast(T_GetStdHandle, #lib_import("kernel32.lib", "GetStdHandle"));
-WriteConsoleA := cast(T_WriteConsoleA, #lib_import("kernel32.lib", "WriteConsoleA"));
-
+GetStdHandle :: #static_link((i32) -> u64, "kernel32.lib", "GetStdHandle");
+WriteConsoleA :: #static_link((HANDLE, *void, u32, *u32, *void) -> u64, "kernel32.lib", "WriteConsoleA");
 
 WIN_STD_OUT_REF :: cast(i32, -11i64);
 

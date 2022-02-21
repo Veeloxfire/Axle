@@ -6,14 +6,15 @@
 #include <iostream>
 #include "trace.h"
 
-constexpr char output_file[] = "output.exe";
+constexpr char output_file[] = "output.nasm";
 
 int main(int argc, const char** args) {
+#ifdef TRACING_ENABLE
   Tracing::start_tracer_threaded("trace.json");
   DEFER() {
     Tracing::end_tracer_threaded();
   };
-
+#endif
 
   if (argc != 2) {
     std::cerr << "Invalid number of arguments!";
@@ -44,9 +45,9 @@ int main(int argc, const char** args) {
 
   options.optimize.non_stack_locals = true;
   
-  Program program ={};
+  //Program program ={};
 
-  int out = compile_file(options, &program);
+  int out = compile_file_and_write(options);
   
   if (out == 0) {
     //RunOutput res = run_program(options, &program);

@@ -26,7 +26,8 @@ struct Errors {
   Array<ErrorMessage> error_messages ={};
 
   template<typename ... T>
-  void register_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) noexcept {
+  void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) noexcept {
+    panic = true;
 
     OwnedPtr<char> message = format(f_message, ts...);
     error_messages.insert({ code, span, std::move(message) });

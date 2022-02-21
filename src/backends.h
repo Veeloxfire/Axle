@@ -258,6 +258,8 @@ void compile_backend_single_func(Program* prog,
 
 void compile_backend(Program* prog, Compiler* comp, const System* system);
 
+void nasm_backend(const char* file_name, Compiler* comp);
+
 void vm_backend_code_block(Compiler* const,
                            Program*,
                            Array<uint8_t>&,
