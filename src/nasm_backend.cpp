@@ -202,7 +202,7 @@ void write_i64(FileData* f, i64 num) {
 void write_u8(FileData* f, u8 num) {
   char str[] = "0x00";
 
-  u8 mask = 0x000000000000000f;
+  u8 mask = 0x0f;
   for (u32 i = 0; i < 2; i++) {
     u8 p = (num & mask) >> (i * 4);
 
@@ -314,6 +314,7 @@ static void check_cmp_jump(FileData* f,
   write_reg(f, p_e.val2, b64_reg_name);
   FILES::write_str(f, ", ");
   write_reg(f, p_e.val1, b64_reg_name);
+  FILES::write_str(f, "\n");
 
   switch (*code_i_2) {
     case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
@@ -401,6 +402,18 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
           FILES::write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R64_TO_R64;
+          break;
+        }
+      case ByteCode::COPY_R32_TO_R32: {
+          const auto p = ByteCode::PARSE::COPY_R32_TO_R32(code_i);
+
+          FILES::write_str(f, "mov ");
+          write_reg(f, p.val2, b32_reg_name);
+          FILES::write_str(f, ", ");
+          write_reg(f, p.val1, b32_reg_name);
+          FILES::write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::COPY_R32_TO_R32;
           break;
         }
       case ByteCode::COPY_R8_TO_R8: {
@@ -738,6 +751,18 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
           code_i += ByteCode::SIZE_OF::COPY_16_TO_MEM;
           break;
         }
+      case ByteCode::COPY_8_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_8_TO_MEM(code_i);
+
+          FILES::write_str(f, "mov BYTE ");
+          write_complex_mem(f, i.mem);
+          FILES::write_str(f, ", ");
+          write_u8(f, i.u8);
+          FILES::write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::COPY_8_TO_MEM;
+          break;
+        }
       case ByteCode::LOAD_ADDRESS: {
           const auto i = ByteCode::PARSE::LOAD_ADDRESS(code_i);
 
@@ -772,6 +797,30 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
           FILES::write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
+          break;
+        }
+      case ByteCode::COPY_R32_FROM_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R32_FROM_MEM(code_i);
+
+          FILES::write_str(f, "mov ");
+          write_reg(f, i.val, b32_reg_name);
+          FILES::write_str(f, ", DWORD ");
+          write_complex_mem(f, i.mem);
+          FILES::write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::COPY_R32_FROM_MEM;
+          break;
+        }
+      case ByteCode::CONV_RU32_TO_R64: {
+          const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(code_i);
+
+          //FILES::write_str(f, "mov ");
+          //write_reg(f, i.val, b64_reg_name);
+          //FILES::write_str(f, ", ");
+          //write_reg(f, i.val, b32_reg_name);
+          //FILES::write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::CONV_RU8_TO_R64;
           break;
         }
       case ByteCode::CONV_RU8_TO_R64: {

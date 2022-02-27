@@ -2028,11 +2028,13 @@ void type_check_ast_node(Compiler* const comp,
         }
 
         state->active_locals.size = locals;
-        type_check_ast_node(comp, context, state, if_else->else_statement);
-        if (comp->is_panic()) {
-          return;
+        if (if_else->else_statement != 0) {
+          type_check_ast_node(comp, context, state, if_else->else_statement);
+          if (comp->is_panic()) {
+            return;
+          }
+          state->active_locals.size = locals;
         }
-        state->active_locals.size = locals;
         return;
       }
     case AST_TYPE::WHILE: {
@@ -3918,7 +3920,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         ASTStaticLink* li = (ASTStaticLink*)expr;
 
         LibraryImport* imp = comp->lib_import.data + (li->import_index - 1);
-        
+
         usize* label_holder = comp->constants.alloc_no_construct<usize>();
         *label_holder = imp->label;
 
@@ -4206,13 +4208,16 @@ void compile_bytecode_of_statement(Compiler* const comp,
           //Jump from if branch to after the else branch
           const uint64_t escape_label = comp->labels++;
           ByteCode::EMIT::JUMP_TO_FIXED(code->code, escape_label);
-          ByteCode::EMIT::LABEL(code->code, else_label);
 
-          //Else branch
+            //Else branch
+          ByteCode::EMIT::LABEL(code->code, else_label);
           state->control_flow.new_flow();
           state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
-          compile_bytecode_of_statement(comp, context, if_else->else_statement, state, code);
 
+          if (if_else->else_statement != 0) {
+            compile_bytecode_of_statement(comp, context, if_else->else_statement, state, code);
+          }
+          
           ByteCode::EMIT::JUMP_TO_FIXED(code->code, escape_label);
 
           state->active_locals.size = locals;

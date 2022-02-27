@@ -1486,12 +1486,17 @@ static AST_LOCAL parse_primary(Compiler* const comp, Parser* const parser) {
         constexpr auto parser_is_func = [](Compiler* comp,
                                            const Token* tokens, const Token* end)->bool {
                                              const Token* new_tok = step_brackets(comp, tokens, end);
-                                             return (new_tok + 1) < end
+
+                                             return !comp->is_panic()
+                                               && (new_tok + 1) < end
                                                && new_tok->type == AxleTokenType::Sub
                                                && (new_tok + 1)->type == AxleTokenType::Greater;
         };
 
         const bool is_func = parser_is_func(comp, parser->stream.i - 2, parser->stream.end);
+        if (comp->is_panic()) {
+          return 0;
+        }
 
         if (is_func) {
           AST_LOCAL l = parse_lambda(comp, parser);
@@ -1681,6 +1686,7 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
         //Lambda or tuple signature
         //Tuple = (ty, ty, etc)
         //Lambda = (ty, ty, etc) -> ty
+        //       = () -> ty
         //Can parse as if it were a tuple and then convert to lambda
 
         advance(comp, parser);
@@ -1691,36 +1697,38 @@ static AST_LOCAL parse_type(Compiler* const comp, Parser* const parser) {
         AST_ARR args ={};
         AST_LINKED* list = nullptr;
 
-        while (true) {
-          if (list == nullptr) {
-            list = PARSER_ALLOC(AST_LINKED);
-            args.start = list;
-          }
-          else {
-            list->next = PARSER_ALLOC(AST_LINKED);
-            list = list->next;
-          }
+        if (parser->current.type != AxleTokenType::Right_Bracket) {
+          while (true) {
+            if (list == nullptr) {
+              list = PARSER_ALLOC(AST_LINKED);
+              args.start = list;
+            }
+            else {
+              list->next = PARSER_ALLOC(AST_LINKED);
+              list = list->next;
+            }
 
-          list->next = nullptr;
-          args.count += 1;
+            list->next = nullptr;
+            args.count += 1;
 
-          list->curr = parse_type(comp, parser);
-          if (comp->is_panic()) {
-            return 0;
-          }
+            list->curr = parse_type(comp, parser);
+            if (comp->is_panic()) {
+              return 0;
+            }
 
-          if (parser->current.type == AxleTokenType::Right_Bracket) {
-            break;
-          }
-          else if (parser->current.type != AxleTokenType::Comma) {
-            comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                               "Invalid token type '{}' in type list", parser->current.type);
-            return 0;
-          }
+            if (parser->current.type == AxleTokenType::Right_Bracket) {
+              break;
+            }
+            else if (parser->current.type != AxleTokenType::Comma) {
+              comp->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
+                                 "Invalid token type '{}' in type list", parser->current.type);
+              return 0;
+            }
 
-          expect(comp, parser, AxleTokenType::Comma);
-          if (comp->is_panic()) {
-            return 0;
+            expect(comp, parser, AxleTokenType::Comma);
+            if (comp->is_panic()) {
+              return 0;
+            }
           }
         }
 
