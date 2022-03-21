@@ -1,14 +1,13 @@
 #pragma once
 #include "utility.h"
 
-struct FileData;
 
 namespace FILES {
   enum struct OPEN_MODE : uint8_t {
     READ = 'r', WRITE = 'w'
   };
 
-
+  struct FileData;
 
   struct OpenedFile {
     FileData* file;
@@ -18,9 +17,9 @@ namespace FILES {
   OpenedFile open(const char* name,
                   OPEN_MODE open_mode);
   OpenedFile create(const char* name,
-                  OPEN_MODE open_mode);
-  OpenedFile replace(const char* name,
                     OPEN_MODE open_mode);
+  OpenedFile replace(const char* name,
+                     OPEN_MODE open_mode);
 
   ErrorCode close(FileData* file);
 
@@ -29,8 +28,8 @@ namespace FILES {
   uint8_t read_byte(FileData* file);
 
   ErrorCode read_to_structures(FileData* file,
-                              uint8_t* ptr_to_s,
-                              size_t size_of_s, size_t num_of_s);
+                               uint8_t* ptr_to_s,
+                               size_t size_of_s, size_t num_of_s);
 
   template<typename T>
   ErrorCode read(FileData* file, T* ptr, size_t num) {

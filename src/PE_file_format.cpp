@@ -304,7 +304,7 @@ ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name)
 
   if (file.error_code != ErrorCode::OK) return file.error_code;
 
-  FileData* const out = file.file;
+  auto* const out = file.file;
 
   {
     //MS-DOS header and stub

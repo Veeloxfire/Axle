@@ -97,14 +97,49 @@ static const char* b64_reg_name(uint8_t reg) {
   return nullptr;
 }
 
+//Buffered file
+struct FileData {
+  static constexpr usize BUFFER_SIZE = 2048;
+
+  FILES::FileData* data = nullptr;
+
+  usize top = 0;
+  u8 buffer[BUFFER_SIZE] ={};
+};
+
+
+void write(FileData* d, const u8* data, usize len) {
+  usize i = 0;
+  for (;;) {
+    if (i == len) {
+      return;
+    }
+
+    d->buffer[d->top] = data[i];
+
+    d->top++;
+    i++;
+
+    if (d->top == d->BUFFER_SIZE) {
+      FILES::write(d->data, d->buffer, d->BUFFER_SIZE);
+      d->top = 0;
+    }
+  }
+}
+
 inline void write_reg(FileData* f, u8 reg, FUNCTION_PTR<const char*, u8> name) {
   const char* n = name(reg);
-  FILES::write(f, (const u8*)n, strlen_ts(n));
+  write(f, (const u8*)n, strlen_ts(n));
 }
 
 inline void write_str(FileData* f, const InternString* s) {
-  FILES::write(f, (const u8*)s->string, s->len);
+  write(f, (const u8*)s->string, s->len);
 }
+
+inline void write_str(FileData* f, const char* s) {
+  write(f, (const u8*)s, strlen_ts(s));
+}
+
 
 void write_label(FileData* f, u64 num) {
   char str[] = "_label_0000000000000000";
@@ -123,7 +158,7 @@ void write_label(FileData* f, u64 num) {
     mask <<= 4;
   }
 
-  FILES::write_str(f, str);
+  write_str(f, str);
 }
 
 void write_u64(FileData* f, u64 num) {
@@ -143,7 +178,7 @@ void write_u64(FileData* f, u64 num) {
     mask <<= 4;
   }
 
-  FILES::write_str(f, str);
+  write_str(f, str);
 }
 
 void write_u32(FileData* f, u32 num) {
@@ -163,7 +198,7 @@ void write_u32(FileData* f, u32 num) {
     mask <<= 4;
   }
 
-  FILES::write_str(f, str);
+  write_str(f, str);
 }
 
 void write_u16(FileData* f, u16 num) {
@@ -183,14 +218,14 @@ void write_u16(FileData* f, u16 num) {
     mask <<= 4;
   }
 
-  FILES::write_str(f, str);
+  write_str(f, str);
 }
 
 
 
 void write_i64(FileData* f, i64 num) {
   if (num < 0) {
-    FILES::write_str(f, "-");
+    write_str(f, "-");
     write_u64(f, (u64)-num);
   }
   else {
@@ -216,87 +251,87 @@ void write_u8(FileData* f, u8 num) {
     mask <<= 4;
   }
 
-  FILES::write_str(f, str);
+  write_str(f, str);
 }
 
 static void jump_zero(FileData* f, u64 label) {
-  FILES::write_str(f, "jz ");
+  write_str(f, "jz ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static constexpr auto jump_equal = jump_zero;
 
 static void jump_not_equal(FileData* f, u64 label) {
-  FILES::write_str(f, "jne ");
+  write_str(f, "jne ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void jump_above(FileData* f, u64 label) {
-  FILES::write_str(f, "ja ");
+  write_str(f, "ja ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void jump_not_above(FileData* f, u64 label) {
-  FILES::write_str(f, "jna ");
+  write_str(f, "jna ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void jump_below(FileData* f, u64 label) {
-  FILES::write_str(f, "jb ");
+  write_str(f, "jb ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void jump_not_below(FileData* f, u64 label) {
-  FILES::write_str(f, "jnb ");
+  write_str(f, "jnb ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void jump_lesser(FileData* f, u64 label) {
-  FILES::write_str(f, "jl ");
+  write_str(f, "jl ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void jump_not_lesser(FileData* f, u64 label) {
-  FILES::write_str(f, "jnl ");
+  write_str(f, "jnl ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void jump_greater(FileData* f, u64 label) {
-  FILES::write_str(f, "jg ");
+  write_str(f, "jg ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void jump_not_greater(FileData* f, u64 label) {
-  FILES::write_str(f, "jng ");
+  write_str(f, "jng ");
   write_label(f, label);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void sete(FileData* f, u8 r) {
-  FILES::write_str(f, "sete ");
+  write_str(f, "sete ");
   write_reg(f, r, b8_reg_name);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void setl(FileData* f, u8 r) {
-  FILES::write_str(f, "setl ");
+  write_str(f, "setl ");
   write_reg(f, r, b8_reg_name);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void setg(FileData* f, u8 r) {
-  FILES::write_str(f, "setg ");
+  write_str(f, "setg ");
   write_reg(f, r, b8_reg_name);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 }
 
 static void check_cmp_jump(FileData* f,
@@ -310,11 +345,11 @@ static void check_cmp_jump(FileData* f,
 
   const auto p_e = ByteCode::OP_R_R::parse(code_i);
 
-  FILES::write_str(f, "cmp ");
+  write_str(f, "cmp ");
   write_reg(f, p_e.val2, b64_reg_name);
-  FILES::write_str(f, ", ");
+  write_str(f, ", ");
   write_reg(f, p_e.val1, b64_reg_name);
-  FILES::write_str(f, "\n");
+  write_str(f, "\n");
 
   switch (*code_i_2) {
     case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
@@ -337,11 +372,11 @@ static void check_cmp_jump(FileData* f,
         no_jump(f, p_e.val2);
 
         //Clear the top of the register
-        FILES::write_str(f, "movzx ");
+        write_str(f, "movzx ");
         write_reg(f, p_e.val2, b64_reg_name);
-        FILES::write_str(f, ", ");
+        write_str(f, ", ");
         write_reg(f, p_e.val2, b8_reg_name);
-        FILES::write_str(f, "\n");
+        write_str(f, "\n");
 
 
         *code_i_ptr = code_i_2;
@@ -351,33 +386,33 @@ static void check_cmp_jump(FileData* f,
 }
 
 void write_complex_mem(FileData* f, const MemComplex& mem) {
-  FILES::write_str(f, "[");
+  write_str(f, "[");
   write_reg(f, mem.base, b64_reg_name);
-  
+
   if (mem.disp > 0) {
-    FILES::write_str(f, " + ");
+    write_str(f, " + ");
     write_u32(f, (u32)mem.disp);
   }
   else if (mem.disp < 0) {
-    FILES::write_str(f, " - ");
+    write_str(f, " - ");
     write_u32(f, (u32)-mem.disp);
   }
   else {}
 
   if (mem.scale != 0) {
-    FILES::write_str(f, " + (");
+    write_str(f, " + (");
     write_reg(f, mem.index, b64_reg_name);
 
     switch (mem.scale) {
-      case 1: FILES::write_str(f, " * 2)"); break;
-      case 2: FILES::write_str(f, " * 4)"); break;
-      case 3: FILES::write_str(f, " * 8)"); break;
+      case 1: write_str(f, " * 2)"); break;
+      case 2: write_str(f, " * 4)"); break;
+      case 3: write_str(f, " * 8)"); break;
       default:
         INVALID_CODE_PATH("TODO: Bigger values?");
     }
   }
 
-  FILES::write_str(f, "]");
+  write_str(f, "]");
 }
 
 void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
@@ -395,11 +430,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_R64_TO_R64: {
           const auto p = ByteCode::PARSE::COPY_R64_TO_R64(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R64_TO_R64;
           break;
@@ -407,11 +442,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_R32_TO_R32: {
           const auto p = ByteCode::PARSE::COPY_R32_TO_R32(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, p.val2, b32_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b32_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R32_TO_R32;
           break;
@@ -419,11 +454,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_R8_TO_R8: {
           const auto p = ByteCode::PARSE::COPY_R8_TO_R8(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, p.val2, b8_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b8_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R8_TO_R8;
           break;
@@ -432,12 +467,12 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
           const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
           const DataHolder* d = comp->data_holders.data + p.u64;
 
-          FILES::write_str(f, "lea ");
+          write_str(f, "lea ");
           write_reg(f, p.val, b64_reg_name);
-          FILES::write_str(f, ", QWORD [");
+          write_str(f, ", QWORD [");
           write_str(f, d->name);
-          FILES::write_str(f, "]");
-          FILES::write_str(f, "\n");
+          write_str(f, "]");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::SET_R64_TO_64;
           break;
@@ -445,11 +480,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::SET_R64_TO_64: {
           const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, p.val, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_u64(f, p.u64.val);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::SET_R64_TO_64;
           break;
@@ -457,11 +492,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::SET_R32_TO_32: {
           const auto p = ByteCode::PARSE::SET_R32_TO_32(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, p.val, b32_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_u32(f, p.u32);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::SET_R32_TO_32;
           break;
@@ -470,11 +505,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::SET_R8_TO_8: {
           const auto p = ByteCode::PARSE::SET_R8_TO_8(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, p.val, b8_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_u8(f, p.u8);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::SET_R8_TO_8;
           break;
@@ -482,11 +517,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::ADD_R64S: {
           const auto p = ByteCode::PARSE::ADD_R64S(code_i);
 
-          FILES::write_str(f, "add ");
+          write_str(f, "add ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::ADD_R64S;
           break;
@@ -494,11 +529,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::SUB_R64S: {
           const auto p = ByteCode::PARSE::SUB_R64S(code_i);
 
-          FILES::write_str(f, "sub ");
+          write_str(f, "sub ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::SUB_R64S;
           break;
@@ -506,11 +541,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::MUL_R64S: {
           const auto p = ByteCode::PARSE::MUL_R64S(code_i);
 
-          FILES::write_str(f, "imul ");
+          write_str(f, "imul ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::MUL_R64S;
           break;
@@ -520,11 +555,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
 
           ASSERT(p.val2 == RAX.REG);
 
-          FILES::write_str(f, "div ");
+          write_str(f, "div ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::DIV_RU64S;
           break;
@@ -534,11 +569,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
 
           ASSERT(p.val2 == RAX.REG);
 
-          FILES::write_str(f, "idiv ");
+          write_str(f, "idiv ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::DIV_RI64S;
           break;
@@ -548,11 +583,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
 
           ASSERT(p.val1 == RCX.REG);
 
-          FILES::write_str(f, "sal ");
+          write_str(f, "sal ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val2, b8_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::SHIFT_L_BY_R8_R64;
           break;
@@ -562,11 +597,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
 
           ASSERT(p.val1 == RCX.REG);
 
-          FILES::write_str(f, "shr ");
+          write_str(f, "shr ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val2, b8_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RU64;
           break;
@@ -576,11 +611,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
 
           ASSERT(p.val1 == RCX.REG);
 
-          FILES::write_str(f, "sar ");
+          write_str(f, "sar ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val2, b8_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
 
           code_i += ByteCode::SIZE_OF::SHIFT_R_BY_R8_RI64;
@@ -589,11 +624,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::OR_R64S: {
           const auto p = ByteCode::PARSE::OR_R64S(code_i);
 
-          FILES::write_str(f, "or ");
+          write_str(f, "or ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::OR_R64S;
           break;
@@ -601,11 +636,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::XOR_R64S: {
           const auto p = ByteCode::PARSE::XOR_R64S(code_i);
 
-          FILES::write_str(f, "xor ");
+          write_str(f, "xor ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::XOR_R64S;
           break;
@@ -613,11 +648,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::AND_R64S: {
           const auto p = ByteCode::PARSE::AND_R64S(code_i);
 
-          FILES::write_str(f, "and ");
+          write_str(f, "and ");
           write_reg(f, p.val2, b64_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, p.val1, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::AND_R64S;
           break;
@@ -650,9 +685,9 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::NEG_R64: {
           const auto p = ByteCode::PARSE::NEG_R64(code_i);
 
-          FILES::write_str(f, "neg ");
+          write_str(f, "neg ");
           write_reg(f, p.val, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::NEG_R64;
           break;
@@ -660,9 +695,9 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::PUSH_R64: {
           const auto p = ByteCode::PARSE::PUSH_R64(code_i);
 
-          FILES::write_str(f, "push ");
+          write_str(f, "push ");
           write_reg(f, p.val, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::PUSH_R64;
           break;
@@ -670,9 +705,9 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::POP_TO_R64: {
           const auto p = ByteCode::PARSE::POP_TO_R64(code_i);
 
-          FILES::write_str(f, "pop ");
+          write_str(f, "pop ");
           write_reg(f, p.val, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::POP_TO_R64;
           break;
@@ -680,7 +715,7 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::PUSH_FRAME: {
           const auto p = ByteCode::PARSE::PUSH_FRAME(code_i);
 
-          FILES::write_str(f, "push rbp\nmov rbp, rsp\n");
+          write_str(f, "push rbp\nmov rbp, rsp\n");
 
           code_i += ByteCode::SIZE_OF::PUSH_FRAME;
           break;
@@ -688,7 +723,7 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::POP_FRAME: {
           const auto p = ByteCode::PARSE::POP_FRAME(code_i);
 
-          FILES::write_str(f, "mov rsp, rbp\npop rbp\n");
+          write_str(f, "mov rsp, rbp\npop rbp\n");
 
           code_i += ByteCode::SIZE_OF::POP_FRAME;
           break;
@@ -696,9 +731,9 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::ALLOCATE_STACK: {
           const auto p = ByteCode::PARSE::ALLOCATE_STACK(code_i);
 
-          FILES::write_str(f, "sub rsp, ");
+          write_str(f, "sub rsp, ");
           write_u64(f, p.u64.val);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::ALLOCATE_STACK;
           break;
@@ -706,11 +741,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_R64_TO_MEM: {
           const auto i = ByteCode::PARSE::COPY_R64_TO_MEM(code_i);
 
-          FILES::write_str(f, "mov QWORD ");
+          write_str(f, "mov QWORD ");
           write_complex_mem(f, i.mem);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, i.val, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R64_TO_MEM;
           break;
@@ -718,11 +753,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_64_TO_MEM: {
           const auto i = ByteCode::PARSE::COPY_64_TO_MEM(code_i);
 
-          FILES::write_str(f, "mov QWORD ");
+          write_str(f, "mov QWORD ");
           write_complex_mem(f, i.mem);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_u64(f, i.u64.val);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_64_TO_MEM;
           break;
@@ -730,11 +765,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_32_TO_MEM: {
           const auto i = ByteCode::PARSE::COPY_32_TO_MEM(code_i);
 
-          FILES::write_str(f, "mov DWORD ");
+          write_str(f, "mov DWORD ");
           write_complex_mem(f, i.mem);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_u32(f, i.u32);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_32_TO_MEM;
           break;
@@ -742,11 +777,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_16_TO_MEM: {
           const auto i = ByteCode::PARSE::COPY_16_TO_MEM(code_i);
 
-          FILES::write_str(f, "mov WORD ");
+          write_str(f, "mov WORD ");
           write_complex_mem(f, i.mem);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_u16(f, i.u16);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_16_TO_MEM;
           break;
@@ -754,11 +789,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_8_TO_MEM: {
           const auto i = ByteCode::PARSE::COPY_8_TO_MEM(code_i);
 
-          FILES::write_str(f, "mov BYTE ");
+          write_str(f, "mov BYTE ");
           write_complex_mem(f, i.mem);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_u8(f, i.u8);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_8_TO_MEM;
           break;
@@ -766,11 +801,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::LOAD_ADDRESS: {
           const auto i = ByteCode::PARSE::LOAD_ADDRESS(code_i);
 
-          FILES::write_str(f, "lea ");
+          write_str(f, "lea ");
           write_reg(f, i.val, b64_reg_name);
-          FILES::write_str(f, ", QWORD ");
+          write_str(f, ", QWORD ");
           write_complex_mem(f, i.mem);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::LOAD_ADDRESS;
           break;
@@ -778,11 +813,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_R8_FROM_MEM: {
           const auto p = ByteCode::PARSE::COPY_R8_FROM_MEM(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, p.val, b8_reg_name);
-          FILES::write_str(f, ", BYTE ");
+          write_str(f, ", BYTE ");
           write_complex_mem(f, p.mem);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R8_FROM_MEM;
           break;
@@ -790,11 +825,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_R64_FROM_MEM: {
           const auto i = ByteCode::PARSE::COPY_R64_FROM_MEM(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, i.val, b64_reg_name);
-          FILES::write_str(f, ", QWORD ");
+          write_str(f, ", QWORD ");
           write_complex_mem(f, i.mem);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R64_FROM_MEM;
           break;
@@ -802,11 +837,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::COPY_R32_FROM_MEM: {
           const auto i = ByteCode::PARSE::COPY_R32_FROM_MEM(code_i);
 
-          FILES::write_str(f, "mov ");
+          write_str(f, "mov ");
           write_reg(f, i.val, b32_reg_name);
-          FILES::write_str(f, ", DWORD ");
+          write_str(f, ", DWORD ");
           write_complex_mem(f, i.mem);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R32_FROM_MEM;
           break;
@@ -814,11 +849,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::CONV_RU32_TO_R64: {
           const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(code_i);
 
-          //FILES::write_str(f, "mov ");
+          //write_str(f, "mov ");
           //write_reg(f, i.val, b64_reg_name);
-          //FILES::write_str(f, ", ");
+          //write_str(f, ", ");
           //write_reg(f, i.val, b32_reg_name);
-          //FILES::write_str(f, "\n");
+          //write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::CONV_RU8_TO_R64;
           break;
@@ -826,11 +861,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::CONV_RU8_TO_R64: {
           const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(code_i);
 
-          FILES::write_str(f, "movzx ");
+          write_str(f, "movzx ");
           write_reg(f, i.val, b8_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, i.val, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::CONV_RU8_TO_R64;
           break;
@@ -838,11 +873,11 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::CONV_RI8_TO_R64: {
           const auto i = ByteCode::PARSE::CONV_RI8_TO_R64(code_i);
 
-          FILES::write_str(f, "movsx ");
+          write_str(f, "movsx ");
           write_reg(f, i.val, b8_reg_name);
-          FILES::write_str(f, ", ");
+          write_str(f, ", ");
           write_reg(f, i.val, b64_reg_name);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
 
           code_i += ByteCode::SIZE_OF::CONV_RI8_TO_R64;
@@ -852,13 +887,13 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
           const auto p = ByteCode::PARSE::LABEL(code_i);
 
           write_label(f, p.u64.val);
-          FILES::write_str(f, ":\n");
+          write_str(f, ":\n");
 
           code_i += ByteCode::SIZE_OF::LABEL;
           break;
         }
       case ByteCode::RETURN: {
-          FILES::write_str(f, "ret\n");
+          write_str(f, "ret\n");
 
           code_i += ByteCode::SIZE_OF::RETURN;
           break;
@@ -867,9 +902,9 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       //    const auto p = ByteCode::PARSE::CALL_CONST(code_i);
       //    const Function* func = p.u64;
       //    
-      //    FILES::write_str(f, "call ");
+      //    write_str(f, "call ");
       //    write_label(f, func->code_block.label);
-      //    FILES::write_str(f, "\n");
+      //    write_str(f, "\n");
 
       //    code_i += ByteCode::SIZE_OF::CALL_CONST;
       //    break;
@@ -877,9 +912,9 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       //case ByteCode::CALL_MEM: {
       //    const auto p = ByteCode::PARSE::CALL_MEM(code_i);
 
-      //    FILES::write_str(f, "call ");
+      //    write_str(f, "call ");
       //    write_complex_mem(f, p.mem);
-      //    FILES::write_str(f, "\n");
+      //    write_str(f, "\n");
 
       //    code_i += ByteCode::SIZE_OF::CALL_MEM;
       //    break;
@@ -888,9 +923,9 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
           const auto p = ByteCode::PARSE::CALL_LABEL(code_i);
           const u64 label = p.u64;
 
-          FILES::write_str(f, "call ");
+          write_str(f, "call ");
           write_label(f, label);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::CALL_LABEL;
           break;
@@ -899,17 +934,17 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
           const auto p_j = ByteCode::PARSE::JUMP_TO_FIXED(code_i);
           code_i += ByteCode::SIZE_OF::JUMP_TO_FIXED;
 
-          FILES::write_str(f, "jmp ");
+          write_str(f, "jmp ");
           write_label(f, p_j.u64.val);
-          FILES::write_str(f, "\n");
+          write_str(f, "\n");
           break;
         }
       case ByteCode::JUMP_TO_FIXED_IF_VAL_ZERO: {
           const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(code_i);
 
-          FILES::write_str(f, "cmp ");
+          write_str(f, "cmp ");
           write_reg(f, p.val, b64_reg_name);
-          FILES::write_str(f, ", 0\n");
+          write_str(f, ", 0\n");
 
           jump_zero(f, p.u64.val);
 
@@ -919,9 +954,9 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
       case ByteCode::JUMP_TO_FIXED_IF_VAL_NOT_ZERO: {
           const auto p = ByteCode::PARSE::JUMP_TO_FIXED_IF_VAL_NOT_ZERO(code_i);
 
-          FILES::write_str(f, "cmp ");
+          write_str(f, "cmp ");
           write_reg(f, p.val, b64_reg_name);
-          FILES::write_str(f, ", 0\n");
+          write_str(f, ", 0\n");
 
           jump_not_equal(f, p.u64.val);
 
@@ -945,13 +980,18 @@ void nasm_backend(const char* file_name, Compiler* comp) {
 
   ASSERT(f.error_code == ErrorCode::OK);
 
-  auto* file = f.file;
 
-  DEFER(file) {
-    FILES::close(file);
+  FileData file ={};
+  file.data = f.file;
+  file.top = 0;
+
+  DEFER(&file) {
+    //flush and close
+    FILES::write(file.data, file.buffer, file.top);
+    FILES::close(file.data);
   };
 
-  FILES::write_str(file, "segment .bss\n");
+  write_str(&file, "segment .bss\n");
 
   {
     auto i = comp->globals.begin_const_iter();
@@ -963,26 +1003,26 @@ void nasm_backend(const char* file_name, Compiler* comp) {
       if ((g->decl.meta_flags & META_FLAG::COMPTIME) == 0) {
         ASSERT(g->decl.type.structure->size == 8);//TEMP
 
-        write_str(file, g->decl.name);
-        FILES::write_str(file, ":\n RESQ 1\n");
+        write_str(&file, g->decl.name);
+        write_str(&file, ":\n RESQ 1\n");
       }
     }
   }
 
-  FILES::write_str(file, "segment .text\n");
+  write_str(&file, "segment .text\n");
 
-  FILES::write_str(file, "global ");
-  write_str(file, comp->build_options.entry_point);
-  FILES::write_str(file, "\n");
+  write_str(&file, "global ");
+  write_str(&file, comp->build_options.entry_point);
+  write_str(&file, "\n");
 
   {
     auto* i = comp->lib_import.begin();
     auto* end = comp->lib_import.end();
 
     for (; i < end; i++) {
-      FILES::write_str(file, "extern ");
-      write_str(file, i->name);
-      FILES::write_str(file, "\n");
+      write_str(&file, "extern ");
+      write_str(&file, i->name);
+      write_str(&file, "\n");
     }
   }
 
@@ -991,10 +1031,10 @@ void nasm_backend(const char* file_name, Compiler* comp) {
     auto* end = comp->lib_import.end();
 
     for (; i < end; i++) {
-      write_label(file, i->label);
-      FILES::write_str(file, ":\njmp ");
-      write_str(file, i->name);
-      FILES::write_str(file, "\n");
+      write_label(&file, i->label);
+      write_str(&file, ":\njmp ");
+      write_str(&file, i->name);
+      write_str(&file, "\n");
     }
   }
 
@@ -1008,7 +1048,7 @@ void nasm_backend(const char* file_name, Compiler* comp) {
       if ((g->decl.meta_flags & META_FLAG::COMPTIME) == 0) {
         ASSERT(g->decl.type.structure->size == 8);//TEMP
 
-        write_code(file, comp, &g->init);
+        write_code(&file, comp, &g->init);
         if (comp->is_panic()) {
           return;
         }
@@ -1023,9 +1063,9 @@ void nasm_backend(const char* file_name, Compiler* comp) {
     for (; i != end; i.next()) {
       const Function* f = i.get();
 
-      //write_label(file, f->code_block.label);
-      //FILES::write_str(file, ":\n");
-      write_code(file, comp, &f->code_block);
+      //write_label(&file, f->code_block.label);
+      //write_str(&file, ":\n");
+      write_code(&file, comp, &f->code_block);
       if (comp->is_panic()) {
         return;
       }
@@ -1036,8 +1076,8 @@ void nasm_backend(const char* file_name, Compiler* comp) {
     const GlobalName* n = find_global_name(comp->build_file_namespace, comp->build_options.entry_point);
     ASSERT(n != nullptr);
 
-    write_str(file, comp->build_options.entry_point);
-    FILES::write_str(file, ":\n");
+    write_str(&file, comp->build_options.entry_point);
+    write_str(&file, ":\n");
     {
       auto i = comp->globals.begin_const_iter();
       auto end = comp->globals.end_const_iter();
@@ -1048,15 +1088,15 @@ void nasm_backend(const char* file_name, Compiler* comp) {
         if ((g->decl.meta_flags & META_FLAG::COMPTIME) == 0) {
           ASSERT(g->decl.type.structure->size == 8);//TEMP
 
-          FILES::write_str(file, "call ");
-          write_label(file, g->init.label);
-          FILES::write_str(file, "\n");
+          write_str(&file, "call ");
+          write_label(&file, g->init.label);
+          write_str(&file, "\n");
         }
       }
     }
-    
-    FILES::write_str(file, "jmp ");
-    write_label(file, *(usize*)n->global->constant_value.ptr);
-    FILES::write_str(file, "\n");
+
+    write_str(&file, "jmp ");
+    write_label(&file, *(usize*)n->global->constant_value.ptr);
+    write_str(&file, "\n");
   }
 }
