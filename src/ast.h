@@ -79,6 +79,7 @@ enum struct AST_TYPE : u8 {
   RETURN,
   FUNCTION_SIGNATURE,
   IMPORT,
+  STATIC_LINK,
 };
 
 constexpr bool valid_type_node(AST_TYPE t) {
@@ -144,7 +145,8 @@ struct ASTFunctionCallExpr : public AST {
   AST_ARR arguments ={};
 
   const InternString* function_name = nullptr;
-  Function* func = nullptr;
+  const SignatureStructure* sig = nullptr;
+  usize label = 0;
 };
 
 struct ASTUnaryOperatorExpr : public AST {
@@ -265,6 +267,15 @@ struct ASTAssign : public AST {
 
 struct ASTImport : public AST {
   AST_LOCAL expr_location;
+};
+
+struct ASTStaticLink : public AST {
+  AST_LOCAL import_type;
+
+  const InternString* lib_file;
+  const InternString* name;
+
+  usize import_index;
 };
 
 struct FileAST {

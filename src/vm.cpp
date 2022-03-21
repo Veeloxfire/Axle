@@ -16,7 +16,7 @@ void VM::allocate_stack(uint64_t bytes) {
   SP -= bytes;
 
   if (SP <= stack) {
-    errors->register_error(ERROR_CODE::VM_ERROR, Span{},
+    errors->report_error(ERROR_CODE::VM_ERROR, Span{},
                            "VM Stack overflow during allocation");
     errors->panic = true;
     return;
@@ -27,7 +27,7 @@ void VM::push(X64_UNION val) {
   SP -= 8;
 
   if (SP <= stack) {
-    errors->register_error(ERROR_CODE::VM_ERROR, Span{},
+    errors->report_error(ERROR_CODE::VM_ERROR, Span{},
                            "VM Stack overflow during 'push' operation");
     errors->panic = true;
     return;
@@ -38,7 +38,7 @@ void VM::push(X64_UNION val) {
 
 X64_UNION VM::pop() {
   if (SP + 8 >= stack + STACK_SIZE) {
-    errors->register_error(ERROR_CODE::VM_ERROR, Span{},
+    errors->report_error(ERROR_CODE::VM_ERROR, Span{},
                            "VM Stack underflow during 'pop' operation");
     errors->panic = true;
     return { (uint64_t) 0 };
@@ -243,14 +243,6 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::LOAD_ADDRESS;
           break;
         }
-      /*case ByteCode::LOAD_GLOBAL_MEM: {
-          const auto i = ByteCode::PARSE::LOAD_GLOBAL_MEM(vm->IP);
-
-          vm->registers[i.val].b64.b_ptr = i.u64;
-
-          vm->IP += ByteCode::SIZE_OF::LOAD_GLOBAL_MEM;
-          break;
-        }*/
       case ByteCode::NEG_R64: {
           const auto i = ByteCode::PARSE::NEG_R64(vm->IP);
 
@@ -534,10 +526,10 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::POP_FRAME;
           break;
         }
-      case ByteCode::CALL: {
-          const auto i = ByteCode::PARSE::CALL(vm->IP);
+      case ByteCode::CALL_LABEL: {
+          const auto i = ByteCode::PARSE::CALL_LABEL(vm->IP);
 
-          vm->push(vm->IP + ByteCode::SIZE_OF::CALL);
+          vm->push(vm->IP + ByteCode::SIZE_OF::CALL_LABEL);
           if (vm->errors->panic) {
             return;
           }
@@ -545,6 +537,30 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP = prog->code.ptr + i.u64.val;
           break;
         }
+     /* case ByteCode::CALL_CONST: {
+          const auto i = ByteCode::PARSE::CALL_CONST(vm->IP);
+
+          vm->push(vm->IP + ByteCode::SIZE_OF::CALL_CONST);
+          if (vm->errors->panic) {
+            return;
+          }
+
+          vm->IP = prog->code.ptr + i.u64.val;
+          break;
+        }
+      case ByteCode::CALL_MEM: {
+          const auto i = ByteCode::PARSE::CALL_MEM(vm->IP);
+
+          vm->push(vm->IP + ByteCode::SIZE_OF::CALL_MEM);
+          if (vm->errors->panic) {
+            return;
+          }
+
+          u64 abs = x64_from_bytes(vm->load_mem(i.mem));
+
+          vm->IP = prog->code.ptr + abs;
+          break;
+        }*/
       case ByteCode::CALL_NATIVE_X64: {
           const auto i = ByteCode::PARSE::CALL_NATIVE_X64(vm->IP);
 
@@ -562,10 +578,10 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           }
           break;
         }
-      case ByteCode::LOAD_GLOBAL_MEM://should never actually be called
+      case ByteCode::LOAD_DATA_MEM://should never actually be called
       default: {
           uint8_t op = vm->IP[0];
-          vm->errors->register_error(ERROR_CODE::VM_ERROR, Span{},
+          vm->errors->report_error(ERROR_CODE::VM_ERROR, Span{},
                                      "Encountered invalid instruction\n"
                                      "Code: {}\nName: '{}'",
                                      op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));

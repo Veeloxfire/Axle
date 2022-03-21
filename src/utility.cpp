@@ -397,3 +397,39 @@ void IO::err_print_impl(const char c)  {
   TRACING_FUNCTION();
   putc(c, stderr);
 }
+
+void serialize_zeros(Array<u8>& bytes, usize size, usize alignment) {
+   //Align
+  const auto align_to = ceil_to_n(bytes.size, alignment);
+
+  usize bytes_to_write = size + (align_to - bytes.size);
+  usize old_top = bytes.size;
+
+  bytes.insert_uninit(bytes_to_write);
+
+  u8* d = (bytes.data + old_top);
+
+  for (usize i = 0; i < bytes_to_write; i++) {
+    d[i] = '\0';
+  }
+}
+
+void serialize_bytes(Array<u8>& bytes, const u8* data, usize size, usize alignment) {
+   //Align
+  const auto align_to = ceil_to_n(bytes.size, alignment);
+
+  usize align_bytes = (align_to - bytes.size);
+  usize old_top = bytes.size;
+
+  bytes.insert_uninit(align_bytes + size);
+
+  u8* d = (bytes.data + old_top);
+
+  for (usize i = 0; i < align_bytes; i++) {
+    d[i] = '\0';
+  }
+
+  for (usize i = 0; i < size; i++) {
+    d[i + align_bytes] = data[i];
+  }
+}

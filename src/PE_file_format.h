@@ -34,7 +34,7 @@ MS_DO_HEADER_SIZE
 + OPTIONAL_WINDOWS_FIELDS_SIZE;
 
 constexpr inline uint32_t SINGLE_SECTION_HEADER_SIZE = 40;
-constexpr inline uint32_t NT_IMAGE_BASE = 0x00400000;
+constexpr inline uint64_t NT_IMAGE_BASE = 0x140000000llu;
 constexpr inline uint32_t IMPORT_DIRECTORY_SIZE = 20;
 
 
@@ -79,15 +79,17 @@ struct COFF_file_header {
   uint16_t characteristics;
 };
 
-enum struct MAGIC_NUMBER : uint16_t {
-  PE32      = 0x010b,
-  PE32_PLUS = 0x020b,
-  MZ        = 0x5a4d,
-};
+namespace MAGIC_NUMBER {
+  enum MAGIC_NUMBER : uint16_t {
+    PE32      = 0x010b,
+    PE32_PLUS = 0x020b,
+    MZ        = 0x5a4d,
+  };
+}
 
 //Not really optional. Just called that because other file formats dont include it
 struct PE32Plus_optional_header {
-  MAGIC_NUMBER magic_number;
+  uint16_t magic_number;
 
   uint8_t major_linker_version;// heh but this is a linker
   uint8_t minor_linker_version;// heh but this is a linker
@@ -101,7 +103,21 @@ struct PE32Plus_optional_header {
 };
 
 //TODO: DLL Characteristics
-struct DLL_Characteristics {};
+namespace DLL_Characteristics {
+  enum DLL_OPTIONS : uint16_t {
+    HIGH_ENTROPY_VA = 0x0020,
+    DYNAMIC_BASE = 0x0040,
+    FORCE_INTEGRITY = 0x0080,
+    NX_COMPAT = 0x0100,
+    NO_ISOLATION = 0x0200,
+    NO_SEH = 0x0400,
+    NO_BIND = 0x0800,
+    APPCONTAINER = 0x1000,
+    WDM_DRIVER = 0x2000,
+    GUARD_CF = 0x4000,
+    TERMINAL_SERVER_AWARE = 0x8000,
+  };
+};
 
 struct PE32Plus_windows_specific {
   uint64_t image_base;// 8 bytes in PE32+ format
@@ -136,7 +152,7 @@ struct PE32Plus_windows_specific {
 };
 
 struct MS_DOS_Header {
-  MAGIC_NUMBER magic = MAGIC_NUMBER::MZ;
+  uint16_t magic = MAGIC_NUMBER::MZ;
   uint16_t extra_bytes = 0x0000;
   uint16_t pages = 0x0000;
   uint16_t num_relocations = 0x0000;
@@ -364,7 +380,7 @@ struct ImportantValues {
 struct Compiler;
 struct Span;
 
-ErrorCode write_portable_executable_to_file(const PE_File_Build* pe_file, const char* file_name);
+ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name);
 
 void load_portable_executable_from_file(Compiler* const comp,
                                         const Span& span,

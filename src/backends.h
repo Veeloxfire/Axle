@@ -190,6 +190,7 @@ namespace X64 {
     MUL_RM_TO_RAX = 0xF7,// r = 4
     DIV_RM_TO_RAX = 0xF7,// r = 6
     IDIV_RM_TO_RAX = 0xF7,// r = 7
+    CALL_NEAR_ABS = 0xFF,//r = 2
   };
 
   void mov(Array<uint8_t>& arr,
@@ -256,6 +257,8 @@ void compile_backend_single_func(Program* prog,
                                  const System* system);
 
 void compile_backend(Program* prog, Compiler* comp, const System* system);
+
+void nasm_backend(const char* file_name, Compiler* comp);
 
 void vm_backend_code_block(Compiler* const,
                            Program*,

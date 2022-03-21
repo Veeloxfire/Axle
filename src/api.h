@@ -12,6 +12,7 @@ struct APIBuildOptions {
   const char* output_file = nullptr;
 
   const char* std_lib_folder = nullptr;
+  const char* lib_folder = nullptr;
 
   const char* system_name = nullptr;
   const char* default_calling_convention = nullptr;
@@ -27,8 +28,7 @@ struct APIPrintOptions {
   bool coalesce_values = false;
   bool run_headers     = false;
   bool file_loads      = false;
-  bool start_comp_unit = false;
-  //bool unfound_dep     = false;
+  bool comp_units      = false;
 };
 
 struct APIOptions {

@@ -3,6 +3,9 @@
 #include "calling_conventions.h"
 #include "format.h"
 #include "trace.h"
+
+#include "PE_file_format.h"
+
 #include <stdio.h>
 
 static void relocation_fix(uint8_t* code,
@@ -35,6 +38,271 @@ static void relocation_fix(uint8_t* code,
   }
 }
 
+
+void build_data_section_for_vm(Program* prog, Compiler* const comp) {
+  TRACING_FUNCTION();
+
+  InternHashTable<size_t> loaded_strings ={};
+
+  Array<uint8_t> data ={};
+
+  //Writes a string if its not alread written
+  const auto write_string = [&](Array<uint8_t>& bytes, const InternString* s) -> size_t {
+    if (!loaded_strings.contains(s)) {
+      //doesnt contain this string
+      //have to write it to data
+
+      bytes.reserve_extra(s->len + 1);
+
+      size_t position = bytes.size;
+
+      memcpy_ts(bytes.data + bytes.size, bytes.capacity - bytes.size, (const uint8_t*)s->string, s->len + 1);
+      bytes.size += s->len + 1;
+
+
+      size_t ret_position = position;
+
+      loaded_strings.insert(s, std::move(position));
+      return ret_position;
+    }
+    else {
+      //Already written
+      return *loaded_strings.get_val(s);
+    }
+  };
+
+  //Write a 64 bit number aligned to a 64 bit boundary
+  const auto write_u64 = [](Array<uint8_t>& bytes, uint64_t a)->size_t {
+    //Align
+    const auto align_to = ceil_to_8(bytes.size);
+    bytes.insert_uninit(align_to - bytes.size);
+
+    size_t position = bytes.size;
+    serialise_to_array(bytes, a);
+
+    return position;
+  };
+
+  const auto write_num_bytes = [](Array<uint8_t>& bytes, size_t num_bytes, size_t alignment)->size_t {
+    //Align
+    const auto align_to = ceil_to_n(bytes.size, alignment);
+    bytes.insert_uninit(align_to - bytes.size);
+
+    size_t position = bytes.size;
+    bytes.insert_uninit(num_bytes);
+
+    return position;
+  };
+
+  //0 is an invalid position
+  write_u64(data, 0);
+
+  // Reserved Data Sections
+  {
+    auto i = comp->data_holders.mut_begin();
+    const auto end = comp->data_holders.end();
+
+    for (; i < end; i++) {
+      i->data_index = write_num_bytes(data, i->size, i->alignment);
+    }
+  }
+
+  Array<uint8_t> imports ={};
+
+#if 0
+  //Dll imports
+  {
+  //Should be sorted ...
+
+    auto i_dll = comp->lib_import.begin();
+    auto end_dll = comp->lib_import.end();
+
+    const InternString* path = nullptr;
+
+    for (; i_dll < end_dll; i_dll++) {
+      if (path != i_dll->path) {
+        if (path != nullptr) {
+          //Null terminate for previous functions in a dll
+          write_u64(imports, 0);
+        }
+
+        path = i_dll->path;
+
+        size_t name_position = write_string(data, path);
+
+        //write header
+        write_u64(imports, name_position);
+      }
+
+
+
+      //Write the function name
+      size_t name_position = write_string(data, i_dll->name);
+      write_u64(imports, name_position);
+
+      //The write the data index
+      write_u64(imports, (comp->data_holders.data + i_dll->data_holder_index - 1)->data_index);
+    }
+
+    //2nd null terminate for dlls in import
+    write_u64(imports, 0);
+  }
+#endif
+
+  prog->data_size = data.size;
+  prog->data = std::move(data);
+  if (imports.size != 8) {
+    prog->imports = std::move(imports);
+  }
+}
+
+#if 0
+void build_data_section_for_file(Array<u8>& data, Array<u8>& imports, Compiler* const comp, Array<Relocation>& relocations) {
+  TRACING_FUNCTION();
+
+  ////Write a 64 bit number aligned to a 64 bit boundary
+  //const auto write_u64 = [](Array<uint8_t>& bytes, uint64_t a)->size_t {
+  //  //Align
+  //  const auto align_to = ceil_to_8(bytes.size);
+  //  bytes.insert_uninit(align_to - bytes.size);
+
+  //  size_t position = bytes.size;
+  //  serialise_to_array(bytes, a);
+
+  //  return position;
+  //};
+
+  //// Reserved Data Sections
+  //{
+  //  auto i = comp->data_holders.mut_begin();
+  //  const auto end = comp->data_holders.end();
+
+  //  for (; i < end; i++) {
+  //    i->data_index = write_num_bytes(data, i->size, i->alignment);
+  //  }
+  //}
+
+  //Dll imports
+  {
+  //Should be sorted ...
+
+    auto i_dll = comp->lib_import.begin();
+    const auto end_dll = comp->lib_import.end();
+
+    usize base_size = 0;
+    const InternString* path = nullptr;
+
+    for (; i_dll < end_dll; i_dll++) {
+      if (path != i_dll->path) {
+        path = i_dll->path;
+        base_size += sizeof(ImportDataDirectory);
+      }
+    }
+
+    base_size += sizeof(ImportDataDirectory);
+
+    i_dll = comp->lib_import.begin();
+    path = 0;
+
+    usize extra_size = 0;
+    usize single_extra = 0;
+
+    const auto write_single_import_directory = [&]() {
+      size_t name_position = data.size;
+      serialize_bytes(data, (const u8*)path->string, path->len + 1, 1);
+
+      //write headers
+      ImportDataDirectory dir ={};
+      dir.import_lookup_table = base_size + extra_size;
+      dir.date_time_stamp = 0;
+      dir.forwarder_chain = 0;
+      dir.name_rva = name_position;
+      dir.import_address_table = base_size + extra_size + single_extra;
+
+      serialize_struct(imports, &dir);
+    };
+
+    for (; i_dll < end_dll; i_dll++) {
+      if (path != i_dll->path) {
+        //Do this before next one starts
+        if (path != nullptr) {
+          //Null terminate the table
+          single_extra += 8;
+          write_single_import_directory();
+
+          //Have 2 tables per dll
+          extra_size += single_extra * 2;
+        }
+
+        path = i_dll->path;
+      }
+
+      single_extra += 8;
+    }
+
+    single_extra += 8;
+    write_single_import_directory();
+
+    //Null terminate all dlls
+    serialize_zeros(imports, sizeof(ImportDataDirectory), alignof(ImportDataDirectory));
+
+    ASSERT(imports.size == base_size);
+
+    i_dll = comp->lib_import.begin();
+    path = 0;
+
+    usize hint_table_extra = 0;
+    usize start = 0;
+
+    for (; i_dll < end_dll; i_dll++) {
+      if (path != i_dll->path) {
+        if (path != nullptr) {
+          //Copy again
+          usize table_size = imports.size - start;
+          imports.reserve_extra(table_size);
+
+          for (usize i = 0; i < table_size; i++) {
+            imports.data[i + start + table_size] = imports.data[i + start];
+          }
+        }
+        start = imports.size;
+        path = i_dll->path;
+      }
+
+      u64 lookup_value = 0;
+      lookup_value |= ((base_size + extra_size + hint_table_extra) & 0xffffffffllu);
+      serialize_struct(imports, &lookup_value);
+
+      u64 h_size = 2 + i_dll->name->len + 1;
+      hint_table_extra += h_size + (h_size & 1);
+    }
+
+    {
+      //Copy again
+      usize table_size = imports.size - start;
+      imports.reserve_extra(table_size);
+
+      for (usize i = 0; i < table_size; i++) {
+        imports.data[i + start + table_size] = imports.data[i + start];
+      }
+    }
+
+    serialize_zeros(imports, 8, 8);
+    ASSERT(imports.size == (base_size + extra_size));
+
+    for (; i_dll < end_dll; i_dll++) {
+      serialize_zeros(imports, 2, 2);
+      serialize_bytes(imports, (const u8*)i_dll->name->string, i_dll->name->len + 1, 1);
+    }
+
+    if (imports.size % 2 != 0) {
+      imports.insert(0);
+    }
+
+    ASSERT(imports.size == (base_size + extra_size + hint_table_extra));
+  }
+}
+#endif
 
 void compile_backend_single_func(Program* prog, const CodeBlock* code, Compiler* const comp, const System* system) {
   TRACING_FUNCTION();
@@ -70,7 +338,7 @@ void compile_backend_single_func(Program* prog, const CodeBlock* code, Compiler*
   prog->code = std::move(out_code);
 }
 
-void vm_backend_code_block(Compiler* const,//compiler is currently not used in this version but is in the x86_64
+void vm_backend_code_block(Compiler* const comp,
                            Program* prog,
                            Array<uint8_t>& out_code,
                            const CodeBlock* code,
@@ -83,17 +351,17 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
 
   while (code_i < code_end) {
     switch (*code_i) {
-      case ByteCode::LOAD_GLOBAL_MEM: {
+      case ByteCode::LOAD_DATA_MEM: {
           //Load the global as an index into the data
-          const auto p_g = ByteCode::PARSE::LOAD_GLOBAL_MEM(code_i);
+          const auto p_g = ByteCode::PARSE::LOAD_DATA_MEM(code_i);
 
-          const Global* glob = p_g.u64;
+          const DataHolder* d = (comp->data_holders.data + p_g.u64);
 
           const auto offset = out_code.size + 2;
-          ByteCode::EMIT::SET_R64_TO_64(out_code, p_g.val, glob->data_index);
+          ByteCode::EMIT::SET_R64_TO_64(out_code, p_g.val, d->data_index);
           relocations.insert({ RELOCATION_TYPE::U64_DATA_OFFSET, offset, out_code.size });
 
-          code_i += ByteCode::SIZE_OF::LOAD_GLOBAL_MEM;
+          code_i += ByteCode::SIZE_OF::LOAD_DATA_MEM;
           break;
         }
       case ByteCode::RESERVE: {
@@ -151,27 +419,27 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
           code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
           break;
         }*/
-      case ByteCode::CALL: {
-          const auto p_c = ByteCode::PARSE::CALL(code_i);
-          const Function* func = p_c.u64;
+      //case ByteCode::CALL_CONST: {
+      //    const auto p_c = ByteCode::PARSE::CALL_CONST(code_i);
+      //    const Function* func = p_c.u64;
 
-          {
-            const size_t offset = out_code.size + 1;
-            //Switch to a code label rather than func ptr
-            ByteCode::EMIT::CALL(out_code, func->code_block.label);
-            relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
-          }
+      //    {
+      //      const size_t offset = out_code.size + 1;
+      //      //Switch to a code label rather than func ptr
+      //      ByteCode::EMIT::CALL_CONST(out_code, func->code_block.label);
+      //      relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
+      //    }
 
 
-          code_i += ByteCode::SIZE_OF::CALL;
-          break;
-        }
+      //    code_i += ByteCode::SIZE_OF::CALL_CONST;
+      //    break;
+      //  }
       case ByteCode::CALL_LABEL: {
           const auto p_c = ByteCode::PARSE::CALL_LABEL(code_i);
 
           {
             const size_t offset = out_code.size + 1;
-            ByteCode::EMIT::CALL(out_code, p_c.u64);
+            ByteCode::EMIT::CALL_LABEL(out_code, p_c.u64);
             relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
           }
 
@@ -201,6 +469,40 @@ void vm_backend_code_block(Compiler* const,//compiler is currently not used in t
           break;
         }
     }
+  }
+}
+
+void compile_backend_to_file(const char* out_file_name, Compiler* comp, const System* system) {
+
+  size_t entry_point_label = 0;
+
+   //Find the entry point first - allows us to say its called
+  {
+    const InternString* entry_name = comp->build_options.entry_point;
+
+    GlobalName* nm = find_global_name(comp->build_file_namespace, entry_name);
+
+    if (nm == nullptr) {
+      CallSignature sig ={};
+      sig.name = entry_name;
+
+      comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
+                         "No function '{}' exists in the build file to be the entry point",
+                         sig);
+      return;
+    }
+
+    Function* entry_point_func = *(Function**)nm->global->constant_value.ptr;
+
+    if (entry_point_func == nullptr) {
+      comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
+                         "Could not find a function '{}' in the build file for the entry point",
+                         entry_name);
+      return;
+    }
+
+    //entry_point_func->is_called = true;//makes it compile
+    entry_point_label = entry_point_func->code_block.label;
   }
 }
 
@@ -243,7 +545,7 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
       return;
     }
 
-    entry_point_func->is_called = true;//makes it compile
+    //entry_point_func->is_called = true;//makes it compile
     entry_point_label = entry_point_func->code_block.label;
   }
 
@@ -253,47 +555,17 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
-      if (!func->is_called) {
-        //Isnt called
-        continue;
+      //if (!func->is_called) {
+      //  //Isnt called
+      //  continue;
+      //}
+
+      const CodeBlock* const code = &func->code_block;
+
+      system->backend_translate(comp, prog, out_code, code, label_indexes, relocations);
+      if (comp->is_panic()) {
+        return;
       }
-
-      if (func->func_type == FUNCTION_TYPE::DEFAULT) {
-        const CodeBlock* const code = &func->code_block;
-
-        system->backend_translate(comp, prog, out_code, code, label_indexes, relocations);
-        if (comp->is_panic()) {
-          return;
-        }
-      }
-      else if (func->func_type == FUNCTION_TYPE::EXTERN
-               && system == &system_vm) {
-        CodeBlock block ={};
-        block.label = comp->labels++;
-
-        u64 stack_size = 0;
-        {
-          const u64 num_params = func->signature.sig_struct->actual_parameter_types.size;
-          const u64 num_regs = convention_microsoft_x64.num_parameter_registers;
-          if (num_params > num_regs) {
-            stack_size = 8 * (num_params - num_regs);
-          }
-        }
-
-        ByteCode::EMIT::CALL_NATIVE_X64(block.code,
-                                        prog->data.ptr + func->data_index,
-                                        stack_size);
-        ByteCode::EMIT::RETURN(block.code);
-
-        system->backend_translate(comp, prog, out_code, &block, label_indexes, relocations);
-        if (comp->is_panic()) {
-          return;
-        }
-      }
-      else {
-        INVALID_CODE_PATH("Function type not supported");
-      }
-
     }
 
     //Init all the globals - then call the main function
@@ -994,16 +1266,13 @@ void x86_64_backend_code_block(Compiler* const comp,
           code_i += ByteCode::SIZE_OF::COPY_R8_TO_R8;
           break;
         }
-      case ByteCode::LOAD_GLOBAL_MEM: {
+      case ByteCode::LOAD_DATA_MEM: {
           const auto p = ByteCode::PARSE::SET_R64_TO_64(code_i);
-          const Global* glob = (const Global*)p.u64.vptr;
+          const DataHolder* d = comp->data_holders.data + p.u64;
 
-          ASSERT(glob->constant_value.ptr == nullptr);
-          ASSERT( glob->data_index != 0);
+          X64::mov(out_code, X64::R{ p.val }, d->data_index);
 
-          X64::mov(out_code, X64::R{ p.val }, glob->data_index);
-
-          relocs.insert({RELOCATION_TYPE::U64_DATA_OFFSET, out_code.size - 8, out_code.size});
+          relocs.insert({ RELOCATION_TYPE::U64_DATA_OFFSET, out_code.size - 8, out_code.size });
 
           code_i += ByteCode::SIZE_OF::SET_R64_TO_64;
           break;
@@ -1377,16 +1646,24 @@ void x86_64_backend_code_block(Compiler* const comp,
           code_i += ByteCode::SIZE_OF::RETURN;
           break;
         }
-      case ByteCode::CALL: {
-          const auto p = ByteCode::PARSE::CALL(code_i);
-          const Function* func = p.u64;
-          //Switch to a code label rather than func ptr
-          call_near(relocs, out_code, (int32_t)func->code_block.label);
+      //case ByteCode::CALL_CONST: {
+      //    const auto p = ByteCode::PARSE::CALL_CONST(code_i);
+      //    const Function* func = p.u64;
+      //    //Switch to a code label rather than func ptr
+      //    call_near(relocs, out_code, (int32_t)func->code_block.label);
 
+      //    code_i += ByteCode::SIZE_OF::CALL_CONST;
+      //    break;
+      //  }
+      //case ByteCode::CALL_MEM: {
+      //    const auto p = ByteCode::PARSE::CALL_MEM(code_i);
 
-          code_i += ByteCode::SIZE_OF::CALL;
-          break;
-        }
+      //    out_code.insert(X64::CALL_NEAR_ABS);
+      //    emit_mod_rm(out_code, X64::R{ 2 }, X64::rm_from_mem_complex(p.mem));
+
+      //    code_i += ByteCode::SIZE_OF::CALL_MEM;
+      //    break;
+      //  }
       case ByteCode::CALL_LABEL: {
           const auto p = ByteCode::PARSE::CALL_LABEL(code_i);
           const u64 label = p.u64;
@@ -1476,7 +1753,7 @@ struct RegisterNames {
   OwnedPtr<char> rm;
 };
 
-const char* b8_no_rex_reg_name(uint8_t reg) {
+static const char* b8_no_rex_reg_name(uint8_t reg) {
   switch (reg) {
     case 0: return "AL";
     case 1: return "CL";
@@ -1491,7 +1768,7 @@ const char* b8_no_rex_reg_name(uint8_t reg) {
   return "INVALID REGISTER";
 }
 
-const char* b8_rex_reg_name(uint8_t reg) {
+static const char* b8_rex_reg_name(uint8_t reg) {
   switch (reg) {
     case 0: return "AL";
     case 1: return "CL";
@@ -1514,7 +1791,7 @@ const char* b8_rex_reg_name(uint8_t reg) {
   return "INVALID REGISTER";
 }
 
-const char* b16_reg_name(uint8_t reg) {
+static const char* b16_reg_name(uint8_t reg) {
   switch (reg) {
     case 0: return "AX";
     case 1: return "CX";
@@ -1537,7 +1814,7 @@ const char* b16_reg_name(uint8_t reg) {
   return "INVALID REGISTER";
 }
 
-const char* b32_reg_name(uint8_t reg) {
+static const char* b32_reg_name(uint8_t reg) {
   switch (reg) {
     case 0: return "EAX";
     case 1: return "ECX";

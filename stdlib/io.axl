@@ -1,11 +1,13 @@
-//#stdlib "kernel32.axl";
-//#stdlib "strings.axl";
-//
-//global u64 stdout_handle = GetStdHandle(cast(i32, -11i64));
-//
-//function print(*ascii string) -> void {
-//  u32 num_chars = cast(u32, strlen(string));
-//  u32 num_chars_written = 0;
-//
-//  WriteConsoleA(stdout_handle, cast(*void, string), num_chars, &num_chars_written, nullptr);
-//}
+HANDLE :: #type u64;
+DWORD :: #type u32;
+
+GetStdHandle :: #static_link((i32) -> u64, "kernel32.lib", "GetStdHandle");
+WriteConsoleA :: #static_link((HANDLE, *void, u32, *u32, *void) -> u32, "kernel32.lib", "WriteConsoleA");
+
+WIN_STD_OUT_REF :: cast(i32, -11i64);
+stdout_handle : u64 = GetStdHandle(WIN_STD_OUT_REF);
+
+
+print :: (string: *ascii, len: u64) -> u32 {
+  WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*u32, nullptr), nullptr);
+}

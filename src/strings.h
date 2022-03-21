@@ -309,3 +309,5 @@ struct InternHashTable {
     }
   }
 };
+
+bool is_alphabetical_order(const InternString* l, const InternString* r);

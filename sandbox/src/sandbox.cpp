@@ -6,14 +6,15 @@
 #include <iostream>
 #include "trace.h"
 
-constexpr char output_file[] = "output.exe";
+constexpr char output_file[] = "output.nasm";
 
 int main(int argc, const char** args) {
+#ifdef TRACING_ENABLE
   Tracing::start_tracer_threaded("trace.json");
   DEFER() {
     Tracing::end_tracer_threaded();
   };
-
+#endif
 
   if (argc != 2) {
     std::cerr << "Invalid number of arguments!";
@@ -30,6 +31,7 @@ int main(int argc, const char** args) {
   options.build.default_calling_convention = "x64";
   options.build.output_file        = output_file;
   options.build.std_lib_folder = "D:\\GitHub\\Compiler\\stdlib";
+  options.build.lib_folder = "D:\\GitHub\\Compiler\\lib";
   
   options.print.ast             = false;
   options.print.pre_reg_alloc   = false;
@@ -38,12 +40,14 @@ int main(int argc, const char** args) {
   options.print.coalesce_values = false;
   options.print.fully_compiled  = false;
   options.print.run_headers     = false;
+  options.print.comp_units      = false;
+  options.print.comptime_exec   = false;
 
   options.optimize.non_stack_locals = true;
   
-  Program program ={};
+  //Program program ={};
 
-  int out = compile_file(options, &program);
+  int out = compile_file_and_write(options);
   
   if (out == 0) {
     //RunOutput res = run_program(options, &program);

@@ -13,7 +13,10 @@
 
 Function* Compiler::new_function() {
   Function* func =  functions.insert();
-  func->func_type = FUNCTION_TYPE::DEFAULT;
+  //func->func_type = FUNCTION_TYPE::DEFAULT;
+
+  func->code_block.label = labels++;
+
   return func;
 }
 
@@ -22,6 +25,12 @@ ImportUnit* Compiler::new_import_unit(Namespace* ns) {
   unit->type  = COMPILATION_TYPE::IMPORT;
   unit->stage = IMPORT_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
+  unit->id = ++comp_unit_counter;
+
+  if (print_options.comp_units) {
+    format_print("New Import unit {}\n",
+                 unit->id);
+  }
 
   to_compile.push_back(unit);
   in_flight_units += 1;
@@ -33,6 +42,12 @@ ConstantExprUnit* Compiler::new_const_expr_unit(Namespace* ns) {
   unit->type  = COMPILATION_TYPE::CONST_EXPR;
   unit->stage = EXPR_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
+  unit->id = ++comp_unit_counter;
+
+  if (print_options.comp_units) {
+    format_print("New Expr unit {}\n",
+                 unit->id);
+  }
 
   to_compile.push_back(unit);
   in_flight_units += 1;
@@ -44,6 +59,12 @@ FunctionUnit* Compiler::new_function_unit(Namespace* ns) {
   unit->type  = COMPILATION_TYPE::FUNCTION;
   unit->stage = FUNCTION_COMP_STAGE::UNINIT;
   unit->available_names = ns;
+  unit->id = ++comp_unit_counter;
+
+  if (print_options.comp_units) {
+    format_print("New Func unit {}\n",
+                 unit->id);
+  }
 
   to_compile.push_back(unit);
   in_flight_units += 1;
@@ -55,6 +76,12 @@ SignatureUnit* Compiler::new_signature_unit(Namespace* ns) {
   unit->type  = COMPILATION_TYPE::SIGNATURE;
   unit->stage = SIGNATURE_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
+  unit->id = ++comp_unit_counter;
+
+  if (print_options.comp_units) {
+    format_print("New Sig unit {}\n",
+                 unit->id);
+  }
 
   to_compile.push_back(unit);
   in_flight_units += 1;
@@ -66,6 +93,12 @@ StructureUnit* Compiler::new_structure_unit(Namespace* ns) {
   unit->type  = COMPILATION_TYPE::STRUCTURE;
   unit->stage = STRUCTURE_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
+  unit->id = ++comp_unit_counter;
+
+  if (print_options.comp_units) {
+    format_print("New Struct unit {}\n",
+                 unit->id);
+  }
 
   to_compile.push_back(unit);
   in_flight_units += 1;
@@ -77,6 +110,12 @@ GlobalUnit* Compiler::new_global_unit(Namespace* ns) {
   unit->type  = COMPILATION_TYPE::GLOBAL;
   unit->stage = GLOBAL_COMP_STAGE::DEPENDING;
   unit->available_names = ns;
+  unit->id = ++comp_unit_counter;
+
+  if (print_options.comp_units) {
+    format_print("New Global unit {}\n",
+                 unit->id);
+  }
 
   to_compile.push_back(unit);
   in_flight_units += 1;
@@ -86,6 +125,11 @@ GlobalUnit* Compiler::new_global_unit(Namespace* ns) {
 void Compiler::set_dep(Context* context, CompilationUnit* unit) {
   ASSERT(unit != nullptr);
   new_depends = true;
+
+  if (print_options.comp_units) {
+    format_print("Comp unit {} waiting on {}\n",
+                 context->current_unit->id, unit->id);
+  }
 
   context->current_unit->num_deps += 1;
   unit->dependency_of.insert(context->current_unit);
@@ -334,6 +378,16 @@ static ConstantVal copy_constant_value(Compiler* comp, ConstantVal val) {
   return { data, val.size };
 }
 
+static size_t new_data_object(Compiler* const comp, const InternString* name, u32 size, u32 alignment) {
+  DataHolder holder ={};
+  holder.name = name;
+  holder.size = size;
+  holder.alignment = alignment;
+
+  comp->data_holders.insert(holder);
+  return comp->data_holders.size;
+}
+
 const Structure* find_or_make_pointer_structure(Compiler* const comp, Context* const context,
                                                 const Type& base) {
   TRACING_FUNCTION();
@@ -496,8 +550,10 @@ static void expect_type(Compiler* const comp, AST_LOCAL a) {
   }
 }
 
+
 inline constexpr bool is_global_depend(const GlobalName* g) {
-  return (g->global == nullptr || g->global->constant_value.ptr == nullptr) && g->unit != nullptr;
+  return (g->global == nullptr || (g->global->constant_value.ptr == nullptr && g->global->data_holder_index == 0))
+    && g->unit != nullptr;
 }
 
 void dependency_check_ast_node(Compiler* const comp,
@@ -829,6 +885,13 @@ void dependency_check_ast_node(Compiler* const comp,
         dependency_check_ast_node(comp, context, state, imp->expr_location);
         return;
       }
+    case AST_TYPE::STATIC_LINK: {
+        ASTStaticLink* imp = (ASTStaticLink*)a;
+
+        dependency_check_ast_node(comp, context, state, imp->import_type);
+
+        return;
+      }
 
     case AST_TYPE::LAMBDA: {
         ASTLambda* l = (ASTLambda*)a;
@@ -1014,65 +1077,6 @@ static bool test_function_overload(const CallSignature* sig, const SignatureStru
   return false;
 }
 
-static Function* match_function(Compiler* const comp,
-                                Context* const context,
-                                State* const state,
-                                const Span& span,
-                                const CallSignature* sig) {
-  TRACING_FUNCTION();
-
-    //Locals
-  //TODO: Fix local functions
-    /*{
-    auto i = state->active_locals.begin();
-    const auto end = state->active_locals.end();
-
-    for (; i < end; i++) {
-      const Local* loc = state->all_locals.data + *i;
-
-      if (loc->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
-        const auto* sig_struct = loc->decl.type.unchecked_base<SignatureStructure>();
-        if (test_function_overload(sig, sig_struct)) {
-          ASSERT(loc->val.type == RVT::CONST);
-          ASSERT(loc->val.constant.ptr != nullptr);
-          ASSERT(loc->val.constant.size == sizeof(Function*));
-
-          return *(Function**)loc->val.constant.ptr;
-        }
-      }
-    }
-  }*/
-
-  GlobalName* name = find_global_name(context->current_namespace, sig->name);
-  ASSERT(name != nullptr);
-
-  const Global* global = name->global;
-  ASSERT(name->global != nullptr);
-
-  if (global->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
-    const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
-
-    if (test_function_overload(sig, sig_struct)) {
-      ASSERT(global->constant_value.ptr != nullptr);
-      ASSERT(global->constant_value.size == sizeof(Function*));
-
-      return *(Function**)global->constant_value.ptr;
-    }
-    else {
-      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-                         "Arguments mismatch\nArgs: {}\nDecl: {}", *sig, PrintSignatureType{ sig_struct });
-      return nullptr;
-    }
-  }
-
-
-
-  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, span,
-                     "No visible function matches signature '{}'",
-                     *sig);
-  return nullptr;
-}
-
 static void compile_find_function_call(Compiler* const comp,
                                        Context* context,
                                        State* const state,
@@ -1093,8 +1097,34 @@ static void compile_find_function_call(Compiler* const comp,
 
   sig.arguments.shrink();
 
-  //Might fail
-  call->func = match_function(comp, context, state, call->node_span, &sig);
+  GlobalName* name = find_global_name(context->current_namespace, sig.name);
+  ASSERT(name != nullptr);
+
+  const Global* global = name->global;
+  ASSERT(name->global != nullptr);
+
+  if (global->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
+    const auto* sig_struct = global->decl.type.unchecked_base<SignatureStructure>();
+
+    if (test_function_overload(&sig, sig_struct)) {
+      ASSERT(global->constant_value.ptr != nullptr);
+      ASSERT(global->constant_value.size == sizeof(usize));
+
+      call->sig = sig_struct;
+      call->label = *(usize*)global->constant_value.ptr;
+      return;
+    }
+    else {
+      comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
+                         "Arguments mismatch\nArgs: {}\nDecl: {}", sig, PrintSignatureType{ sig_struct });
+      return;
+    }
+  }
+
+  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->node_span,
+                     "No visible function matches signature '{}'",
+                     sig);
+
   //if(comp->is_panic()) //Currently not needed because this is the last thing
 }
 
@@ -1131,6 +1161,9 @@ void type_check_ast_node(Compiler* const comp,
 
         nt->value = global->constant_value.ptr;
         nt->node_type = comp->services.builtin_types->t_type;
+        nt->meta_flags |= META_FLAG::COMPTIME;
+        nt->meta_flags |= META_FLAG::CONST;
+        nt->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
         return;
       }
@@ -1182,6 +1215,9 @@ void type_check_ast_node(Compiler* const comp,
 
         at->value = type;
         at->node_type = comp->services.builtin_types->t_type;
+        at->meta_flags |= META_FLAG::COMPTIME;
+        at->meta_flags |= META_FLAG::CONST;
+        at->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
         return;
       }
@@ -1206,6 +1242,10 @@ void type_check_ast_node(Compiler* const comp,
 
         ptr->value = type;
         ptr->node_type = comp->services.builtin_types->t_type;
+
+        ptr->meta_flags |= META_FLAG::COMPTIME;
+        ptr->meta_flags |= META_FLAG::CONST;
+        ptr->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return;
       }
     case AST_TYPE::LAMBDA_TYPE: {
@@ -1231,6 +1271,8 @@ void type_check_ast_node(Compiler* const comp,
             return;
           }
 
+          ASSERT(i != nullptr);
+          ASSERT(i->value != nullptr);
           args.insert(*(const Type*)(i->value));
         }
 
@@ -1239,7 +1281,10 @@ void type_check_ast_node(Compiler* const comp,
           return;
         }
 
-        Type ret = lt->ret->node_type;
+        ASSERT(lt->ret != nullptr);
+        ASSERT(lt->ret->value != nullptr);
+
+        Type ret = *(const Type*)lt->ret->value;
 
 
         const Structure* s = find_or_make_lamdba_structure(comp, context, comp->build_options.default_calling_convention, std::move(args), ret);
@@ -1251,7 +1296,9 @@ void type_check_ast_node(Compiler* const comp,
         lt->value = type;
 
         lt->node_type = comp->services.builtin_types->t_type;
-
+        lt->meta_flags |= META_FLAG::COMPTIME;
+        lt->meta_flags |= META_FLAG::CONST;
+        lt->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return;
       }
     case AST_TYPE::TUPLE_TYPE: {
@@ -1283,7 +1330,9 @@ void type_check_ast_node(Compiler* const comp,
 
         tt->value = type;
         tt->node_type = comp->services.builtin_types->t_type;
-
+        tt->meta_flags |= META_FLAG::COMPTIME;
+        tt->meta_flags |= META_FLAG::CONST;
+        tt->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return;
       }
     case AST_TYPE::STRUCT_EXPR: {
@@ -1294,7 +1343,9 @@ void type_check_ast_node(Compiler* const comp,
 
         SET_MASK(se->meta_flags, META_FLAG::COMPTIME);
         a->node_type = comp->services.builtin_types->t_type;
-
+        a->meta_flags |= META_FLAG::COMPTIME;
+        a->meta_flags |= META_FLAG::CONST;
+        a->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return;
       }
     case AST_TYPE::LAMBDA_EXPR: {
@@ -1325,34 +1376,59 @@ void type_check_ast_node(Compiler* const comp,
 
         ASSERT(base->node_type.is_valid());
 
-        if (base->node_type.struct_type() != STRUCTURE_TYPE::COMPOSITE) {
+        STRUCTURE_TYPE struct_type = base->node_type.struct_type();
+
+
+        if (struct_type == STRUCTURE_TYPE::COMPOSITE) {
+          const Type& cmp_t = base->node_type;
+
+          const auto* cs = cmp_t.unchecked_base<CompositeStructure>();
+
+          auto i = cs->elements.begin();
+          auto end = cs->elements.end();
+
+          a->node_type.structure = nullptr;//reset
+
+          for (; i < end; i++) {
+            if (i->name == member->name) {
+              member->node_type = i->type;
+              member->offset = i->offset;
+              break;
+            }
+          }
+
+          if (!a->node_type.is_valid()) {
+            comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+                               "Type '{}' has no member '{}'",
+                               cmp_t.name, member->name);
+            return;
+          }
+        }
+        else if (struct_type == STRUCTURE_TYPE::FIXED_ARRAY) {
+          const Type& arr_t = base->node_type;
+
+          const ArrayStructure* as = arr_t.unchecked_base<ArrayStructure>();
+
+          if (member->name == comp->important_names.ptr) {
+            a->node_type = to_type(find_or_make_pointer_structure(comp, context, as->base));
+
+            //TODO: do this outside of memory
+            set_runtime_flags(base, state, false, (u8)RVT::MEMORY);
+          }
+          else  if (member->name == comp->important_names.len) {
+            a->node_type = comp->services.builtin_types->t_u64;
+          }
+          else {
+            comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+                               "Type '{}' has no member '{}'",
+                               arr_t.name, member->name);
+            return;
+          }
+        }
+        else {
           comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
                              "Type '{}' does not have any members (it is not a composite type)",
                              base->node_type.name);
-          return;
-        }
-
-        const Type& cmp_t = base->node_type;
-
-        const auto* cs = cmp_t.unchecked_base<CompositeStructure>();
-
-        auto i = cs->elements.begin();
-        auto end = cs->elements.end();
-
-        a->node_type.structure = nullptr;//reset
-
-        for (; i < end; i++) {
-          if (i->name == member->name) {
-            member->node_type = i->type;
-            member->offset = i->offset;
-            break;
-          }
-        }
-
-        if (!a->node_type.is_valid()) {
-          comp->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
-                             "Type '{}' has no member '{}'",
-                             cmp_t.name, member->name);
           return;
         }
 
@@ -1614,6 +1690,45 @@ void type_check_ast_node(Compiler* const comp,
 
         return;
       }
+
+    case AST_TYPE::STATIC_LINK: {
+        a->meta_flags |= META_FLAG::COMPTIME;
+        a->meta_flags |= META_FLAG::CONST;
+        a->meta_flags &= ~META_FLAG::ASSIGNABLE;
+
+
+        ASTStaticLink* imp = (ASTStaticLink*)a;
+        type_check_ast_node(comp, context, state, imp->import_type);
+
+        ASSERT(imp->import_type->node_type == comp->services.builtin_types->t_type);
+
+        imp->node_type = *(const Type*)imp->import_type->value;
+
+        FileLocation loc = parse_file_location(comp->build_options.lib_folder->string, imp->lib_file->string,
+                                               comp->services.strings);
+
+        FOR(comp->lib_import, it) {
+          if (it->path == loc.full_name
+              && imp->name == it->name) {
+            //Already imported
+            goto ALREADY_IMPORTED;
+          }
+        }
+
+        {
+          LibraryImport import_lib ={};
+          import_lib.name = imp->name;
+          import_lib.path = loc.full_name;
+          import_lib.label = comp->labels++;
+
+          comp->lib_import.insert(std::move(import_lib));
+          imp->import_index = comp->lib_import.size;
+        }
+
+      ALREADY_IMPORTED:
+        return;
+      }
+
     case AST_TYPE::IDENTIFIER_EXPR: {
         INVALID_CODE_PATH("Should be removed in dependency check");
 
@@ -1820,13 +1935,12 @@ void type_check_ast_node(Compiler* const comp,
           pass_meta_flags_down(&a->meta_flags, it->meta_flags);
         }
 
-
         compile_find_function_call(comp, context, state, call);
         if (comp->is_panic()) {
           return;
         }
 
-        const auto* sig = call->func->signature.sig_struct;
+        const auto* sig = call->sig;
         ASSERT(sig);
 
         const size_t size = sig->parameter_types.size;
@@ -1838,7 +1952,10 @@ void type_check_ast_node(Compiler* const comp,
           return;
         }
 
-        if (!TEST_MASK(a->meta_flags, META_FLAG::COMPTIME)) {
+        //Temp
+        a->meta_flags &= ~META_FLAG::COMPTIME;
+
+        /*if (!TEST_MASK(a->meta_flags, META_FLAG::COMPTIME)) {
           FOR_AST(call->arguments, it) {
             if (can_compile_const_value(it)) {
               ConstantExprUnit* unit = comp->new_const_expr_unit(context->current_namespace);
@@ -1848,7 +1965,7 @@ void type_check_ast_node(Compiler* const comp,
               comp->set_dep(context, unit);
             }
           }
-        }
+        }*/
 
         //Last thing to do it set return type
         a->node_type = sig->return_type;
@@ -1911,11 +2028,13 @@ void type_check_ast_node(Compiler* const comp,
         }
 
         state->active_locals.size = locals;
-        type_check_ast_node(comp, context, state, if_else->else_statement);
-        if (comp->is_panic()) {
-          return;
+        if (if_else->else_statement != 0) {
+          type_check_ast_node(comp, context, state, if_else->else_statement);
+          if (comp->is_panic()) {
+            return;
+          }
+          state->active_locals.size = locals;
         }
-        state->active_locals.size = locals;
         return;
       }
     case AST_TYPE::WHILE: {
@@ -3039,6 +3158,26 @@ void copy_runtime_to_runtime_hint(Compiler* const comp,
   }
 }
 
+static RuntimeValue load_data_memory(State* state, size_t size, size_t index, CodeBlock* code) {
+  const auto reg_mem = state->new_value();
+
+
+  ByteCode::EMIT::LOAD_DATA_MEM(code->code, (uint8_t)reg_mem.val, index);//changed later to be the actual location
+  state->set_value(reg_mem);
+
+  state->control_flow.expression_num++;
+
+  RuntimeValue global_mem ={};
+  global_mem.type = RVT::MEMORY;
+  global_mem.mem = state->new_mem();
+
+  MemValue* mem_val = state->get_mem(global_mem.mem);
+  mem_val->size = size;
+  mem_val->mem.base = (uint8_t)reg_mem.val;
+
+  return global_mem;
+}
+
 static void compile_bytecode_of_expression(Compiler* const comp,
                                            Context* const context,
                                            State* const state,
@@ -3087,7 +3226,7 @@ static void compile_function_call(Compiler* const comp,
                                   RuntimeHint* hint) {
   TRACING_FUNCTION();
 
-  const auto* sig_struct = call->func->signature.sig_struct;
+  const auto* sig_struct = call->sig;
 
   auto save_stack_params = state->stack.current_passed;
   DEFER(&) { state->stack.current_passed = save_stack_params; };
@@ -3181,13 +3320,7 @@ static void compile_function_call(Compiler* const comp,
 
   size_t stack_params = state->stack.current_passed;
 
-  Function* func = call->func;
-
-  ASSERT(func != nullptr);
-
-  func->is_called = true;
-  ByteCode::EMIT::CALL(code->code, func);
-
+  ByteCode::EMIT::CALL_LABEL(code->code, call->label);
 
   state->control_flow.had_call = true;
   state->control_flow.last_call = state->control_flow.expression_num;
@@ -3216,6 +3349,10 @@ static void compile_function_call(Compiler* const comp,
     }
 
     copy_reg_to_runtime(comp, state, code, call->node_type.structure, rax, &hint->val);
+  }
+  else {
+    //Fixes void functions
+    hint->is_hint = false;
   }
 }
 
@@ -3288,11 +3425,11 @@ static void compile_bytecode_of_expression(Compiler* const comp,
           load_runtime_hint(comp, state, expr->node_type.structure, hint, expr->valid_rvts);
         }
 
-        Function** func_c = (Function**)comp->constants.alloc_no_construct(8);
-        *func_c = l->function;
+        usize* label = (usize*)comp->constants.alloc_no_construct(8);
+        *label = l->function->code_block.label;
 
         load_const_to_runtime_val(comp, state, code, expr->node_type.structure,
-                                  ConstantVal{ (uint8_t*)func_c, 8 },
+                                  ConstantVal{ (uint8_t*)label, sizeof(usize) },
                                   &hint->val);
         break;
       }
@@ -3300,33 +3437,78 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         ASSERT(hint != nullptr);
 
         ASTMemberAccessExpr* member_e = (ASTMemberAccessExpr*)expr;
-        AST_LOCAL m_expr = member_e->expr;
+        AST_LOCAL m_base = member_e->expr;
 
-        RuntimeValue obj = compile_bytecode_of_expression_new(comp,
-                                                              context,
-                                                              state,
-                                                              code,
-                                                              m_expr,
-                                                              (uint8_t)RVT::MEMORY);
+        STRUCTURE_TYPE st = m_base->node_type.struct_type();
+        if (st == STRUCTURE_TYPE::COMPOSITE) {
 
-        ASSERT(obj.type == RVT::MEMORY);
 
-        RuntimeValue member ={};
-        member.type = RVT::MEMORY;
-        member.mem = state->new_mem();
+          RuntimeValue obj = compile_bytecode_of_expression_new(comp,
+                                                                context,
+                                                                state,
+                                                                code,
+                                                                m_base,
+                                                                (uint8_t)RVT::MEMORY);
 
-        //Set up memory as offset from the original object memory
-        {
-          MemValue* member_mem = state->get_mem(member.mem);
-          const MemValue* obj_mem = state->get_mem(obj.mem);
+          ASSERT(obj.type == RVT::MEMORY);
 
-          member_mem->mem = obj_mem->mem;
+          RuntimeValue member ={};
+          member.type = RVT::MEMORY;
+          member.mem = state->new_mem();
 
-          member_mem->mem.disp += member_e->offset;
-          member_mem->size = expr->node_type.structure->size;
+          //Set up memory as offset from the original object memory
+          {
+            MemValue* member_mem = state->get_mem(member.mem);
+            const MemValue* obj_mem = state->get_mem(obj.mem);
+
+            member_mem->mem = obj_mem->mem;
+
+            member_mem->mem.disp += member_e->offset;
+            member_mem->size = expr->node_type.structure->size;
+          }
+
+          copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &member, hint, expr->valid_rvts & NON_CONST_RVTS);
+        }
+        else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
+          if (member_e->name == comp->important_names.ptr) {
+            RuntimeValue obj = compile_bytecode_of_expression_new(comp,
+                                                                  context,
+                                                                  state,
+                                                                  code,
+                                                                  m_base,
+                                                                  (uint8_t)RVT::MEMORY);
+
+            ASSERT(obj.type == RVT::MEMORY);
+
+            RuntimeValue val = take_address(comp, state, code, &obj);
+            copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &val, hint, expr->valid_rvts & NON_CONST_RVTS);
+          }
+          else if (member_e->name == comp->important_names.len) {
+            const ArrayStructure* as = m_base->node_type.unchecked_base<ArrayStructure>();
+
+            u64 val = as->length;
+
+            const size_t size = sizeof(val);
+
+            uint8_t* val_c = comp->constants.alloc_no_construct(size);
+            memcpy_ts(val_c, size, (uint8_t*)&val, size);
+
+            const ConstantVal constant ={ val_c, size };
+
+            if (hint->is_hint) {
+              load_runtime_hint(comp, state, expr->node_type.structure, hint, expr->valid_rvts);
+            }
+
+            load_const_to_runtime_val(comp, state, code, expr->node_type.structure, constant, &hint->val);
+          }
+          else {
+            INVALID_CODE_PATH("Not a valid name");
+          }
+        }
+        else {
+          INVALID_CODE_PATH("Type does not have members");
         }
 
-        copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &member, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
     case AST_TYPE::INDEX_EXPR: {
@@ -3734,6 +3916,30 @@ static void compile_bytecode_of_expression(Compiler* const comp,
         copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &local->val, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
       }
+    case AST_TYPE::STATIC_LINK: {
+        ASTStaticLink* li = (ASTStaticLink*)expr;
+
+        LibraryImport* imp = comp->lib_import.data + (li->import_index - 1);
+
+        usize* label_holder = comp->constants.alloc_no_construct<usize>();
+        *label_holder = imp->label;
+
+        ConstantVal val ={};
+        val.ptr = label_holder;
+        val.size = sizeof(usize);
+
+        if (hint->is_hint) {
+          load_runtime_hint(comp, state, expr->node_type.structure, hint, expr->valid_rvts);
+        }
+
+        load_const_to_runtime_val(comp,
+                                  state,
+                                  code,
+                                  ((const Type*)li->import_type->value)->structure, val,
+                                  &hint->val);
+
+        break;
+      }
     case AST_TYPE::GLOBAL: {
         ASSERT(hint != nullptr);
         ASTIdentifier* ident = (ASTIdentifier*)expr;
@@ -3758,20 +3964,7 @@ static void compile_bytecode_of_expression(Compiler* const comp,
                                     &hint->val);
         }
         else {
-          const auto reg_mem = state->new_value();
-
-          ByteCode::EMIT::LOAD_GLOBAL_MEM(code->code, (uint8_t)reg_mem.val, glob);//changed later to be the actual location
-          state->set_value(reg_mem);
-
-          state->control_flow.expression_num++;
-
-          RuntimeValue global_mem ={};
-          global_mem.type = RVT::MEMORY;
-          global_mem.mem = state->new_mem();
-
-          MemValue* mem_val = state->get_mem(global_mem.mem);
-          mem_val->size = glob->decl.type.structure->size;
-          mem_val->mem.base = (uint8_t)reg_mem.val;
+          RuntimeValue global_mem = load_data_memory(state, glob->decl.type.structure->size, glob->data_holder_index - 1, code);
 
           copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
         }
@@ -4015,13 +4208,16 @@ void compile_bytecode_of_statement(Compiler* const comp,
           //Jump from if branch to after the else branch
           const uint64_t escape_label = comp->labels++;
           ByteCode::EMIT::JUMP_TO_FIXED(code->code, escape_label);
-          ByteCode::EMIT::LABEL(code->code, else_label);
 
-          //Else branch
+            //Else branch
+          ByteCode::EMIT::LABEL(code->code, else_label);
           state->control_flow.new_flow();
           state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
-          compile_bytecode_of_statement(comp, context, if_else->else_statement, state, code);
 
+          if (if_else->else_statement != 0) {
+            compile_bytecode_of_statement(comp, context, if_else->else_statement, state, code);
+          }
+          
           ByteCode::EMIT::JUMP_TO_FIXED(code->code, escape_label);
 
           state->active_locals.size = locals;
@@ -4076,13 +4272,8 @@ void compile_bytecode_of_statement(Compiler* const comp,
       }
     default: {
         AST_LOCAL expr = statement;
-        if (expr->node_type == comp->services.builtin_types->t_void) {
-          compile_bytecode_of_expression(comp, context, state, code, expr, nullptr);
-        }
-        else {
-          auto unused = compile_bytecode_of_expression_new(comp, context, state, code, expr, ALL_RVTS);
-        }
 
+        auto unused = compile_bytecode_of_expression_new(comp, context, state, code, expr, ALL_RVTS);
         return;
       }
   }
@@ -4236,6 +4427,10 @@ static void map_values(const System* sys,
 
   const auto OP_64_MEM = [&](ByteCode::OP_64_MEM&& p) {
     ByteCode::OP_64_MEM::emit(temp, p.op, p.u64, check_mem(p.mem));
+  };
+
+  const auto OP_MEM = [&](ByteCode::OP_MEM&& p) {
+    ByteCode::OP_MEM::emit(temp, p.op, check_mem(p.mem));
   };
 
   const auto OP_64 = [&](ByteCode::OP_64&& p) {
@@ -4894,7 +5089,7 @@ void compile_function_body_code(Compiler* const comp,
   ASSERT(func->code_block.code.size == 0);
 
   //Enter the body - setup
-  func->code_block.label = comp->labels++;
+  //func->code_block.label = comp->labels++;//already set
   state->return_label = comp->labels++;
   state->control_flow.new_flow();
 
@@ -5264,9 +5459,11 @@ void compile_init_expr_of_global(Compiler* comp, Context* context, State* state,
     global->init.label = comp->labels++;
     state->return_label = comp->labels++;
 
+    global->data_holder_index = new_data_object(comp, global->decl.name, global->decl.type.structure->size, global->decl.type.structure->alignment);
+
     ValueIndex reg_mem = state->new_value();
 
-    ByteCode::EMIT::LOAD_GLOBAL_MEM(global->init.code, (uint8_t)reg_mem.val, global);//changed later to be the actual location
+    ByteCode::EMIT::LOAD_DATA_MEM(global->init.code, (uint8_t)reg_mem.val, global->data_holder_index - 1);//changed later to be the actual location
     state->set_value(reg_mem);
 
     state->control_flow.expression_num++;
@@ -5481,6 +5678,11 @@ void add_comp_unit_for_struct(Compiler* const comp, Namespace* ns, ASTStructBody
 }
 
 void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
+  if (comp->print_options.comp_units) {
+    format_print("----------- Close Comp unit {}\n",
+                 unit->id);
+  }
+
   //Remove as dependency
   auto i = unit->dependency_of.begin();
   const auto end = unit->dependency_of.end();
@@ -5491,6 +5693,11 @@ void close_compilation_unit(Compiler* const comp, const CompilationUnit* unit) {
     dep_of->num_deps -= 1;
 
     if (dep_of->num_deps == 0) {
+      if (comp->print_options.comp_units) {
+        format_print("Comp unit started again {}\n",
+                     dep_of->id);
+      }
+
       //No more dependencies - can add back to the compiling
       comp->to_compile.push_back(dep_of);
     }
@@ -5555,9 +5762,9 @@ ERROR_CODE compile_all(Compiler* const comp) {
           context.system = nullptr;
           context.calling_convention = nullptr;
 
-          if (comp->print_options.start_comp_unit) {
+          if (comp->print_options.comp_units) {
             format_print("Running Comp unit {}\n",
-                         PrintPtr{ comp_u });
+                         comp_u->id);
           }
 
           switch (comp_u->type) {
@@ -5655,18 +5862,6 @@ ERROR_CODE compile_all(Compiler* const comp) {
                       compile_untyped_global(comp, &context, &unit->state, unit->source, unit->global);
                       if (comp->is_panic()) {
                         return comp->services.errors->print_all();
-                      }
-
-                      if (TEST_MASK(unit->global->decl.meta_flags, META_FLAG::COMPTIME)) {
-                        AST_LOCAL decl_expr = unit->source->expr;
-
-                        if (decl_expr->value == nullptr) {
-                          ConstantExprUnit* unit = comp->new_const_expr_unit(context.current_namespace);
-                          unit->expr = decl_expr;
-                          unit->stage = EXPR_COMP_STAGE::TYPED;
-
-                          comp->set_dep(&context, unit);
-                        }
                       }
 
                       unit->stage = GLOBAL_COMP_STAGE::TYPED;
@@ -6086,13 +6281,19 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
       if (comp->unfound_deps.unfound.size > 0) {
         TRACING_SCOPE("check unfound dependencies");
-
         const size_t num_deps = comp->unfound_deps.unfound.size;
 
-        constexpr auto found_dep_l = [](const UnfoundDep& dep) -> bool {
+        const auto found_dep_l = [comp](const UnfoundDep& dep) -> bool {
           const GlobalName* gn = find_global_name(dep.name.ns, dep.name.ident);
 
-          return gn != nullptr;
+          if (gn != nullptr) {
+            //Load the found dependency
+            comp->to_compile.push_back(dep.unit_waiting);
+            return true;
+          }
+          else {
+            return false;
+          }
         };
 
         //Remove units if dependency has been found
@@ -6116,35 +6317,47 @@ ERROR_CODE compile_all(Compiler* const comp) {
 
   ASSERT(comp->in_flight_units == 0);
 
-  {
-    TRACING_SCOPE("test load dlls");
+  constexpr auto import_sorter = [](const LibraryImport& l, const LibraryImport& r) {
+    return !is_alphabetical_order(r.path, l.path);
+  };
 
-    auto i = comp->dlls_import.begin();
-    auto end = comp->dlls_import.end();
+  sort_range(comp->lib_import.mut_begin(), comp->lib_import.mut_end(), import_sorter);
 
-    for (; i < end; i++) {
-      PEFile single_dll ={};
+  //{
+  //  TRACING_SCOPE("test load dlls");
 
-      load_portable_executable_from_file(comp, i->span, &single_dll, i->name->string);
-      if (comp->is_panic()) {
-        return comp->services.errors->print_all();
-      }
+  //  //Sort the dlls
+  //  constexpr auto import_sorter = [](const LibraryImport& l, const LibraryImport& r) {
+  //    return !is_alphabetical_order(r.path, l.path);
+  //  };
 
-      auto i_el = i->imports.begin();
-      auto end_el = end->imports.begin();
-      for (; i_el < end_el; i_el++) {
-        if (!single_dll.export_table.names.contains(i_el->name)) {
-          comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, i_el->ptr->declaration->sig->node_span,
-                             "Dll '{}' does export anything named '{}'",
-                             i->name, i_el->name);
-        }
-      }
+  //  auto i = comp->lib_import.begin();
+  //  auto end = comp->lib_import.end();
 
-      if (comp->is_panic()) {
-        return comp->services.errors->print_all();
-      }
-    }
-  }
+  //  while (i < end) {
+  //    const InternString* path = i->path;
+  //    PEFile single_dll ={};
+
+  //    load_portable_executable_from_file(comp, Span{}, &single_dll, path->string);
+  //    if (comp->is_panic()) {
+  //      return comp->services.errors->print_all();
+  //    }
+
+  //    while (i < end && i->path == path) {
+  //      if (!single_dll.export_table.names.contains(i->name)) {
+  //        comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
+  //                           "Dll '{}' does export anything named '{}'",
+  //                           i->path, i->name);
+  //      }
+
+  //      i++;
+  //    }
+
+  //    if (comp->is_panic()) {
+  //      return comp->services.errors->print_all();
+  //    }
+  //  }
+  //}
 
   return ERROR_CODE::NO_ERRORS;
 }
@@ -6271,6 +6484,7 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
 
   {
     Structure* const s_void_ptr = STRUCTS::new_pointer_structure(comp, builtin_types->t_void);
+    builtin_types->t_void_ptr = register_builtin_type(s_void_ptr);
   }
 
   {
@@ -6300,15 +6514,37 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
     s_bool->enum_values.shrink();
   }
 
+  {
+    //Nullptr
+    Global* g = comp->globals.insert();
+
+    g->decl.name = strings->intern("nullptr");
+    g->decl.span = Span{};
+    g->decl.type = builtin_types->t_void_ptr;
+    g->decl.meta_flags |= META_FLAG::COMPTIME;
+    g->decl.meta_flags |= META_FLAG::CONST;
+
+    g->constant_value.ptr = comp->constants.alloc_no_construct<const void*>();
+    g->constant_value.size = sizeof(void*);
+    *(const void**)g->constant_value.ptr = 0;
+
+    add_global_name(comp, builtin_namespace, g->decl.name, nullptr, g);
+  }
+
 
   //Intrinsics
 #define MOD(n) comp->intrinsics. ## n = strings->intern(#n);
   INTRINSIC_MODS;
 #undef MOD
 
+  //Other important names
+#define MOD(n) comp->important_names. ## n = strings->intern(#n);
+  IMPORTANT_NAMES_INC;
+#undef MOD
+
+
   //File extensions
   comp->services.file_loader->axl = strings->intern("axl");
-  comp->services.file_loader->dll = strings->intern("dll");
 
   //Systems
   comp->system_names.sys_vm = strings->intern(system_vm.name);
@@ -6350,6 +6586,13 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
     return;
   }
   comp->build_options.std_lib_folder = strings->intern(options.build.std_lib_folder);
+
+  if (options.build.lib_folder == nullptr) {
+    comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
+                       "Expected lib folder");
+    return;
+  }
+  comp->build_options.lib_folder = strings->intern(options.build.lib_folder);
 
   {
     const InternString* system_name = strings->intern(options.build.system_name);
@@ -6397,146 +6640,5 @@ void init_compiler(const APIOptions& options, Compiler* comp) {
       comp->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                          "Invalid default calling convention '{}'", conv_name);
     }
-  }
-}
-
-void build_data_section_for_vm(Program* prog, Compiler* const comp) {
-  TRACING_FUNCTION();
-
-  InternHashTable<size_t> loaded_strings ={};
-
-  Array<uint8_t> data ={};
-
-  //Writes a string if its not alread written
-  const auto write_string = [&](Array<uint8_t>& bytes, const InternString* s) -> size_t {
-    if (!loaded_strings.contains(s)) {
-      //doesnt contain this string
-      //have to write it to data
-
-      bytes.reserve_extra(s->len + 1);
-
-      size_t position = bytes.size;
-
-      memcpy_ts(bytes.data + bytes.size, bytes.capacity - bytes.size, (const uint8_t*)s->string, s->len + 1);
-      bytes.size += s->len + 1;
-
-
-      size_t ret_position = position;
-
-      loaded_strings.insert(s, std::move(position));
-      return ret_position;
-    }
-    else {
-      //Already written
-      return *loaded_strings.get_val(s);
-    }
-  };
-
-  //Write a 64 bit number aligned to a 64 bit boundary
-  const auto write_u64 = [](Array<uint8_t>& bytes, uint64_t a)->size_t {
-    //Align
-    const auto align_to = ceil_to_8(bytes.size);
-    bytes.insert_uninit(align_to - bytes.size);
-
-    size_t position = bytes.size;
-    serialise_to_array(bytes, a);
-
-    return position;
-  };
-
-  const auto write_num_bytes = [](Array<uint8_t>& bytes, size_t num_bytes, size_t alignment)->size_t {
-    //Align
-    const auto align_to = ceil_to_n(bytes.size, alignment);
-    bytes.insert_uninit(align_to - bytes.size);
-
-    size_t position = bytes.size;
-    bytes.insert_uninit(num_bytes);
-
-    return position;
-  };
-
-  //0 is an invalid position
-  write_u64(data, 0);
-
-  //Function pointers
-  {
-    auto i = comp->functions.begin_iter();
-    auto end = comp->functions.end_iter();
-
-    for (; i != end; i.next()) {
-      Function* func = i.get();
-
-      if (func->is_called && func->func_type == FUNCTION_TYPE::EXTERN) {
-        //Reserve the location
-        func->data_index = write_u64(data, 0);
-      }
-    }
-  }
-
-  // Globals
-  {
-    auto i = comp->globals.begin_iter();
-    auto end = comp->globals.end_iter();
-
-    for (; i != end; i.next()) {
-      Global* glob = i.get();
-
-      if (glob->constant_value.ptr == nullptr) {
-        glob->data_index = write_num_bytes(data, glob->decl.type.structure->size, glob->decl.type.structure->alignment);
-      }
-    }
-  }
-
-  Array<uint8_t> imports ={};
-
-  //Dll imports
-  {
-    auto i_dll = comp->dlls_import.begin();
-    auto end_dll = comp->dlls_import.end();
-
-    for (; i_dll < end_dll; i_dll++) {
-      //Dont need to write the header unless a function is used
-      bool written_header = false;
-
-      auto i_func = i_dll->imports.begin();
-      const auto end_func = i_dll->imports.end();
-
-      for (; i_func < end_func; i_func++) {
-        Function* func = i_func->ptr;
-        const InternString* name = i_func->name;
-
-        if (func->is_called && func->func_type == FUNCTION_TYPE::EXTERN) {
-          //Function is used in this dll
-          if (!written_header) {
-            //Need to put in the name of the dll before any functions
-            //Dont know we need it until this point (might not use any of the functions)
-            written_header = true;
-            size_t name_position = write_string(data, i_dll->name);
-
-            //write header
-            write_u64(imports, name_position);
-          }
-
-          //Write the function name
-          size_t name_position = write_string(data, name);
-          write_u64(imports, name_position);
-
-          //The write the data index
-          write_u64(imports, func->data_index);
-        }
-      }
-
-      //Null terminate for functions in a dll
-      write_u64(imports, 0);
-    }
-
-    //2nd null terminate for dlls in import
-    write_u64(imports, 0);
-  }
-
-  prog->data_size = data.size;
-  prog->data = std::move(data);
-  if (imports.size != 8) {
-    prog->imports = std::move(imports);
   }
 }

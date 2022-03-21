@@ -32,6 +32,9 @@ struct PrintPtr {
   const void* ptr;
 };
 
+struct MagicNumber {
+  uint16_t num;
+};
 
 void load_string(Array<char>& res, char c);
 void load_string(Array<char>& res, int8_t i8);
@@ -45,6 +48,7 @@ void load_string(Array<char>& res, uint64_t u64);
 void load_string(Array<char>& res, PrintPtr ptr);
 
 void load_string(Array<char>& res, DisplayChar c);
+void load_string(Array<char>& res, MagicNumber mn);
 void load_string(Array<char>& res, const char* str);
 void load_string(Array<char>& res, const Array<char>& str);
 void load_string(Array<char>& res, const InternString* str);

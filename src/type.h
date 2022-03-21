@@ -89,7 +89,7 @@ inline constexpr void pass_meta_flags_up(META_FLAGS low, META_FLAGS* high) {
 }
 
 inline constexpr void pass_meta_flags_down(META_FLAGS* low, META_FLAGS high) {
-  *low &= high & META_DOWN_FLAGS;
+  *low |= high & META_DOWN_FLAGS;
 }
 
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;
@@ -252,19 +252,17 @@ struct FunctionSignature {
   const InternString* name ={};
 };
 
-enum struct FUNCTION_TYPE {
-  DEFAULT, EXTERN
-};
+//enum struct FUNCTION_TYPE {
+//  DEFAULT, EXTERN
+//};
 
 struct Function {
-  bool is_called = false;
-
   const ASTLambda* declaration = nullptr;
 
   FunctionSignature signature ={};
   CompilationUnit* compilation_unit = nullptr;
 
-  FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
+//  FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
 
   size_t data_index = 0;
   CodeBlock code_block;

@@ -226,10 +226,17 @@ struct DependencyCheckState {
 
 };
 
+struct DataHolder {
+  const InternString* name;
+  size_t size = 0;
+  size_t alignment = 0;
+  size_t data_index = 0;
+};
+
 struct Global {
   Decl decl;
 
-  size_t data_index = 0;
+  size_t data_holder_index = 0;
   ConstantVal constant_value ={};
 
   CodeBlock init ={};
@@ -273,7 +280,7 @@ struct Dependency {
 
 struct CompilationUnit : public Dependency {
   COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
-
+  u64 id;
   Namespace* available_names = nullptr;
 };
 
@@ -358,22 +365,15 @@ struct FileImport {
 };
 
 struct FileLoader {
-  const InternString* dll = nullptr;
   const InternString* axl = nullptr;
 
   Array<FileImport> unparsed_files ={};
 };
 
-struct SingleDllImport {
-  Function* ptr;
-  uint32_t rva_hint;
+struct LibraryImport {
+  size_t label;
+  const InternString* path;
   const InternString* name;
-};
-
-struct ImportedDll {
-  const InternString* name = nullptr;
-  Span span ={};
-  Array<SingleDllImport> imports ={};
 };
 
 struct SystemsAndConventionNames {
@@ -392,6 +392,7 @@ struct BuildOptions {
   const InternString* entry_point = nullptr;
   const InternString* output_file = nullptr;
 
+  const InternString* lib_folder = nullptr;
   const InternString* std_lib_folder = nullptr;
 
   const System* endpoint_system = nullptr;
@@ -407,6 +408,16 @@ struct Context {
 
   CompilationUnit* current_unit;
   Namespace* current_namespace;
+};
+
+#define IMPORTANT_NAMES_INC \
+MOD(ptr) \
+MOD(len) \
+
+struct ImportantNames {
+#define MOD(n) const InternString* n;
+  IMPORTANT_NAMES_INC;
+#undef MOD
 };
 
 //struct ToTypeCheckData {
@@ -443,9 +454,11 @@ struct Compiler {
 
   bool new_depends = false;
   u32 in_flight_units = 0;
+  u64 comp_unit_counter = 0;
 
   SystemsAndConventionNames system_names ={};
   Intrinsics intrinsics ={};
+  ImportantNames important_names ={};
 
   Services services;
 
@@ -459,8 +472,9 @@ struct Compiler {
   Namespace* build_file_namespace ={};//needs to be saved for finding main
   Namespace* builtin_namespace ={};
 
-  Array<ImportedDll> dlls_import ={};
+  Array<LibraryImport> lib_import ={};
   Array<FileAST> parsed_files ={};
+  Array<DataHolder> data_holders ={};
 
   FreelistBlockAllocator<SignatureUnit> signature_units ={};
   FreelistBlockAllocator<StructureUnit> structure_units ={};
@@ -497,9 +511,7 @@ struct Compiler {
 
   template<typename ... T>
   void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) {
-    services.errors->register_error(code, span, f_message, ts...);
-
-    services.errors->panic = true;
+    services.errors->report_error(code, span, f_message, ts...);
   }
 
   template<typename ... T>

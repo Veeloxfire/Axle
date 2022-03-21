@@ -17,6 +17,8 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 #include "files.h"
 #include "backends.h"
 
+#include "trace.h"
+
 #include <utility>
 #include <iostream>
 
@@ -80,6 +82,8 @@ RunOutput run_as_machine_code(Program* prog) {
 
 int compile_file(const APIOptions& options,
                  Program* out_program) {
+  TRACING_FUNCTION();
+
 
   //Setup
   StringInterner strings ={};
@@ -204,46 +208,68 @@ int compile_file_and_write(const APIOptions& options) {
     return 1;
   }
 
-  Program program ={};
-
-  int res = compile_file(options, &program);
-
-  if (res != 0) {
-    return res;
-  }
-
-  if (slow_string_eq(options.build.system_name, system_vm.name)) {
-    std::cerr << "Cannot write bytecode to a file!";
-
-    return res;
-  }
-  else if (slow_string_eq(options.build.system_name, system_x86_64.name)) {
-    std::cout << "Writing to file \"" << options.build.output_file << "\"\n";
-
-    StringInterner strings ={};
-
-    PE_File_Build pe_file_build ={};
-
-    CodeSection code_section ={};
-    code_section.bytes = program.code.ptr;
-    code_section.size  = program.code_size;
-    code_section.entry_point = program.entry_point;
-
-    ImportTable imports ={};
-    ConstantTable constants ={};
-
-    Import* kernel32 = new_import(strings.intern("kernel32.dll"), &imports, &constants);
-    //add_name_to_import(kernel32, strings.intern("just_a_test"), &imports);
+  
+  TRACING_FUNCTION();
 
 
-    pe_file_build.code = &code_section;
-    pe_file_build.constants = &constants;
-    pe_file_build.imports = &imports;
+  //Setup
+  StringInterner strings ={};
+  BuiltinTypes builtin_types ={};
+  Structures structures ={};
+  Lexer lexer ={};
+  Parser parser ={};
+  VM vm ={};
+  Errors errors ={};
+  FileLoader file_loader ={};
 
-    return write_portable_executable_to_file(&pe_file_build, options.build.output_file) == ErrorCode::OK ? 0 : 1;
-  }
-  else {
-    std::cerr << "Could write out! Invalid convention and system conbination\n";
+  Compiler compiler ={};
+
+  compiler.services.lexer = &lexer;
+  compiler.services.parser = &parser;
+  compiler.services.vm = &vm;
+  compiler.services.errors = &errors;
+  compiler.services.file_loader = &file_loader;
+  compiler.services.builtin_types = &builtin_types;
+  compiler.services.structures = &structures;
+  compiler.services.strings = &strings;
+
+  //Load the builtin types
+  init_compiler(options, &compiler);
+  if (compiler.is_panic()) {
+    compiler.services.errors->print_all();
     return 1;
   }
+
+  {
+    FileLocation loc = parse_file_location(compiler.build_options.file_name->string, nullptr, compiler.services.strings);
+
+    compiler.build_file_namespace = compiler.namespaces.insert();
+
+
+    compiler.services.file_loader->unparsed_files.insert(FileImport{ loc, compiler.build_file_namespace, Span{} });//use null span
+
+    //Compilation
+    ERROR_CODE ret = compile_all(&compiler);
+    if (ret != ERROR_CODE::NO_ERRORS) {
+      std::cerr << "Compilation was not completed due to an error!\nError Code '"
+        << error_code_string(ret)
+        << "'\n";
+      return 1;
+    }
+  }
+
+  if (compiler.is_panic()) {
+    std::cerr << "Compiler paniced but did not have an error message\n";
+    return -1;
+  }
+
+  ASSERT(slow_string_eq(options.build.system_name, system_x86_64.name));
+  
+  nasm_backend(options.build.output_file, &compiler);
+  if (compiler.is_panic()) {
+    compiler.services.errors->print_all();
+    return -1;
+  }
+
+  return 0;
 }
