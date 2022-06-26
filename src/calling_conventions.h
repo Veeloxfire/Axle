@@ -8,7 +8,8 @@ inline constexpr size_t VM_SP_R = 17;
 
 //Forward decls
 struct REGISTER_CONSTANT;
-struct Compiler;
+struct CompilerGlobals;
+struct CompilerThread;
 struct Program;
 struct Structure;
 struct Type;
@@ -39,7 +40,8 @@ using REG_NAME_FROM_NUM_PTR = FUNCTION_PTR<const char*, uint8_t>;
 
 using BACKEND_TRANSLATE_PTR = FUNCTION_PTR<
   void, 
-  Compiler*,
+  CompilerGlobals*,
+  CompilerThread*,
   Program*,
   Array<uint8_t>&,
   const CodeBlock*,

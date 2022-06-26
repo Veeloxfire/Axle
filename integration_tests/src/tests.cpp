@@ -216,8 +216,10 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const APIOpti
     options.build.default_calling_convention = env.convention;
     options.build.entry_point        = "main";
     options.build.file_name          = test.file_name;
-    options.build.std_lib_folder     = "D:\\Github\\Compiler\\stdlib";
-    options.build.lib_folder         = "D:\\Github\\Compiler\\lib";
+    options.build.std_lib_folder     = ".\\stdlib";
+    options.build.lib_folder         = ".\\lib";
+
+
 
     //options.print.ast             = true;
     //options.print.fully_compiled  = true;
@@ -226,7 +228,7 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const APIOpti
     //options.print.pre_reg_alloc   = true;
     //options.print.coalesce_values = true;
     //options.print.file_loads      = true;
-    //options.print.start_comp_unit = true;
+    //options.print.comp_units      = true;
     //options.print.unfound_dep     = true;
 
     std::cout << "\nStarting Test: " << test.test_name << "\n";

@@ -17,8 +17,7 @@ void VM::allocate_stack(uint64_t bytes) {
 
   if (SP <= stack) {
     errors->report_error(ERROR_CODE::VM_ERROR, Span{},
-                           "VM Stack overflow during allocation");
-    errors->panic = true;
+                         "VM Stack overflow during allocation");
     return;
   }
 }
@@ -28,8 +27,7 @@ void VM::push(X64_UNION val) {
 
   if (SP <= stack) {
     errors->report_error(ERROR_CODE::VM_ERROR, Span{},
-                           "VM Stack overflow during 'push' operation");
-    errors->panic = true;
+                         "VM Stack overflow during 'push' operation");
     return;
   }
 
@@ -39,9 +37,8 @@ void VM::push(X64_UNION val) {
 X64_UNION VM::pop() {
   if (SP + 8 >= stack + STACK_SIZE) {
     errors->report_error(ERROR_CODE::VM_ERROR, Span{},
-                           "VM Stack underflow during 'pop' operation");
-    errors->panic = true;
-    return { (uint64_t) 0 };
+                         "VM Stack underflow during 'pop' operation");
+    return { (uint64_t)0 };
   }
 
   X64_UNION val = x64_from_bytes(SP);
@@ -60,10 +57,10 @@ uint8_t* VM::load_mem(const MemComplex& mem) {
 }
 
 //Written in assembly to directly deal with the stack
-extern "C" uint64_t call_native_x64(const void* func, uint64_t* param_registers, uint8_t* stack_top, uint64_t stack_required);
+extern "C" uint64_t call_native_x64(const void* func, uint64_t * param_registers, uint8_t * stack_top, uint64_t stack_required);
 
 void vm_call_native_x64(VM* const vm, const void* func_ptr, uint64_t stack_required) {
-  uint64_t param_registers[4] ={};
+  uint64_t param_registers[4] = {};
 
   //Load the parameters
   param_registers[0] = vm->registers[1].b64.reg;
@@ -211,7 +208,7 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::AND_R64S;
           break;
         }
-      case ByteCode::SHIFT_L_BY_R8_R64 : {
+      case ByteCode::SHIFT_L_BY_R8_R64: {
           const auto i = ByteCode::PARSE::SHIFT_L_BY_R8_R64(vm->IP);
 
           vm->registers[i.val2].b64.reg <<= vm->registers[i.val1].b8l.reg;
@@ -537,30 +534,30 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP = prog->code.ptr + i.u64.val;
           break;
         }
-     /* case ByteCode::CALL_CONST: {
-          const auto i = ByteCode::PARSE::CALL_CONST(vm->IP);
+                               /* case ByteCode::CALL_CONST: {
+                                    const auto i = ByteCode::PARSE::CALL_CONST(vm->IP);
 
-          vm->push(vm->IP + ByteCode::SIZE_OF::CALL_CONST);
-          if (vm->errors->panic) {
-            return;
-          }
+                                    vm->push(vm->IP + ByteCode::SIZE_OF::CALL_CONST);
+                                    if (vm->errors->panic) {
+                                      return;
+                                    }
 
-          vm->IP = prog->code.ptr + i.u64.val;
-          break;
-        }
-      case ByteCode::CALL_MEM: {
-          const auto i = ByteCode::PARSE::CALL_MEM(vm->IP);
+                                    vm->IP = prog->code.ptr + i.u64.val;
+                                    break;
+                                  }
+                                case ByteCode::CALL_MEM: {
+                                    const auto i = ByteCode::PARSE::CALL_MEM(vm->IP);
 
-          vm->push(vm->IP + ByteCode::SIZE_OF::CALL_MEM);
-          if (vm->errors->panic) {
-            return;
-          }
+                                    vm->push(vm->IP + ByteCode::SIZE_OF::CALL_MEM);
+                                    if (vm->errors->panic) {
+                                      return;
+                                    }
 
-          u64 abs = x64_from_bytes(vm->load_mem(i.mem));
+                                    u64 abs = x64_from_bytes(vm->load_mem(i.mem));
 
-          vm->IP = prog->code.ptr + abs;
-          break;
-        }*/
+                                    vm->IP = prog->code.ptr + abs;
+                                    break;
+                                  }*/
       case ByteCode::CALL_NATIVE_X64: {
           const auto i = ByteCode::PARSE::CALL_NATIVE_X64(vm->IP);
 
@@ -582,11 +579,11 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
       default: {
           uint8_t op = vm->IP[0];
           vm->errors->report_error(ERROR_CODE::VM_ERROR, Span{},
-                                     "Encountered invalid instruction\n"
-                                     "Code: {}\nName: '{}'",
-                                     op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
+                                   "Encountered invalid instruction\n"
+                                   "Code: {}\nName: '{}'",
+                                   op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
           return;
         }
-    } 
+    }
   }
 }

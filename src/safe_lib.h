@@ -21,6 +21,10 @@ using usize = size_t;
 #define STR_REPLAC2(a) #a
 #define STR_REPLACE(a) STR_REPLAC2(a)
 
+#define BYTE(a) (static_cast<uint8_t>(a))
+#define JOI2(a, b) a ## b
+#define JOIN(a, b) JOI2(a, b)
+
 void throw_testing_assertion(const char* message);
 
 #ifdef ASSERT_EXCEPTIONS

@@ -52,4 +52,10 @@ namespace Windows {
   };
 
   Array<ActiveDll> load_dlls(Program* prog);
+
+  struct MAX_PATH_STR {
+    char str[MAX_PATH + 1];
+  };
+
+  MAX_PATH_STR get_current_directory();
 }

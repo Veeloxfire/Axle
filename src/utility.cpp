@@ -16,6 +16,32 @@ void load_to_bytes(Array<uint8_t>& bytes,
   memcpy_ts(bytes.data + offset, bytes.capacity - offset, in_bytes, len);
 }
 
+#ifdef ARENA_ALLOCATOR_DEBUG
+
+uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
+  void* d = malloc(bytes);
+  allocated.insert(d);
+
+  return (uint8_t*)d;
+}
+
+void ArenaAllocator::free_no_destruct(void* val) {
+  usize check = allocated.size;
+  ASSERT(check != 0);
+
+  allocated.remove_if([val](void* data) { return val == data; });
+
+  ASSERT(check == allocated.size + 1);
+  
+  free(val);
+}
+
+ArenaAllocator::~ArenaAllocator() {
+  ASSERT(allocated.size == 0);
+}
+
+#else
+
 void ArenaAllocator::add_to_free_list(ArenaAllocator::FreeList* new_fl) {
   //Should otherwise all be combined
   //Just need to find if this is after a free space or before a free space
@@ -107,8 +133,10 @@ bool ArenaAllocator::_debug_freelist_loops() const {
   return false;
 }
 
-bool ArenaAllocator::_debug_valid_free_pointer(void* ptr) const {
+bool ArenaAllocator::_debug_valid_pointer(void* ptr) const {
   Block* block = base;
+
+  //Checking the pointer is actually from one of these blocks
 
   while (block != nullptr) {
     if(ptr >= (block->data + 1)/*+ 1 for the saved free size*/
@@ -118,6 +146,28 @@ bool ArenaAllocator::_debug_valid_free_pointer(void* ptr) const {
   }
 
   return false;
+}
+
+bool ArenaAllocator::_debug_is_allocated_data(uint64_t* ptr, usize len) const {
+  auto list = free_list;
+
+  auto ptr_end = ptr + len;
+  //Try to find if its in the freelist
+
+  while (list != nullptr) {
+    u64* start = (u64*)list;
+    u64* end = start + list->qwords_available + 1;
+
+    //Check if the ranges overlap - error if they do
+    if((ptr <= start && start < ptr_end)
+       || (ptr < end && end <= ptr_end)
+       || (ptr <= start && end <= ptr_end))
+      return false;
+
+    list = list->next;
+  }
+
+  return true;
 }
 
 uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
@@ -189,10 +239,11 @@ uint8_t* ArenaAllocator::alloc_no_construct(size_t bytes) {
   return (uint8_t*)current_alloc;
 }
 
+
 void ArenaAllocator::free_no_destruct(void* val) {
   ASSERT(val != nullptr);
   ASSERT(!_debug_freelist_loops());
-  ASSERT(_debug_valid_free_pointer(val));
+  ASSERT(_debug_valid_pointer(val));
 
   uint64_t* ptr = (uint64_t*)val;
 
@@ -204,6 +255,7 @@ void ArenaAllocator::free_no_destruct(void* val) {
 
   add_to_free_list(new_fl);
 }
+
 
 void ArenaAllocator::new_block() {
   Block* block = allocate_default<Block>(1);
@@ -224,6 +276,7 @@ ArenaAllocator::~ArenaAllocator() {
 }
 
 ArenaAllocator::Block::~Block() { ::free_destruct_single(next); }
+#endif
 
 SquareBitMatrix::~SquareBitMatrix() {
   free();
@@ -368,34 +421,48 @@ uint8_t* BumpAllocator::allocate_no_construct(size_t bytes) {
   return ptr;
 }
 
+static SpinLockMutex io_mutex = {};
+
 void IO::print_impl(const char* string) {
   TRACING_FUNCTION();
+  io_mutex.acquire();
   fputs(string, stdout);
+  io_mutex.release();
 }
 
 void IO::print_impl(const OwnedPtr<char>& string) {
   TRACING_FUNCTION();
+  io_mutex.acquire();
   fputs(string.ptr, stdout);
+  io_mutex.release();
 }
 
 void IO::print_impl(const char c) {
   TRACING_FUNCTION();
+  io_mutex.acquire();
   putc(c, stdout);
+  io_mutex.release();
 }
 
 void IO::err_print_impl(const char* string) {
   TRACING_FUNCTION();
+  io_mutex.acquire();
   fputs(string, stderr);
+  io_mutex.release();
 }
 
 void IO::err_print_impl(const OwnedPtr<char>& string) {
   TRACING_FUNCTION();
+  io_mutex.acquire();
   fputs(string.ptr, stderr);
+  io_mutex.release();
 }
 
 void IO::err_print_impl(const char c)  {
   TRACING_FUNCTION();
+  io_mutex.acquire();
   putc(c, stderr);
+  io_mutex.release();
 }
 
 void serialize_zeros(Array<u8>& bytes, usize size, usize alignment) {
@@ -415,7 +482,7 @@ void serialize_zeros(Array<u8>& bytes, usize size, usize alignment) {
 }
 
 void serialize_bytes(Array<u8>& bytes, const u8* data, usize size, usize alignment) {
-   //Align
+  //Align
   const auto align_to = ceil_to_n(bytes.size, alignment);
 
   usize align_bytes = (align_to - bytes.size);

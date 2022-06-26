@@ -21,59 +21,51 @@ int main(int argc, const char** args) {
     return 1;
   }
 
+  Windows::MAX_PATH_STR cwd = Windows::get_current_directory();
+
   APIOptions options = {};
-  
-  options.build.file_name       = args[1];
-  options.build.entry_point     = "main";
+
+  options.build.current_directory = cwd.str;
+  options.build.file_name = args[1];
+  options.build.entry_point = "main";
   //options.build.system_name                = "vm";
   //options.build.default_calling_convention = "vm";
-  options.build.system_name                = "x86_64";
+  options.build.system_name = "x86_64";
   options.build.default_calling_convention = "x64";
-  options.build.output_file        = output_file;
-  options.build.std_lib_folder = "D:\\GitHub\\Compiler\\stdlib";
-  options.build.lib_folder = "D:\\GitHub\\Compiler\\lib";
-  
-  options.print.ast             = false;
-  options.print.pre_reg_alloc   = false;
-  options.print.normal_bytecode = false;
-  options.print.comptime_res    = false;
-  options.print.coalesce_values = false;
-  options.print.fully_compiled  = false;
-  options.print.run_headers     = false;
-  options.print.comp_units      = false;
-  options.print.comptime_exec   = false;
+  options.build.output_file = output_file;
+  options.build.std_lib_folder = ".\\stdlib";
+  options.build.lib_folder = ".\\lib";
+
+  //options.print.ast = true;
+  //options.print.pre_reg_alloc = true;
+  //options.print.normal_bytecode = true;
+  //options.print.comptime_res = true;
+  //options.print.coalesce_values = true;
+  //options.print.fully_compiled = true;
+  //options.print.run_headers = true;
+  //options.print.comp_units = true;
+  //options.print.comptime_exec = true;
 
   options.optimize.non_stack_locals = true;
-  
-  //Program program ={};
 
-  int out = compile_file_and_write(options);
-  
-  if (out == 0) {
-    //RunOutput res = run_program(options, &program);
-    //std::cout << "Returned: " << res.program_return;
-    
-    return out;
+  {
+    TRACING_SCOPE("Compiler");
+    int out = compile_file_and_write(options);
+
+    if (out != 0) {
+      std::cerr << "Error!";
+      return out;
+    }
   }
-  else {
-    std::cerr << "Error!";
-    return out;
+
+  {
+    TRACING_SCOPE("Nasm");
+    system("nasm -g -fwin64 ./output.nasm");
   }
-  
 
-  //int ret = compile_file_and_write(options);
-  //if (ret != 0) {
-  //  return ret;
-  //}
-
-  //std::cout << "running " << output_file << '\n';
-
-  //uint32_t res = Windows::run_exe(output_file);
-
-  //std::cout << "Res: " << res;
-  //return ret;
-
-  //speedtests();
-
+  {
+    TRACING_SCOPE("Link");
+    system("link /LARGEADDRESSAWARE:NO /ENTRY:main /SUBSYSTEM:CONSOLE output.obj ..\\lib\\kernel32.lib");
+  }
   return 0;
 }

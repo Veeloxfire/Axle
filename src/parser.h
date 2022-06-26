@@ -42,7 +42,6 @@ MODIFY(Colon, ":") \
 MODIFY(Full_Stop, ".")
 
 #define AXLE_TOKEN_MODIFY \
-MODIFY(Error, "") \
 MODIFY(End, "") \
 MODIFY(Identifier, "") \
 MODIFY(Intrinsic, "") \
@@ -75,7 +74,7 @@ struct Position {
 };
 
 struct Token {
-  AxleTokenType type = AxleTokenType::Error;
+  AxleTokenType type = AxleTokenType::End;
   bool consumed_whitespace = false;
 
   const InternString* string = nullptr;
@@ -93,13 +92,15 @@ void set_span_end(const Token& token, Span& span);
 
 Span span_of_token(const Token& tok);
 
-struct Lexer {
-  StringInterner* strings = nullptr;
 
-  Position curr_pos ={};
+struct Lexer {
+  Position save_pos = {};
+  Position curr_pos = {};
 
   const char* top = nullptr;
 };
+
+Span span_of_lex(const Lexer* lex);
 
 struct TokenStream {
   Token* i;
@@ -109,7 +110,9 @@ struct TokenStream {
 struct Namespace;
 
 struct Parser {
-  MemoryPool store ={};
+  Lexer lexer = {};
+
+  MemoryPool ast_store ={};  
 
   TokenStream stream;
   Namespace* current_namespace;
@@ -119,18 +122,23 @@ struct Parser {
   Token next ={};
 };
 
-#define PARSER_ALLOC(T) parser->store.push<T>()
+#define PARSER_ALLOC(T) parser->ast_store.push<T>()
 
-void reset_parser(struct Compiler* const comp,
+struct CompilerGlobals;
+struct CompilerThread;
+
+void reset_parser(CompilerGlobals* comp,
+                  CompilerThread* const comp_thread,
+                  Parser* const parser,
                   const InternString* file_name,
                   const char* string);
 
 struct FileAST;
-void parse_file(Compiler* const comp, Parser* const parser, FileAST* const file);
+void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser, FileAST* const file);
 
 struct KeywordPair {
   const char* keyword = nullptr;
-  AxleTokenType type = AxleTokenType::Error;
+  AxleTokenType type = AxleTokenType::End;
   size_t size = 0;
 
   constexpr KeywordPair(const char* kw, AxleTokenType t)

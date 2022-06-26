@@ -4,13 +4,15 @@
 #include "strings.h"
 #include "format.h"
 
+
 struct Span {
   //the span is null if full_path == nullptr
-  const InternString* full_path ={};
-  size_t line_start = 0;
-  size_t line_end = 0;
+  const InternString* full_path = nullptr;
   size_t char_start = 0;
+  size_t line_start = 0;
+
   size_t char_end = 0;
+  size_t line_end = 0;
 };
 
 OwnedPtr<char> load_span_from_source(const Span& span, const char* source);

@@ -6,10 +6,10 @@ using UN_OP_EMIT = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;
 using BIN_OP_EMIT = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t, uint8_t>;
 
 //Will always move to a register
-static RuntimeValue load_to_mod_op(Compiler* comp, State* state, CodeBlock* code, const Structure* ty, const RuntimeValue* v) {
-  RuntimeValue temp ={};
+static RuntimeValue load_to_mod_op(CompilerGlobals* comp, State* state, CodeBlock* code, const Structure* ty, const RuntimeValue* v) {
+  RuntimeValue temp = {};
   temp.type = RVT::REGISTER;
-  temp.reg  = state->new_value();
+  temp.reg = state->new_value();
 
   copy_runtime_to_runtime(comp, state, code, ty, v, &temp);
 
@@ -17,11 +17,11 @@ static RuntimeValue load_to_mod_op(Compiler* comp, State* state, CodeBlock* code
 };
 
 //Will only move to a new register if its not a register
-static RuntimeValue load_to_const_op(Compiler* comp, State* state, CodeBlock* code, const Structure* ty, const RuntimeValue* v) {
+static RuntimeValue load_to_const_op(CompilerGlobals* comp, State* state, CodeBlock* code, const Structure* ty, const RuntimeValue* v) {
   if (v->type != RVT::REGISTER) {
-    RuntimeValue temp ={};
+    RuntimeValue temp = {};
     temp.type = RVT::REGISTER;
-    temp.reg  = state->new_value();
+    temp.reg = state->new_value();
 
     copy_runtime_to_runtime(comp, state, code, ty, v, &temp);
 
@@ -32,7 +32,7 @@ static RuntimeValue load_to_const_op(Compiler* comp, State* state, CodeBlock* co
   }
 };
 
-static void bin_op_impl(Compiler* const comp,
+static void bin_op_impl(CompilerGlobals* const comp,
                         State* const state,
                         CodeBlock* const code,
                         const RuntimeValue* left, const RuntimeValue* right,
@@ -48,7 +48,7 @@ static void bin_op_impl(Compiler* const comp,
   state->use_value(right->reg);
 }
 
-static void un_op_impl(Compiler* const comp,
+static void un_op_impl(CompilerGlobals* const comp,
                        State* const state,
                        CodeBlock* const code,
                        const RuntimeValue* val,
@@ -62,7 +62,7 @@ static void un_op_impl(Compiler* const comp,
 }
 
 RuntimeValue BinOpArgs::emit_add_64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -73,7 +73,7 @@ RuntimeValue BinOpArgs::emit_add_64s() {
 }
 
 RuntimeValue BinOpArgs::emit_sub_64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -107,7 +107,7 @@ RuntimeValue BinOpArgs::emit_add_64_to_ptr() {
   const RuntimeValue* save_left = left;
   const RuntimeValue* save_right = right;
 
-  RuntimeValue mult_size ={};
+  RuntimeValue mult_size = {};
 
   ASSERT(info->main_type.struct_type() == STRUCTURE_TYPE::POINTER);
   const auto* ptr = info->main_type.unchecked_base<PointerStructure>();
@@ -140,7 +140,7 @@ RuntimeValue BinOpArgs::emit_add_64_to_ptr() {
 }
 
 RuntimeValue BinOpArgs::emit_mul_64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -151,24 +151,24 @@ RuntimeValue BinOpArgs::emit_mul_64s() {
 }
 
 RuntimeValue BinOpArgs::emit_div_u64s() {
-  const Structure* type = comp->services.builtin_types->t_u64.structure;
+  const Structure* type = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
 
   if (comp->build_options.endpoint_system == &system_x86_64) {
     {
-      auto* res_val       = state->value_tree.values.data + temp_left.reg.val;
+      auto* res_val = state->value_tree.values.data + temp_left.reg.val;
       res_val->value_type = ValueType::FIXED;
-      res_val->reg        = RAX.REG;
+      res_val->reg = RAX.REG;
     }
 
     ValueIndex save_rdx = state->new_value();
     state->set_value(save_rdx);
 
-    auto* save_val       = state->value_tree.values.data + save_rdx.val;
+    auto* save_val = state->value_tree.values.data + save_rdx.val;
     save_val->value_type = ValueType::FIXED;
-    save_val->reg        = RDX.REG;
+    save_val->reg = RDX.REG;
 
     ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);//Just show its being reserved
 
@@ -190,24 +190,24 @@ RuntimeValue BinOpArgs::emit_div_u64s() {
 }
 
 RuntimeValue BinOpArgs::emit_div_i64s() {
-  const Structure* type = comp->services.builtin_types->t_u64.structure;
+  const Structure* type = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
 
   if (comp->build_options.endpoint_system == &system_x86_64) {
     {
-      auto* res_val       = state->value_tree.values.data + temp_left.reg.val;
+      auto* res_val = state->value_tree.values.data + temp_left.reg.val;
       res_val->value_type = ValueType::FIXED;
-      res_val->reg        = RAX.REG;
+      res_val->reg = RAX.REG;
     }
 
     ValueIndex save_rdx = state->new_value();
     state->set_value(save_rdx);
 
-    auto* save_val       = state->value_tree.values.data + save_rdx.val;
+    auto* save_val = state->value_tree.values.data + save_rdx.val;
     save_val->value_type = ValueType::FIXED;
-    save_val->reg        = RDX.REG;
+    save_val->reg = RDX.REG;
 
     ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);//Just show its being reserved
 
@@ -229,7 +229,7 @@ RuntimeValue BinOpArgs::emit_div_i64s() {
 }
 
 RuntimeValue BinOpArgs::emit_eq_64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -240,7 +240,7 @@ RuntimeValue BinOpArgs::emit_eq_64s() {
 }
 
 RuntimeValue BinOpArgs::emit_eq_8s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -251,7 +251,7 @@ RuntimeValue BinOpArgs::emit_eq_8s() {
 }
 
 RuntimeValue BinOpArgs::emit_neq_8s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -262,7 +262,7 @@ RuntimeValue BinOpArgs::emit_neq_8s() {
 }
 
 RuntimeValue BinOpArgs::emit_lesser_u64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -273,7 +273,7 @@ RuntimeValue BinOpArgs::emit_lesser_u64s() {
 }
 
 RuntimeValue BinOpArgs::emit_greater_u64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -284,7 +284,7 @@ RuntimeValue BinOpArgs::emit_greater_u64s() {
 }
 
 RuntimeValue BinOpArgs::emit_lesser_i64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -295,7 +295,7 @@ RuntimeValue BinOpArgs::emit_lesser_i64s() {
 }
 
 RuntimeValue BinOpArgs::emit_greater_i64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -306,7 +306,7 @@ RuntimeValue BinOpArgs::emit_greater_i64s() {
 }
 
 RuntimeValue BinOpArgs::emit_or_64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -317,7 +317,7 @@ RuntimeValue BinOpArgs::emit_or_64s() {
 }
 
 RuntimeValue BinOpArgs::emit_xor_64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -328,7 +328,7 @@ RuntimeValue BinOpArgs::emit_xor_64s() {
 }
 
 RuntimeValue BinOpArgs::emit_and_64s() {
-  const Structure* ty = comp->services.builtin_types->t_u64.structure;
+  const Structure* ty = comp->builtin_types->t_u64.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
@@ -339,16 +339,16 @@ RuntimeValue BinOpArgs::emit_and_64s() {
 }
 
 RuntimeValue BinOpArgs::emit_shift_l_64_by_8() {
-  const Structure* left_t = comp->services.builtin_types->t_u64.structure;
-  const Structure* right_t = comp->services.builtin_types->t_u8.structure;
+  const Structure* left_t = comp->builtin_types->t_u64.structure;
+  const Structure* right_t = comp->builtin_types->t_u8.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
 
   if (comp->build_options.endpoint_system == &system_x86_64) {
-    auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
+    auto* res_val = state->value_tree.values.data + temp_right.reg.val;
     res_val->value_type = ValueType::FIXED;
-    res_val->reg        = RCX.REG;
+    res_val->reg = RCX.REG;
 
     bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_L_BY_R8_R64);
 
@@ -362,16 +362,16 @@ RuntimeValue BinOpArgs::emit_shift_l_64_by_8() {
 }
 
 RuntimeValue BinOpArgs::emit_shift_r_u64_by_8() {
-  const Structure* left_t = comp->services.builtin_types->t_u64.structure;
-  const Structure* right_t = comp->services.builtin_types->t_u8.structure;
+  const Structure* left_t = comp->builtin_types->t_u64.structure;
+  const Structure* right_t = comp->builtin_types->t_u8.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
 
   if (comp->build_options.endpoint_system == &system_x86_64) {
-    auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
+    auto* res_val = state->value_tree.values.data + temp_right.reg.val;
     res_val->value_type = ValueType::FIXED;
-    res_val->reg        = RCX.REG;
+    res_val->reg = RCX.REG;
 
     bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_BY_R8_RU64);
 
@@ -385,16 +385,16 @@ RuntimeValue BinOpArgs::emit_shift_r_u64_by_8() {
 }
 
 RuntimeValue BinOpArgs::emit_shift_r_i64_by_8() {
-  const Structure* left_t = comp->services.builtin_types->t_i64.structure;
-  const Structure* right_t = comp->services.builtin_types->t_u8.structure;
+  const Structure* left_t = comp->builtin_types->t_i64.structure;
+  const Structure* right_t = comp->builtin_types->t_u8.structure;
 
   const RuntimeValue temp_left = load_to_mod_op(comp, state, code, left_t, left);
   const RuntimeValue temp_right = load_to_mod_op(comp, state, code, right_t, right);
 
   if (comp->build_options.endpoint_system == &system_x86_64) {
-    auto* res_val       = state->value_tree.values.data + temp_right.reg.val;
+    auto* res_val = state->value_tree.values.data + temp_right.reg.val;
     res_val->value_type = ValueType::FIXED;
-    res_val->reg        = RCX.REG;
+    res_val->reg = RCX.REG;
 
     bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SHIFT_R_BY_R8_RI64);
 
@@ -409,7 +409,7 @@ RuntimeValue BinOpArgs::emit_shift_r_i64_by_8() {
 
 RuntimeValue UnOpArgs::emit_neg_i64() {
 
-  const RuntimeValue temp = load_to_mod_op(comp, state, code, comp->services.builtin_types->t_i64.structure, prim);
+  const RuntimeValue temp = load_to_mod_op(comp, state, code, comp->builtin_types->t_i64.structure, prim);
 
   un_op_impl(comp, state, code, &temp, ByteCode::EMIT::NEG_R64);
 
@@ -421,7 +421,7 @@ RuntimeValue UnOpArgs::emit_neg_i64() {
 RuntimeValue UnOpArgs::emit_address() {
   ASSERT(prim->type == RVT::MEMORY);
 
-  RuntimeValue ptr_val ={};
+  RuntimeValue ptr_val = {};
   ptr_val.type = RVT::REGISTER;
   ptr_val.reg = state->new_value();
 
@@ -433,7 +433,7 @@ RuntimeValue UnOpArgs::emit_address() {
 
 RuntimeValue UnOpArgs::emit_deref() {
 
-  RuntimeValue deref_val ={};
+  RuntimeValue deref_val = {};
   deref_val.type = RVT::MEMORY;
 
   switch (prim->type) {
@@ -483,16 +483,17 @@ RuntimeValue UnOpArgs::emit_deref() {
 }
 
 template<typename L>
-void impl_compile_balanced_binary_op(Compiler* comp,
+void impl_compile_balanced_binary_op(CompilerGlobals* comp,
+                                     CompilerThread* comp_thread,
                                      ASTBinaryOperatorExpr* expr,
                                      const BalancedBinOpOptions& op,
                                      L&& try_emit) {
-  const BuiltinTypes* const types = comp->services.builtin_types;
+  const BuiltinTypes* const types = comp_thread->builtin_types;
 
   //Reset
   expr->emit = nullptr;
 
-#define SHOULD_RET comp->is_panic() || expr->emit != nullptr
+#define SHOULD_RET comp_thread->is_panic() || expr->emit != nullptr
 
   const auto try_normal_options = [&](AST_LOCAL main, AST_LOCAL other) {
     expr->info.main_type = main->node_type;
@@ -512,7 +513,7 @@ void impl_compile_balanced_binary_op(Compiler* comp,
         expr->node_type = types->t_u64;//overide default expected type
         return;
       }
-      else if (comp->is_panic()) {
+      else if (comp_thread->is_panic()) {
         return;
       }
     }
@@ -567,17 +568,17 @@ void impl_compile_balanced_binary_op(Compiler* comp,
 
   const char* const op_string = BINARY_OP_STRING::get(expr->op);
 
-  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                     "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
-                     op_string, left->node_type.name, right->node_type.name);
+  comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+                            "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
+                            op_string, left->node_type.name, right->node_type.name);
 }
 
-void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State* state, ASTBinaryOperatorExpr* expr, const UnpositionedBinOpOptions& op) {
+void impl_compile_unpositioned_binary_op(CompilerGlobals* comp, CompilerThread* comp_thread, State* state, ASTBinaryOperatorExpr* expr, const UnpositionedBinOpOptions& op) {
 
   //Reset
   expr->emit = nullptr;
 
-  const BuiltinTypes* const types = comp->services.builtin_types;
+  const BuiltinTypes* const types = comp_thread->builtin_types;
 
   AST_LOCAL left = expr->left;
   AST_LOCAL right = expr->right;
@@ -588,7 +589,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State
     if (op.r64_and_r64_emit != nullptr && main->node_type == types->t_u64) {
       if (other->node_type == main->node_type) {
         expr->emit = op.r64_and_r64_emit;
-        expr->node_type        = main->node_type;
+        expr->node_type = main->node_type;
         return;
       }
     }
@@ -596,7 +597,7 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State
     if (op.r64_and_r64_emit != nullptr && main->node_type == types->t_i64) {
       if (other->node_type == main->node_type) {
         expr->emit = op.r64_and_r64_emit;
-        expr->node_type        = main->node_type;
+        expr->node_type = main->node_type;
         return;
       }
     }
@@ -605,33 +606,33 @@ void impl_compile_unpositioned_binary_op(Compiler* comp, Context* context, State
         && main->node_type.struct_type() == STRUCTURE_TYPE::POINTER
         && other->node_type == types->t_u64) {
       expr->emit = op.ptr_and_r64_emit;
-      expr->node_type        = main->node_type;
+      expr->node_type = main->node_type;
       return;
     }
   };
 
   expr->info.main_op = MainOp::LEFT;
   try_non_positioned_options(left, right);
-  if (comp->is_panic() || expr->emit != nullptr) {
+  if (comp_thread->is_panic() || expr->emit != nullptr) {
     return;
   }
 
   expr->info.main_op = MainOp::RIGHT;
   try_non_positioned_options(right, left);
-  if (comp->is_panic() || expr->emit != nullptr) {
+  if (comp_thread->is_panic() || expr->emit != nullptr) {
     return;
   }
 
   if (expr->emit == nullptr) {
-    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                       "No supported operator for '{}' and '{}'",
-                       left->node_type.name, right->node_type.name);
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+                              "No supported operator for '{}' and '{}'",
+                              left->node_type.name, right->node_type.name);
   }
 }
 
-void impl_compile_unbalanced_binary_op(Compiler* comp, Context* context, State* state, ASTBinaryOperatorExpr* expr, const UnbalancedBinOpOptions& op) {
+void impl_compile_unbalanced_binary_op(CompilerGlobals* comp, CompilerThread* comp_thread, State* state, ASTBinaryOperatorExpr* expr, const UnbalancedBinOpOptions& op) {
 
-  const BuiltinTypes* const types = comp->services.builtin_types;
+  const BuiltinTypes* const types = comp_thread->builtin_types;
 
   //Reset
   expr->emit = nullptr;
@@ -643,7 +644,7 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, Context* context, State* 
       && left->node_type == types->t_u64) {
     if (right->node_type == types->t_u8) {
       expr->emit = op.Lu64_Ru8_emit;
-      expr->node_type        = left->node_type;
+      expr->node_type = left->node_type;
       return;
     }
   }
@@ -652,20 +653,20 @@ void impl_compile_unbalanced_binary_op(Compiler* comp, Context* context, State* 
       && left->node_type == types->t_i64) {
     if (right->node_type == types->t_u8) {
       expr->emit = op.Lu64_Ru8_emit;
-      expr->node_type        = left->node_type;
+      expr->node_type = left->node_type;
       return;
     }
   }
 
   const char* const op_string = BINARY_OP_STRING::get(expr->op);
 
-  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                     "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
-                     op_string, left->node_type.name, right->node_type.name);
+  comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+                            "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
+                            op_string, left->node_type.name, right->node_type.name);
 }
 
-void impl_compile_unary_op(Compiler* comp, Context* context, State* state, ASTUnaryOperatorExpr* expr, const UnaryOpOptions& op) {
-  const BuiltinTypes* const types = comp->services.builtin_types;
+void impl_compile_unary_op(CompilerGlobals* comp, CompilerThread* comp_thread, State* state, ASTUnaryOperatorExpr* expr, const UnaryOpOptions& op) {
+  const BuiltinTypes* const types = comp_thread->builtin_types;
 
   AST_LOCAL prim = expr->expr;
 
@@ -675,54 +676,54 @@ void impl_compile_unary_op(Compiler* comp, Context* context, State* state, ASTUn
   if (op.i64_emit != nullptr) {
     if (prim->node_type == types->t_i64) {
       expr->emit = op.i64_emit;
-      expr->node_type       =  types->t_i64;
+      expr->node_type = types->t_i64;
       return;
     }
   }
 
   const char* const op_string = UNARY_OP_STRING::get(expr->op);
 
-  comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                     "No unary operator '{}' exists for type: '{}'",
-                     op_string, prim->node_type.name);
+  comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+                            "No unary operator '{}' exists for type: '{}'",
+                            op_string, prim->node_type.name);
 }
 
 //Overload for unbalanced operators
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
                              const UnpositionedBinOpOptions& op) {
-  impl_compile_unpositioned_binary_op(comp, context, state, expr, op);
+  impl_compile_unpositioned_binary_op(comp, comp_thread, state, expr, op);
 }
 
 //Overload for unbalanced operators
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
                              const UnbalancedBinOpOptions& op) {
 
-  impl_compile_unbalanced_binary_op(comp, context, state, expr, op);
+  impl_compile_unbalanced_binary_op(comp, comp_thread, state, expr, op);
 }
 
 //Overload for unbalanced operators that dont care about left sign
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
                              const UnbalancedLeftSignAgnBin& op) {
 
-  UnbalancedBinOpOptions normal ={};
+  UnbalancedBinOpOptions normal = {};
   normal.Li64_Ru8_emit = op.Lr64_Ru8_emit;
   normal.Lu64_Ru8_emit = op.Lr64_Ru8_emit;
 
-  impl_compile_unbalanced_binary_op(comp, context, state, expr, normal);
+  impl_compile_unbalanced_binary_op(comp, comp_thread, state, expr, normal);
 }
 
 
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
                              const EqOpBin& op) {
@@ -734,22 +735,22 @@ void compile_binary_operator(Compiler* comp,
   {
     if (expect == other->node_type) {
       expr->emit = emit_op;
-      expr->node_type        = comp->services.builtin_types->t_bool;
+      expr->node_type = comp_thread->builtin_types->t_bool;
     }
   };
 
-  BalancedBinOpOptions balanced_op ={};
+  BalancedBinOpOptions balanced_op = {};
   balanced_op.u64_emit = op.u64_emit;
   balanced_op.i64_emit = op.i64_emit;
-  balanced_op.u8_emit  = op.r8_emit;
+  balanced_op.u8_emit = op.r8_emit;
   balanced_op.bools_emit = op.bools_emit;
   balanced_op.ascii_emit = op.ascii_emit;
 
-  impl_compile_balanced_binary_op(comp, expr, balanced_op, try_emit);
+  impl_compile_balanced_binary_op(comp, comp_thread, expr, balanced_op, try_emit);
 }
 
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
                              const SignAgnArithBinOp& op) {
@@ -760,22 +761,22 @@ void compile_binary_operator(Compiler* comp,
   {
     if (expect == other->node_type) {
       expr->emit = emit_op;
-      expr->node_type        = main->node_type;
+      expr->node_type = main->node_type;
     }
   };
 
-  BalancedBinOpOptions balanced_op ={};
+  BalancedBinOpOptions balanced_op = {};
   balanced_op.ptrs_emit = op.ptrs_emit;
   balanced_op.u64_emit = op.r64_emit;
   balanced_op.i64_emit = op.r64_emit;
   balanced_op.bools_emit = op.bools_emit;
 
-  impl_compile_balanced_binary_op(comp, expr, balanced_op, try_emit);
+  impl_compile_balanced_binary_op(comp, comp_thread, expr, balanced_op, try_emit);
 }
 
 
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              ASTBinaryOperatorExpr* expr,
                              const SignedArithBinOp& op) {
@@ -789,30 +790,35 @@ void compile_binary_operator(Compiler* comp,
     }
   };
 
-  BalancedBinOpOptions balanced_op ={};
+  BalancedBinOpOptions balanced_op = {};
   balanced_op.u64_emit = op.u64_emit;
   balanced_op.i64_emit = op.i64_emit;
 
-  impl_compile_balanced_binary_op(comp, expr, balanced_op, try_emit);
+  impl_compile_balanced_binary_op(comp, comp_thread, expr, balanced_op, try_emit);
 }
 
 //Overload for unary operators
-void compile_unary_operator(Compiler* comp,
-                            Context* context,
+void compile_unary_operator(CompilerGlobals* comp,
+                            CompilerThread* comp_thread,
                             State* state,
                             ASTUnaryOperatorExpr* expr,
                             const UnaryOpOptions& op) {
   //just to match stuff
-  impl_compile_unary_op(comp, context, state, expr, op);
+  impl_compile_unary_op(comp, comp_thread, state, expr, op);
 }
 
 //Overload for taking address
-void compile_take_address(Compiler* comp,
-                          Context* context,
+void compile_take_address(CompilerGlobals* comp,
+                          CompilerThread* comp_thread,
                           State* state,
                           ASTUnaryOperatorExpr* expr) {
 
-  const Structure* ptr = find_or_make_pointer_structure(comp, context, expr->expr->node_type);
+  AtomicLock<Structures> structures = {};
+  AtomicLock<StringInterner> strings = {};
+  comp->services.get_multiple(&structures, &strings);
+
+  const Structure* ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
+                                                        comp_thread->build_options.ptr_size, expr->expr->node_type);
   expr->node_type = to_type(ptr);
   expr->emit = &UnOpArgs::emit_address;
 
@@ -824,7 +830,8 @@ void compile_take_address(Compiler* comp,
 }
 
 //Overload for dereferencing
-void compile_deref(Compiler* comp,
+void compile_deref(CompilerGlobals* comp,
+                   CompilerThread* comp_thread,
                    ASTUnaryOperatorExpr* expr) {
 
   AST_LOCAL prim = expr->expr;
@@ -838,8 +845,8 @@ void compile_deref(Compiler* comp,
   else {
     const char* const op_string = UNARY_OP_STRING::get(expr->op);
 
-    comp->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                       "No unary operator '{}' exists for type: '{}'",
-                       op_string, prim->node_type.name);
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+                              "No unary operator '{}' exists for type: '{}'",
+                              op_string, prim->node_type.name);
   }
 }

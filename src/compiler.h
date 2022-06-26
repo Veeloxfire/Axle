@@ -10,7 +10,6 @@
 #include "names.h"
 
 #include "api.h"
-
 #include "type.h"
 
 
@@ -171,6 +170,12 @@ struct Local {
   RuntimeValue val ={};
 };
 
+struct LocalsNode {
+  //TODO: make this an array if its more efficient
+  LocalsNode* prev;
+  Local local;
+};
+
 struct State {
   Type return_type;
 
@@ -190,8 +195,6 @@ struct State {
 
   bool made_call = false;
   StackState stack ={};
-
-  bool comptime_compilation = false;
 
   constexpr bool needs_new_frame() const {
     return made_call || stack.max_passed > 0 || stack.max > 0;
@@ -215,9 +218,20 @@ struct State {
 
 void init_state_regs(const CallingConvention* convention, State* state);
 
-struct DependencyCheckState {
+struct Pipe : AtomicQueue<CompilationUnit*> {
+  const char* _debug_name;
+};
+
+struct Context {
+  bool comptime_compilation;
+  CompilationUnit* current_unit;
+
+  Pipe* dependency_load_pipe;
+};
+
+struct DependencyCheckStateAndContext : Context {
   bool local_context;
-  //DependencyCheckState* outer;
+
   Array<const InternString*> locals;
 
   inline bool is_local(const InternString* l) {
@@ -242,96 +256,63 @@ struct Global {
   CodeBlock init ={};
 };
 
-enum struct COMPILATION_TYPE : uint8_t {
-  NONE, STRUCTURE, FUNCTION, SIGNATURE, CONST_EXPR, GLOBAL, IMPORT
+enum struct COMPILATION_EMIT_TYPE : uint8_t {
+  STRUCTURE, FUNC_BODY, FUNC_SIG, EXEC_CODE, GLOBAL, IMPORT
 };
 
-enum struct STRUCTURE_COMP_STAGE : uint8_t {
-  DEPENDING, UNTYPED, TYPED, FINISHED
+struct CompPipes {
+  Pipe depend_check;
+  Pipe type_check;
+  Pipe exec_code;
+  Pipe emit_function;
+  Pipe emit_global;
+  Pipe emit_import;
 };
 
-enum struct SIGNATURE_COMP_STAGE : uint8_t {
-  DEPENDING, UNTYPED, FINISHED
+struct DependencyListSingle {
+  DependencyListSingle* next;
+  CompilationUnit* waiting;
 };
 
-enum struct GLOBAL_COMP_STAGE : uint8_t {
-  DEPENDING, UNTYPED, TYPED, FINISHED
+struct DependencyManager {
+  FreelistBlockAllocator<DependencyListSingle> dependency_list_entry;
+  Queue<CompilationUnit*> free_dependencies;
+
+  void close_dependency(CompilationUnit* ptr);
+  void remove_dependency_from(CompilationUnit* ptr);
+  void add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on);
+  void add_external_dependency(CompilationUnit* now_waiting);
 };
 
-enum struct EXPR_COMP_STAGE : uint8_t {
-  DEPENDING, UNTYPED, TYPED, FINISHED
+struct CompilationUnit {
+  UnitID id;
+
+  u32 waiting_on_count;
+  DependencyListSingle* dependency_list;
+  Pipe* insert_to;
+
+  COMPILATION_EMIT_TYPE emit;
+  Namespace* available_names;
+  AST_LOCAL ast;
+
+  State* state;
+  void* extra;
 };
 
-enum struct FUNCTION_COMP_STAGE : uint8_t {
-  UNINIT, DEPENDING, UNTYPED_BODY, TYPED_BODY, FINISHED
+struct ImportExtra {
+  FileLocation src_loc;
 };
 
-enum struct IMPORT_COMP_STAGE : u8 {
-  DEPENDING, UNTYPED, UNPARSED, FINISHED
+struct GlobalExtra {
+  Global* global;
 };
 
-struct Dependency {
-  usize num_deps = 0;
-
-  Array<Dependency*> dependency_of;
-
-  CompilationUnit* waiting_unit;
+struct FuncBodyExtra {
+  Function* func;
 };
 
-struct CompilationUnit : public Dependency {
-  COMPILATION_TYPE type = COMPILATION_TYPE::NONE;
-  u64 id;
-  Namespace* available_names = nullptr;
-};
-
-struct ImportUnit : public CompilationUnit {
-  IMPORT_COMP_STAGE stage = IMPORT_COMP_STAGE::DEPENDING;
-
-  State state ={};
-  FileLocation src_loc ={};
-  ASTImport* import_ast;
-};
-
-struct SignatureUnit : public CompilationUnit {
-  SIGNATURE_COMP_STAGE stage = SIGNATURE_COMP_STAGE::DEPENDING;
-
-  ASTLambda* source = nullptr;
-  FunctionSignature* sig = nullptr;
-  Function* func = nullptr;
-};
-
-struct StructureUnit : public CompilationUnit {
-  STRUCTURE_COMP_STAGE stage = STRUCTURE_COMP_STAGE::DEPENDING;
-
-  ASTStructBody* source = nullptr;
-  AST_LINKED* untyped ={};
-};
-
-struct GlobalUnit : public CompilationUnit {
-  GLOBAL_COMP_STAGE stage = GLOBAL_COMP_STAGE::DEPENDING;
-
-  ASTDecl* source = nullptr;
-  Global* global = nullptr;
-
-  State state ={};
-};
-
-struct FunctionUnit : public CompilationUnit {
-  FUNCTION_COMP_STAGE stage = FUNCTION_COMP_STAGE::UNINIT;
-
-  ASTLambda* source = nullptr;
-  Function* func = nullptr;
-
-  State state ={};
-};
-
-struct ConstantExprUnit : public CompilationUnit {
-  EXPR_COMP_STAGE stage = EXPR_COMP_STAGE::DEPENDING;
-
-  AST_LOCAL expr = nullptr;
-  Type cast_to ={};
-
-  State state ={};
+struct ExecCodeExtra {
+  Type cast_to;
 };
 
 struct CallSignature {
@@ -345,17 +326,16 @@ struct UnknownName {
 };
 
 
-struct UnfoundDep {
+struct UnfoundNameHolder {
   UnknownName name ={};
-  CompilationUnit* unit_waiting ={};
-  
+  CompilationUnit* dependency = nullptr;
+
   //Used if the dependency isnt found
   ErrorMessage as_error={};
 };
 
-struct UnfoundDependencies {
-  bool panic = false;
-  Array<UnfoundDep> unfound ={};
+struct UnfoundNames {
+  Array<UnfoundNameHolder> names ={};
 };
 
 struct FileImport {
@@ -365,7 +345,7 @@ struct FileImport {
 };
 
 struct FileLoader {
-  const InternString* axl = nullptr;
+  FileLocation cwd = {};
 
   Array<FileImport> unparsed_files ={};
 };
@@ -400,19 +380,10 @@ struct BuildOptions {
   const CallingConvention* default_calling_convention = nullptr;
 };
 
-struct Context {
-  const System* system = nullptr;
-  const CallingConvention* calling_convention = nullptr;
-
-  Span span;
-
-  CompilationUnit* current_unit;
-  Namespace* current_namespace;
-};
-
 #define IMPORTANT_NAMES_INC \
 MOD(ptr) \
 MOD(len) \
+MOD(axl) \
 
 struct ImportantNames {
 #define MOD(n) const InternString* n;
@@ -420,54 +391,77 @@ struct ImportantNames {
 #undef MOD
 };
 
-//struct ToTypeCheckData {
-//
-//};
-//
-//struct ToByteCodeData {
-//
-//};
-//
-//struct ToExecData {
-//
-//};
-//
-//struct CompPipes {
-//  Queue<ToTypeCheckData> type_check;
-//};
+struct CompilationUnitStore {
+  UnitID comp_unit_counter = NULL_ID;
+  
+  FreelistBlockAllocator<CompilationUnit> compilation_units = {};
+  Array<CompilationUnit*> active_units;
 
-struct Services {
-  Lexer* lexer = nullptr;
-  Parser* parser = nullptr;
-  VM* vm = nullptr;
-  Errors* errors = nullptr;
-  FileLoader* file_loader = nullptr;
-  Structures* structures = nullptr;
-  BuiltinTypes* builtin_types = nullptr;
-  StringInterner* strings = nullptr;
+  CompilationUnit* allocate_unit();
+  void free_unit(CompilationUnit* unit);
+  CompilationUnit* get_unit_if_exists(u64 id) const;
 };
 
-struct Compiler {
-  APIPrintOptions        print_options        ={};
-  BuildOptions           build_options        ={};
-  APIOptimizationOptions optimization_options ={};
+struct Compilation {
+  UnfoundNames unfound_names = {};
+  DependencyManager dependencies = {};
 
-  bool new_depends = false;
-  u32 in_flight_units = 0;
-  u64 comp_unit_counter = 0;
+  u64 in_flight_units = 0;//Units that are not waiting somewhere
 
-  SystemsAndConventionNames system_names ={};
-  Intrinsics intrinsics ={};
-  ImportantNames important_names ={};
+  CompilationUnitStore store = {};
+  FreelistBlockAllocator<State> states = {};
 
+  FreelistBlockAllocator<FuncBodyExtra> func_body_extras = {};
+  FreelistBlockAllocator<GlobalExtra> global_extras = {};
+  FreelistBlockAllocator<ImportExtra> import_extras = {};
+  FreelistBlockAllocator<ExecCodeExtra> exec_code_extras = {};
+};
+
+
+struct Services {
+  //Must always be acquired in order!
+  AtomicPtr<FileLoader> file_loader;
+  AtomicPtr<Compilation> compilation;
+  AtomicPtr<NameManager> names;
+
+  AtomicPtr<VM> vm;
+  AtomicPtr<Structures> structures;
+  AtomicPtr<StringInterner> strings;
+
+  void get_multiple(AtomicLock<Structures>* structs,
+                    AtomicLock<StringInterner>* string_int) {
+    structures._mutex.acquire();
+    strings._mutex.acquire();
+
+    structs->_mutex = &structures._mutex;
+    structs->_ptr = structures._ptr;
+
+    string_int->_mutex = &strings._mutex;
+    string_int->_ptr = strings._ptr;
+  }
+};
+
+struct CompilerConstants {
+  APIPrintOptions        print_options = {};
+  BuildOptions           build_options = {};
+  APIOptimizationOptions optimization_options = {};
+
+  BuiltinTypes* builtin_types = nullptr;
+
+  SystemsAndConventionNames system_names = {};
+  Intrinsics intrinsics = {};
+  ImportantNames important_names = {};
+};
+
+constexpr void copy_compiler_constants(const CompilerConstants* from, CompilerConstants* to) {
+  *to = *from;
+}
+
+//Things that may be modified by multiple threads
+struct CompilerGlobals : CompilerConstants {
   Services services;
 
-  Array<Token> current_stream ={};
-
-  //CompPipes comp_unit_pipes;
-  Queue<CompilationUnit*> to_compile ={};
-
-  UnfoundDependencies unfound_deps ={};
+  CompPipes pipelines;
 
   Namespace* build_file_namespace ={};//needs to be saved for finding main
   Namespace* builtin_namespace ={};
@@ -476,78 +470,78 @@ struct Compiler {
   Array<FileAST> parsed_files ={};
   Array<DataHolder> data_holders ={};
 
-  FreelistBlockAllocator<SignatureUnit> signature_units ={};
-  FreelistBlockAllocator<StructureUnit> structure_units ={};
-  FreelistBlockAllocator<FunctionUnit> function_units ={};
-  FreelistBlockAllocator<ImportUnit> import_units ={};
-  FreelistBlockAllocator<ConstantExprUnit> const_expr_units ={};
-  FreelistBlockAllocator<GlobalUnit> global_units ={};
+  SpinLockMutex globals_mutex;
+  BucketArray<Global> globals_single_threaded ={};
+  SpinLockMutex functions_mutex;
+  BucketArray<Function> functions_single_threaded ={};
+  SpinLockMutex namespaces_mutex;
+  BucketArray<Namespace> namespaces_single_threaded ={};
 
-  BucketArray<Global> globals ={};
-  BucketArray<Function> functions ={};
-  BucketArray<Namespace> namespaces ={};
-
-  ArenaAllocator constants ={};
+  SpinLockMutex constants_mutex;
+  ArenaAllocator constants_single_threaded ={};
 
   uint64_t labels = 0;
 
   Function* new_function();
+  Global* new_global();
+  Namespace* new_namespace();
 
-  ImportUnit* new_import_unit(Namespace* ns);
-  ConstantExprUnit* new_const_expr_unit(Namespace* ns);
-  FunctionUnit* new_function_unit(Namespace* ns);
-  SignatureUnit* new_signature_unit(Namespace* ns);
-  StructureUnit* new_structure_unit(Namespace* ns);
-  GlobalUnit* new_global_unit(Namespace* ns);
+  template<typename T>
+  T* new_constant() {
+    //constants_mutex.acquire();
+    //T* t = constants_single_threaded.alloc_no_construct<T>();
+    //constants_mutex.release();
+    return (T*)malloc(sizeof(T));
+  }
 
-  inline constexpr bool is_panic() const { return services.errors->panic; }
-  inline constexpr bool is_depends() const { return new_depends || unfound_deps.panic; }
-  inline constexpr void reset_panic() { services.errors->panic = false; unfound_deps.panic = false; new_depends = false; }
+  inline u8* new_constant(usize size) {
+    //constants_mutex.acquire();
+    //u8* t = constants_single_threaded.alloc_no_construct(size);
+    //constants_mutex.release();
+    return (u8*)malloc(size);
+  }
 
-  inline constexpr bool is_compiling() const {
-    return to_compile.size > 0
-      || services.file_loader->unparsed_files.size > 0;
+  void free_constant(void* ptr) {
+    //constants_mutex.acquire();
+    //constants_single_threaded.free_no_destruct(ptr);
+    //constants_mutex.release();
+    free(ptr);
+  }
+
+  inline bool is_compiling() const {
+    auto files = services.file_loader.get();
+    auto compilation = services.compilation.get();
+    return files->unparsed_files.size > 0 || compilation->store.active_units.size > 0;
+  }
+};
+
+//Things that cannot be modified by other threads
+struct CompilerThread : CompilerConstants {
+
+  Array<Token> current_stream = {};
+  Errors errors = {};
+
+  UnfoundNames local_unfound_names;
+  Array<UnitID> new_depends;
+
+  inline bool is_panic() const { return errors.panic; }
+  inline bool is_depends() const {
+    return new_depends.size > 0 || local_unfound_names.names.size > 0;
   }
 
   template<typename ... T>
   void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) {
-    services.errors->report_error(code, span, f_message, ts...);
+    errors.report_error(code, span, f_message, ts...);
   }
-
-  template<typename ... T>
-  void set_unfound_name(Context* context, UnknownName&& name,
-                        ERROR_CODE code, const Span& span,
-                        const char* f_message, T&& ... ts) {
-    ASSERT(name.ident != nullptr);
-    unfound_deps.panic = true;
-
-    unfound_deps.unfound.insert_uninit(1);
-    UnfoundDep* dep = unfound_deps.unfound.back();
-
-    dep->name = std::move(name);
-    dep->unit_waiting = context->current_unit;
-    dep->as_error.type = code;
-    dep->as_error.span = span;
-    dep->as_error.message = format(f_message, std::forward<T>(ts)...);
-
-    context->current_unit->num_deps += 1;
-  }
-
-  void set_dep(Context* context, CompilationUnit* unit);
 };
 
-void add_comp_unit_for_lambda(Compiler* const comp, Namespace* ns, ASTLambda* lambda) noexcept;
-void add_comp_unit_for_struct(Compiler* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;
+#if 0
+void set_dependency(CompilerGlobals* const comp, Context* const context, CompilationUnit* current, CompilationUnit* waiting_on);
 
-void init_compiler(const APIOptions& options, Compiler* comp);
+CompilationUnit* compile_and_execute(Compiler* const comp, Namespace* const available_names, AST_LOCAL ast, Type cast_to);
 
-ERROR_CODE compile_all(Compiler* const comp);
-
-void set_runtime_flags(AST_LOCAL expr, State* const state,
-                       bool modified, uint8_t valid_rvts);
 
 void cast_operator_type(Compiler* const comp,
-                        Context* const context,
                         State* const state,
                         ASTCastExpr* const expr);
 
@@ -555,30 +549,30 @@ void process_parsed_file(Compiler* const comp, FileAST* const func);
 
 void print_compiled_functions(const Compiler* comp);
 
-RuntimeValue new_const_in_reg(Compiler* const comp,
-                              State* const state,
-                              CodeBlock* const code,
-                              const uint8_t* data,
-                              size_t);
 
-void copy_runtime_to_runtime(Compiler* const comp,
+#endif
+
+UnitID compile_and_execute(CompilerGlobals* const comp, Namespace* const available_names, AST_LOCAL ast, Type cast_to);
+
+void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread);
+
+void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThread* comp_thread);
+
+void set_runtime_flags(AST_LOCAL expr, State* const state,
+                       bool modified, uint8_t valid_rvts);
+
+void copy_runtime_to_runtime(CompilerGlobals* const comp,
                              State* const state,
                              CodeBlock* const code,
                              const Structure* type,
                              const RuntimeValue* from,
                              RuntimeValue* to);
 
-const Structure* find_or_make_array_structure(Compiler* const comp,
-                                         Context* context,
-                                         const Type& base,
-                                         size_t length);
+RuntimeValue new_const_in_reg(CompilerGlobals* const comp,
+                              State* const state,
+                              CodeBlock* const code,
+                              const uint8_t* data,
+                              size_t);
 
-const Structure* find_or_make_pointer_structure(Compiler* const comp,
-                                           Context* context,
-                                           const Type& base);
-
-const Structure* find_or_make_tuple_structure(Compiler* const comp,
-                                            Context* context,
-                                            Array<Type>&& elements);
-
-void build_data_section_for_vm(Program* prog, Compiler* const comp);
+void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTLambda* lambda) noexcept;
+void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;

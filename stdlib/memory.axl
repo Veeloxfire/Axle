@@ -1,11 +1,11 @@
-#import #std("kernel32");
+#import "kernel32.axl";
 
-heap_handle : $dynamic = GetProcessHeap();
+heap_handle := GetProcessHeap();
 
-allocate := (bytes: u64) -> *void {
+allocate :: (bytes: u64) -> *void {
   return HeapAlloc(heap_handle, 0, bytes);
 }
 
-free := (ptr: *void) -> void {
+free :: (ptr: *void) -> void {
   HeapFree(heap_handle, 0, ptr);
 }

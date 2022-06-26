@@ -92,7 +92,7 @@ inline constexpr void pass_meta_flags_down(META_FLAGS* low, META_FLAGS high) {
   *low |= high & META_DOWN_FLAGS;
 }
 
-using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, Compiler*, State*, CodeBlock*, const RuntimeValue*>;
+using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*>;
 
 enum struct STRUCTURE_TYPE : u8 {
   VOID = 0,
@@ -260,7 +260,8 @@ struct Function {
   const ASTLambda* declaration = nullptr;
 
   FunctionSignature signature ={};
-  CompilationUnit* compilation_unit = nullptr;
+  UnitID sig_unit_id = 0;
+  UnitID body_unit_id = 0;
 
 //  FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
 
@@ -308,29 +309,37 @@ struct Structures {
 };
 
 namespace STRUCTS {
-  TupleStructure* new_tuple_structure(Compiler* comp, Array<Type>&& types);
-  IntegerStructure* new_int_structure(Compiler* comp, const InternString* name);
-  CompositeStructure* new_composite_structure(Compiler* comp);
-  Structure* new_base_structure(Compiler* comp, const InternString* name);
-  ArrayStructure* new_array_structure(Compiler* comp, const Type& base,
+  TupleStructure* new_tuple_structure(Structures* comp, StringInterner* strings, Array<Type>&& types);
+  IntegerStructure* new_int_structure(Structures* comp, const InternString* name);
+  CompositeStructure* new_composite_structure(Structures* comp, StringInterner* strings);
+  Structure* new_base_structure(Structures* comp, const InternString* name);
+  ArrayStructure* new_array_structure(Structures* comp, StringInterner* strings,
+                                      const Type& base,
                                       size_t length);
-  PointerStructure* new_pointer_structure(Compiler* comp, const Type& base);
-  SignatureStructure* new_lambda_structure(Compiler* comp, const CallingConvention* conv,
+  PointerStructure* new_pointer_structure(Structures* comp, StringInterner* strings, usize ptr_size, const Type& base);
+  SignatureStructure* new_lambda_structure(Structures* comp, StringInterner* strings,
+                                           usize ptr_size, const CallingConvention* conv,
                                            Array<Type>&& params,
                                            Type ret_type);
-  EnumStructure* new_enum_structure(Compiler* comp, const Type&);
-  EnumValue* new_enum_value(Compiler* comp,
+  EnumStructure* new_enum_structure(Structures* comp, StringInterner* strings, const Type&);
+  EnumValue* new_enum_value(Structures* comp,
                             EnumStructure* enum_s,
                             const InternString* enum_name,
                             const InternString* value_name);
 }
 
+const Structure* find_or_make_array_structure(Structures* comp, StringInterner* strings, const Type& base, size_t length);
+
+const Structure* find_or_make_pointer_structure(Structures* comp, StringInterner* strings, usize ptr_size, const Type& base);
+
+const Structure* find_or_make_tuple_structure(Structures* comp, StringInterner* strings, Array<Type>&& types);
+
 namespace CASTS {
-  RuntimeValue u8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
-  RuntimeValue i8_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
-  RuntimeValue u32_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
-  RuntimeValue i32_to_r64(Compiler*, State*, CodeBlock*, const RuntimeValue*);
-  RuntimeValue no_op(Compiler*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue u8_to_r64(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue i8_to_r64(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue u32_to_r64(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue i32_to_r64(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
+  RuntimeValue no_op(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
 }
 
 namespace TYPE_TESTS {

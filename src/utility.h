@@ -6,10 +6,7 @@
 #include <new>
 
 #include "safe_lib.h"
-
-#define BYTE(a) (static_cast<uint8_t>(a))
-#define JOIN2(a, b) a ## b
-#define JOIN(a, b) JOIN2(a, b)
+#include "threading.h"
 
 #define FOR(name, it) \
 for(auto it = (name).begin(), JOIN(__end, __LINE__) = (name).end(); \
@@ -448,13 +445,14 @@ void sort_range(T* start, T* end, const L& pred) {
 
 template<typename T>
 struct Array {
-  T* data     = nullptr;// ptr to data in the array
+  T* data         = nullptr;// ptr to data in the array
   size_t size     = 0;// used size
   size_t capacity = 0;
 
   //No copy!
   Array(const Array&) = delete;
 
+  Array() noexcept = default;
   Array(Array&& arr) noexcept : data(arr.data), size(arr.size), capacity(arr.capacity)
   {
     arr.data = nullptr;
@@ -462,8 +460,7 @@ struct Array {
     arr.capacity = 0;
   }
 
-  Array() noexcept = default;
-  Array(size_t s) noexcept : data(allocate_default<T>(s)), size(s), capacity(s) {}
+  //Array(size_t s) noexcept : data(allocate_default<T>(s)), size(s), capacity(s) {}
 
   Array& operator=(Array&& arr) noexcept {
     free();
@@ -686,10 +683,13 @@ struct Array {
 
   void concat(Array<T>&& arr) noexcept {
     reserve_extra(arr.size);
-    memcpy_ts(data + size, (capacity - size), arr.data, arr.size);
+    T* start = data + size;
+    FOR_MUT(arr, it) {
+      *start = std::move(*it);
+      start += 1;
+    }
 
     size += arr.size;
-
     arr.free();
   }
 
@@ -912,7 +912,7 @@ struct SparseHashSet {
       const KeyEntry* const keys = key_entry_arr();
 
       used++;
-      keys[soa_index] = key;
+      keys[soa_index] = *key;
     }
     else {
       size_t soa_index = get_soa_index(key);
@@ -931,7 +931,7 @@ struct SparseHashSet {
       const KeyEntry* const keys = key_entry_arr();
 
       used++;
-      keys[soa_index] = key;
+      keys[soa_index] = *key;
     }
   }
 };
@@ -1059,6 +1059,8 @@ struct BucketArray {
   }
 };
 
+#define ARENA_ALLOCATOR_DEBUG
+
 struct ArenaAllocator {
   static_assert(sizeof(void*) == sizeof(uint64_t), "Must be 8 bytes");
 
@@ -1077,14 +1079,19 @@ struct ArenaAllocator {
     FreeList* next = nullptr;
   };
 
+#ifdef ARENA_ALLOCATOR_DEBUG
+  Array<void*> allocated;
+#else
   Block* base = nullptr;
   FreeList* free_list = nullptr;
+#endif
 
   ArenaAllocator() = default;
   ~ArenaAllocator();
 
   bool _debug_freelist_loops() const;
-  bool _debug_valid_free_pointer(void* ptr) const;
+  bool _debug_valid_pointer(void* ptr) const;
+  bool _debug_is_allocated_data(uint64_t* ptr, usize len) const;
 
   void new_block();
   void add_to_free_list(FreeList* fl);
@@ -1445,6 +1452,108 @@ struct Queue {
 };
 
 template<typename T>
+struct AtomicQueue {
+  SpinLockMutex mutex;
+
+  T* holder;
+  usize start;
+  volatile __int64 atomic_size;
+  usize capacity;
+
+  //No copy!
+  AtomicQueue(const AtomicQueue&) = delete;
+
+  AtomicQueue() noexcept = default;
+
+  void free() {
+    usize size = (usize)_InterlockedOr64(&atomic_size, 0);
+    if (start + size > capacity) {
+      usize temp = capacity - start;
+      destruct_arr<T>(holder + start, temp);
+      destruct_arr<T>(holder + start, size - temp);
+    }
+    else {
+      destruct_arr<T>(holder + start, size);
+    }
+
+    ::free_no_destruct(holder);
+    holder = nullptr;
+    start = 0;
+    _InterlockedExchange64(&atomic_size, 0);
+    capacity = 0;
+  }
+
+  ~AtomicQueue() noexcept {
+    free();
+  }
+
+  //Does the index taking into account wrapping
+  usize _ptr_index(usize i) const {
+    return (start + i) % capacity;
+  }
+
+  bool is_immediately_empty() {
+    return (usize)_InterlockedOr64(&atomic_size, 0) == 0;
+  }
+
+  //returns true if there is a value in out_t
+  bool try_pop_front(T* out_t) {
+    mutex.acquire();
+    if (is_immediately_empty()) {
+      mutex.release();
+      return false;
+    }
+
+    _InterlockedDecrement64(&atomic_size);
+    *out_t = std::move(holder[start]);
+    start++;
+
+    if (start >= capacity) {
+      start -= capacity;
+    }
+
+    mutex.release();
+    return true;
+  }
+
+  void push_back(T t) {
+    mutex.acquire();
+    if ((usize)_InterlockedOr64(&atomic_size, 0) == capacity) {
+      extend();
+    }
+
+    usize s = (usize)_InterlockedIncrement64(&atomic_size);
+
+    new(holder + _ptr_index(s - 1)) T(std::move(t));
+    mutex.release();
+  }
+
+  void extend() {
+    if (capacity == 0) {
+      holder = allocate_default<T>(8);
+      capacity = 8;
+      return;
+    }
+
+    usize new_cap = capacity << 1;
+
+    T* new_holder = allocate_default<T>(new_cap);
+
+    usize i = 0;
+    usize end_i = (usize)_InterlockedOr64(&atomic_size, 0) + 1llu;
+    for (; i < end_i; i++) {
+      new_holder[i] = std::move(holder[_ptr_index(i)]);
+    }
+
+    free_no_destruct(holder);
+    holder = new_holder;
+    capacity = new_cap;
+
+    start = 0;
+  }
+};
+
+template<typename T>
 struct OwnedPtr {
   T* ptr = nullptr;
   OwnedPtr(const OwnedPtr&) = delete;
@@ -1482,6 +1591,20 @@ struct OwnedPtr {
     ptr = nullptr;
   }
 };
+
+//template<typename T>
+//struct LinkedList {
+//
+//  struct LinkedNode;
+//
+//  T* alloc() {
+//
+//  }
+//
+//  void remove(T* t) {
+//
+//  }
+//};
 
 template<typename U, typename T>
 OwnedPtr<U> cast_ptr(OwnedPtr<T>&& ptr) {

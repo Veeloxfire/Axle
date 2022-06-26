@@ -14,7 +14,8 @@ struct BinOpEmitInfo {
 
 struct BinOpArgs {
   const BinOpEmitInfo* info;
-  Compiler* comp;
+  CompilerGlobals* comp;
+  //CompilerThread* comp_thread;
   State* state;
   CodeBlock* code;
   const RuntimeValue* left;
@@ -44,7 +45,8 @@ struct BinOpArgs {
 };
 
 struct UnOpArgs {
-  Compiler* comp;
+  CompilerGlobals* comp;
+  //CompilerThread* comp_thread;
   State* state;
   CodeBlock* code;
   const RuntimeValue* prim;
@@ -115,61 +117,62 @@ struct DerefUnOp {
 };
 
 //Overload for operators that dont care about sign
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
                              const SignAgnArithBinOp& op);
 
 //Overload for operators that do care about sign
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
                              const SignedArithBinOp& op);
 
 //Overload for operators that return bools
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
                              const EqOpBin& op);
 
 //Overload for unpositioned operators
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
                              const UnpositionedBinOpOptions& op);
 
 //Overload for unbalanced operators
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
                              const UnbalancedBinOpOptions& op);
 
 //Overload for unbalanced operators that dont care about left sign
-void compile_binary_operator(Compiler* comp,
-                             Context* context,
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
                              State* state,
                              struct ASTBinaryOperatorExpr* expr,
                              const UnbalancedLeftSignAgnBin& op);
 
 //Overload for unary operators
-void compile_unary_operator(Compiler* comp,
-                            Context* context,
+void compile_unary_operator(CompilerGlobals* comp,
+                            CompilerThread* comp_thread,
                             State* state,
                             struct ASTUnaryOperatorExpr* expr,
                             const UnaryOpOptions& op);
 
 //Overload for taking address
-void compile_take_address(Compiler* comp,
-                          Context* context,
+void compile_take_address(CompilerGlobals* comp,
+                          CompilerThread* comp_thread,
                           State* state,
                           struct ASTUnaryOperatorExpr* expr);
 
-void compile_deref(Compiler* comp,
+void compile_deref(CompilerGlobals* comp,
+                   CompilerThread* comp_thread,
                    struct ASTUnaryOperatorExpr* expr);
 
 inline constexpr UnpositionedBinOpOptions add_operators ={ 

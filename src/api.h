@@ -7,6 +7,7 @@ struct APIOptimizationOptions {
 };
 
 struct APIBuildOptions {
+  const char* current_directory = nullptr;
   const char* file_name   = nullptr;
   const char* entry_point = nullptr;
   const char* output_file = nullptr;

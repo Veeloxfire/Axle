@@ -104,7 +104,7 @@ struct FileData {
   FILES::FileData* data = nullptr;
 
   usize top = 0;
-  u8 buffer[BUFFER_SIZE] ={};
+  u8 buffer[BUFFER_SIZE] = {};
 };
 
 
@@ -205,14 +205,14 @@ void write_u16(FileData* f, u16 num) {
   char str[] = "0x0000";
 
   u16 mask = 0x000f;
-  for (u16 i = 0; i < 8; i++) {
+  for (u16 i = 0; i < 4; i++) {
     u16 p = (num & mask) >> (i * 4);
 
     if (p >= 0xa) {
-      str[sizeof(str) - 2 - i] = 'a' + (char)(p - 0xa);
+      str[(sizeof(str) - 2) - i] = 'a' + (char)(p - 0xa);
     }
     else {
-      str[sizeof(str) - 2 - i] = '0' + (char)p;
+      str[(sizeof(str) - 2) - i] = '0' + (char)p;
     }
 
     mask <<= 4;
@@ -415,7 +415,7 @@ void write_complex_mem(FileData* f, const MemComplex& mem) {
   write_str(f, "]");
 }
 
-void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
+void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const comp_thread, const CodeBlock* code) {
   TRACING_FUNCTION();
 
   auto code_i = code->code.begin();
@@ -469,7 +469,7 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
 
           write_str(f, "lea ");
           write_reg(f, p.val, b64_reg_name);
-          write_str(f, ", QWORD [");
+          write_str(f, ", [");
           write_str(f, d->name);
           write_str(f, "]");
           write_str(f, "\n");
@@ -803,7 +803,7 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
 
           write_str(f, "lea ");
           write_reg(f, i.val, b64_reg_name);
-          write_str(f, ", QWORD ");
+          write_str(f, ", ");
           write_complex_mem(f, i.mem);
           write_str(f, "\n");
 
@@ -898,27 +898,27 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
           code_i += ByteCode::SIZE_OF::RETURN;
           break;
         }
-      //case ByteCode::CALL_CONST: {
-      //    const auto p = ByteCode::PARSE::CALL_CONST(code_i);
-      //    const Function* func = p.u64;
-      //    
-      //    write_str(f, "call ");
-      //    write_label(f, func->code_block.label);
-      //    write_str(f, "\n");
+                           //case ByteCode::CALL_CONST: {
+                           //    const auto p = ByteCode::PARSE::CALL_CONST(code_i);
+                           //    const Function* func = p.u64;
+                           //    
+                           //    write_str(f, "call ");
+                           //    write_label(f, func->code_block.label);
+                           //    write_str(f, "\n");
 
-      //    code_i += ByteCode::SIZE_OF::CALL_CONST;
-      //    break;
-      //  }
-      //case ByteCode::CALL_MEM: {
-      //    const auto p = ByteCode::PARSE::CALL_MEM(code_i);
+                           //    code_i += ByteCode::SIZE_OF::CALL_CONST;
+                           //    break;
+                           //  }
+                           //case ByteCode::CALL_MEM: {
+                           //    const auto p = ByteCode::PARSE::CALL_MEM(code_i);
 
-      //    write_str(f, "call ");
-      //    write_complex_mem(f, p.mem);
-      //    write_str(f, "\n");
+                           //    write_str(f, "call ");
+                           //    write_complex_mem(f, p.mem);
+                           //    write_str(f, "\n");
 
-      //    code_i += ByteCode::SIZE_OF::CALL_MEM;
-      //    break;
-      //  }
+                           //    code_i += ByteCode::SIZE_OF::CALL_MEM;
+                           //    break;
+                           //  }
       case ByteCode::CALL_LABEL: {
           const auto p = ByteCode::PARSE::CALL_LABEL(code_i);
           const u64 label = p.u64;
@@ -965,23 +965,23 @@ void write_code(FileData* f, Compiler* const comp, const CodeBlock* code) {
         }
       default: {
           uint8_t op = *code_i;
-          comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
-                             "Backend found unsupported bytecode instruction\n"
-                             "Code: {}, Name: {}",
-                             op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                                    "Backend found unsupported bytecode instruction\n"
+                                    "Code: {}, Name: {}",
+                                    op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
           return;
         }
     }
   }
 }
 
-void nasm_backend(const char* file_name, Compiler* comp) {
+void nasm_backend(const char* file_name, CompilerGlobals* comp, CompilerThread* comp_thread) {
   FILES::OpenedFile f = FILES::replace(file_name, FILES::OPEN_MODE::WRITE);
 
   ASSERT(f.error_code == ErrorCode::OK);
 
 
-  FileData file ={};
+  FileData file = {};
   file.data = f.file;
   file.top = 0;
 
@@ -994,8 +994,10 @@ void nasm_backend(const char* file_name, Compiler* comp) {
   write_str(&file, "segment .bss\n");
 
   {
-    auto i = comp->globals.begin_const_iter();
-    auto end = comp->globals.end_const_iter();
+    comp->globals_mutex.acquire();
+
+    auto i = comp->globals_single_threaded.begin_const_iter();
+    auto end = comp->globals_single_threaded.end_const_iter();
 
     for (; i != end; i.next()) {
       const Global* g = i.get();
@@ -1007,6 +1009,8 @@ void nasm_backend(const char* file_name, Compiler* comp) {
         write_str(&file, ":\n RESQ 1\n");
       }
     }
+
+    comp->globals_mutex.release();
   }
 
   write_str(&file, "segment .text\n");
@@ -1039,8 +1043,10 @@ void nasm_backend(const char* file_name, Compiler* comp) {
   }
 
   {
-    auto i = comp->globals.begin_const_iter();
-    auto end = comp->globals.end_const_iter();
+    comp->globals_mutex.acquire();
+
+    auto i = comp->globals_single_threaded.begin_const_iter();
+    auto end = comp->globals_single_threaded.end_const_iter();
 
     for (; i != end; i.next()) {
       const Global* g = i.get();
@@ -1048,39 +1054,47 @@ void nasm_backend(const char* file_name, Compiler* comp) {
       if ((g->decl.meta_flags & META_FLAG::COMPTIME) == 0) {
         ASSERT(g->decl.type.structure->size == 8);//TEMP
 
-        write_code(&file, comp, &g->init);
-        if (comp->is_panic()) {
+        write_code(&file, comp, comp_thread, &g->init);
+        if (comp_thread->is_panic()) {
           return;
         }
       }
     }
+
+    comp->globals_mutex.release();
   }
 
   {
-    auto i = comp->functions.begin_const_iter();
-    auto end = comp->functions.end_const_iter();
+    comp->functions_mutex.acquire();
+
+    auto i = comp->functions_single_threaded.begin_const_iter();
+    auto end = comp->functions_single_threaded.end_const_iter();
 
     for (; i != end; i.next()) {
       const Function* f = i.get();
 
       //write_label(&file, f->code_block.label);
       //write_str(&file, ":\n");
-      write_code(&file, comp, &f->code_block);
-      if (comp->is_panic()) {
+      write_code(&file, comp, comp_thread, &f->code_block);
+      if (comp_thread->is_panic()) {
         return;
       }
     }
+
+    comp->functions_mutex.release();
   }
 
   {
-    const GlobalName* n = find_global_name(comp->build_file_namespace, comp->build_options.entry_point);
-    ASSERT(n != nullptr);
+
+
 
     write_str(&file, comp->build_options.entry_point);
     write_str(&file, ":\n");
     {
-      auto i = comp->globals.begin_const_iter();
-      auto end = comp->globals.end_const_iter();
+      comp->globals_mutex.acquire();
+
+      auto i = comp->globals_single_threaded.begin_const_iter();
+      auto end = comp->globals_single_threaded.end_const_iter();
 
       for (; i != end; i.next()) {
         const Global* g = i.get();
@@ -1093,10 +1107,21 @@ void nasm_backend(const char* file_name, Compiler* comp) {
           write_str(&file, "\n");
         }
       }
+
+      comp->globals_mutex.release();
     }
 
+
+
     write_str(&file, "jmp ");
-    write_label(&file, *(usize*)n->global->constant_value.ptr);
+    usize label;
+    {
+      auto names = comp->services.names.get();
+      const GlobalName* n = names->find_global_name(comp->build_file_namespace, comp->build_options.entry_point);
+      ASSERT(n != nullptr);
+      label = *(usize*)n->global->constant_value.ptr;
+    }
+    write_label(&file, label);
     write_str(&file, "\n");
   }
 }

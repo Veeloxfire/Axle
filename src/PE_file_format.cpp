@@ -587,7 +587,8 @@ static RVA_Resolver get_rva_section_resolver(PEFile* pe_file, RVA rva) {
   return {};
 }
 
-void load_portable_executable_from_file(Compiler* const comp,
+void load_portable_executable_from_file(CompilerGlobals* const comp,
+                                        CompilerThread* const comp_thread,
                                         const Span& span,
                                         PEFile* pe_file,
                                         const char* file_name) {
@@ -595,7 +596,7 @@ void load_portable_executable_from_file(Compiler* const comp,
   FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::READ);
 
   if (file.error_code != ErrorCode::OK) {
-    comp->report_error(ERROR_CODE::FILE_ERROR, span,
+    comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                        "Could not open file '{}'\n"
                        "Perhaps it does not exist",
                        file_name);
@@ -608,7 +609,7 @@ void load_portable_executable_from_file(Compiler* const comp,
   FILES::read(file.file, &pe_file->header.ms_dos, 1);
 
   if (pe_file->header.ms_dos.magic != MAGIC_NUMBER::MZ) {
-    comp->report_error(ERROR_CODE::FILE_ERROR, span,
+    comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                        "File '{}' did not have correct type\n"
                        "Magic numbers did not match\n"
                        "Expected '{}'. Found '{}'",
@@ -626,7 +627,7 @@ void load_portable_executable_from_file(Compiler* const comp,
     char* sig = (char*)pe_file->header.signature;
 
     if (memcmp_ts(expected_sig, sig, 4) != 0) {
-      comp->report_error(ERROR_CODE::FILE_ERROR, span,
+      comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                          "File '{}' did not have correct signature\n"
                          "Expected: {} {} {} {}. Found: {} {} {} {}",
                          file_name,
@@ -643,7 +644,7 @@ void load_portable_executable_from_file(Compiler* const comp,
   FILES::read(file.file, &pe_file->header.pe32, 1);
 
   if (pe_file->header.pe32.magic_number != MAGIC_NUMBER::PE32_PLUS) {
-    comp->report_error(ERROR_CODE::FILE_ERROR, span,
+    comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                        "File '{}' did not have correct type\n"
                        "2nd magic numbers did not match\n"
                        "Expected '{}'. Found '{}'",
@@ -658,7 +659,7 @@ void load_portable_executable_from_file(Compiler* const comp,
     const PE32Plus_windows_specific& win = pe_file->header.pe32_windows;
 
     if (win.win32_version != 0 || win.loader_flags != 0) {
-      comp->report_error(ERROR_CODE::FILE_ERROR, span,
+      comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                          "Parts of file '{}' that are reserved as 0 were not 0\n"
                          "This is probably an internal reading error",
                          file_name);
@@ -675,7 +676,7 @@ void load_portable_executable_from_file(Compiler* const comp,
     size_t expected = pe_file->header.coff.size_of_optional_header + opt_header_pos;
 
     if (currpos != expected) {
-      comp->report_error(ERROR_CODE::FILE_ERROR, span,
+      comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                          "Size mismatch in header\n"
                          "Expected optional header position '{}'. Found '{}'",
                          expected, currpos);
@@ -708,7 +709,7 @@ void load_portable_executable_from_file(Compiler* const comp,
 
     const ExportDirectoryTable& directory_table = pe_file->export_table.directory_table;
     if (directory_table.export_flags != 0) {
-      comp->report_error(ERROR_CODE::FILE_ERROR, span,
+      comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                          "Export table export flags should be '0'. Found '{}'\n"
                          "This is probably an internal error",
                          directory_table.export_flags);
@@ -780,7 +781,7 @@ void load_portable_executable_from_file(Compiler* const comp,
 
         name_holder.insert('\0');
 
-        ptr->str = comp->services.strings->intern(name_holder.data);
+        ptr->str = comp->services.strings.get()->intern(name_holder.data);
         pe_file->export_table.names.insert(ptr->str);
 
         name_holder.clear();

@@ -222,9 +222,12 @@ size_t FILES::get_current_pos(FileData* file) {
 }
 
 
-FileLocation parse_file_location(const char* path_str,
-                                 const char* file_str,
+FileLocation parse_file_location(const char* const path_str_in,
+                                 const char* const file_str_in,
                                  StringInterner* const strings) {
+
+  const char* file_str = file_str_in;
+  const char* path_str = path_str_in;
 
   //check if file is absolute path
   if (file_str != nullptr) {
@@ -239,6 +242,10 @@ FileLocation parse_file_location(const char* path_str,
         //Absolute path
         path_str = file_str;
         file_str = nullptr;
+        break;
+      }
+      else if (c == '.') {
+        //Relative path
         break;
       }
       else if (c == '\\' || c == '/') {

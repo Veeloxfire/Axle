@@ -36,8 +36,8 @@ Type BuiltinTypes::get_signed_of(const Type& ty) {
 //}
 
 
-TupleStructure* STRUCTS::new_tuple_structure(Compiler* comp, Array<Type>&& types) {
-  TupleStructure* const type = comp->services.structures->tuple_structures.allocate();
+TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInterner* strings, Array<Type>&& types) {
+  TupleStructure* const type = structures->tuple_structures.allocate();
 
   type->type = STRUCTURE_TYPE::TUPLE;
 
@@ -93,25 +93,25 @@ TupleStructure* STRUCTS::new_tuple_structure(Compiler* comp, Array<Type>&& types
 
     type->size = current_size;
     type->alignment = current_align;
-    type->struct_name = comp->services.strings->intern(name.data);
+    type->struct_name = strings->intern(name.data);
   }
 
-  comp->services.structures->structures.insert(type);
+  structures->structures.insert(type);
 
   return type;
 }
 
 
-SignatureStructure* STRUCTS::new_lambda_structure(Compiler* comp, const CallingConvention* conv,
+SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, StringInterner* strings, usize ptr_size, const CallingConvention* conv,
                                                   Array<Type>&& params,
                                                   Type ret_type) {
-  SignatureStructure* type = comp->services.structures->lambda_structures.allocate();
+  SignatureStructure* type = structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
   type->parameter_types = std::move(params);
   type->return_type = ret_type;
   type->calling_convention = conv;
-  type->size = comp->build_options.ptr_size;
-  type->alignment = comp->build_options.ptr_size;
+  type->size = (u32)ptr_size;
+  type->alignment = (u32)ptr_size;
 
   {
     Array<char> name ={};
@@ -133,63 +133,62 @@ SignatureStructure* STRUCTS::new_lambda_structure(Compiler* comp, const CallingC
     format_to_array(name, ") -> {}", type->return_type.name);
     name.insert('\0');
 
-    type->struct_name = comp->services.strings->intern(name.data);
+    type->struct_name = strings->intern(name.data);
   }
 
-  comp->services.structures->structures.insert(type);
+  structures->structures.insert(type);
 
   return type;
 }
 
 
-IntegerStructure* STRUCTS::new_int_structure(Compiler* comp, const InternString* name) {
-  IntegerStructure* const type = comp->services.structures->int_structures.allocate();
+IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const InternString* name) {
+  IntegerStructure* const type = structures->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
   type->struct_name = name;
-  comp->services.structures->structures.insert(type);
+  structures->structures.insert(type);
 
   return type;
 }
 
-CompositeStructure* STRUCTS::new_composite_structure(Compiler* comp) {
-
-  CompositeStructure* const type = comp->services.structures->composite_structures.allocate();
+CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, StringInterner* strings) {
+  CompositeStructure* const type = structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
-  type->struct_name = comp->services.strings->intern("anoymous-struct");
+  type->struct_name = strings->intern("anoymous-struct");
 
-  comp->services.structures->structures.insert(type);
+  structures->structures.insert(type);
 
   return type;
 }
 
-EnumStructure* STRUCTS::new_enum_structure(Compiler* comp, const Type& base) {
-  EnumStructure* const type = comp->services.structures->enum_structures.allocate();
+EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterner* strings, const Type& base) {
+  EnumStructure* const type = structures->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
-  type->struct_name = comp->services.strings->intern(EnumStructure::gen_name(base).ptr);
+  type->struct_name = strings->intern(EnumStructure::gen_name(base).ptr);
   type->base = base;
 
   type->size = base.structure->size;
   type->alignment = base.structure->alignment;
 
-  comp->services.structures->structures.insert(type);
+  structures->structures.insert(type);
 
   return type;
 }
 
-Structure* STRUCTS::new_base_structure(Compiler* comp, const InternString* name) {
-  Structure* const type = comp->services.structures->base_structures.allocate();
+Structure* STRUCTS::new_base_structure(Structures* structures, const InternString* name) {
+  Structure* const type = structures->base_structures.allocate();
   type->struct_name = name;
 
-  comp->services.structures->structures.insert(type);
+  structures->structures.insert(type);
 
   return type;
 }
 
-ArrayStructure* STRUCTS::new_array_structure(Compiler* comp, const Type& base,
+ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInterner* strings, const Type& base,
                                              size_t length) {
-  const InternString* name = comp->services.strings->intern(ArrayStructure::gen_name(base, length).ptr);
+  const InternString* name = strings->intern(ArrayStructure::gen_name(base, length).ptr);
 
-  ArrayStructure* const type = comp->services.structures->array_structures.allocate();
+  ArrayStructure* const type = structures->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
   type->base = base;
   type->length = length;
@@ -198,37 +197,37 @@ ArrayStructure* STRUCTS::new_array_structure(Compiler* comp, const Type& base,
   type->size = base.structure->size * (u32)length;
   type->alignment = base.structure->alignment;
 
-  comp->services.structures->structures.insert(type);
+  structures->structures.insert(type);
 
   return type;
 }
 
-PointerStructure* STRUCTS::new_pointer_structure(Compiler* comp, const Type& base) {
-  const InternString* name = comp->services.strings->intern(PointerStructure::gen_name(base).ptr);
+PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringInterner* strings, usize ptr_size, const Type& base) {
+  const InternString* name = strings->intern(PointerStructure::gen_name(base).ptr);
 
-  PointerStructure* const type = comp->services.structures->pointer_structures.allocate();
+  PointerStructure* const type = structures->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
   type->base = base;
   type->struct_name = name;
 
-  type->size = comp->build_options.ptr_size;
-  type->alignment = comp->build_options.ptr_size;
+  type->size = (u32)ptr_size;
+  type->alignment = (u32)ptr_size;
 
-  comp->services.structures->structures.insert(type);
+  structures->structures.insert(type);
 
   return type;
 }
 
-EnumValue* STRUCTS::new_enum_value(Compiler* comp,
+EnumValue* STRUCTS::new_enum_value(Structures* structures,
                                    EnumStructure* enum_s,
                                    const InternString* enum_name,
                                    const InternString* value_name) {
-  EnumValue* const val = comp->services.structures->enum_values.allocate();
+  EnumValue* const val = structures->enum_values.allocate();
   val->type = Type{ enum_name, enum_s };
   val->name = value_name;
 
   enum_s->enum_values.insert(val);
-  comp->services.structures->enums.insert(val);
+  structures->enums.insert(val);
 
   //NamedElement* el = comp->services.names->create_name(current_namespace, name);
   //if (el == nullptr) {
@@ -318,7 +317,7 @@ Structures::~Structures() {
 
 using CAST_BYTECODE = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;
 
-RuntimeValue impl_single_cast(Compiler* const comp,
+RuntimeValue impl_single_cast(CompilerGlobals* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const Structure* type,
@@ -338,35 +337,35 @@ RuntimeValue impl_single_cast(Compiler* const comp,
   return reg;
 }
 
-RuntimeValue CASTS::u8_to_r64(Compiler* const comp,
+RuntimeValue CASTS::u8_to_r64(CompilerGlobals* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->services.builtin_types->t_u8.structure, val, ByteCode::EMIT::CONV_RU8_TO_R64);
+  return impl_single_cast(comp, state, code, comp->builtin_types->t_u8.structure, val, ByteCode::EMIT::CONV_RU8_TO_R64);
 }
 
-RuntimeValue CASTS::i8_to_r64(Compiler* const comp,
+RuntimeValue CASTS::i8_to_r64(CompilerGlobals* const comp,
                               State* const state,
                               CodeBlock* const code,
                               const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->services.builtin_types->t_i8.structure, val, ByteCode::EMIT::CONV_RI8_TO_R64);
+  return impl_single_cast(comp, state, code, comp->builtin_types->t_i8.structure, val, ByteCode::EMIT::CONV_RI8_TO_R64);
 }
 
-RuntimeValue CASTS::u32_to_r64(Compiler* const comp,
+RuntimeValue CASTS::u32_to_r64(CompilerGlobals* const comp,
                                State* const state,
                                CodeBlock* const code,
                                const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->services.builtin_types->t_u8.structure, val, ByteCode::EMIT::CONV_RU32_TO_R64);
+  return impl_single_cast(comp, state, code, comp->builtin_types->t_u8.structure, val, ByteCode::EMIT::CONV_RU32_TO_R64);
 }
 
-RuntimeValue CASTS::i32_to_r64(Compiler* const comp,
+RuntimeValue CASTS::i32_to_r64(CompilerGlobals* const comp,
                                State* const state,
                                CodeBlock* const code,
                                const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->services.builtin_types->t_i8.structure, val, ByteCode::EMIT::CONV_RI32_TO_R64);
+  return impl_single_cast(comp, state, code, comp->builtin_types->t_i8.structure, val, ByteCode::EMIT::CONV_RI32_TO_R64);
 }
 
-RuntimeValue CASTS::no_op(Compiler* const comp,
+RuntimeValue CASTS::no_op(CompilerGlobals* const comp,
                           State* const state,
                           CodeBlock* const code,
                           const RuntimeValue* const val) {

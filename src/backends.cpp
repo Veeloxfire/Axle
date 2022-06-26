@@ -39,12 +39,12 @@ static void relocation_fix(uint8_t* code,
 }
 
 
-void build_data_section_for_vm(Program* prog, Compiler* const comp) {
+void build_data_section_for_vm(Program* prog, CompilerGlobals* const comp) {
   TRACING_FUNCTION();
 
-  InternHashTable<size_t> loaded_strings ={};
+  InternHashTable<size_t> loaded_strings = {};
 
-  Array<uint8_t> data ={};
+  Array<uint8_t> data = {};
 
   //Writes a string if its not alread written
   const auto write_string = [&](Array<uint8_t>& bytes, const InternString* s) -> size_t {
@@ -107,12 +107,12 @@ void build_data_section_for_vm(Program* prog, Compiler* const comp) {
     }
   }
 
-  Array<uint8_t> imports ={};
+  Array<uint8_t> imports = {};
 
 #if 0
   //Dll imports
   {
-  //Should be sorted ...
+    //Should be sorted ...
 
     auto i_dll = comp->lib_import.begin();
     auto end_dll = comp->lib_import.end();
@@ -184,7 +184,7 @@ void build_data_section_for_file(Array<u8>& data, Array<u8>& imports, Compiler* 
 
   //Dll imports
   {
-  //Should be sorted ...
+    //Should be sorted ...
 
     auto i_dll = comp->lib_import.begin();
     const auto end_dll = comp->lib_import.end();
@@ -212,7 +212,7 @@ void build_data_section_for_file(Array<u8>& data, Array<u8>& imports, Compiler* 
       serialize_bytes(data, (const u8*)path->string, path->len + 1, 1);
 
       //write headers
-      ImportDataDirectory dir ={};
+      ImportDataDirectory dir = {};
       dir.import_lookup_table = base_size + extra_size;
       dir.date_time_stamp = 0;
       dir.forwarder_chain = 0;
@@ -304,20 +304,20 @@ void build_data_section_for_file(Array<u8>& data, Array<u8>& imports, Compiler* 
 }
 #endif
 
-void compile_backend_single_func(Program* prog, const CodeBlock* code, Compiler* const comp, const System* system) {
+void compile_backend_single_func(CompilerGlobals* const comp, CompilerThread* const comp_thread, Program* prog, const CodeBlock* code, const System* system) {
   TRACING_FUNCTION();
 
-  Array<uint8_t> out_code ={};
+  Array<uint8_t> out_code = {};
 
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
   DEFER(&) { free_no_destruct(label_indexes); };
 
-  Array<Relocation> relocations ={};
+  Array<Relocation> relocations = {};
 
   size_t entry_point_label = 0;
 
-  system->backend_translate(comp, prog, out_code, code, label_indexes, relocations);
-  if (comp->is_panic()) {
+  system->backend_translate(comp, comp_thread, prog, out_code, code, label_indexes, relocations);
+  if (comp_thread->is_panic()) {
     return;
   }
 
@@ -338,7 +338,8 @@ void compile_backend_single_func(Program* prog, const CodeBlock* code, Compiler*
   prog->code = std::move(out_code);
 }
 
-void vm_backend_code_block(Compiler* const comp,
+void vm_backend_code_block(CompilerGlobals* const comp,
+                           CompilerThread* const comp_thread,
                            Program* prog,
                            Array<uint8_t>& out_code,
                            const CodeBlock* code,
@@ -409,31 +410,31 @@ void vm_backend_code_block(Compiler* const comp,
         SKIP_JUMP:
           break;
         }
-      /*case ByteCode::CALL_NATIVE_X64: {
-          const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
+                                  /*case ByteCode::CALL_NATIVE_X64: {
+                                      const auto p_c = ByteCode::PARSE::CALL_NATIVE_X64(code_i);
 
 
-          relocations.insert({RELOCATION_TYPE::U64_DATA_OFFSET, out_code.size, 1});
+                                      relocations.insert({RELOCATION_TYPE::U64_DATA_OFFSET, out_code.size, 1});
 
-          ByteCode::EMIT::CALL_NATIVE_X64(out_code, p_c.u64_1, p_c.u64_2);
-          code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
-          break;
-        }*/
-      //case ByteCode::CALL_CONST: {
-      //    const auto p_c = ByteCode::PARSE::CALL_CONST(code_i);
-      //    const Function* func = p_c.u64;
+                                      ByteCode::EMIT::CALL_NATIVE_X64(out_code, p_c.u64_1, p_c.u64_2);
+                                      code_i += ByteCode::SIZE_OF::CALL_NATIVE_X64;
+                                      break;
+                                    }*/
+                                    //case ByteCode::CALL_CONST: {
+                                    //    const auto p_c = ByteCode::PARSE::CALL_CONST(code_i);
+                                    //    const Function* func = p_c.u64;
 
-      //    {
-      //      const size_t offset = out_code.size + 1;
-      //      //Switch to a code label rather than func ptr
-      //      ByteCode::EMIT::CALL_CONST(out_code, func->code_block.label);
-      //      relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
-      //    }
+                                    //    {
+                                    //      const size_t offset = out_code.size + 1;
+                                    //      //Switch to a code label rather than func ptr
+                                    //      ByteCode::EMIT::CALL_CONST(out_code, func->code_block.label);
+                                    //      relocations.insert({ RELOCATION_TYPE::U64_LABEL_OFFSET, offset, out_code.size });
+                                    //    }
 
 
-      //    code_i += ByteCode::SIZE_OF::CALL_CONST;
-      //    break;
-      //  }
+                                    //    code_i += ByteCode::SIZE_OF::CALL_CONST;
+                                    //    break;
+                                    //  }
       case ByteCode::CALL_LABEL: {
           const auto p_c = ByteCode::PARSE::CALL_LABEL(code_i);
 
@@ -472,32 +473,33 @@ void vm_backend_code_block(Compiler* const comp,
   }
 }
 
-void compile_backend_to_file(const char* out_file_name, Compiler* comp, const System* system) {
+void compile_backend_to_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, const char* out_file_name, const System* system) {
 
   size_t entry_point_label = 0;
 
-   //Find the entry point first - allows us to say its called
+  //Find the entry point first - allows us to say its called
   {
     const InternString* entry_name = comp->build_options.entry_point;
 
-    GlobalName* nm = find_global_name(comp->build_file_namespace, entry_name);
+    auto names = comp->services.names.get();
+    GlobalName* nm = names->find_global_name(comp->build_file_namespace, entry_name);
 
     if (nm == nullptr) {
-      CallSignature sig ={};
+      CallSignature sig = {};
       sig.name = entry_name;
 
-      comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
-                         "No function '{}' exists in the build file to be the entry point",
-                         sig);
+      comp_thread->report_error(ERROR_CODE::NAME_ERROR, Span{},
+                                "No function '{}' exists in the build file to be the entry point",
+                                sig);
       return;
     }
 
     Function* entry_point_func = *(Function**)nm->global->constant_value.ptr;
 
     if (entry_point_func == nullptr) {
-      comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
-                         "Could not find a function '{}' in the build file for the entry point",
-                         entry_name);
+      comp_thread->report_error(ERROR_CODE::NAME_ERROR, Span{},
+                                "Could not find a function '{}' in the build file for the entry point",
+                                entry_name);
       return;
     }
 
@@ -506,17 +508,17 @@ void compile_backend_to_file(const char* out_file_name, Compiler* comp, const Sy
   }
 }
 
-void compile_backend(Program* prog, Compiler* comp, const System* system) {
+void compile_backend(CompilerGlobals* const comp, CompilerThread* const comp_thread, Program* prog, const System* system) {
   TRACING_FUNCTION();
-  Array<uint8_t> out_code ={};
+  Array<uint8_t> out_code = {};
 
-  CodeBlock actual_entry_function ={};
+  CodeBlock actual_entry_function = {};
   actual_entry_function.label = comp->labels++;
 
   size_t* const label_indexes = allocate_default<size_t>(comp->labels);
   DEFER(&) { free_no_destruct(label_indexes); };
 
-  Array<Relocation> relocations ={};
+  Array<Relocation> relocations = {};
 
   size_t entry_point_label = 0;
 
@@ -524,34 +526,27 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
   {
     const InternString* entry_name = comp->build_options.entry_point;
 
-    GlobalName* nm = find_global_name(comp->build_file_namespace, entry_name);
+    auto names = comp->services.names.get();
+    GlobalName* nm = names->find_global_name(comp->build_file_namespace, entry_name);
 
     if (nm == nullptr) {
-      CallSignature sig ={};
+      CallSignature sig = {};
       sig.name = entry_name;
 
-      comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
-                         "No function '{}' exists in the build file to be the entry point",
-                         sig);
+      comp_thread->report_error(ERROR_CODE::NAME_ERROR, Span{},
+                                "No function '{}' exists in the build file to be the entry point",
+                                sig);
       return;
     }
 
-    Function* entry_point_func = *(Function**)nm->global->constant_value.ptr;
-
-    if (entry_point_func == nullptr) {
-      comp->report_error(ERROR_CODE::NAME_ERROR, Span{},
-                         "Could not find a function '{}' in the build file for the entry point",
-                         entry_name);
-      return;
-    }
-
-    //entry_point_func->is_called = true;//makes it compile
-    entry_point_label = entry_point_func->code_block.label;
+    entry_point_label = *(usize*)nm->global->constant_value.ptr;
   }
 
   {
-    auto func_i = comp->functions.begin_const_iter();
-    const auto func_end = comp->functions.end_const_iter();
+    comp->functions_mutex.acquire();
+
+    auto func_i = comp->functions_single_threaded.begin_const_iter();
+    const auto func_end = comp->functions_single_threaded.end_const_iter();
 
     for (; func_i != func_end; func_i.next()) {
       const Function* const func = func_i.get();
@@ -562,30 +557,35 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
 
       const CodeBlock* const code = &func->code_block;
 
-      system->backend_translate(comp, prog, out_code, code, label_indexes, relocations);
-      if (comp->is_panic()) {
+      system->backend_translate(comp, comp_thread, prog, out_code, code, label_indexes, relocations);
+      if (comp_thread->is_panic()) {
         return;
       }
     }
 
+    comp->functions_mutex.release();
+
+
     //Init all the globals - then call the main function
     {
-      auto i = comp->globals.begin_iter();
-      auto end = comp->globals.end_iter();
+      comp->globals_mutex.acquire();
+
+      auto i = comp->globals_single_threaded.begin_iter();
+      auto end = comp->globals_single_threaded.end_iter();
 
       for (; i != end; i.next()) {
         Global* glob = i.get();
 
         if (glob->constant_value.ptr == nullptr) {
-          system->backend_translate(comp, prog, out_code, &glob->init, label_indexes, relocations);
-          if (comp->is_panic()) {
+          system->backend_translate(comp, comp_thread, prog, out_code, &glob->init, label_indexes, relocations);
+          if (comp_thread->is_panic()) {
             return;
           }
         }
       }
 
       //Just init calls
-      i = comp->globals.begin_iter();
+      i = comp->globals_single_threaded.begin_iter();
       for (; i != end; i.next()) {
         Global* glob = i.get();
 
@@ -598,10 +598,12 @@ void compile_backend(Program* prog, Compiler* comp, const System* system) {
       ByteCode::EMIT::RETURN(actual_entry_function.code);
 
 
+      comp->globals_mutex.release();
+
       //Entry before emitting possible inits
       prog->entry_point = out_code.size;
-      system->backend_translate(comp, prog, out_code, &actual_entry_function, label_indexes, relocations);
-      if (comp->is_panic()) {
+      system->backend_translate(comp, comp_thread, prog, out_code, &actual_entry_function, label_indexes, relocations);
+      if (comp_thread->is_panic()) {
         return;
       }
     }
@@ -663,7 +665,7 @@ static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte)
       arr.insert(0b00'000'000 | mod_byte);
       arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, sib.base));
     }
-    else if (-128 <= sib.disp  && sib.disp <= 127) {
+    else if (-128 <= sib.disp && sib.disp <= 127) {
       arr.insert(0b01'000'000 | mod_byte);
       arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, sib.base));
       arr.insert((uint8_t)sib.disp);
@@ -687,7 +689,7 @@ static void emit_sib(Array<uint8_t>& arr, const X64::SIB& sib, uint8_t mod_byte)
       arr.insert(0b00'000'000 | mod_byte);
       arr.insert(X64::sib(sib.scale, sib.index, sib.base));
     }
-    else if (-128 <= sib.disp  && sib.disp <= 127) {
+    else if (-128 <= sib.disp && sib.disp <= 127) {
       arr.insert(0b01'000'000 | mod_byte);
       arr.insert(X64::sib(sib.scale, sib.index, sib.base));
       arr.insert((uint8_t)sib.disp);
@@ -724,7 +726,7 @@ static void emit_mod_rm(Array<uint8_t>& arr, const X64::R r, const X64::RM& rm) 
           arr.insert(X64::MODRM_MOD_INDIRECT | X64::modrm_r_rm(r.r, rm.r));
           arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, rm.r));
         }
-        else if (-128 <= rm.disp  && rm.disp <= 127) {
+        else if (-128 <= rm.disp && rm.disp <= 127) {
           arr.insert(0b01000000 | X64::modrm_r_rm(r.r, rm.r));
           arr.insert(X64::SIB_SCALE_1 | X64::sib_i_b(RSP.REG, rm.r));
           arr.insert((int8_t)rm.disp);
@@ -754,7 +756,7 @@ static void emit_mod_rm(Array<uint8_t>& arr, const X64::R r, const X64::RM& rm) 
         }
 
       RM_DEFAULT:
-        if (-128 <= rm.disp  && rm.disp <= 127) {
+        if (-128 <= rm.disp && rm.disp <= 127) {
           arr.insert(0b01000000 | X64::modrm_r_rm(r.r, rm.r));
           arr.insert((int8_t)rm.disp);
           break;
@@ -773,7 +775,7 @@ static void emit_mod_rm(Array<uint8_t>& arr, const X64::R r, const X64::RM& rm) 
 }
 
 X64::RM X64::rm_from_mem_complex(const MemComplex& mem) {
-  X64::RM rm ={};
+  X64::RM rm = {};
   rm.indirect = true;
 
   if (mem.scale == 0) {
@@ -1232,7 +1234,8 @@ static void check_for_jumps(Array<Relocation>& relocs, Array<uint8_t>& out_code,
   }
 }
 
-void x86_64_backend_code_block(Compiler* const comp,
+void x86_64_backend_code_block(CompilerGlobals* const comp,
+                               CompilerThread* comp_thread,
                                Program* prog,
                                Array<uint8_t>& out_code,
                                const CodeBlock* code,
@@ -1258,7 +1261,7 @@ void x86_64_backend_code_block(Compiler* const comp,
       case ByteCode::COPY_R8_TO_R8: {
           const auto p = ByteCode::PARSE::COPY_R8_TO_R8(code_i);
 
-          X64::RM rm ={};
+          X64::RM rm = {};
           rm.r = p.val2;
           rm.indirect = false;
 
@@ -1646,24 +1649,24 @@ void x86_64_backend_code_block(Compiler* const comp,
           code_i += ByteCode::SIZE_OF::RETURN;
           break;
         }
-      //case ByteCode::CALL_CONST: {
-      //    const auto p = ByteCode::PARSE::CALL_CONST(code_i);
-      //    const Function* func = p.u64;
-      //    //Switch to a code label rather than func ptr
-      //    call_near(relocs, out_code, (int32_t)func->code_block.label);
+                           //case ByteCode::CALL_CONST: {
+                           //    const auto p = ByteCode::PARSE::CALL_CONST(code_i);
+                           //    const Function* func = p.u64;
+                           //    //Switch to a code label rather than func ptr
+                           //    call_near(relocs, out_code, (int32_t)func->code_block.label);
 
-      //    code_i += ByteCode::SIZE_OF::CALL_CONST;
-      //    break;
-      //  }
-      //case ByteCode::CALL_MEM: {
-      //    const auto p = ByteCode::PARSE::CALL_MEM(code_i);
+                           //    code_i += ByteCode::SIZE_OF::CALL_CONST;
+                           //    break;
+                           //  }
+                           //case ByteCode::CALL_MEM: {
+                           //    const auto p = ByteCode::PARSE::CALL_MEM(code_i);
 
-      //    out_code.insert(X64::CALL_NEAR_ABS);
-      //    emit_mod_rm(out_code, X64::R{ 2 }, X64::rm_from_mem_complex(p.mem));
+                           //    out_code.insert(X64::CALL_NEAR_ABS);
+                           //    emit_mod_rm(out_code, X64::R{ 2 }, X64::rm_from_mem_complex(p.mem));
 
-      //    code_i += ByteCode::SIZE_OF::CALL_MEM;
-      //    break;
-      //  }
+                           //    code_i += ByteCode::SIZE_OF::CALL_MEM;
+                           //    break;
+                           //  }
       case ByteCode::CALL_LABEL: {
           const auto p = ByteCode::PARSE::CALL_LABEL(code_i);
           const u64 label = p.u64;
@@ -1726,10 +1729,10 @@ void x86_64_backend_code_block(Compiler* const comp,
         }
       default: {
           uint8_t op = *code_i;
-          comp->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
-                             "Backend found unsupported bytecode instruction\n"
-                             "Code: {}, Name: {}",
-                             op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                                    "Backend found unsupported bytecode instruction\n"
+                                    "Code: {}, Name: {}",
+                                    op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
           return;
         }
     }
@@ -1864,10 +1867,10 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
         const uint8_t scale = 1 << ((sib & 0b11'000'000) >> 6);
         const uint8_t index = ((rex & X64::REX_X) << 2) | ((sib & X64::SIB_INDEX_MASK) >> 3);
-        const uint8_t base  = ((rex & X64::REX_B) << 3) | ((sib & X64::SIB_BASE_MASK));
+        const uint8_t base = ((rex & X64::REX_B) << 3) | ((sib & X64::SIB_BASE_MASK));
 
         const bool INDEX_RSP = index == RSP.REG;
-        const bool BASE_RBP  = (base & 0b111) == 0b101;
+        const bool BASE_RBP = (base & 0b111) == 0b101;
 
         switch (address_mode) {
           case 0b00: {
@@ -2053,7 +2056,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
   const uint8_t* bytes = machine_code;
   const uint8_t* const end = machine_code + size;
 
-  x86PrintOptions p_opts ={};
+  x86PrintOptions p_opts = {};
 
   while (bytes < end) {
     printf("0x%-4llx: ", bytes - machine_code);
@@ -2250,7 +2253,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
 
                   load_default_sizes(&p_opts, true, short_address, short_operand);
 
-                  RegisterNames names =  register_names(&p_opts, maybe_rex, modrm, &bytes);
+                  RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
 
                   printf("imul %s, %s\n", names.r.ptr, names.rm.ptr);
                   break;

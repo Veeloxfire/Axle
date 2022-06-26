@@ -47,6 +47,7 @@ constexpr inline _AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
 }
 
 enum struct AST_TYPE : u8 {
+  INVALID = 0,
   NAMED_TYPE,
   ARRAY_TYPE,
   PTR_TYPE,
@@ -56,8 +57,8 @@ enum struct AST_TYPE : u8 {
   UNARY_OPERATOR,
   BINARY_OPERATOR,
   IDENTIFIER_EXPR,
-  LOCAL,
-  GLOBAL,
+  LOCAL_DECL,
+  GLOBAL_DECL,
   NUMBER,
   FUNCTION_CALL,
   TUPLE_LIT,
@@ -70,7 +71,6 @@ enum struct AST_TYPE : u8 {
   LAMBDA_EXPR,
   STRUCT,
   STRUCT_EXPR,
-  DECL,
   TYPED_NAME,
   ASSIGN,
   BLOCK,
@@ -100,12 +100,12 @@ struct AST {
   void* value = nullptr;
 
   AST_TYPE ast_type;
-  Type node_type ={};
-  Span node_span ={};
+  Type node_type = {};
+  Span node_span = {};
 };
 
 struct ASTNamedType : public AST {
-  const InternString* name ={};
+  const InternString* name = {};
 };
 
 struct ASTArrayType : public AST {
@@ -119,11 +119,11 @@ struct ASTPtrType : public AST {
 
 struct ASTLambdaType : public AST {
   AST_LOCAL ret = 0;
-  AST_ARR args ={};
+  AST_ARR args = {};
 };
 
 struct ASTTupleType : public AST {
-  AST_ARR types ={};
+  AST_ARR types = {};
 };
 
 struct ASTBinaryOperatorExpr : public AST {
@@ -142,7 +142,7 @@ struct ASTTupleLitExpr : public AST {
 };
 
 struct ASTFunctionCallExpr : public AST {
-  AST_ARR arguments ={};
+  AST_ARR arguments = {};
 
   const InternString* function_name = nullptr;
   const SignatureStructure* sig = nullptr;
@@ -169,11 +169,11 @@ struct ASTIndexExpr : public AST {
 
 struct ASTNumber : public AST {
   uint64_t value = 0;
-  const InternString* suffix =nullptr;
+  const InternString* suffix = nullptr;
 };
 
 struct ASTArrayExpr : public AST {
-  AST_ARR elements ={};
+  AST_ARR elements = {};
 };
 
 struct ASTIdentifier : public AST {
@@ -196,19 +196,24 @@ struct ASTAsciiChar : public AST {
 };
 
 struct ASTBlock : public AST {
-  AST_ARR block ={};
+  AST_ARR block = {};
 };
 
 struct ASTDecl : public AST {
   const InternString* name = nullptr;
   bool compile_time_const = false;
-  Type type ={};
-
-  //Only used in locals
-  size_t local_index = 0;
+  Type type = {};
 
   AST_LOCAL type_ast = 0;
   AST_LOCAL expr = 0;
+};
+
+struct ASTGlobalDecl : public ASTDecl {
+  //Global* global_ptr;
+};
+
+struct ASTLocalDecl : public ASTDecl {
+  size_t local_index;
 };
 
 struct ASTFuncSig : public AST {
@@ -216,7 +221,7 @@ struct ASTFuncSig : public AST {
   const CallingConvention* convention = nullptr;
 
   AST_LOCAL return_type = 0;
-  AST_ARR parameters ={};
+  AST_ARR parameters = {};
 };
 
 struct ASTLambdaExpr : public AST {
@@ -231,17 +236,17 @@ struct ASTStructExpr : public AST {
 struct ASTLambda : public AST {
   Function* function = nullptr;
 
-  AST_LOCAL sig ={};
-  AST_LOCAL body ={};
+  AST_LOCAL sig = {};
+  AST_LOCAL body = {};
 };
 
 struct ASTTypedName : public AST {
-  AST_LOCAL type ={};
+  AST_LOCAL type = {};
   const InternString* name = nullptr;
 };
 
 struct ASTStructBody : public AST {
-  CompilationUnit* compilation_unit;
+  UnitID unit_id;
   AST_ARR elements = {};
 };
 

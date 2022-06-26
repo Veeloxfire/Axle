@@ -1,16 +1,11 @@
 #pragma once
 
 #include "utility.h"
-
-struct Compiler;
-struct InternString;
-struct Span;
-struct Global;
-struct CompilationUnit;
+#include "comp_utilities.h"
 
 struct GlobalName {
   //Can be null in some cases
-  CompilationUnit* unit;
+  UnitID unit_id;
   const InternString* name;
   Global* global;
 };
@@ -20,8 +15,11 @@ struct Namespace {
   Array<Namespace*> imported ={};
 };
 
-GlobalName* add_global_name(Compiler* const comp, Namespace* ns, const InternString* name, CompilationUnit* unit, Global* g);
+//Exists for mutex stuff
+struct NameManager {
+  GlobalName* add_global_name(CompilerThread* const comp, Namespace* ns, const InternString* name, UnitID unit_id, Global* g);
 
-void add_global_import(Compiler* const comp, Namespace* ns, Namespace* imp, const Span& s);
+  void add_global_import(CompilerThread* const comp, Namespace* ns, Namespace* imp, const Span& s);
 
-GlobalName* find_global_name(Namespace* ns, const InternString* name);
+  GlobalName* find_global_name(Namespace* ns, const InternString* name);
+};

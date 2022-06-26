@@ -2,7 +2,8 @@
 #include <stdint.h>
 
 //Important forward declarations
-struct Compiler;
+struct CompilerGlobals;
+struct CompilerThread;
 struct Context;
 struct State;
 struct CodeBlock;
@@ -10,6 +11,7 @@ struct AST;
 struct Local;
 struct Global;
 struct InternString;
+struct Span;
 
 //New structures
 
@@ -223,3 +225,6 @@ struct Intrinsics {
   INTRINSIC_MODS;
 #undef MOD
 };
+
+using UnitID = u64;
+constexpr UnitID NULL_ID = 0;

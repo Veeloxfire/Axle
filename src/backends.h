@@ -247,27 +247,34 @@ namespace X64 {
   void pop(Array<uint8_t>& arr, uint8_t reg);
 }
 
-struct Compiler;
+struct CompilerGlobals;
+struct CompilerThread;
 struct CodeBlock;
 struct System;
 
-void compile_backend_single_func(Program* prog,
+void compile_backend_single_func(CompilerGlobals* const comp,
+                                 CompilerThread* const comp_thread,
+                                 Program* prog,
                                  const CodeBlock* code,
-                                 Compiler* const comp,
+                                 
                                  const System* system);
 
-void compile_backend(Program* prog, Compiler* comp, const System* system);
+void build_data_section_for_vm(Program* prog, CompilerGlobals* const comp);
 
-void nasm_backend(const char* file_name, Compiler* comp);
+void compile_backend(CompilerGlobals* comp, CompilerThread* comp_thread, Program* prog, const System* system);
 
-void vm_backend_code_block(Compiler* const,
+void nasm_backend(const char* file_name, CompilerGlobals* comp, CompilerThread* comp_thread);
+
+void vm_backend_code_block(CompilerGlobals* const,
+                           CompilerThread* const,
                            Program*,
                            Array<uint8_t>&,
                            const CodeBlock*,
                            size_t*,
                            Array<Relocation>&);
 
-void x86_64_backend_code_block(Compiler* const,
+void x86_64_backend_code_block(CompilerGlobals* const,
+                               CompilerThread* const,
                                Program*,
                                Array<uint8_t>&,
                                const CodeBlock*,

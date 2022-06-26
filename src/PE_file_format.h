@@ -377,12 +377,14 @@ struct ImportantValues {
   uint32_t imports_raw_size;
 };
 
-struct Compiler;
+struct CompilerGlobals;
+struct CompilerThread;
 struct Span;
 
 ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name);
 
-void load_portable_executable_from_file(Compiler* const comp,
+void load_portable_executable_from_file(CompilerGlobals* const comp,
+                                        CompilerThread* const comp_thread,
                                         const Span& span,
                                         PEFile* pe_file,
                                         const char* file_name);

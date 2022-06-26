@@ -1,0 +1,10 @@
+HANDLE :: #type u64;
+DWORD :: #type u32;
+
+GetStdHandle :: #static_link((i32) -> u64, "kernel32.lib", "GetStdHandle");
+WriteConsoleA :: #static_link((HANDLE, *void, u32, *u32, *void) -> u32, "kernel32.lib", "WriteConsoleA");
+
+
+GetProcessHeap :: #static_link(()->HANDLE, "kernel32.lib", "GetProcessHeap");
+HeapAlloc :: #static_link((HANDLE, DWORD, u64) -> *void, "kernel32.lib", "HeapAlloc");
+HeapFree :: #static_link((HANDLE, DWORD, *void) -> u32, "kernel32.lib", "HeapFree");

@@ -17,5 +17,5 @@ x64/
 **.obj
 **.json
 
-sandbox/out/**
+/sandbox/out/**
 

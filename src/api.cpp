@@ -82,76 +82,71 @@ RunOutput run_as_machine_code(Program* prog) {
 
 int compile_file(const APIOptions& options,
                  Program* out_program) {
+
   TRACING_FUNCTION();
 
-
   //Setup
-  StringInterner strings ={};
-  BuiltinTypes builtin_types ={};
-  Structures structures ={};
-  Lexer lexer ={};
-  Parser parser ={};
   VM vm = {};
-  Errors errors ={};
-  FileLoader file_loader ={};
+  FileLoader file_loader = {};
+  Structures structures = {};
+  StringInterner strings = {};
+  NameManager names = {};
+  Compilation compilation = {};
 
-  Compiler compiler ={};
+  BuiltinTypes builtin_types = {};
 
-  compiler.services.lexer = &lexer;
-  compiler.services.parser = &parser;
-  compiler.services.vm = &vm;
-  compiler.services.errors = &errors;
-  compiler.services.file_loader = &file_loader;
-  compiler.services.builtin_types = &builtin_types;
-  compiler.services.structures = &structures;
-  compiler.services.strings = &strings;
+  CompilerThread compiler_thread = {};
+  CompilerGlobals compiler = {};
+
+  compiler.services.vm.set(&vm);
+  compiler.services.file_loader.set(&file_loader);
+  compiler.services.structures.set(&structures);
+  compiler.services.strings.set(&strings);
+  compiler.services.names.set(&names);
+  compiler.services.compilation.set(&compilation);
+
+  compiler.builtin_types = &builtin_types;
+
+  compiler.pipelines.depend_check._debug_name = "Depend Check";
+  compiler.pipelines.type_check._debug_name = "Type Check";
+  compiler.pipelines.emit_function._debug_name = "Emit Function";
+  compiler.pipelines.emit_global._debug_name = "Emit Global";
+  compiler.pipelines.emit_import._debug_name = "Emit Import";
+  compiler.pipelines.exec_code._debug_name = "Exec Code";
 
   //Load the builtin types
-  init_compiler(options, &compiler);
-  if (compiler.is_panic()) {
-    compiler.services.errors->print_all();
-    return 1;
+  init_compiler(options, &compiler, &compiler_thread);
+  if (compiler_thread.is_panic()) {
+    compiler_thread.errors.print_all();
+    return -1;
   }
 
   {
-    FileLocation loc = parse_file_location(compiler.build_options.file_name->string, nullptr, compiler.services.strings);
+    FileLocation loc = parse_file_location(file_loader.cwd.full_name->string, compiler.build_options.file_name->string, compiler.services.strings.get()._ptr);
 
-    compiler.build_file_namespace = compiler.namespaces.insert();
+    compiler.build_file_namespace = compiler.new_namespace();
 
 
-    compiler.services.file_loader->unparsed_files.insert(FileImport{ loc, compiler.build_file_namespace, Span{} });//use null span
-
-    ////Parsing/loading
-    //ERROR_CODE ret = parse_all_unparsed_files_with_imports(&compiler);
-    //if (ret != ERROR_CODE::NO_ERRORS) {
-    //  std::cerr << "Parsing was not completed due to an error!\nError Code '"
-    //    << error_code_string(ret)
-    //    << "'\n";
-    //  return 1;
-    //}
+    compiler.services.file_loader.get()->unparsed_files.insert(FileImport{loc, compiler.build_file_namespace, Span{}});//use null span
 
     //Compilation
-    ERROR_CODE ret = compile_all(&compiler);
-    if (ret != ERROR_CODE::NO_ERRORS) {
+    compile_all(&compiler, &compiler_thread);
+    if (compiler_thread.is_panic()) {
+      ERROR_CODE code = compiler_thread.errors.print_all();
       std::cerr << "Compilation was not completed due to an error!\nError Code '"
-        << error_code_string(ret)
+        << error_code_string(code)
         << "'\n";
-      return 1;
+      return -2;
     }
-  }
-
-  if (compiler.is_panic()) {
-    std::cerr << "Compiler paniced but did not have an error message\n";
-    return -1;
   }
 
   //Backend
   build_data_section_for_vm(out_program, &compiler);
   
-  compile_backend(out_program, &compiler, compiler.build_options.endpoint_system);
-  if (compiler.is_panic()) {
-    compiler.services.errors->print_all();
-    return 1;
+  compile_backend(&compiler, &compiler_thread, out_program, compiler.build_options.endpoint_system);
+  if (compiler_thread.is_panic()) {
+    compiler_thread.errors.print_all();
+    return -3;
   }
 
   if (compiler.print_options.fully_compiled) {
@@ -208,67 +203,69 @@ int compile_file_and_write(const APIOptions& options) {
     return 1;
   }
 
-  
   TRACING_FUNCTION();
 
-
   //Setup
-  StringInterner strings ={};
-  BuiltinTypes builtin_types ={};
-  Structures structures ={};
-  Lexer lexer ={};
-  Parser parser ={};
   VM vm ={};
-  Errors errors ={};
   FileLoader file_loader ={};
+  Structures structures ={};
+  StringInterner strings ={};
+  NameManager names = {};
+  Compilation compilation = {};
+  
+  BuiltinTypes builtin_types ={};
 
-  Compiler compiler ={};
+  CompilerThread compiler_thread = {};
+  CompilerGlobals compiler ={};
 
-  compiler.services.lexer = &lexer;
-  compiler.services.parser = &parser;
-  compiler.services.vm = &vm;
-  compiler.services.errors = &errors;
-  compiler.services.file_loader = &file_loader;
-  compiler.services.builtin_types = &builtin_types;
-  compiler.services.structures = &structures;
-  compiler.services.strings = &strings;
+  compiler.services.vm.set(&vm);
+  compiler.services.file_loader.set(&file_loader);
+  compiler.services.structures.set(&structures);
+  compiler.services.strings.set(&strings);
+  compiler.services.names.set(&names);
+  compiler.services.compilation.set(&compilation);
+
+  compiler.builtin_types = &builtin_types;
+
+  compiler.pipelines.depend_check._debug_name = "Depend Check";
+  compiler.pipelines.type_check._debug_name = "Type Check";
+  compiler.pipelines.emit_function._debug_name = "Emit Function";
+  compiler.pipelines.emit_global._debug_name = "Emit Global";
+  compiler.pipelines.emit_import._debug_name = "Emit Import";
+  compiler.pipelines.exec_code._debug_name = "Exec Code";
 
   //Load the builtin types
-  init_compiler(options, &compiler);
-  if (compiler.is_panic()) {
-    compiler.services.errors->print_all();
-    return 1;
+  init_compiler(options, &compiler, &compiler_thread);
+  if (compiler_thread.is_panic()) {
+    compiler_thread.errors.print_all();
+    return -1;
   }
 
   {
-    FileLocation loc = parse_file_location(compiler.build_options.file_name->string, nullptr, compiler.services.strings);
+    FileLocation loc = parse_file_location(file_loader.cwd.full_name->string, compiler.build_options.file_name->string, compiler.services.strings.get()._ptr);
 
-    compiler.build_file_namespace = compiler.namespaces.insert();
+    compiler.build_file_namespace = compiler.new_namespace();
 
 
-    compiler.services.file_loader->unparsed_files.insert(FileImport{ loc, compiler.build_file_namespace, Span{} });//use null span
+    compiler.services.file_loader.get()->unparsed_files.insert(FileImport{loc, compiler.build_file_namespace, Span{}});//use null span
 
     //Compilation
-    ERROR_CODE ret = compile_all(&compiler);
-    if (ret != ERROR_CODE::NO_ERRORS) {
+    compile_all(&compiler, &compiler_thread);
+    if (compiler_thread.is_panic()) {
+      ERROR_CODE code = compiler_thread.errors.print_all();
       std::cerr << "Compilation was not completed due to an error!\nError Code '"
-        << error_code_string(ret)
+        << error_code_string(code)
         << "'\n";
-      return 1;
+      return -2;
     }
-  }
-
-  if (compiler.is_panic()) {
-    std::cerr << "Compiler paniced but did not have an error message\n";
-    return -1;
   }
 
   ASSERT(slow_string_eq(options.build.system_name, system_x86_64.name));
   
-  nasm_backend(options.build.output_file, &compiler);
-  if (compiler.is_panic()) {
-    compiler.services.errors->print_all();
-    return -1;
+  nasm_backend(options.build.output_file, &compiler, &compiler_thread);
+  if (compiler_thread.is_panic()) {
+    compiler_thread.errors.print_all();
+    return -3;
   }
 
   return 0;
