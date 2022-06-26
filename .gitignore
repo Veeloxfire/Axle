@@ -3,8 +3,6 @@ Debug/
 Release/
 x64/
 
-lib/*
-
 **.sln
 **.vcxproj
 **.vcxproj.filters
@@ -12,10 +10,12 @@ lib/*
 
 **.swp
 
-
+**.lib
+**.Lib
+**.pdb
 **.exe
 **.obj
-
-sandbox/out/*
-
 **.json
+
+sandbox/out/**
+
