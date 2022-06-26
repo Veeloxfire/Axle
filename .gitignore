@@ -1,6 +1,9 @@
 .vs/
 Debug/
+Release/
 x64/
+
+lib/**
 
 **.sln
 **.vcxproj
@@ -11,7 +14,8 @@ x64/
 
 
 **.exe
-**.lib
 **.obj
 
 sandbox/*.nasm
+
+**.json
