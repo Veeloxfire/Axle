@@ -6,7 +6,7 @@
 #include <iostream>
 #include "trace.h"
 
-constexpr char output_file[] = "output.nasm";
+constexpr char output_file[] = ".\\out\\output.nasm";
 
 int main(int argc, const char** args) {
 #ifdef TRACING_ENABLE
@@ -60,12 +60,12 @@ int main(int argc, const char** args) {
 
   {
     TRACING_SCOPE("Nasm");
-    system("nasm -g -fwin64 ./output.nasm");
+    system("nasm -g -fwin64 .\\out\\output.nasm");
   }
 
   {
     TRACING_SCOPE("Link");
-    system("link /LARGEADDRESSAWARE:NO /ENTRY:main /SUBSYSTEM:CONSOLE output.obj ..\\lib\\kernel32.lib");
+    system("link /LARGEADDRESSAWARE:NO /ENTRY:main /SUBSYSTEM:CONSOLE /OUT:.\\out\\output.exe .\\out\\output.obj ..\\lib\\kernel32.lib");
   }
   return 0;
 }
