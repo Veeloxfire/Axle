@@ -3,7 +3,7 @@ Debug/
 Release/
 x64/
 
-lib/**
+lib/*
 
 **.sln
 **.vcxproj
@@ -16,6 +16,6 @@ lib/**
 **.exe
 **.obj
 
-sandbox/*.nasm
+sandbox/out/*
 
 **.json
