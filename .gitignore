@@ -11,3 +11,7 @@ x64/
 
 
 **.exe
+**.lib
+**.obj
+
+sandbox/*.nasm
