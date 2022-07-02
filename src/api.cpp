@@ -131,8 +131,8 @@ int compile_file(const APIOptions& options,
 
     //Compilation
     compile_all(&compiler, &compiler_thread);
-    if (compiler_thread.is_panic()) {
-      ERROR_CODE code = compiler_thread.errors.print_all();
+    if (compiler.is_global_panic()) {
+      ERROR_CODE code = print_error_messages(compiler.global_errors);
       std::cerr << "Compilation was not completed due to an error!\nError Code '"
         << error_code_string(code)
         << "'\n";
@@ -251,8 +251,8 @@ int compile_file_and_write(const APIOptions& options) {
 
     //Compilation
     compile_all(&compiler, &compiler_thread);
-    if (compiler_thread.is_panic()) {
-      ERROR_CODE code = compiler_thread.errors.print_all();
+    if (compiler.is_global_panic()) {
+      ERROR_CODE code = print_error_messages(compiler.global_errors);
       std::cerr << "Compilation was not completed due to an error!\nError Code '"
         << error_code_string(code)
         << "'\n";

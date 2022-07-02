@@ -16,7 +16,7 @@ it < JOIN(__end, __LINE__); it++)
 for(auto it = (name).mut_begin(), JOIN(__end, __LINE__) = (name).mut_end(); \
 it < JOIN(__end, __LINE__); it++)
 
-constexpr inline u64 MAX_DECIMAL_U64_DIGITS = sizeof("9223372036854775807") - 1;
+constexpr inline u64 MAX_DECIMAL_U64_DIGITS = sizeof("18446744073709551615") - 1;
 
 constexpr u64 greatest_common_divisor(u64 v1, u64 v2) {
   //Swap to be the correct way around

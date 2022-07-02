@@ -23,7 +23,7 @@ void Signal::unset() {
   _InterlockedCompareExchange8(&held, '\0', '\1');
 }
 
-bool Signal::test() {
+bool Signal::test() const {
   return _InterlockedCompareExchange8(&held, '\0', '\0') == '\1';
 }
 

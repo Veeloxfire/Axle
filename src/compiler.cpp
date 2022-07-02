@@ -2578,24 +2578,26 @@ void type_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::RETURN: {
         ASTReturn* ret = (ASTReturn*)a;
 
-        type_check_ast_node(comp, comp_thread, context, state, ret->expr);
-        if (comp_thread->is_panic()) {
-          return;
-        }
+        if (ret->expr != nullptr) {
+          type_check_ast_node(comp, comp_thread, context, state, ret->expr);
+          if (comp_thread->is_panic()) {
+            return;
+          }
 
-        if (ret->expr->node_type != state->return_type) {
-          comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, ret->expr->node_span,
-                                    "Return type did not match\n"
-                                    "Returned '{}' ... Expected '{}'",
-                                    ret->expr->node_type.name, state->return_type.name);
-          return;
-        }
+          if (ret->expr->node_type != state->return_type) {
+            comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, ret->expr->node_span,
+                                      "Return type did not match\n"
+                                      "Returned '{}' ... Expected '{}'",
+                                      ret->expr->node_type.name, state->return_type.name);
+            return;
+          }
 
-        if (can_compile_const_value(a)) {
-          UnitID id = compile_and_execute(comp, context->current_unit->available_names, ret->expr, {});
+          if (can_compile_const_value(ret->expr)) {
+            UnitID id = compile_and_execute(comp, context->current_unit->available_names, ret->expr, {});
 
-          set_dependency(comp_thread, context, id);
-          return;
+            set_dependency(comp_thread, context, id);
+            return;
+          }
         }
 
         a->node_type = comp_thread->builtin_types->t_void;
@@ -4305,15 +4307,20 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     case AST_TYPE::RETURN: {
         ASTReturn* ret = (ASTReturn*)statement;
 
-        compile_bytecode_of_expression_existing(comp,
-                                                context,
-                                                state,
-                                                code,
-                                                ret->expr,
-                                                &state->return_val);
+        if (ret != nullptr) {
+          compile_bytecode_of_expression_existing(comp,
+                                                  context,
+                                                  state,
+                                                  code,
+                                                  ret->expr,
+                                                  &state->return_val);
 
-        if (state->return_val.type == RVT::REGISTER) {
-          state->use_value(state->return_val.reg);
+          if (state->return_val.type == RVT::REGISTER) {
+            state->use_value(state->return_val.reg);
+          }
+        }
+        else {
+          ASSERT(state->return_type.struct_type() == STRUCTURE_TYPE::VOID);
         }
 
         ByteCode::EMIT::JUMP_TO_FIXED(code->code, state->return_label);
@@ -6462,8 +6469,16 @@ void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_threa
   while (comp->is_compiling()) {
     run_compiler_pipes(comp, comp_thread);
     if (comp_thread->is_panic()) {
-      return;
+      comp->global_panic.set();
     }
+  }
+
+  if (comp_thread->is_panic()) {
+    ASSERT(comp->is_global_panic());
+
+    comp->global_errors_mutex.acquire();
+    comp->global_errors.concat(std::move(comp_thread->errors.error_messages));
+    comp->global_errors_mutex.release();
   }
 }
 
@@ -6501,13 +6516,6 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
 
   for (usize i = 0; i < extra_threads; i++) {
     wait_for_thread_end(handles[i]);
-
-    if (comp_threads[i].errors.panic) {
-      comp_thread->errors.panic = true;
-      comp_thread->errors.error_messages.concat(std::move(comp_threads[i].errors.error_messages));
-
-    }
-
   }
 
   free_destruct_n(handles, extra_threads);
@@ -6520,7 +6528,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
 
   //compiler_loop(comp, comp_thread);
   compiler_loop_threaded(comp, comp_thread);
-  if (comp_thread->is_panic()) {
+  if (comp->is_global_panic()) {
     return;
   }
 

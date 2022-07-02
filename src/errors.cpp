@@ -133,6 +133,11 @@ OwnedPtr<char> load_span_from_source(const Span& span, const char* source) {
 }
 
 ERROR_CODE Errors::print_all() const {
+  return print_error_messages(error_messages);
+}
+
+ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
+{
   ERROR_CODE ret = ERROR_CODE::NO_ERRORS;
 
   IO::err_print("--- Compiler Encountered A Fatal Error ---\n\n");

@@ -31,9 +31,14 @@ struct Errors {
   void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) noexcept {
     panic = true;
 
+    ASSERT(f_message != nullptr);
+
     OwnedPtr<char> message = format(f_message, ts...);
+    ASSERT(message.ptr != nullptr);
     error_messages.insert({ code, span, std::move(message) });
   }
 
   ERROR_CODE print_all() const;
 };
+
+ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages);

@@ -459,6 +459,10 @@ constexpr void copy_compiler_constants(const CompilerConstants* from, CompilerCo
 
 //Things that may be modified by multiple threads
 struct CompilerGlobals : CompilerConstants {
+  Signal global_panic;
+  SpinLockMutex global_errors_mutex;
+  Array<ErrorMessage> global_errors;
+
   Services services;
 
   CompPipes pipelines;
@@ -508,10 +512,15 @@ struct CompilerGlobals : CompilerConstants {
     free(ptr);
   }
 
+  inline bool is_global_panic() const {
+    return global_panic.test();
+  }
+
   inline bool is_compiling() const {
     auto files = services.file_loader.get();
     auto compilation = services.compilation.get();
-    return files->unparsed_files.size > 0 || compilation->store.active_units.size > 0;
+    return !is_global_panic()
+      && (files->unparsed_files.size > 0 || compilation->store.active_units.size > 0);
   }
 };
 

@@ -4,6 +4,37 @@ WIN_STD_OUT_REF :: cast(i32, -11i64);
 stdout_handle : u64 = GetStdHandle(WIN_STD_OUT_REF);
 
 
-print :: (string: *ascii, len: u64) -> u32 {
+print :: (string: *ascii, len: u64) -> void {
   WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*u32, nullptr), nullptr);
+}
+
+print :: (val: u64) -> void {
+  if(val == 0) {
+    print("0", "0".len);
+    return;
+  }
+  
+  arr := "00000000000000000000";
+
+  arr_len :: arr.len;
+  index : u64 = 0;
+
+  digit : u64 = 10000000000000000000;
+  index : u64 = 0;
+  while((digit > 0) & ((val / digit) == 0)) {
+    first_index += 1;
+    digit /= 10;
+  }
+
+  first_index := index;
+
+  while(digit > 0) {
+    d := val / digit;
+    arr[index] += d;
+
+    first_index += 1;
+    digit /= 10;
+  }
+
+  print(arr.ptr + first_index, arr.len - first_index);
 }

@@ -493,7 +493,7 @@ static Token lex_token(CompilerGlobals* const comp_globals, CompilerThread* cons
 
   lex->save_pos = lex->curr_pos;
   Token tok = lex_unpositioned_token(comp_globals, comp_thread, lex);
-  tok.pos = std::move(lex->curr_pos);
+  tok.pos = lex->save_pos;
   tok.consumed_whitespace = consumed_whitespace;
 
   return tok;
@@ -649,8 +649,8 @@ void reset_parser(CompilerGlobals* const comp,
     set_span_end(*parser->stream.i, span);
 
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
-                       "Found '{}' token in the middle of a token stream",
-                       AxleTokenType::End);
+                              "Found '{}' token in the middle of a token stream",
+                              AxleTokenType::End);
     return;
   }
 
@@ -686,8 +686,8 @@ Span span_of_token(const Token& tok) {
 static const InternString* parse_name(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {
   if (parser->current.type != AxleTokenType::Identifier) {
     comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                       "Expected token type '{}'. Found: '{}'",
-                       AxleTokenType::Identifier, parser->current.type);
+                              "Expected token type '{}'. Found: '{}'",
+                              AxleTokenType::Identifier, parser->current.type);
     return nullptr;
   }
 
@@ -781,7 +781,7 @@ static BINARY_OPERATOR parse_binary_operator(CompilerGlobals* const comp, Compil
   }
 
   comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                     "'{}' is not a valid binary operator", parser->current.string);
+                            "'{}' is not a valid binary operator", parser->current.string);
   return BINARY_OPERATOR::ADD;//just return whatever and hope everything errors out
 }
 
@@ -868,6 +868,10 @@ static AST_LOCAL parse_inner_expression(CompilerGlobals* const comp, CompilerThr
     }
 
     PrecidenceState s = parse_binary_precidence(comp, comp_thread, parser, op, pos_left);
+    if (comp_thread->is_panic()) {
+      return 0;
+    }
+    
     ASSERT(s.finished);
     SPAN_END;
     s.expr->node_span = span;
@@ -895,7 +899,7 @@ static void mismatched_brackets_error(CompilerGlobals* comp, CompilerThread* con
   set_span_end(*last, span);
 
   comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span,
-                     message);
+                            message);
 }
 
 
@@ -1163,7 +1167,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
           if (parser->current.type != AxleTokenType::String) {
             comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                               "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", comp_thread->intrinsics.static_link);
+                                      "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", comp_thread->intrinsics.static_link);
             return 0;
           }
 
@@ -1180,7 +1184,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
           if (parser->current.type != AxleTokenType::String) {
             comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                               "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", comp_thread->intrinsics.static_link);
+                                      "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", comp_thread->intrinsics.static_link);
             return 0;
           }
 
@@ -1217,8 +1221,8 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
         }
         else {
           comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                             "Invalid intrinsics #{} in this context",
-                             parser->current.string);
+                                    "Invalid intrinsics #{} in this context",
+                                    parser->current.string);
           return 0;
         }
       }
@@ -1433,8 +1437,8 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
               else {
                 //ERROR
                 comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                                   "Expected '{}', Found '{}'",
-                                   AxleTokenType::Comma, parser->current.type);
+                                          "Expected '{}', Found '{}'",
+                                          AxleTokenType::Comma, parser->current.type);
                 return 0;
               }
             }
@@ -1535,7 +1539,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
         }
       }
     default: comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                                "Unexpected Token Type '{}'", parser->current.type);
+                                       "Unexpected Token Type '{}'", parser->current.type);
       return 0;
   }
 
@@ -1735,7 +1739,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
             }
             else if (parser->current.type != AxleTokenType::Comma) {
               comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                                 "Invalid token type '{}' in type list", parser->current.type);
+                                        "Invalid token type '{}' in type list", parser->current.type);
               return 0;
             }
 
@@ -1757,8 +1761,8 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
             && parser->next.type == AxleTokenType::Greater) {
           if (parser->next.consumed_whitespace) {
             comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                               "Expected -> or nothing after type\n"
-                               "Found we the compiler thinks is '->' but the characters are separated");
+                                      "Expected -> or nothing after type\n"
+                                      "Found we the compiler thinks is '->' but the characters are separated");
             return 0;
           }
 
@@ -1880,7 +1884,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
       }
     default: {
         comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                           "Expected a Type! Found '{}'", parser->current.type);
+                                  "Expected a Type! Found '{}'", parser->current.type);
         return 0;
       }
   }
@@ -1925,7 +1929,7 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
 
   if (parser->current.type != AxleTokenType::Identifier) {
     comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                       "Expected Identifier as declarations start with identifiers");
+                              "Expected Identifier as declarations start with identifiers");
     return 0;
   }
 
@@ -1958,8 +1962,8 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
   }
   else {
     comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                       "Expected '{}' or '{}' but found '{}'",
-                       AxleTokenType::Equals, AxleTokenType::Colon, parser->current.type);
+                              "Expected '{}' or '{}' but found '{}'",
+                              AxleTokenType::Equals, AxleTokenType::Colon, parser->current.type);
     return 0;
   }
 
@@ -2018,23 +2022,39 @@ static AST_LOCAL parse_statement(CompilerGlobals* const comp, CompilerThread* co
           return 0;
         }
 
-        AST_LOCAL expr = parse_expression(comp, comp_thread, parser);
-        if (comp_thread->is_panic()) {
-          return 0;
+        if (parser->current.type != AxleTokenType::Semicolon) {
+          AST_LOCAL expr = parse_expression(comp, comp_thread, parser);
+          if (comp_thread->is_panic()) {
+            return 0;
+          }
+
+          expect(comp, comp_thread, parser, AxleTokenType::Semicolon);
+          if (comp_thread->is_panic()) {
+            return 0;
+          }
+
+          SPAN_END;
+
+          ASTReturn* ret = PARSER_ALLOC(ASTReturn);
+          ret->ast_type = AST_TYPE::RETURN;
+          ret->node_span = span;
+          ret->expr = expr;
+          return ret;
         }
+        else {
+          expect(comp, comp_thread, parser, AxleTokenType::Semicolon);
+          if (comp_thread->is_panic()) {
+            return 0;
+          }
 
-        expect(comp, comp_thread, parser, AxleTokenType::Semicolon);
-        if (comp_thread->is_panic()) {
-          return 0;
+          SPAN_END;
+
+          ASTReturn* ret = PARSER_ALLOC(ASTReturn);
+          ret->ast_type = AST_TYPE::RETURN;
+          ret->node_span = span;
+          ret->expr = nullptr;
+          return ret;
         }
-
-        SPAN_END;
-
-        ASTReturn* ret = PARSER_ALLOC(ASTReturn);
-        ret->ast_type = AST_TYPE::RETURN;
-        ret->node_span = span;
-        ret->expr = expr;
-        return ret;
       }
     case AxleTokenType::If: {
         advance(comp, comp_thread, parser);
@@ -2164,10 +2184,10 @@ static AST_LOCAL parse_statement(CompilerGlobals* const comp, CompilerThread* co
           SPAN_END;
 
           comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span,
-                             "Expected one of '{}' or '{}' at the end of the expression shown\n"
-                             "Found '{}'",
-                             AxleTokenType::Equals, AxleTokenType::Semicolon,
-                             parser->current.type);
+                                    "Expected one of '{}' or '{}' at the end of the expression shown\n"
+                                    "Found '{}'",
+                                    AxleTokenType::Equals, AxleTokenType::Semicolon,
+                                    parser->current.type);
           return 0;
         }
         break;
@@ -2268,7 +2288,7 @@ static AST_LOCAL parse_function_signature(CompilerGlobals* const comp, CompilerT
       else {
         //ERROR
         comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                           "Expected a comma!");
+                                  "Expected a comma!");
         return 0;
       }
     }
@@ -2327,9 +2347,9 @@ static AST_LOCAL parse_lambda(CompilerGlobals* const comp, CompilerThread* const
   }
   else {
     comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                       "Expected '{}' or '{}'\nFound '{}'",
-                       AxleTokenType::Left_Brace, AxleTokenType::Semicolon,
-                       parser->current.type);
+                              "Expected '{}' or '{}'\nFound '{}'",
+                              AxleTokenType::Left_Brace, AxleTokenType::Semicolon,
+                              parser->current.type);
     return 0;
   }
 
@@ -2420,7 +2440,7 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
     if (parser->current.type == AxleTokenType::Intrinsic) {
       if (parser->current.string != comp_thread->intrinsics.import) {
         comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                           "Intrinsic '#{}' is not valid here", comp_thread->intrinsics.import);
+                                  "Intrinsic '#{}' is not valid here", comp_thread->intrinsics.import);
         return;
       }
 
@@ -2458,7 +2478,7 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
     }
     else {
       comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                         "Unexpected token");
+                                "Unexpected token");
     }
   }
 

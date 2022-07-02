@@ -9,12 +9,12 @@ struct SpinLockMutex {
 };
 
 struct Signal {
-  volatile char held;
+  mutable volatile char held;
 
   void set();
   void unset();
 
-  bool test();
+  bool test() const;
 };
 
 template<typename T>
