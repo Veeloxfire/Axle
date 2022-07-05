@@ -13,6 +13,8 @@ struct Global;
 struct InternString;
 struct Span;
 
+using AST_LOCAL = AST*;
+
 //New structures
 
 struct ValueIndex {

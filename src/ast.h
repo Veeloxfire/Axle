@@ -14,8 +14,6 @@ struct Global;
 struct AST;
 struct Namespace;
 
-using AST_LOCAL = AST*;
-
 struct AST_LINKED {
   AST_LOCAL curr = 0;
   AST_LINKED* next = 0;

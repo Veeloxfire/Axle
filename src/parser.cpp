@@ -1718,11 +1718,11 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
         if (parser->current.type != AxleTokenType::Right_Bracket) {
           while (true) {
             if (list == nullptr) {
-              list = PARSER_ALLOC(AST_LINKED);
+              list = parser->ast_store.push<AST_LINKED>();
               args.start = list;
             }
             else {
-              list->next = PARSER_ALLOC(AST_LINKED);
+              list->next = parser->ast_store.push<AST_LINKED>();
               list = list->next;
             }
 
@@ -2215,11 +2215,11 @@ static AST_LOCAL parse_block(CompilerGlobals* const comp, CompilerThread* const 
     }
 
     if (list == nullptr) {
-      list = PARSER_ALLOC(AST_LINKED);
+      list = parser->ast_store.push<AST_LINKED>();
       statements.start = list;
     }
     else {
-      list->next = PARSER_ALLOC(AST_LINKED);
+      list->next = parser->ast_store.push<AST_LINKED>();
       list = list->next;
     }
     list->next = nullptr;
@@ -2426,11 +2426,11 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
        current = parser->current.type)
   {
     if (linked == nullptr) {
-      linked = PARSER_ALLOC(AST_LINKED);
+      linked = parser->ast_store.push<AST_LINKED>();
       top_level.start = linked;
     }
     else {
-      linked->next = PARSER_ALLOC(AST_LINKED);
+      linked->next = parser->ast_store.push<AST_LINKED>();
       linked = linked->next;
     }
 

@@ -170,12 +170,6 @@ struct Local {
   RuntimeValue val ={};
 };
 
-struct LocalsNode {
-  //TODO: make this an array if its more efficient
-  LocalsNode* prev;
-  Local local;
-};
-
 struct State {
   Type return_type;
 
