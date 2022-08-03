@@ -8,32 +8,38 @@ print :: (string: *ascii, len: u64) -> void {
   WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*u32, nullptr), nullptr);
 }
 
-print :: (val: u64) -> void {
+print_newline :: () -> void {
+  nl :: "\n";
+  print(nl.ptr, nl.len);
+}
+
+print_u64 :: (val: u64) -> void {
   if(val == 0) {
-    print("0", "0".len);
+    zero :: "0";
+    print(zero.ptr, zero.len);
     return;
   }
   
   arr := "00000000000000000000";
 
-  arr_len :: arr.len;
-  index : u64 = 0;
-
   digit : u64 = 10000000000000000000;
   index : u64 = 0;
+
   while((digit > 0) & ((val / digit) == 0)) {
-    first_index += 1;
-    digit /= 10;
+    index = index + 1;
+    digit = digit / 10;
   }
 
   first_index := index;
 
+
   while(digit > 0) {
     d := val / digit;
-    arr[index] += d;
+    arr[index] = cast(ascii, cast(u8, '0') + cast(u8, d));
 
-    first_index += 1;
-    digit /= 10;
+    val = val - (d * digit);
+    index = index + 1;
+    digit = digit / 10;
   }
 
   print(arr.ptr + first_index, arr.len - first_index);

@@ -1,8 +1,32 @@
 #import "..\\..\\stdlib\\io.axl";
 
-main :: () -> u64 {
-  arr := "Hello World!";
+fizzbuzz :: (max: u64) -> void {
+  i := 1;
 
-  print(arr.ptr, arr.len - 1);
+  FIZZBUZZ :: "FizzBuzz\n";
+  FIZZ :: "Fizz\n";
+  BUZZ :: "Buzz\n";
+
+  while(i < max) {
+    if(i % 15 == 0) {
+      print(FIZZBUZZ.ptr, FIZZBUZZ.len);
+    } else if(i % 3 == 0) {
+      print(FIZZ.ptr, FIZZ.len);
+    } else if(i % 5 == 0) {
+      print(BUZZ.ptr, BUZZ.len);
+    } else {
+      print_u64(i);
+      print_newline();
+    }
+
+    i = i + 1;
+  }
+}
+
+main :: () -> u64 {
+  
+  fizzbuzz(10);
+
+  return 0;
 }
 

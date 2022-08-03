@@ -48,6 +48,13 @@ Function* CompilerGlobals::new_function() {
   return func;
 }
 
+Local* CompilerGlobals::new_local() {
+  locals_mutex.acquire();
+  Local* loc = locals_single_threaded.insert();
+  locals_mutex.release();
+  return loc;
+}
+
 Global* CompilerGlobals::new_global() {
   globals_mutex.acquire();
   Global* glob = globals_single_threaded.insert();
@@ -160,6 +167,7 @@ void State::use_mem(const MemIndex index) {
 
   if (val->mem.scale != 0) {
     ValueIndex index = ValueIndex{ val->mem.index };
+    use_value(index);
   }
 }
 
@@ -167,7 +175,7 @@ void State::use_value(const ValueIndex index) {
   use_value(index, index);
 }
 
-void State::use_value(const ValueIndex index, const ValueIndex related) {
+static void use_value_impl(Value& val, ValueIndex related, const ControlFlow& flow) {
   struct Lambda {
     const ControlFlow* flow;
 
@@ -177,24 +185,32 @@ void State::use_value(const ValueIndex index, const ValueIndex related) {
     }
   };
 
-  auto& val = *get_val(index);
-
-  ASSERT(val.has_value);
-
-  val.last_uses.remove_if(Lambda{ &control_flow });
+  val.last_uses.remove_if(Lambda{ &flow });
   val.last_uses.insert(
     ValueUse{
       related,
-      control_flow.now(),
+      flow.now(),
     }
   );
+}
 
-  val.crosses_call = val.crosses_call //still crossed a call
-    || (control_flow.had_call //had a call
-        && val.creation.time.flow == control_flow.current_flow //same flow
-        && val.creation.time.time < control_flow.last_call) // created before last call
-    || (control_flow.had_call //had a call
-        && val.creation.time.flow != control_flow.current_flow);//not same flow must lead here
+void State::use_value(const ValueIndex index, const ValueIndex related) {
+  auto& val = *get_val(index);
+  ASSERT(val.has_value);
+
+  if (val.creation.time.flow != control_flow.current_flow
+      && !captured_values.contains(index)) {
+    captured_values.insert(index);
+  }
+
+  use_value_impl(val, related, control_flow);
+}
+
+void State::use_value_captured(const ValueIndex index, const ValueIndex related) {
+  auto& val = *get_val(index);
+  ASSERT(val.has_value);
+
+  use_value_impl(val, related, control_flow);
 }
 
 MemIndex State::new_mem() {
@@ -215,6 +231,7 @@ ValueIndex State::new_value() {
 
   auto val_index = ValueIndex{ value_tree.intersection_check.new_value() };
 
+  ASSERT(val_index.val < 256);//TODO: support more values
 
   auto* val = value_tree.values.data + val_index.val;
   val->creation = ValueUse{ val_index, control_flow.now() };
@@ -238,16 +255,18 @@ void State::value_copy(ValueIndex a, ValueIndex b) {
   use_value(b);
 }
 
-Local* State::find_local(const InternString* i_s) {
-  auto i = active_locals.begin();
-  const auto end = active_locals.end();
+Local* DependencyCheckStateAndContext::get_local(const InternString* name) {
+  auto i = locals.begin();
+  const auto end = locals.end();
 
   for (; i < end; i++) {
-    Local* l = all_locals.data + *i;
-    if (l->decl.name == i_s) {
+    Local* l = *i;
+
+    if (l->decl.name == name) {
       return l;
     }
   }
+
   return nullptr;
 }
 
@@ -577,6 +596,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
                                AST_LOCAL a) {
   TRACING_FUNCTION();
 
+  ASSERT(a != nullptr);
+
   switch (a->ast_type) {
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
@@ -650,10 +671,15 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
         ASTIdentifier* ident = (ASTIdentifier*)a;
         const InternString* name = ident->name;
 
-        const bool is_local = state->is_local(name);
+        {
+          Local* local = state->get_local(name);
 
-        if (is_local) {
-          return;
+          if (local != nullptr) {
+            ident->id_type = ASTIdentifier::LOCAL;
+            ident->local = local;
+
+            return;
+          }
         }
 
         {
@@ -667,6 +693,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
               //Need to wait for this if its not ready
               set_dependency(comp_thread, state, id);
             }
+
+            ident->id_type = ASTIdentifier::GLOBAL;
+            ident->global = non_local->global;
             return;
           }
         }
@@ -752,9 +781,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
 
         return;
       }
-    case AST_TYPE::LOCAL_DECL:
-    case AST_TYPE::GLOBAL_DECL: {
-        ASTDecl* decl = (ASTDecl*)a;
+    case AST_TYPE::LOCAL_DECL: {
+        ASTLocalDecl* decl = (ASTLocalDecl*)a;
 
         if (decl->type_ast != 0) {
           dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
@@ -764,8 +792,39 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
           dependency_check_ast_node(comp, comp_thread, state, decl->expr);
         }
 
-        if (state->local_context) {
-          state->locals.insert(decl->name);
+        if (decl->local_ptr == nullptr) {
+          const Local* shadowing = state->get_local(decl->name);
+
+          if (shadowing != nullptr) {
+            comp_thread->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+                                      "Attempted to shadow the local variable '{}'",
+                                      decl->name);
+            return;
+          }
+
+          Local* loc = comp->new_local();
+          decl->local_ptr = loc;
+
+          loc->decl.name = decl->name;
+          loc->decl.span = decl->node_span;
+
+        }
+
+
+
+        state->locals.insert(decl->local_ptr);
+
+        return;
+      }
+    case AST_TYPE::GLOBAL_DECL: {
+        ASTGlobalDecl* decl = (ASTGlobalDecl*)a;
+
+        if (decl->type_ast != 0) {
+          dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
+        }
+
+        if (decl->expr != 0) {
+          dependency_check_ast_node(comp, comp_thread, state, decl->expr);
         }
 
         return;
@@ -777,9 +836,24 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
           dependency_check_ast_node(comp, comp_thread, state, tn->type);
         }
 
-        if (state->local_context) {
-          state->locals.insert(tn->name);
+        if (tn->local_ptr == nullptr) {
+          const Local* shadowing = state->get_local(tn->name);
+
+          if (shadowing != nullptr) {
+            comp_thread->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+                                      "Attempted to shadow the variable '{}'",
+                                      tn->name);
+            return;
+          }
+
+          Local* loc = comp->new_local();
+          tn->local_ptr = loc;
+
+          loc->decl.name = tn->name;
+          loc->decl.span = tn->node_span;
         }
+
+        state->locals.insert(tn->local_ptr);
 
         return;
       }
@@ -834,8 +908,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::RETURN: {
         ASTReturn* ret = (ASTReturn*)a;
-
-        dependency_check_ast_node(comp, comp_thread, state, ret->expr);
+        if (ret->expr != nullptr) {
+          dependency_check_ast_node(comp, comp_thread, state, ret->expr);
+        }
         return;
       }
     case AST_TYPE::FUNCTION_SIGNATURE: {
@@ -866,7 +941,7 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::LAMBDA: {
         ASTLambda* l = (ASTLambda*)a;
 
-        state->local_context = true;
+        ASSERT(state->locals.size == 0);
 
         dependency_check_ast_node(comp, comp_thread, state, l->sig);
         dependency_check_ast_node(comp, comp_thread, state, l->body);
@@ -903,10 +978,10 @@ void set_runtime_flags(AST_LOCAL ast, State* const state, bool modified, uint8_t
 
   switch (ast->ast_type) {
     case AST_TYPE::IDENTIFIER_EXPR: {
-        Local* local = state->find_local(((ASTIdentifier*)ast)->name);
+        ASTIdentifier* id = (ASTIdentifier*)ast;
 
-        if (local != nullptr) {
-          local->valid_rvts &= ast->valid_rvts;
+        if (id->id_type == ASTIdentifier::LOCAL) {
+          id->local->valid_rvts &= ast->valid_rvts;
         }
         break;
       }
@@ -940,59 +1015,6 @@ static void compile_unary_operator_emit(CompilerGlobals* const comp,
 
         comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
                                   "Type checking is not implemented for unary operator '{}'",
-                                  name);
-        return;
-      }
-  }
-}
-
-static void compile_binary_operator_emit(CompilerGlobals* const comp, CompilerThread* const comp_thread, State* const state, ASTBinaryOperatorExpr* const expr) {
-  TRACING_FUNCTION();
-  switch (expr->op) {
-    case BINARY_OPERATOR::ADD:
-      compile_binary_operator(comp, comp_thread, state, expr, add_operators);
-      break;
-    case BINARY_OPERATOR::SUB:
-      compile_binary_operator(comp, comp_thread, state, expr, sub_operators);
-      break;
-    case BINARY_OPERATOR::MUL:
-      compile_binary_operator(comp, comp_thread, state, expr, mul_operators);
-      break;
-    case BINARY_OPERATOR::DIV:
-      compile_binary_operator(comp, comp_thread, state, expr, div_operators);
-      break;
-    case BINARY_OPERATOR::EQUIVALENT:
-      compile_binary_operator(comp, comp_thread, state, expr, eq_operators);
-      break;
-    case BINARY_OPERATOR::NOT_EQ:
-      compile_binary_operator(comp, comp_thread, state, expr, neq_operators);
-      break;
-    case BINARY_OPERATOR::LESSER:
-      compile_binary_operator(comp, comp_thread, state, expr, lesser_operators);
-      break;
-    case BINARY_OPERATOR::GREATER:
-      compile_binary_operator(comp, comp_thread, state, expr, greater_operators);
-      break;
-    case BINARY_OPERATOR::OR:
-      compile_binary_operator(comp, comp_thread, state, expr, or_operators);
-      break;
-    case BINARY_OPERATOR::XOR:
-      compile_binary_operator(comp, comp_thread, state, expr, xor_operators);
-      break;
-    case BINARY_OPERATOR::AND:
-      compile_binary_operator(comp, comp_thread, state, expr, and_operators);
-      break;
-    case BINARY_OPERATOR::LEFT_SHIFT:
-      compile_binary_operator(comp, comp_thread, state, expr, left_shift_operators);
-      break;
-    case BINARY_OPERATOR::RIGHT_SHIFT:
-      compile_binary_operator(comp, comp_thread, state, expr, right_shift_operators);
-      break;
-    default: {
-        const char* const name = BINARY_OP_STRING::get(expr->op);
-
-        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                                  "Type Checking is not implemented for binary operator '{}'",
                                   name);
         return;
       }
@@ -1129,6 +1151,19 @@ static void cast_operator_type(CompilerGlobals* const comp,
   };
 
   switch (cast_from.struct_type()) {
+    case STRUCTURE_TYPE::ASCII_CHAR: {
+        if (cast_to.struct_type() == STRUCTURE_TYPE::INTEGER) {
+          const auto* to_int = cast_to.unchecked_base<IntegerStructure>();
+
+          if (to_int->size == 1 && !to_int->is_signed) {
+            //Can cast ascii to u8
+            emit_cast_func(cast, CASTS::no_op);
+            return;
+          }
+        }
+        break;
+      }
+
     case STRUCTURE_TYPE::ENUM: {
         const auto* en = cast_from.unchecked_base<EnumStructure>();
 
@@ -1206,6 +1241,19 @@ static void cast_operator_type(CompilerGlobals* const comp,
                                     "Cannot cast type '{}' to type '{}'\n"
                                     "They are both integers and this should be implemented",
                                     cast_from.name, cast_to.name);
+          return;
+        }
+        else if (cast_to.struct_type() == STRUCTURE_TYPE::ASCII_CHAR) {
+          if (from_int->size == 1 && !from_int->is_signed) {
+            //Can case u8 to ascii
+            emit_cast_func(cast, CASTS::no_op);
+            return;
+          }
+
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, cast->node_span,
+                                    "Cannot cast type '{}' to type '{}'\n"
+                                    "First cast to a smaller int type ({})",
+                                    cast_from.name, cast_to.name, comp_thread->builtin_types->t_u8.name);
           return;
         }
 
@@ -1587,14 +1635,10 @@ void type_check_ast_node(CompilerGlobals* const comp,
         ASTFuncSig* ast_sig = (ASTFuncSig*)a;
 
         FOR_AST(ast_sig->parameters, i) {
-          ASTTypedName* n = (ASTTypedName*)i;
-          type_check_ast_node(comp, comp_thread, context, state, n->type);
+          type_check_ast_node(comp, comp_thread, context, state, i);
           if (comp_thread->is_panic()) {
             return;
           }
-
-          //Need to load the type
-          n->node_type = *(const Type*)(n->type->value);
         }
 
         type_check_ast_node(comp, comp_thread, context, state, ast_sig->return_type);
@@ -1628,6 +1672,7 @@ void type_check_ast_node(CompilerGlobals* const comp,
 
         return;
       }
+
     case AST_TYPE::LAMBDA: {
         ASTLambda* lambda = (ASTLambda*)a;
         ASTFuncSig* ast_sig = (ASTFuncSig*)lambda->sig;
@@ -1635,31 +1680,6 @@ void type_check_ast_node(CompilerGlobals* const comp,
         ASSERT(ast_sig->node_type.is_valid());//should be done in the signature unit
 
         state->return_type = *(const Type*)ast_sig->return_type->value;
-
-        //Enter the body
-        state->control_flow.new_flow();
-
-        //Load parameters as locals
-        state->all_locals.insert_uninit(ast_sig->parameters.count);
-
-        size_t index = 0;
-        const size_t size = ast_sig->parameters.count;
-
-        FOR_AST(ast_sig->parameters, it) {
-          auto i = (ASTTypedName*)it;
-          auto l_i = state->all_locals.data + index;
-          state->active_locals.insert(index);
-
-          ASSERT(i->node_type.is_valid());
-
-          l_i->decl.name = i->name;
-          l_i->decl.type = i->node_type;
-          l_i->decl.meta_flags |= META_FLAG::ASSIGNABLE;
-          l_i->valid_rvts &= NON_CONST_RVTS;//Cant have const parameters
-          l_i->val = RuntimeValue();
-
-          index += 1;
-        }
 
         type_check_ast_node(comp, comp_thread, context, state, lambda->body);
         if (comp_thread->is_panic()) {
@@ -1734,6 +1754,9 @@ void type_check_ast_node(CompilerGlobals* const comp,
           }
           else  if (member->name == comp_thread->important_names.len) {
             a->node_type = comp_thread->builtin_types->t_u64;
+
+            //TODO: make this a constant
+            //set_runtime_flags(base, state, false, (u8)RVT::CONST);
           }
           else {
             comp_thread->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
@@ -2077,37 +2100,32 @@ void type_check_ast_node(CompilerGlobals* const comp,
         //Because shadowing isn't allowed this should always work?
         ASTIdentifier* ident = (ASTIdentifier*)a;
 
-        Local* const loc = state->find_local(ident->name);
-        if (loc != nullptr) {
+        if (ident->id_type == ASTIdentifier::LOCAL) {
+          Local* local = ident->local;
+
           //Is a local not a global
           a->meta_flags |= META_FLAG::ASSIGNABLE;
-          a->meta_flags |= META_FLAG::COMPTIME;
+          a->meta_flags &= ~META_FLAG::COMPTIME;//for now
           a->meta_flags |= META_FLAG::CONST;
 
-          a->node_type = loc->decl.type;
-          pass_meta_flags_down(&a->meta_flags, loc->decl.meta_flags);
+          a->node_type = local->decl.type;
+          pass_meta_flags_down(&a->meta_flags, local->decl.meta_flags);
+          return;
+        }
+        else if (ident->id_type == ASTIdentifier::GLOBAL) {
+          Global* glob = ident->global;
+
+          a->meta_flags |= META_FLAG::ASSIGNABLE;
+          a->meta_flags &= ~META_FLAG::COMPTIME;
+          a->meta_flags |= META_FLAG::CONST;
+
+          a->node_type = glob->decl.type;
+          pass_meta_flags_down(&a->meta_flags, glob->decl.meta_flags);
           return;
         }
 
-
-        const Global* glob;
-        {
-          auto names = comp->services.names.get();
-          const GlobalName* nm = names->find_global_name(context->current_unit->available_names, ident->name);
-          ASSERT(nm != nullptr);
-
-          glob = nm->global;
-          ASSERT(glob != nullptr);
-        }
-
-        //Default flags
-        a->meta_flags |= META_FLAG::ASSIGNABLE;
-        a->meta_flags |= META_FLAG::COMPTIME;
-        a->meta_flags |= META_FLAG::CONST;
-
-        a->node_type = glob->decl.type;
-        pass_meta_flags_down(&a->meta_flags, glob->decl.meta_flags);
-
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
+                                  "Identifer type was invalid");
         return;
       }
     case AST_TYPE::CAST: {
@@ -2199,7 +2217,7 @@ void type_check_ast_node(CompilerGlobals* const comp,
           }
         }
 
-        compile_binary_operator_emit(comp, comp_thread, state, bin_op);
+        compile_binary_operator(comp, comp_thread, state, bin_op);
         if (comp_thread->is_panic()) {
           return;
         }
@@ -2345,7 +2363,6 @@ void type_check_ast_node(CompilerGlobals* const comp,
           return;
         }
 
-
         if (if_else->condition->node_type != comp_thread->builtin_types->t_bool) {
           comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, if_else->condition->node_span,
                                     "'{}' Cannot be used to resolve a condition ... expected '{}'",
@@ -2354,19 +2371,16 @@ void type_check_ast_node(CompilerGlobals* const comp,
           return;
         }
 
-        auto locals = state->active_locals.size;
         type_check_ast_node(comp, comp_thread, context, state, if_else->if_statement);
         if (comp_thread->is_panic()) {
           return;
         }
 
-        state->active_locals.size = locals;
         if (if_else->else_statement != 0) {
           type_check_ast_node(comp, comp_thread, context, state, if_else->else_statement);
           if (comp_thread->is_panic()) {
             return;
           }
-          state->active_locals.size = locals;
         }
 
         a->node_type = comp_thread->builtin_types->t_void;
@@ -2388,20 +2402,16 @@ void type_check_ast_node(CompilerGlobals* const comp,
           return;
         }
 
-        auto locals = state->active_locals.size;
         type_check_ast_node(comp, comp_thread, context, state, while_loop->statement);
         if (comp_thread->is_panic()) {
           return;
         }
-        state->active_locals.size = locals;
 
         a->node_type = comp_thread->builtin_types->t_void;
         return;
       }
     case AST_TYPE::BLOCK: {
         ASTBlock* block = (ASTBlock*)a;
-
-        auto locals = state->active_locals.size;
 
         FOR_AST(block->block, it) {
           type_check_ast_node(comp, comp_thread, context, state, it);
@@ -2410,7 +2420,6 @@ void type_check_ast_node(CompilerGlobals* const comp,
           }
         }
 
-        state->active_locals.size = locals;
         a->node_type = comp_thread->builtin_types->t_void;
         return;
       }
@@ -2531,29 +2540,10 @@ void type_check_ast_node(CompilerGlobals* const comp,
           set_dependency(comp_thread, context, id);
         }
 
-        //Check for shadowing
-
-        const Local* shadowing = state->find_local(decl->name);
-
-        if (shadowing != nullptr) {
-          comp_thread->report_error(ERROR_CODE::NAME_ERROR, a->node_span,
-                                    "Attempted to shadow the local variable '{}'",
-                                    decl->name);
-          return;
-        }
-
-
-        size_t loc_index = state->all_locals.size;
-        decl->local_index = loc_index;
-
-        state->all_locals.insert_uninit(1);
-        auto* loc = state->all_locals.back();
-
         ASSERT(decl->type.is_valid());
 
-        loc->decl.name = decl->name;
+        Local* const loc = decl->local_ptr;
         loc->decl.type = decl->type;
-        loc->decl.span = decl->node_span;
         if (decl->compile_time_const) {
           loc->decl.meta_flags |= META_FLAG::COMPTIME;
         }
@@ -2569,8 +2559,6 @@ void type_check_ast_node(CompilerGlobals* const comp,
                                     "a non compile time constant value");
           return;
         }
-
-        state->active_locals.insert(decl->local_index);
 
         a->node_type = comp_thread->builtin_types->t_void;
         return;
@@ -2670,7 +2658,14 @@ void type_check_ast_node(CompilerGlobals* const comp,
           return;
         }
 
-        name->node_type = name->type->node_type;
+        //Extract the value of the type
+        ASSERT(name->type->value != nullptr);
+        name->node_type = *(const Type*)name->type->value;
+
+        Local* loc = name->local_ptr;
+
+        loc->decl.type = name->node_type;
+        loc->decl.meta_flags |= META_FLAG::ASSIGNABLE;
         return;
       }
   }
@@ -3530,9 +3525,7 @@ static void compile_function_call(CompilerGlobals* const comp,
   size_t stack_params = state->stack.current_passed;
 
   ByteCode::EMIT::CALL_LABEL(code->code, call->label);
-
-  state->control_flow.had_call = true;
-  state->control_flow.last_call = state->control_flow.expression_num;
+  state->control_flow.calls.insert(state->control_flow.now());
 
   state->control_flow.expression_num++;
 
@@ -4105,9 +4098,9 @@ static void compile_bytecode_of_expression(CompilerGlobals* const comp,
         ASSERT(hint != nullptr);
         ASTIdentifier* ident = (ASTIdentifier*)expr;
 
-        Local* local = state->find_local(ident->name);
+        if (ident->id_type == ASTIdentifier::LOCAL) {
+          Local* local = ident->local;
 
-        if (local != nullptr) {
           RuntimeValue local_val = local->val;
           if (local_val.type == RVT::CONST) {
             //Need to actively copy the constant otherwise it will be freed twice
@@ -4126,39 +4119,32 @@ static void compile_bytecode_of_expression(CompilerGlobals* const comp,
 
           break;
         }
+        else if (ident->id_type == ASTIdentifier::GLOBAL) {
+          const Global* glob = ident->global;
+          ASSERT(glob != nullptr);
 
-        {
-          auto names = comp->services.names.get();
-          const GlobalName* gn = names->find_global_name(context->current_unit->available_names, ident->name);
-          if (gn != nullptr) {
-
-            const Global* glob = gn->global;
-            ASSERT(glob != nullptr);
-
-            if (glob->constant_value.ptr != nullptr) {
-              if (hint->is_hint) {
-                load_runtime_hint(comp, state, expr->node_type.structure, hint, expr->valid_rvts);
-              }
-
-              ConstantVal copied_val = copy_constant_value(comp, glob->constant_value);
-
-              load_const_to_runtime_val(comp,
-                                        state,
-                                        code,
-                                        glob->decl.type.structure, copied_val,
-                                        &hint->val);
+          if (glob->constant_value.ptr != nullptr) {
+            if (hint->is_hint) {
+              load_runtime_hint(comp, state, expr->node_type.structure, hint, expr->valid_rvts);
             }
-            else {
-              names.release();
-              RuntimeValue global_mem = load_data_memory(state, glob->decl.type.structure->size, glob->data_holder_index - 1, code);
 
-              copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
-            }
-            break;
+            ConstantVal copied_val = copy_constant_value(comp, glob->constant_value);
+
+            load_const_to_runtime_val(comp,
+                                      state,
+                                      code,
+                                      glob->decl.type.structure, copied_val,
+                                      &hint->val);
           }
+          else {
+            RuntimeValue global_mem = load_data_memory(state, glob->decl.type.structure->size, glob->data_holder_index - 1, code);
+
+            copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &global_mem, hint, expr->valid_rvts & NON_CONST_RVTS);
+          }
+          break;
         }
 
-        INVALID_CODE_PATH("Could not find name of global that should exist by now");
+        INVALID_CODE_PATH("Missing identifier type");
         break;
       }
     case AST_TYPE::STATIC_LINK: {
@@ -4249,9 +4235,9 @@ static void compile_bytecode_of_expression(CompilerGlobals* const comp,
         args.left = &temp_left;
         args.right = &temp_right;
 
-        args.info = &bin_op->info;
+        args.info = &bin_op->emit_info;
 
-        RuntimeValue res = (args.*(bin_op->emit))();
+        RuntimeValue res = args.emit();
 
         copy_runtime_to_runtime_hint(comp, state, code, expr->node_type.structure, &res, hint, expr->valid_rvts & NON_CONST_RVTS);
         break;
@@ -4295,9 +4281,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     case AST_TYPE::BLOCK: {
         ASTBlock* block = (ASTBlock*)statement;
 
-        const auto num_locals = state->active_locals.size;
-        DEFER(&) { state->active_locals.size = num_locals; };
-
         FOR_AST(block->block, it) {
           compile_bytecode_of_statement(comp, context, state, it, code);
         }
@@ -4307,7 +4290,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     case AST_TYPE::RETURN: {
         ASTReturn* ret = (ASTReturn*)statement;
 
-        if (ret != nullptr) {
+        if (ret->expr != nullptr) {
           compile_bytecode_of_expression_existing(comp,
                                                   context,
                                                   state,
@@ -4332,6 +4315,13 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         const uint64_t base_label = comp->labels++;
         ByteCode::EMIT::LABEL(code->code, base_label);//to jump back to in the loop
 
+        const size_t pre_loop_flow = state->control_flow.current_flow;
+        state->control_flow.new_flow();
+        const size_t cond_flow = state->control_flow.current_flow;
+        state->control_flow.set_a_flows_to_b(pre_loop_flow, cond_flow);
+
+        Array<ValueIndex> outer_captures = std::move(state->captured_values);
+
         RuntimeValue cond = compile_bytecode_of_expression_new(comp,
                                                                context,
                                                                state,
@@ -4339,18 +4329,45 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
                                                                while_loop->condition,
                                                                RVT::CONST | RVT::REGISTER);
 
+        //Should be the same as cond_flow but best to do this
+        const size_t post_cond_flow = state->control_flow.current_flow;
+
+        constexpr auto save_captures = [](Array<ValueIndex>& outer_captures,
+                                          State* const state,
+                                          CodeBlock* code) {
+          usize num_outer_captures = outer_captures.size;
+
+          for (usize i = 0; i < state->captured_values.size; i++) {
+            ValueIndex index = state->captured_values.data[i];
+
+            ByteCode::EMIT::RESERVE(code->code, (uint8_t)index.val);
+            state->use_value_captured(index, index);
+
+            for (usize j = 0; j < num_outer_captures; j++) {
+              if (outer_captures.data[j] == index) goto NEXT;
+            }
+
+            outer_captures.insert(index);
+
+          NEXT:
+            continue;
+          }
+        };
+
         if (cond.type == RVT::CONST) {
           //Only compile loop if its true
 
           if (*(uint64_t*)cond.constant.ptr != 0) {
-            const auto locals = state->active_locals.size;
-            DEFER(&) { state->active_locals.size = locals; };
-
-            //Compile while loop as a fixed loop with no condition
-            const uint64_t base_label = comp->labels++;
+            state->control_flow.new_flow();
+            state->control_flow.set_a_flows_to_b(post_cond_flow, state->control_flow.current_flow);
 
             compile_bytecode_of_statement(comp, context, state, while_loop->statement, code);
+
+            save_captures(outer_captures, state, code);
+            state->control_flow.set_a_flows_to_b(state->control_flow.current_flow, cond_flow);
             ByteCode::EMIT::JUMP_TO_FIXED(code->code, base_label);
+
+            state->control_flow.new_flow();//after loop - doesn't actually flow to this next one
           }
         }
         else {
@@ -4359,23 +4376,22 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           ByteCode::EMIT::JUMP_TO_FIXED_IF_VAL_ZERO(code->code, (uint8_t)cond.reg.val, exit_label);
           state->use_value(cond.reg);
 
-          const size_t start_flow = state->control_flow.current_flow;
-
-          const auto locals = state->active_locals.size;
-
           //loop branch
           state->control_flow.new_flow();
-          state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
+          state->control_flow.set_a_flows_to_b(post_cond_flow, state->control_flow.current_flow);
           compile_bytecode_of_statement(comp, context, state, while_loop->statement, code);
 
-          state->active_locals.size = locals;
 
+          save_captures(outer_captures, state, code);
           ByteCode::EMIT::JUMP_TO_FIXED(code->code, base_label);
-          const size_t loop_flow = state->control_flow.current_flow;
+
+          const size_t end_loop_flow = state->control_flow.current_flow;
+          state->control_flow.set_a_flows_to_b(end_loop_flow, cond_flow);
+
 
           //After the loop
           state->control_flow.new_flow();
-          state->control_flow.set_a_flows_to_b(loop_flow, state->control_flow.current_flow);
+          state->control_flow.set_a_flows_to_b(post_cond_flow, state->control_flow.current_flow);
 
           ByteCode::EMIT::LABEL(code->code, exit_label);
         }
@@ -4393,9 +4409,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
         if (cond.type == RVT::CONST) {
           //Just becomes a block - no need for flows and stuff
-
-          const auto locals = state->active_locals.size;
-          DEFER(&) { state->active_locals.size = locals; };
 
           if (*(uint64_t*)cond.constant.ptr != 0) {
             //Compile if branch
@@ -4415,14 +4428,10 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           const size_t start_flow = state->control_flow.current_flow;
 
-          const auto locals = state->active_locals.size;
-
           //If branch
           state->control_flow.new_flow();
           state->control_flow.set_a_flows_to_b(start_flow, state->control_flow.current_flow);
           compile_bytecode_of_statement(comp, context, state, if_else->if_statement, code);
-
-          state->active_locals.size = locals;
 
           const size_t end_if_flow = state->control_flow.current_flow;
 
@@ -4440,8 +4449,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           }
 
           ByteCode::EMIT::JUMP_TO_FIXED(code->code, escape_label);
-
-          state->active_locals.size = locals;
 
           const size_t end_else_flow = state->control_flow.current_flow;
 
@@ -4461,7 +4468,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     case AST_TYPE::LOCAL_DECL: {
         ASTLocalDecl* const decl = (ASTLocalDecl*)statement;
 
-        Local* const local = state->all_locals.data + decl->local_index;
+        Local* const local = decl->local_ptr;
 
         if (!TEST_MASK(local->decl.meta_flags, META_FLAG::COMPTIME)) {
           RuntimeHint hint = {};
@@ -4489,10 +4496,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
                                                           decl->expr,
                                                           (u8)RVT::CONST);
         }
-
-
-        //Needed for function calls
-        state->active_locals.insert(decl->local_index);
         return;
       }
     default: {
@@ -4764,9 +4767,12 @@ constexpr static ValueIndex resolve_coalesced(ValueIndex i, const ValueTree& tre
   return i;
 }
 
-
-static void compute_value_intersections(ValueTree& tree, const ControlFlow& flow) {
+static void compute_value_intersections(const CompilerConstants* comp, ValueTree& tree, const ControlFlow& flow) {
   TRACING_FUNCTION();
+
+  if (comp->print_options.intersections) {
+    IO::print("--- Intersections ---\n");
+  }
 
   for (size_t i = 0; i < tree.values.size - 1; i++) {
     auto i_val = tree.values.data + i;
@@ -4781,43 +4787,104 @@ static void compute_value_intersections(ValueTree& tree, const ControlFlow& flow
         continue;
       }
 
-      auto j_last = j_val->last_uses.begin();
-      const auto j_end = j_val->last_uses.end();
-
-      for (; j_last < j_end; j_last++) {
-        if (flow.test_a_flows_to_b(j_last->time.flow, i_val->creation.time.flow)
-            || (j_last->time.flow == i_val->creation.time.flow && j_last->time.time < i_val->creation.time.time)) {
-          //i created after j last use
-          //if j_last flows to i_val then j_last must be before i_val
-          continue;
+      if (i_val->creation.time.flow == j_val->creation.time.flow
+          && i_val->creation.time.time == j_val->creation.time.time) {
+        if (comp->print_options.intersections) {
+          format_print("{} - {}\n", i, j);
         }
-        else {
-          //i created before j last use
-          auto i_last = i_val->last_uses.begin();
-          const auto i_end = i_val->last_uses.end();
+        tree.set_intersection(ValueIndex{ i }, ValueIndex{ j });
+        continue;
+      }
 
-          for (; i_last < i_end; i_last++) {
-            if (flow.test_a_flows_to_b(i_last->time.flow, j_val->creation.time.flow)
-                || (i_last->time.flow == j_val->creation.time.flow && i_last->time.time < j_val->creation.time.time)) {
-              //i last used before j created
-              continue;
-            }
-            else {
-              //i and j dont not overlap
-              //therefore overlap
-              tree.set_intersection(ValueIndex{ i }, ValueIndex{ j });
-              goto OVERLAP_DONE;
-            }
+      if ((i_val->creation.time.flow == j_val->creation.time.flow
+           && i_val->creation.time.time < j_val->creation.time.time)
+          || flow.test_a_flows_to_b(i_val->creation.time.flow, j_val->creation.time.flow)) {
+        //i is before j
+
+        auto i_last = i_val->last_uses.begin();
+        const auto i_end = i_val->last_uses.end();
+
+        for (; i_last < i_end; i_last++) {
+          if ((j_val->creation.time.flow == i_last->time.flow
+               && i_last->time.time < j_val->creation.time.time)
+              || flow.test_a_flows_to_b(j_val->creation.time.flow, i_last->time.flow)) {
+            continue;
           }
+
+          //j is created between i start and end -> intersection
+
+          if (comp->print_options.intersections) {
+            format_print("{} - {}\n", i, j);
+          }
+          tree.set_intersection(ValueIndex{ i }, ValueIndex{ j });
+          break;
+        }
+
+      }
+      else {
+        //j is before i
+
+        auto j_last = j_val->last_uses.begin();
+        const auto j_end = j_val->last_uses.end();
+
+        for (; j_last < j_end; j_last++) {
+          if ((i_val->creation.time.flow == j_last->time.flow
+               && j_last->time.time < i_val->creation.time.time)
+              || flow.test_a_flows_to_b(i_val->creation.time.flow, j_last->time.flow)) {
+            continue;
+          }
+
+          //i is created between j start and end -> intersection
+
+          if (comp->print_options.intersections) {
+            format_print("{} - {}\n", i, j);
+          }
+          tree.set_intersection(ValueIndex{ i }, ValueIndex{ j });
+          break;
         }
       }
-    OVERLAP_DONE:
-      continue;
     }
+  }
+
+  if (comp->print_options.intersections) {
+    IO::print("---------------------\n");
   }
 }
 
-static uint64_t select(const CallingConvention* conv, State* const state) {
+static bool is_inside_range(const ControlFlow& flow,
+                            const TimePoint& start, const TimePoint& end,
+                            const TimePoint& val) {
+  return (flow.test_a_flows_to_b(start.flow, val.flow)
+          || (start.flow == val.flow && start.time < end.time))
+    && (flow.test_a_flows_to_b(val.flow, end.flow)
+        || (val.flow == end.flow && val.time < end.time));
+}
+
+static void set_calls(State* const state) {
+  const size_t num_values = state->value_tree.values.size;
+  const size_t num_calls = state->control_flow.calls.size;
+
+  for (size_t i = 0; i < num_values; i++) {
+    Value* const val = state->value_tree.values.data + i;
+
+    const size_t num_last_uses = val->last_uses.size;
+    for (size_t n = 0; n < num_last_uses; n++) {
+      for (size_t c = 0; c < num_calls; c++) {
+        if (is_inside_range(state->control_flow,
+                            val->creation.time, val->last_uses.data[n].time,
+                            state->control_flow.calls.data[c])) {
+          val->crosses_call = true;
+          goto NEXT_VAL;
+        }
+      }
+    }
+
+  NEXT_VAL:
+    continue;
+  }
+}
+
+static uint64_t select(const CompilerConstants* comp, const CallingConvention* conv, State* const state) {
   TRACING_FUNCTION();
 
   const ValueTree& tree = state->value_tree;
@@ -4860,6 +4927,8 @@ static uint64_t select(const CallingConvention* conv, State* const state) {
 
   const size_t stack_max = a_l.size;
   size_t* const stack = stack_max > 0 ? allocate_default<size_t>(stack_max) : nullptr;
+  DEFER(stack) { free_no_destruct(stack); };
+
   size_t index = 0;
   size_t num_intersects = 1;
 
@@ -4931,16 +5000,17 @@ static uint64_t select(const CallingConvention* conv, State* const state) {
     }
   }
 
+
+  size_t num_registers = conv->num_non_volatile_registers + conv->num_volatile_registers;
+  ASSERT(num_registers < 64);
+
+
   //Load colours
   for (size_t iter = stack_max; iter > 0; iter--) {
     const size_t i = stack[iter - 1];
     auto* i_val = tree.values.data + i;
 
-    if (i_val->fixed()) {
-      continue;
-    }
-
-    uint64_t regs = 0;//not going to have more than 64 registers ... hopefully
+    uint64_t regs = 0;//not going to have more than 64 registers ... hopefully ^ checked in assert
 
     //For each adjacent check for reserved colours
     {
@@ -4956,6 +5026,13 @@ static uint64_t select(const CallingConvention* conv, State* const state) {
       }
     }
 
+    if (i_val->fixed()) {
+      //Check there is not a conflict
+      ASSERT((regs & ((uint64_t)1 << (i_val->reg))) > 0);
+
+      continue;
+    }
+
     uint8_t colour = 0;
     if (i_val->crosses_call) {
       //requires non volatile reg
@@ -4965,27 +5042,45 @@ static uint64_t select(const CallingConvention* conv, State* const state) {
     //Find first index that is 0 (i.e. a free colour/reg)
     //Search in order of options->calling_convention->all_regs_unordered because this will do
     //volatile registers first and then non volatile registers if required
-    while ((regs & ((uint64_t)1 << conv->all_regs_unordered[colour])) != 0) {
+    while (colour < num_registers && (regs & ((uint64_t)1 << conv->all_regs_unordered[colour])) != 0) {
       colour++;
     }
+
+    ASSERT(colour < num_registers);
 
     i_val->value_type = ValueType::FIXED;
     i_val->reg = conv->all_regs_unordered[colour];
   }
 
-  free_no_destruct(stack);
+
+
+  if (comp->print_options.reg_mapping) {
+    printf("--- Reg Mapping ---\n");
+  }
 
   uint64_t used_regs = 0;
   {
+    size_t index = 0;
     auto i = tree.values.begin();
     const auto end = tree.values.end();
 
     for (; i < end; i++) {
-      ASSERT(i->value_type != ValueType::FREE);
-
       if (i->fixed()) {
+
+        if (comp->print_options.reg_mapping) {
+          printf("%llu -> %s\n", index, comp->build_options.endpoint_system->reg_name_from_num(i->reg));
+        }
+
         used_regs |= ((uint64_t)1 << (i->reg));
       }
+      else {
+        ASSERT(i->value_type == ValueType::COALESCED);
+        if (comp->print_options.reg_mapping) {
+          printf("%llu -> %llu\n", index, i->index.val);
+        }
+      }
+
+      index += 1;
     }
 
     //Managed separately
@@ -4993,6 +5088,10 @@ static uint64_t select(const CallingConvention* conv, State* const state) {
     auto sp = conv->stack_pointer_reg;
 
     used_regs &= ~(bp | sp);
+  }
+
+  if (comp->print_options.reg_mapping) {
+    printf("-----\n");
   }
 
   return used_regs;
@@ -5169,12 +5268,14 @@ void coalesce(const CompilerConstants* const comp, const CallingConvention* conv
   ValueTree& tree = state->value_tree;
   const ControlFlow& c_flow = state->control_flow;
 
-  const size_t size = state->value_tree.adjacency_list.size;
+  const size_t size = tree.values.size;
   for (size_t l1 = 0; l1 < size; l1++) {
     auto& l1_val = tree.values.data[l1];
 
     ValueIndex created_by = resolve_coalesced(l1_val.creation.related_index, tree);
     auto& possible_parent = tree.values.data[created_by.val];
+
+    if (possible_parent.fixed()) continue;//Don't coalesce if the value is fixed by default?
 
     Array<size_t> ignore_vals = {};
 
@@ -5228,12 +5329,18 @@ void graph_colour_algo(CompilerConstants* const comp_const,
   }
 
   //Computers all the intersections in the value tree based on control flow
-  //Build section
-  compute_value_intersections(state->value_tree, state->control_flow);
-  coalesce(comp_const, conv, state);
-  const uint64_t regs = select(conv, state);
+  compute_value_intersections(comp_const, state->value_tree, state->control_flow);
 
-  //map values and function prolog and epilog
+  //Combine values together that can be combined
+  coalesce(comp_const, conv, state);
+
+  //Check if each value is used across a call
+  set_calls(state);
+
+  //Actually select which register is used for each value
+  const uint64_t regs = select(comp_const, conv, state);
+
+  //map values to their registers and emit function prolog and epilog
   map_values(comp_const->build_options.endpoint_system, conv, code, state, regs);
 
   code->code.shrink();
@@ -5274,13 +5381,18 @@ void compile_function_body_code(CompilerGlobals* const comp,
                                 Function* const func) {
   TRACING_FUNCTION();
 
+  ASSERT(ast_lambda->sig->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
+  ASTFuncSig* sig = (ASTFuncSig*)ast_lambda->sig;
+
   //Should never be called twice on the same function
   ASSERT(func->code_block.code.size == 0);
 
   //Enter the body - setup
   //func->code_block.label = comp->labels++;//already set
   state->return_label = comp->labels++;
+
   state->control_flow.new_flow();
+  ASSERT(state->control_flow.current_flow == 0);
 
   //Useful values
   init_state_regs(func->signature.sig_struct->calling_convention, state);
@@ -5319,14 +5431,19 @@ void compile_function_body_code(CompilerGlobals* const comp,
 
     if (return_as_ptr) { i_param++; }
 
-    auto* i_loc = state->all_locals.mut_begin();
-    const auto end_loc = i_loc + func->signature.sig_struct->parameter_types.size;
+    FOR_AST(sig->parameters, it) {
+      ASSERT(i_param < end_param);
 
-    for (; i_param < end_param; (i_param++, i_loc++)) {
-      ASSERT(i_loc < end_loc);
+      ASTTypedName* tn = (ASTTypedName*)it;
 
-      i_loc->val = advance_runtime_param(state, &param_itr, i_param->structure);
+      Local* loc = tn->local_ptr;
+      loc->val = advance_runtime_param(state, &param_itr, i_param->structure);
+      loc->valid_rvts &= NON_CONST_RVTS;
+
+      i_param += 1;
     }
+
+    ASSERT(i_param == end_param);
   }
 
   state->control_flow.expression_num++;
@@ -5391,22 +5508,24 @@ void compile_function_body_code(CompilerGlobals* const comp,
     auto i_param = func->signature.sig_struct->parameter_types.begin();
     const auto end_param = func->signature.sig_struct->parameter_types.end();
 
-    auto i_loc = state->all_locals.mut_begin();
-    const auto end_loc = state->all_locals.end();
+    FOR_AST(sig->parameters, it) {
+      ASSERT(it->ast_type == AST_TYPE::TYPED_NAME);
+      ASTTypedName* tn = (ASTTypedName*)it;
 
-    for (; i_param < end_param; (i_loc++, i_param++, i_act_param++)) {
-      ASSERT(i_loc < end_loc);
+      Local* loc = tn->local_ptr;
+
+      ASSERT(i_param < end_param);
       ASSERT(i_act_param < end_act_param);
 
       const Type& param_t = *i_param;
       const Type& act_param_t = *i_act_param;
 
-      ASSERT(i_loc->decl.type == param_t);
+      ASSERT(loc->decl.type == param_t);
 
       RuntimeValue rt_p = {};
 
       if (param_t == act_param_t) {
-        if (i_loc->val.type != RVT::REGISTER) {
+        if (loc->val.type != RVT::REGISTER) {
           //Dont need to save somehere else
           continue;
         }
@@ -5415,16 +5534,16 @@ void compile_function_body_code(CompilerGlobals* const comp,
         //Not passed by pointer
         if (comp_thread->optimization_options.non_stack_locals) {
           RuntimeHint load_hint = {};
-          load_hint.hint_types = i_loc->valid_rvts;
+          load_hint.hint_types = loc->valid_rvts;
 
           load_runtime_hint(comp, state, param_t.structure, &load_hint, NON_CONST_RVTS);
 
-          copy_runtime_to_runtime(comp, state, &func->code_block, param_t.structure, &i_loc->val, &load_hint.val);
+          copy_runtime_to_runtime(comp, state, &func->code_block, param_t.structure, &loc->val, &load_hint.val);
 
           rt_p = std::move(load_hint.val);
         }
         else {
-          ASSERT((i_loc->valid_rvts & RVT::MEMORY) > 0);
+          ASSERT((loc->valid_rvts & RVT::MEMORY) > 0);
           rt_p.type = RVT::MEMORY;
           rt_p.mem = state->new_mem();
 
@@ -5442,7 +5561,7 @@ void compile_function_body_code(CompilerGlobals* const comp,
           stack_v->mem.scale = 0;
           stack_v->size = param_t.structure->size;
 
-          copy_reg_to_runtime(comp, state, &func->code_block, param_t.structure, i_loc->val.reg, &rt_p);
+          copy_reg_to_runtime(comp, state, &func->code_block, param_t.structure, loc->val.reg, &rt_p);
         }
       }
       else if (act_param_t.struct_type() == STRUCTURE_TYPE::POINTER
@@ -5454,7 +5573,7 @@ void compile_function_body_code(CompilerGlobals* const comp,
         args.comp = comp;
         args.state = state;
         args.code = &func->code_block;
-        args.prim = &i_loc->val;
+        args.prim = &loc->val;
 
         rt_p = args.emit_deref();
       }
@@ -5463,7 +5582,10 @@ void compile_function_body_code(CompilerGlobals* const comp,
         INVALID_CODE_PATH("Signature mismatch in code generation");
       }
 
-      i_loc->val = std::move(rt_p);
+      loc->val = std::move(rt_p);
+
+      i_param += 1;
+      i_act_param += 1;
     }
   }
 
@@ -5615,79 +5737,6 @@ UnitID compile_and_execute(CompilerGlobals* const comp, Namespace* const availab
   return unit->id;
 }
 
-void process_parsed_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, FileAST* const file) {
-  TRACING_FUNCTION();
-
-  ASSERT(file->top_level.start != nullptr && file->top_level.start->curr != nullptr);
-
-  //Always include the builtin namespace
-  file->ns->imported.insert(comp->builtin_namespace);
-
-  FOR_AST(file->top_level, it) {
-    switch (it->ast_type) {
-      case AST_TYPE::IMPORT: {
-          ASTImport* i = (ASTImport*)it;
-          CompilationUnit* imp_unit;
-          {
-            auto compilation = comp->services.compilation.get();
-            ImportExtra* extra = compilation->import_extras.allocate();
-            extra->src_loc = file->file_loc;
-
-            State* state = compilation->states.allocate();
-
-            imp_unit = new_compilation_unit(compilation._ptr,
-                                            COMPILATION_EMIT_TYPE::IMPORT, i, file->ns,
-                                            state, (void*)extra,
-                                            comp->print_options.comp_units);
-          }
-          comp->pipelines.depend_check.push_back(imp_unit);
-          break;
-        }
-      case AST_TYPE::GLOBAL_DECL: {
-          ASTGlobalDecl* i = (ASTGlobalDecl*)it;
-
-          Global* glob = comp->new_global();
-
-          CompilationUnit* glob_unit;
-          {
-            auto compilation = comp->services.compilation.get();
-            State* state = compilation->states.allocate();
-            GlobalExtra* extra = compilation->global_extras.allocate();
-            extra->global = glob;
-
-            glob_unit = new_compilation_unit(compilation._ptr,
-                                             COMPILATION_EMIT_TYPE::GLOBAL, i, file->ns,
-                                             state, (void*)extra,
-                                             comp->print_options.comp_units);
-          }
-
-          //i->global_ptr = glob;
-
-          glob->decl.name = i->name;
-          glob->decl.span = i->node_span;
-
-          {
-            auto names = comp->services.names.get();
-
-            names->add_global_name(comp_thread, file->ns, i->name, glob_unit->id, glob);
-          }
-          if (comp_thread->is_panic()) {
-            return;
-          }
-
-          comp->pipelines.depend_check.push_back(glob_unit);
-
-          break;
-        }
-      default: {
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, it->node_span,
-                                    "Invalid top level syntax tree. Node ID: {}", (usize)it->ast_type);
-          return;
-        }
-    }
-  }
-}
-
 void compile_current_unparsed_files(CompilerGlobals* const comp,
                                     CompilerThread* const comp_thread) {
   TRACING_FUNCTION();
@@ -5700,7 +5749,6 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
 
     //parse the last file
     const FileImport* file_import = file_loader->unparsed_files.back();
-
     const InternString* full_path = file_import->file_loc.full_name;
 
     if (comp->print_options.file_loads) {
@@ -5721,11 +5769,14 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
         return;
       }
 
+
+
+      Parser parser = {};
+      parser.file_path = file_import->file_loc;
+
       //Loaded file can pop of the file stack thing
       //It will shortly be loaded into the parsed files
       file_loader->unparsed_files.pop();
-
-      Parser parser = {};
 
       //Reset the parser for this file
       reset_parser(comp, comp_thread, &parser, full_path, text_source.ptr);
@@ -5741,6 +5792,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       ast_file->file_loc = file_import->file_loc;
 
       ast_file->ns = file_import->ns;
+      ast_file->ns->imported.insert(comp->builtin_namespace);
 
       {
         TRACING_SCOPE("Parsing");
@@ -5765,7 +5817,6 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       if (comp_thread->is_panic()) {
         return;
       }
-      process_parsed_file(comp, comp_thread, ast_file);
     }
     else {
       comp_thread->report_error(ERROR_CODE::FILE_ERROR, file_import->span,
@@ -5776,6 +5827,60 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
   }
 }
 
+void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const FileLocation& src_loc, ASTImport* imp) noexcept {
+
+  CompilationUnit* imp_unit;
+  {
+    auto compilation = comp->services.compilation.get();
+    ImportExtra* extra = compilation->import_extras.allocate();
+    extra->src_loc = src_loc;
+
+    State* state = compilation->states.allocate();
+
+    imp_unit = new_compilation_unit(compilation._ptr,
+                                    COMPILATION_EMIT_TYPE::IMPORT, imp, ns,
+                                    state, (void*)extra,
+                                    comp->print_options.comp_units);
+  }
+
+  comp->pipelines.depend_check.push_back(imp_unit);
+}
+
+void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTGlobalDecl* global) noexcept {
+
+  Global* glob = comp->new_global();
+
+  CompilationUnit* glob_unit;
+  {
+    auto compilation = comp->services.compilation.get();
+    State* state = compilation->states.allocate();
+    GlobalExtra* extra = compilation->global_extras.allocate();
+    extra->global = glob;
+
+    glob_unit = new_compilation_unit(compilation._ptr,
+                                     COMPILATION_EMIT_TYPE::GLOBAL, global, ns,
+                                     state, (void*)extra,
+                                     comp->print_options.comp_units);
+  }
+
+  //i->global_ptr = glob;
+
+  glob->decl.name = global->name;
+  glob->decl.span = global->node_span;
+
+  global->global_ptr = glob;
+
+  {
+    auto names = comp->services.names.get();
+
+    names->add_global_name(comp_thread, ns, global->name, glob_unit->id, glob);
+  }
+  if (comp_thread->is_panic()) {
+    return;
+  }
+
+  comp->pipelines.depend_check.push_back(glob_unit);
+}
 
 void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTLambda* lambda) noexcept {
   //Setup the function object
@@ -5817,7 +5922,7 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const
     if (comp_thread->print_options.comp_units) {
       format_print("Comp unit {} is function body of {} (so it waiting)\n", body_unit->id, sig_unit->id);
     }
-    
+
   }
   //Last thing to do (stops certian threading bugs)
   comp->pipelines.depend_check.push_back(sig_unit);
@@ -5996,11 +6101,14 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       context.dependency_load_pipe = &comp->pipelines.emit_import;
       context.current_unit = unit;
 
+      ASSERT(unit->ast != nullptr);
       ASSERT(unit->ast->ast_type == AST_TYPE::IMPORT);
 
       ASTImport* imp = (ASTImport*)unit->ast;
 
+
       AST_LOCAL expr = imp->expr_location;
+      ASSERT(expr != nullptr);
 
       //Only called if this isnt already a constant literal
       if (can_compile_const_value(expr)) {
@@ -6044,6 +6152,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       context.dependency_load_pipe = &comp->pipelines.emit_global;
       context.current_unit = unit;
 
+      ASSERT(unit->ast != nullptr);
       ASSERT(unit->ast->ast_type == AST_TYPE::GLOBAL_DECL);
 
       ASTDecl* decl = (ASTDecl*)unit->ast;
@@ -6128,8 +6237,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       st.comptime_compilation = false;//meaningless here
       st.current_unit = unit;
 
-      //TODO: set this properly?
-      st.local_context = false;
+      ASSERT(unit->ast != nullptr);
 
       dependency_check_ast_node(comp, comp_thread, &st, unit->ast);
 
@@ -6162,6 +6270,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       context.dependency_load_pipe = &comp->pipelines.type_check;
       context.current_unit = unit;
 
+      ASSERT(unit->ast != nullptr);
       type_check_ast_node(comp, comp_thread, &context, state, unit->ast);
       if (comp_thread->is_panic()) {
         return;
@@ -6265,8 +6374,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         state->return_label = comp->labels++;
 
         //Set up new flow
-        size_t new_flow = state->control_flow.new_flow();
-        state->control_flow.current_flow = new_flow;
+        state->control_flow.new_flow();
 
         const Type type = ast->node_type;
 
@@ -6450,10 +6558,11 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
           comp_thread->errors.error_messages.insert(std::move(i->as_error));
         }
 
+        comp_thread->errors.panic = true;
         return;
       }
     }
-    
+
     if (compilation->dependencies.free_dependencies.size > 0) {
       launch_free_dependencies(comp_thread, compilation._ptr);
       return;
@@ -6498,29 +6607,36 @@ void compiler_loop_thread_proc(const ThreadHandle* handle, void* data) {
 }
 
 void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const comp_thread) noexcept {
-  usize extra_threads = 3;
-  ThreadData* datas = allocate_default<ThreadData>(extra_threads);
-  CompilerThread* comp_threads = allocate_default<CompilerThread>(extra_threads);
-  const ThreadHandle** handles = allocate_default<const ThreadHandle*>(extra_threads);
+  const usize EXTRA_THREADS = 0;
 
-  for (usize i = 0; i < extra_threads; i++) {
-    datas[i].comp = comp;
-    datas[i].comp_thread = comp_threads + i;
-    handles[i] = start_thread(compiler_loop_thread_proc, datas + i);
+  if (EXTRA_THREADS > 0) {
+    ThreadData* datas = allocate_default<ThreadData>(EXTRA_THREADS);
+    CompilerThread* comp_threads = allocate_default<CompilerThread>(EXTRA_THREADS);
+    const ThreadHandle** handles = allocate_default<const ThreadHandle*>(EXTRA_THREADS);
+
+    for (usize i = 0; i < EXTRA_THREADS; i++) {
+      datas[i].comp = comp;
+      datas[i].comp_thread = comp_threads + i;
+      handles[i] = start_thread(compiler_loop_thread_proc, datas + i);
+    }
+
+    {
+      CompilerThread comp_thread = {};
+      compiler_loop(comp, &comp_thread);
+    }
+
+    for (usize i = 0; i < EXTRA_THREADS; i++) {
+      wait_for_thread_end(handles[i]);
+    }
+
+    free_destruct_n(handles, EXTRA_THREADS);
+    free_destruct_n(datas, EXTRA_THREADS);
+    free_destruct_n(comp_threads, EXTRA_THREADS);
   }
-
-  {
+  else {
     CompilerThread comp_thread = {};
     compiler_loop(comp, &comp_thread);
   }
-
-  for (usize i = 0; i < extra_threads; i++) {
-    wait_for_thread_end(handles[i]);
-  }
-
-  free_destruct_n(handles, extra_threads);
-  free_destruct_n(datas, extra_threads);
-  free_destruct_n(comp_threads, extra_threads);
 }
 
 void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread) {

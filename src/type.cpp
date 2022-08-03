@@ -48,7 +48,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
     uint32_t current_size = 0;
     uint32_t current_align = 0;
 
-    Array<char> name ={};
+    Array<char> name = {};
 
     auto i = types.begin();
     const auto end = types.end();
@@ -114,7 +114,7 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
   type->alignment = (u32)ptr_size;
 
   {
-    Array<char> name ={};
+    Array<char> name = {};
 
     auto i = type->parameter_types.begin();
     auto end = type->parameter_types.end();
@@ -323,7 +323,7 @@ RuntimeValue impl_single_cast(CompilerGlobals* const comp,
                               const Structure* type,
                               const RuntimeValue* const val,
                               CAST_BYTECODE cast) {
-  RuntimeValue reg ={};
+  RuntimeValue reg = {};
   reg.type = RVT::REGISTER;
   reg.reg = state->new_value();
 
@@ -431,14 +431,16 @@ static bool can_literal_cast(const Type& from, const Type& to) {
 
   switch (from.struct_type()) {
     case STRUCTURE_TYPE::INTEGER: {
-        if (to.struct_type() == STRUCTURE_TYPE::INTEGER) {
-          const auto* int_f = from.unchecked_base<IntegerStructure>();
+        const auto* int_f = from.unchecked_base<IntegerStructure>();
+        auto to_type = to.struct_type();
+
+        if (to_type == STRUCTURE_TYPE::INTEGER) {
           const auto* int_t = to.unchecked_base<IntegerStructure>();
-          
+
           //Can only cast from unsigned to signed not the other way around without a cast
           return !int_f->is_signed || int_t->is_signed;
         }
-        
+
         return false;
       }
     case STRUCTURE_TYPE::FIXED_ARRAY: {
@@ -493,7 +495,7 @@ static bool can_literal_cast(const Type& from, const Type& to) {
 
               break;
             }
-        }       
+        }
 
         return true;
       }

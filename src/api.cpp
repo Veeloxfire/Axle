@@ -24,27 +24,35 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 
 #include <chrono>
 
-void print_program(const APIOptions& opts, const Program& prog) {
-  if (slow_string_eq(opts.build.system_name, system_vm.name)) {
-    std::cout << "\n=== Print Linked Bytecode ===\n\n";
-    std::cout << "Data:\n";
-    print_as_bytes(prog.data.ptr, prog.data_size);
+void print_globals(CompilerGlobals* comp) {
+  //theoretically very slow to do
 
-    std::cout << "\n\nProgram:\n";
-    ByteCode::print_bytecode(system_vm.reg_name_from_num, stdout, prog.code.ptr, prog.code_size);
-    std::cout << "\n=============================\n\n";
-  }
-  else if (slow_string_eq(opts.build.system_name, system_x86_64.name)) {
-    std::cout << "\n=== Print x86_64 Machine code ===\n\n";
-    std::cout << "Data:\n";
-    print_as_bytes(prog.data.ptr, prog.data_size);
+  auto i = comp->globals_single_threaded.begin_const_iter();
+  auto end = comp->globals_single_threaded.end_const_iter();
 
-    std::cout << "\n\nProgram:\n";
-    print_x86_64(prog.code.ptr, prog.code_size);
-    std::cout << "\n=================================\n\n";
-  }
-  else {
-    std::cerr << "Incorrect system for printing combined bytecode!\n";
+  for (; i != end; i.next()) {
+    const Global* g = i.get();
+
+    format_print("{} = {}\n", g->decl.name, g->decl.type.name);
+
+    if (g->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
+      usize label = *(usize*)g->constant_value.ptr;
+      format_print("{}:\n", label);
+
+      auto fi = comp->functions_single_threaded.begin_const_iter();
+      auto fend = comp->functions_single_threaded.end_const_iter();
+      for (; fi != fend; fi.next()) {
+        if (fi.get()->code_block.label == label) {
+          const Function* f = fi.get();
+          const CodeBlock* block = &f->code_block;
+
+          ByteCode::print_bytecode(comp->build_options.endpoint_system->reg_name_from_num, stdout, block->code.data, block->code.size);
+          break;
+        }
+      }      
+    }
+
+    IO::print('\n');
   }
 }
 
@@ -140,6 +148,10 @@ int compile_file(const APIOptions& options,
     }
   }
 
+  if (compiler.print_options.fully_compiled) {
+    print_globals(&compiler);
+  }
+
   //Backend
   build_data_section_for_vm(out_program, &compiler);
   
@@ -147,10 +159,6 @@ int compile_file(const APIOptions& options,
   if (compiler_thread.is_panic()) {
     compiler_thread.errors.print_all();
     return -3;
-  }
-
-  if (compiler.print_options.fully_compiled) {
-    print_program(options, *out_program);
   }
 
   return 0;
@@ -261,6 +269,10 @@ int compile_file_and_write(const APIOptions& options) {
   }
 
   ASSERT(slow_string_eq(options.build.system_name, system_x86_64.name));
+
+  if (compiler.print_options.fully_compiled) {
+    print_globals(&compiler);
+  }
   
   nasm_backend(options.build.output_file, &compiler, &compiler_thread);
   if (compiler_thread.is_panic()) {

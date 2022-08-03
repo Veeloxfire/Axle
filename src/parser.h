@@ -21,6 +21,7 @@ MODIFY(Add, "+") \
 MODIFY(Sub, "-") \
 MODIFY(Star, "*") \
 MODIFY(BackSlash, "/") \
+MODIFY(Percent, "%") \
 MODIFY(Lesser, "<") \
 MODIFY(Greater, ">") \
 MODIFY(Or, "|") \
@@ -120,6 +121,8 @@ struct Parser {
   Token prev = {};
   Token current ={};
   Token next ={};
+
+  FileLocation file_path = {};
 };
 
 #define PARSER_ALLOC(T) parser->ast_store.push<T>()

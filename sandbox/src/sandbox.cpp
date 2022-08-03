@@ -37,11 +37,13 @@ int main(int argc, const char** args) {
   options.build.lib_folder = ".\\lib";
 
   //options.print.ast = true;
-  //options.print.pre_reg_alloc = true;
+  options.print.pre_reg_alloc = true;
+  options.print.intersections = true;
   //options.print.normal_bytecode = true;
   //options.print.comptime_res = true;
   //options.print.coalesce_values = true;
-  //options.print.fully_compiled = true;
+  options.print.fully_compiled = true;
+  options.print.reg_mapping = true;
   //options.print.run_headers = true;
   //options.print.comp_units = true;
   //options.print.comptime_exec = true;
@@ -60,12 +62,22 @@ int main(int argc, const char** args) {
 
   {
     TRACING_SCOPE("Nasm");
-    system("nasm -g -fwin64 .\\out\\output.nasm");
+    int res = system("nasm -g -fwin64 .\\out\\output.nasm");
+
+    if (res != 0) {
+      std::cerr << "Nasm returned non-zero";
+      return res;
+    }
   }
 
   {
     TRACING_SCOPE("Link");
-    system("link /LARGEADDRESSAWARE:NO /ENTRY:main /SUBSYSTEM:CONSOLE /OUT:.\\out\\output.exe .\\out\\output.obj ..\\lib\\kernel32.lib");
+    int res = system("link /LARGEADDRESSAWARE:NO /ENTRY:main /SUBSYSTEM:CONSOLE /OUT:.\\out\\output.exe .\\out\\output.obj ..\\lib\\kernel32.lib");
+
+    if (res != 0) {
+      std::cerr << "Link returned non-zero";
+      return res;
+    }
   }
   return 0;
 }

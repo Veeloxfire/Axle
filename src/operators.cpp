@@ -72,6 +72,17 @@ RuntimeValue BinOpArgs::emit_add_64s() {
   return temp_left;
 }
 
+RuntimeValue BinOpArgs::emit_add_8s() {
+  const Structure* ty = comp->builtin_types->t_u8.structure;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::ADD_R8S);
+
+  return temp_left;
+}
+
 RuntimeValue BinOpArgs::emit_sub_64s() {
   const Structure* ty = comp->builtin_types->t_u64.structure;
 
@@ -86,7 +97,6 @@ RuntimeValue BinOpArgs::emit_sub_64s() {
 RuntimeValue BinOpArgs::emit_sub_ptrs() {
   RuntimeValue res = emit_sub_64s();
 
-  ASSERT(info->main_type.struct_type() == STRUCTURE_TYPE::POINTER);
   const auto* ptr = info->main_type.unchecked_base<PointerStructure>();
 
   uint64_t size_num = ptr->base.structure->size;
@@ -189,6 +199,48 @@ RuntimeValue BinOpArgs::emit_div_u64s() {
   }
 }
 
+RuntimeValue BinOpArgs::emit_mod_u64s() {
+  const Structure* type = comp->builtin_types->t_u64.structure;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
+  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
+
+  if (comp->build_options.endpoint_system == &system_x86_64) {
+    {
+      auto* passed_val = state->value_tree.values.data + temp_left.reg.val;
+      passed_val->value_type = ValueType::FIXED;
+      passed_val->reg = RAX.REG;
+    }
+
+    ValueIndex save_rdx = state->new_value();
+    state->set_value(save_rdx);
+
+    auto* save_val = state->value_tree.values.data + save_rdx.val;
+    save_val->value_type = ValueType::FIXED;
+    save_val->reg = RDX.REG;
+
+    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);//Just show its being reserved
+
+    state->control_flow.expression_num++;
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::MOD_RU64S);
+
+    //Stop it from being removed
+    state->use_value(save_rdx);
+    state->control_flow.expression_num++;
+
+    RuntimeValue res = {};
+    res.type = RVT::REGISTER;
+    res.reg = save_rdx;
+
+    return res;
+  }
+  else {
+    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::MOD_RU64S);
+
+    return temp_left;
+  }
+}
+
 RuntimeValue BinOpArgs::emit_div_i64s() {
   const Structure* type = comp->builtin_types->t_u64.structure;
 
@@ -235,6 +287,17 @@ RuntimeValue BinOpArgs::emit_eq_64s() {
   const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
 
   bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::EQ_R64S);
+
+  return temp_left;
+}
+
+RuntimeValue BinOpArgs::emit_neq_64s() {
+  const Structure* ty = comp->builtin_types->t_u64.structure;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::NEQ_R64S);
 
   return temp_left;
 }
@@ -338,6 +401,39 @@ RuntimeValue BinOpArgs::emit_and_64s() {
   return temp_left;
 }
 
+RuntimeValue BinOpArgs::emit_or_8s() {
+  const Structure* ty = comp->builtin_types->t_u8.structure;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::OR_R8S);
+
+  return temp_left;
+}
+
+RuntimeValue BinOpArgs::emit_xor_8s() {
+  const Structure* ty = comp->builtin_types->t_u8.structure;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::XOR_R8S);
+
+  return temp_left;
+}
+
+RuntimeValue BinOpArgs::emit_and_8s() {
+  const Structure* ty = comp->builtin_types->t_u8.structure;
+
+  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
+  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+
+  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::AND_R8S);
+
+  return temp_left;
+}
+
 RuntimeValue BinOpArgs::emit_shift_l_64_by_8() {
   const Structure* left_t = comp->builtin_types->t_u64.structure;
   const Structure* right_t = comp->builtin_types->t_u8.structure;
@@ -416,8 +512,6 @@ RuntimeValue UnOpArgs::emit_neg_i64() {
   return temp;
 }
 
-
-
 RuntimeValue UnOpArgs::emit_address() {
   ASSERT(prim->type == RVT::MEMORY);
 
@@ -482,187 +576,671 @@ RuntimeValue UnOpArgs::emit_deref() {
   return deref_val;
 }
 
-template<typename L>
-void impl_compile_balanced_binary_op(CompilerGlobals* comp,
-                                     CompilerThread* comp_thread,
-                                     ASTBinaryOperatorExpr* expr,
-                                     const BalancedBinOpOptions& op,
-                                     L&& try_emit) {
-  const BuiltinTypes* const types = comp_thread->builtin_types;
 
-  //Reset
-  expr->emit = nullptr;
+void compile_binary_operator(CompilerGlobals* comp,
+                             CompilerThread* comp_thread,
+                             State* state,
+                             struct ASTBinaryOperatorExpr* expr) {
+  AST_LOCAL left_ast = expr->left;
+  AST_LOCAL right_ast = expr->right;
 
-#define SHOULD_RET comp_thread->is_panic() || expr->emit != nullptr
+  const Type& left = left_ast->node_type;
+  const Type& right = right_ast->node_type;
 
-  const auto try_normal_options = [&](AST_LOCAL main, AST_LOCAL other) {
-    expr->info.main_type = main->node_type;
+  switch (expr->op) {
+    case BINARY_OPERATOR::ADD: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
 
-    if (op.u64_emit != nullptr && main->node_type == types->t_u64) {
-      //is a valid unsigned type
-      try_emit(main, other, main->node_type, op.u64_emit);
-      if (SHOULD_RET) {
-        return;
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+
+                      switch (int_l->size) {
+                        case 1: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_add_8s;
+                            return;
+                          }
+                        case 8: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_add_64s;
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+
+                case STRUCTURE_TYPE::POINTER: {
+                    if (int_l->size == 8 && !int_l->is_signed) {
+                      expr->node_type = right;
+                      expr->emit_info.main_op = MainOp::RIGHT;
+                      expr->emit_info.main_type = right;
+                      expr->emit_info.func = &BinOpArgs::emit_add_64_to_ptr;
+                      return;
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::POINTER: {
+              if (right.struct_type() == STRUCTURE_TYPE::INTEGER) {
+                const auto* int_r = right.unchecked_base<IntegerStructure>();
+                if (int_r->size == 8 && !int_r->is_signed) {
+                  expr->node_type = left;
+                  expr->emit_info.main_op = MainOp::LEFT;
+                  expr->emit_info.main_type = left;
+                  expr->emit_info.func = &BinOpArgs::emit_add_64_to_ptr;
+                  return;
+                }
+              }
+
+              break;
+            }
+        }
+
+        break;
       }
-    }
 
-    if (op.ptrs_emit != nullptr && main->node_type.struct_type() == STRUCTURE_TYPE::POINTER) {
-      //is a valid unsigned type
-      try_emit(main, other, main->node_type, op.ptrs_emit);
-      if (expr->emit != nullptr) {
-        expr->node_type = types->t_u64;//overide default expected type
-        return;
+    case BINARY_OPERATOR::SUB: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 8: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_sub_64s;
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::POINTER: {
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::POINTER: {
+                    if (left == right) {
+                      expr->node_type = left;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+                      expr->emit_info.func = &BinOpArgs::emit_sub_ptrs;
+                      return;
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
       }
-      else if (comp_thread->is_panic()) {
-        return;
+
+    case BINARY_OPERATOR::MUL: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 8: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_mul_64s;
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
       }
-    }
 
-    if (op.i64_emit != nullptr && main->node_type == types->t_i64) {
-      //is a valid signed type
-      try_emit(main, other, main->node_type, op.i64_emit);
-      if (SHOULD_RET) {
-        return;
+    case BINARY_OPERATOR::DIV: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 8: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            if (int_l->is_signed) {
+                              expr->emit_info.func = &BinOpArgs::emit_div_i64s;
+                            }
+                            else {
+                              expr->emit_info.func = &BinOpArgs::emit_div_u64s;
+                            }
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
       }
-    }
 
-    if (op.u8_emit != nullptr && main->node_type == types->t_u8) {
-      //is a valid unsigned type
-      try_emit(main, other, main->node_type, op.u8_emit);
-      if (SHOULD_RET) {
-        return;
+    case BINARY_OPERATOR::MOD: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      if (int_l->size == 8
+                          && !int_l->is_signed) {
+                        expr->node_type = left;
+                        expr->emit_info.main_op = MainOp::LEFT;
+                        expr->emit_info.main_type = left;
+                        expr->emit_info.func = &BinOpArgs::emit_mod_u64s;
+                        return;
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
       }
-    }
 
-    if (op.bools_emit != nullptr && main->node_type == types->t_bool) {
-      //is a valid bool type
-      try_emit(main, other, main->node_type, op.bools_emit);
-      if (SHOULD_RET) {
-        return;
+    case BINARY_OPERATOR::EQUIVALENT: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::ASCII_CHAR: {
+              if (right.struct_type() == STRUCTURE_TYPE::ASCII_CHAR) {
+                expr->node_type = comp_thread->builtin_types->t_bool;
+                expr->emit_info.main_op = MainOp::LEFT;
+                expr->emit_info.main_type = left;
+                expr->emit_info.func = &BinOpArgs::emit_eq_8s;
+                return;
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::ENUM: {
+              if (left == right) {
+                const auto* en = left.extract_base<EnumStructure>();
+                ASSERT(en->base.struct_type() == STRUCTURE_TYPE::INTEGER);
+
+                switch (en->base.structure->size) {
+                  case 1: {
+                      expr->node_type = comp_thread->builtin_types->t_bool;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+                      expr->emit_info.func = &BinOpArgs::emit_eq_8s;
+                      return;
+                    }
+                }
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 1: {
+                            expr->node_type = comp_thread->builtin_types->t_bool;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_eq_8s;
+                            return;
+                          }
+
+                        case 8: {
+                            expr->node_type = comp_thread->builtin_types->t_bool;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_eq_64s;
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::POINTER: {
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::POINTER: {
+                    if (left == right) {
+                      expr->node_type = comp_thread->builtin_types->t_bool;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+                      expr->emit_info.func = &BinOpArgs::emit_eq_64s;
+                      return;
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
       }
-    }
 
-    if (op.ascii_emit != nullptr && main->node_type == types->t_ascii) {
-      //is a valid bool type
-      try_emit(main, other, main->node_type, op.ascii_emit);
-      if (SHOULD_RET) {
-        return;
+    case BINARY_OPERATOR::NOT_EQ: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::ASCII_CHAR: {
+              if (right.struct_type() == STRUCTURE_TYPE::ASCII_CHAR) {
+                expr->node_type = comp_thread->builtin_types->t_bool;
+                expr->emit_info.main_op = MainOp::LEFT;
+                expr->emit_info.main_type = left;
+                expr->emit_info.func = &BinOpArgs::emit_neq_8s;
+                return;
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::ENUM: {
+              if (left == right) {
+                const auto* en = left.extract_base<EnumStructure>();
+                ASSERT(en->base.struct_type() == STRUCTURE_TYPE::INTEGER);
+
+                switch (en->base.structure->size) {
+                  case 1: {
+                      expr->node_type = comp_thread->builtin_types->t_bool;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+                      expr->emit_info.func = &BinOpArgs::emit_neq_8s;
+                      return;
+                    }
+                }
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 1: {
+                            expr->node_type = comp_thread->builtin_types->t_bool;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_neq_8s;
+                            return;
+                          }
+
+                        case 8: {
+                            expr->node_type = comp_thread->builtin_types->t_bool;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_neq_64s;
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::POINTER: {
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::POINTER: {
+                    if (left == right) {
+                      expr->node_type = comp_thread->builtin_types->t_bool;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+                      expr->emit_info.func = &BinOpArgs::emit_neq_64s;
+                      return;
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
       }
-    }
-  };
 
-  AST_LOCAL const left = expr->left;
-  AST_LOCAL const right = expr->right;
+    case BINARY_OPERATOR::LESSER: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
 
-  expr->info.main_op = MainOp::LEFT;
-  try_normal_options(left, right);
-  if (SHOULD_RET) {
-    return;
-  }
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 8: {
+                            expr->node_type = comp_thread->builtin_types->t_bool;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            if (int_l->is_signed) {
+                              expr->emit_info.func = &BinOpArgs::emit_lesser_i64s;
+                            }
+                            else {
+                              expr->emit_info.func = &BinOpArgs::emit_lesser_u64s;
+                            }
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
 
-  expr->info.main_op = MainOp::RIGHT;
-  try_normal_options(right, left);
-  if (SHOULD_RET) {
-    return;
+              break;
+            }
+        }
+
+        break;
+      }
+
+    case BINARY_OPERATOR::GREATER: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 8: {
+                            expr->node_type = comp_thread->builtin_types->t_bool;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            if (int_l->is_signed) {
+                              expr->emit_info.func = &BinOpArgs::emit_greater_i64s;
+                            }
+                            else {
+                              expr->emit_info.func = &BinOpArgs::emit_greater_u64s;
+                            }
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
+      }
+
+    case BINARY_OPERATOR::OR: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::ENUM: {
+              if (left == right) {
+                const auto* en = left.extract_base<EnumStructure>();
+                ASSERT(en->base.struct_type() == STRUCTURE_TYPE::INTEGER);
+
+                switch (en->base.structure->size) {
+                  case 1: {
+                      expr->node_type = left;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+                      expr->emit_info.func = &BinOpArgs::emit_or_8s;
+                      return;
+                    }
+                }
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 1: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_or_8s;
+                            return;
+                          }
+                        case 8: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_or_64s;
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
+      }
+
+    case BINARY_OPERATOR::XOR: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 1: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_xor_8s;
+                            return;
+                          }
+                        case 8: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_or_64s;
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
+      }
+
+    case BINARY_OPERATOR::AND: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::ENUM: {
+              if (left == right) {
+                const auto* en = left.extract_base<EnumStructure>();
+                ASSERT(en->base.struct_type() == STRUCTURE_TYPE::INTEGER);
+
+                switch (en->base.structure->size) {
+                  case 1: {
+                      expr->node_type = left;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+                      expr->emit_info.func = &BinOpArgs::emit_and_8s;
+                      return;
+                    }
+                }
+              }
+
+              break;
+            }
+
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    if (left == right) {
+                      switch (int_l->size) {
+                        case 1: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_and_8s;
+                            return;
+                          }
+                        case 8: {
+                            expr->node_type = left;
+                            expr->emit_info.main_op = MainOp::LEFT;
+                            expr->emit_info.main_type = left;
+                            expr->emit_info.func = &BinOpArgs::emit_and_64s;
+                            return;
+                          }
+                      }
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
+      }
+
+    case BINARY_OPERATOR::LEFT_SHIFT: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    const auto* int_r = left.unchecked_base<IntegerStructure>();
+
+
+                    if (int_l->size == 8 && int_r->size == 1) {
+                      expr->node_type = left;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+                      expr->emit_info.func = &BinOpArgs::emit_shift_l_64_by_8;
+                      return;
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
+      }
+
+    case BINARY_OPERATOR::RIGHT_SHIFT: {
+        switch (left.struct_type()) {
+          case STRUCTURE_TYPE::INTEGER: {
+              const auto* int_l = left.unchecked_base<IntegerStructure>();
+
+              switch (right.struct_type()) {
+                case STRUCTURE_TYPE::INTEGER: {
+                    const auto* int_r = left.unchecked_base<IntegerStructure>();
+
+
+                    if (int_l->size == 8 && int_r->size == 1) {
+                      expr->node_type = left;
+                      expr->emit_info.main_op = MainOp::LEFT;
+                      expr->emit_info.main_type = left;
+
+                      if (int_l->is_signed) {
+                        expr->emit_info.func = &BinOpArgs::emit_shift_r_i64_by_8;
+                      }
+                      else {
+                        expr->emit_info.func = &BinOpArgs::emit_shift_r_u64_by_8;
+                      }
+                      return;
+                    }
+                    break;
+                  }
+              }
+
+              break;
+            }
+        }
+
+        break;
+      }
   }
 
   const char* const op_string = BINARY_OP_STRING::get(expr->op);
 
   comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
                             "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
-                            op_string, left->node_type.name, right->node_type.name);
-}
-
-void impl_compile_unpositioned_binary_op(CompilerGlobals* comp, CompilerThread* comp_thread, State* state, ASTBinaryOperatorExpr* expr, const UnpositionedBinOpOptions& op) {
-
-  //Reset
-  expr->emit = nullptr;
-
-  const BuiltinTypes* const types = comp_thread->builtin_types;
-
-  AST_LOCAL left = expr->left;
-  AST_LOCAL right = expr->right;
-
-  const auto try_non_positioned_options = [&](AST_LOCAL main, AST_LOCAL other) {
-    expr->info.main_type = main->node_type;
-
-    if (op.r64_and_r64_emit != nullptr && main->node_type == types->t_u64) {
-      if (other->node_type == main->node_type) {
-        expr->emit = op.r64_and_r64_emit;
-        expr->node_type = main->node_type;
-        return;
-      }
-    }
-
-    if (op.r64_and_r64_emit != nullptr && main->node_type == types->t_i64) {
-      if (other->node_type == main->node_type) {
-        expr->emit = op.r64_and_r64_emit;
-        expr->node_type = main->node_type;
-        return;
-      }
-    }
-
-    if (op.ptr_and_r64_emit != nullptr
-        && main->node_type.struct_type() == STRUCTURE_TYPE::POINTER
-        && other->node_type == types->t_u64) {
-      expr->emit = op.ptr_and_r64_emit;
-      expr->node_type = main->node_type;
-      return;
-    }
-  };
-
-  expr->info.main_op = MainOp::LEFT;
-  try_non_positioned_options(left, right);
-  if (comp_thread->is_panic() || expr->emit != nullptr) {
-    return;
-  }
-
-  expr->info.main_op = MainOp::RIGHT;
-  try_non_positioned_options(right, left);
-  if (comp_thread->is_panic() || expr->emit != nullptr) {
-    return;
-  }
-
-  if (expr->emit == nullptr) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                              "No supported operator for '{}' and '{}'",
-                              left->node_type.name, right->node_type.name);
-  }
-}
-
-void impl_compile_unbalanced_binary_op(CompilerGlobals* comp, CompilerThread* comp_thread, State* state, ASTBinaryOperatorExpr* expr, const UnbalancedBinOpOptions& op) {
-
-  const BuiltinTypes* const types = comp_thread->builtin_types;
-
-  //Reset
-  expr->emit = nullptr;
-
-  AST_LOCAL left = expr->left;
-  AST_LOCAL right = expr->right;
-
-  if (op.Lu64_Ru8_emit != nullptr
-      && left->node_type == types->t_u64) {
-    if (right->node_type == types->t_u8) {
-      expr->emit = op.Lu64_Ru8_emit;
-      expr->node_type = left->node_type;
-      return;
-    }
-  }
-
-  if (op.Li64_Ru8_emit != nullptr
-      && left->node_type == types->t_i64) {
-    if (right->node_type == types->t_u8) {
-      expr->emit = op.Lu64_Ru8_emit;
-      expr->node_type = left->node_type;
-      return;
-    }
-  }
-
-  const char* const op_string = BINARY_OP_STRING::get(expr->op);
-
-  comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                            "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
-                            op_string, left->node_type.name, right->node_type.name);
+                            op_string, left.name, right.name);
+  return;
 }
 
 void impl_compile_unary_op(CompilerGlobals* comp, CompilerThread* comp_thread, State* state, ASTUnaryOperatorExpr* expr, const UnaryOpOptions& op) {
@@ -686,115 +1264,6 @@ void impl_compile_unary_op(CompilerGlobals* comp, CompilerThread* comp_thread, S
   comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
                             "No unary operator '{}' exists for type: '{}'",
                             op_string, prim->node_type.name);
-}
-
-//Overload for unbalanced operators
-void compile_binary_operator(CompilerGlobals* comp,
-                             CompilerThread* comp_thread,
-                             State* state,
-                             ASTBinaryOperatorExpr* expr,
-                             const UnpositionedBinOpOptions& op) {
-  impl_compile_unpositioned_binary_op(comp, comp_thread, state, expr, op);
-}
-
-//Overload for unbalanced operators
-void compile_binary_operator(CompilerGlobals* comp,
-                             CompilerThread* comp_thread,
-                             State* state,
-                             ASTBinaryOperatorExpr* expr,
-                             const UnbalancedBinOpOptions& op) {
-
-  impl_compile_unbalanced_binary_op(comp, comp_thread, state, expr, op);
-}
-
-//Overload for unbalanced operators that dont care about left sign
-void compile_binary_operator(CompilerGlobals* comp,
-                             CompilerThread* comp_thread,
-                             State* state,
-                             ASTBinaryOperatorExpr* expr,
-                             const UnbalancedLeftSignAgnBin& op) {
-
-  UnbalancedBinOpOptions normal = {};
-  normal.Li64_Ru8_emit = op.Lr64_Ru8_emit;
-  normal.Lu64_Ru8_emit = op.Lr64_Ru8_emit;
-
-  impl_compile_unbalanced_binary_op(comp, comp_thread, state, expr, normal);
-}
-
-
-void compile_binary_operator(CompilerGlobals* comp,
-                             CompilerThread* comp_thread,
-                             State* state,
-                             ASTBinaryOperatorExpr* expr,
-                             const EqOpBin& op) {
-
-  //returns bool instead of main->node_type
-  const auto try_emit = [&](AST_LOCAL main, AST_LOCAL other,
-                            const Type& expect,
-                            BINARY_OPERATOR_FUNCTION emit_op)
-  {
-    if (expect == other->node_type) {
-      expr->emit = emit_op;
-      expr->node_type = comp_thread->builtin_types->t_bool;
-    }
-  };
-
-  BalancedBinOpOptions balanced_op = {};
-  balanced_op.u64_emit = op.u64_emit;
-  balanced_op.i64_emit = op.i64_emit;
-  balanced_op.u8_emit = op.r8_emit;
-  balanced_op.bools_emit = op.bools_emit;
-  balanced_op.ascii_emit = op.ascii_emit;
-
-  impl_compile_balanced_binary_op(comp, comp_thread, expr, balanced_op, try_emit);
-}
-
-void compile_binary_operator(CompilerGlobals* comp,
-                             CompilerThread* comp_thread,
-                             State* state,
-                             ASTBinaryOperatorExpr* expr,
-                             const SignAgnArithBinOp& op) {
-
-  const auto try_emit = [&](AST_LOCAL main, AST_LOCAL other,
-                            const Type& expect,
-                            BINARY_OPERATOR_FUNCTION emit_op)
-  {
-    if (expect == other->node_type) {
-      expr->emit = emit_op;
-      expr->node_type = main->node_type;
-    }
-  };
-
-  BalancedBinOpOptions balanced_op = {};
-  balanced_op.ptrs_emit = op.ptrs_emit;
-  balanced_op.u64_emit = op.r64_emit;
-  balanced_op.i64_emit = op.r64_emit;
-  balanced_op.bools_emit = op.bools_emit;
-
-  impl_compile_balanced_binary_op(comp, comp_thread, expr, balanced_op, try_emit);
-}
-
-
-void compile_binary_operator(CompilerGlobals* comp,
-                             CompilerThread* comp_thread,
-                             State* state,
-                             ASTBinaryOperatorExpr* expr,
-                             const SignedArithBinOp& op) {
-  const auto try_emit = [&](AST_LOCAL main, AST_LOCAL other,
-                            const Type& expect,
-                            BINARY_OPERATOR_FUNCTION emit_op)
-  {
-    if (expect == other->node_type) {
-      expr->emit = emit_op;
-      expr->node_type = main->node_type;
-    }
-  };
-
-  BalancedBinOpOptions balanced_op = {};
-  balanced_op.u64_emit = op.u64_emit;
-  balanced_op.i64_emit = op.i64_emit;
-
-  impl_compile_balanced_binary_op(comp, comp_thread, expr, balanced_op, try_emit);
 }
 
 //Overload for unary operators

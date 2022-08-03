@@ -156,6 +156,7 @@ MODIFY(ADD, "+", 3)\
 MODIFY(SUB, "-", 3)\
 MODIFY(MUL, "*", 4)\
 MODIFY(DIV, "/", 4)\
+MODIFY(MOD, "%", 4)\
 MODIFY(LESSER, "<", 2)\
 MODIFY(GREATER, ">", 2)\
 MODIFY(EQUIVALENT, "==", 2)\

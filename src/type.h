@@ -397,4 +397,16 @@ namespace TYPE_TESTS {
   inline bool is_unsigned_int(const Type& t) {
     return is_unsigned_int(t.structure);
   }
+
+  inline bool is_64_bit_int(const Type& t) {
+    return is_64_bit_int(t.structure);
+  }
+
+  inline bool is_unsigned_64_bit_int(const Type& t) {
+    return is_unsigned_64_bit_int(t.structure);
+  }
+
+  inline bool is_signed_64_bit_int(const Type& t) {
+    return is_signed_64_bit_int(t.structure);
+  }
 }

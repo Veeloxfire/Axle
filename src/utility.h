@@ -576,6 +576,7 @@ struct Array {
     size++;
   }
 
+  //TODO: rename intert_default
   void insert_uninit(const size_t num) noexcept {
     if (num > 0) {
       reserve_extra(num);

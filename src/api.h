@@ -27,6 +27,8 @@ struct APIPrintOptions {
   bool normal_bytecode = false;
   bool fully_compiled  = false;
   bool coalesce_values = false;
+  bool intersections   = false;
+  bool reg_mapping     = false;
   bool run_headers     = false;
   bool file_loads      = false;
   bool comp_units      = false;
@@ -53,4 +55,3 @@ int compile_file_and_write(const APIOptions& options);
 
 int compile_file(const APIOptions& options, Program* out_program);
 RunOutput run_program(const APIOptions& options, Program* prog);
-void print_program(const APIOptions& opts, const Program& prog);

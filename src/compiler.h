@@ -27,48 +27,45 @@ struct ControlFlow {
   size_t current_flow = 0;
   uint32_t expression_num = 0;
 
-  bool had_call = false;
-  uint32_t last_call = 0;
+  Array<TimePoint> calls = {};
 
   void free() {
     ever_flows_to.free();
     direct_flows_from.free();
+    calls.free();
 
     current_flow = 0;
     expression_num = 0;
-
-    had_call = false;
-    last_call = 0;
   }
 
-  size_t new_flow() noexcept {
-    size_t old_flow = current_flow;
+  void new_flow() noexcept {
     expression_num = 0;
-
-    had_call = false;
-    last_call = 0;
 
     direct_flows_from.insert_uninit(1);
     current_flow = ever_flows_to.new_value();
-
-    return old_flow;
   }
 
   void recurse_flows_to(size_t a, size_t b) noexcept {
-    auto i = direct_flows_from.data[b].begin();
-    auto end = direct_flows_from.data[b].end();
+    auto i = direct_flows_from.data[a].begin();
+    auto end = direct_flows_from.data[a].end();
 
     for (; i < end; i++) {
-      ever_flows_to.set_a_intersects_b(*i, a);
-      //Recurse the direct flows
-      recurse_flows_to(a, *i);
+      if (*i != b && !ever_flows_to.test_a_intersects_b(*i, b)) {
+        ever_flows_to.set_a_intersects_b(*i, b);
+        //Recurse the direct flows
+        recurse_flows_to(*i, b);
+      }
     }
   }
 
   void set_a_flows_to_b(size_t a, size_t b) noexcept {
-    ever_flows_to.set_a_intersects_b(a, b);
-    recurse_flows_to(a, b);
-    direct_flows_from.data[b].insert(a);
+    ASSERT(a != b);
+
+    if (!ever_flows_to.test_a_intersects_b(a, b)) {
+      ever_flows_to.set_a_intersects_b(a, b);
+      recurse_flows_to(a, b);
+      direct_flows_from.data[b].insert(a);
+    }
   }
 
   bool test_a_flows_to_b(size_t a, size_t b) const {
@@ -132,7 +129,7 @@ struct ValueTree {
   void free() {
     values.free();
     intersection_check.free();
-    adjacency_list.free();
+    //adjacency_list.free();
   }
 };
 
@@ -173,12 +170,11 @@ struct Local {
 struct State {
   Type return_type;
 
-  Array<Local> all_locals ={};
-  Array<size_t> active_locals ={};
-
   ValueTree value_tree ={};
   Array<MemValue> mem_values ={};
   ControlFlow control_flow ={};
+
+  Array<ValueIndex> captured_values = {};
 
   ValueIndex rbp ={};
   ValueIndex rsp ={};
@@ -204,10 +200,9 @@ struct State {
 
   void use_value(ValueIndex index);
   void use_value(ValueIndex index, ValueIndex related);
+  void use_value_captured(ValueIndex index, ValueIndex related);
 
   void use_mem(MemIndex index);
-
-  Local* find_local(const InternString* i_s);
 };
 
 void init_state_regs(const CallingConvention* convention, State* state);
@@ -224,14 +219,9 @@ struct Context {
 };
 
 struct DependencyCheckStateAndContext : Context {
-  bool local_context;
+  Array<Local*> locals;
 
-  Array<const InternString*> locals;
-
-  inline bool is_local(const InternString* l) {
-    return locals.contains(l);
-  }
-
+  Local* get_local(const InternString* name);
 };
 
 struct DataHolder {
@@ -468,6 +458,8 @@ struct CompilerGlobals : CompilerConstants {
   Array<FileAST> parsed_files ={};
   Array<DataHolder> data_holders ={};
 
+  SpinLockMutex locals_mutex;
+  BucketArray<Local> locals_single_threaded = {};
   SpinLockMutex globals_mutex;
   BucketArray<Global> globals_single_threaded ={};
   SpinLockMutex functions_mutex;
@@ -481,6 +473,7 @@ struct CompilerGlobals : CompilerConstants {
   uint64_t labels = 0;
 
   Function* new_function();
+  Local* new_local();
   Global* new_global();
   Namespace* new_namespace();
 
@@ -577,5 +570,10 @@ RuntimeValue new_const_in_reg(CompilerGlobals* const comp,
                               const uint8_t* data,
                               size_t);
 
+void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const FileLocation& src_loc, ASTImport* imp) noexcept;
+
 void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTLambda* lambda) noexcept;
+
+void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTGlobalDecl* global) noexcept;
+
 void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;

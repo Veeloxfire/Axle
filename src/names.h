@@ -15,11 +15,20 @@ struct Namespace {
   Array<Namespace*> imported ={};
 };
 
-//Exists for mutex stuff
+struct NameFindItr {
+  Namespace* ns;
+  usize import_index;
+  usize name_index;
+};
+
+//Is a struct because its easier to multithread names this way
 struct NameManager {
   GlobalName* add_global_name(CompilerThread* const comp, Namespace* ns, const InternString* name, UnitID unit_id, Global* g);
 
   void add_global_import(CompilerThread* const comp, Namespace* ns, Namespace* imp, const Span& s);
 
   GlobalName* find_global_name(Namespace* ns, const InternString* name);
+
+  NameFindItr global_name_iterator(Namespace* ns, const InternString* name);
+  GlobalName* next_name(NameFindItr);
 };

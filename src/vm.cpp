@@ -96,6 +96,14 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::ADD_R64S;
           break;
         }
+      case ByteCode::ADD_R8S: {
+          const auto i = ByteCode::PARSE::ADD_R8S(vm->IP);
+
+          vm->registers[i.val2].b8l.reg += vm->registers[i.val1].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::ADD_R8S;
+          break;
+        }
       case ByteCode::SUB_R64S: {
           const auto i = ByteCode::PARSE::SUB_R64S(vm->IP);
 
@@ -120,6 +128,14 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::DIV_RU64S;
           break;
         }
+      case ByteCode::MOD_RU64S: {
+          const auto i = ByteCode::PARSE::MOD_RU64S(vm->IP);
+
+          vm->registers[i.val2].b64.reg %= vm->registers[i.val1].b64.reg;
+
+          vm->IP += ByteCode::SIZE_OF::MOD_RU64S;
+          break;
+        }
       case ByteCode::DIV_RI64S: {
           const auto i = ByteCode::PARSE::DIV_RI64S(vm->IP);
 
@@ -134,6 +150,14 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->registers[i.val2].b64.reg = (vm->registers[i.val2].b64.reg == vm->registers[i.val1].b64.reg);
 
           vm->IP += ByteCode::SIZE_OF::EQ_R64S;
+          break;
+        }
+      case ByteCode::NEQ_R64S: {
+          const auto i = ByteCode::PARSE::NEQ_R64S(vm->IP);
+
+          vm->registers[i.val2].b64.reg = (vm->registers[i.val2].b64.reg != vm->registers[i.val1].b64.reg);
+
+          vm->IP += ByteCode::SIZE_OF::NEQ_R64S;
           break;
         }
       case ByteCode::EQ_R8S: {
@@ -208,6 +232,31 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           vm->IP += ByteCode::SIZE_OF::AND_R64S;
           break;
         }
+      case ByteCode::OR_R8S: {
+          const auto i = ByteCode::PARSE::OR_R8S(vm->IP);
+
+          vm->registers[i.val2].b8l.reg |= vm->registers[i.val1].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::OR_R8S;
+          break;
+        }
+      case ByteCode::XOR_R8S: {
+          const auto i = ByteCode::PARSE::XOR_R8S(vm->IP);
+
+          vm->registers[i.val2].b8l.reg ^= vm->registers[i.val1].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::XOR_R8S;
+          break;
+        }
+      case ByteCode::AND_R8S: {
+          const auto i = ByteCode::PARSE::AND_R8S(vm->IP);
+
+          vm->registers[i.val2].b8l.reg &= vm->registers[i.val1].b8l.reg;
+
+          vm->IP += ByteCode::SIZE_OF::AND_R8S;
+          break;
+        }
+
       case ByteCode::SHIFT_L_BY_R8_R64: {
           const auto i = ByteCode::PARSE::SHIFT_L_BY_R8_R64(vm->IP);
 

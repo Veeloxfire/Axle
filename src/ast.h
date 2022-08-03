@@ -130,8 +130,7 @@ struct ASTBinaryOperatorExpr : public AST {
   AST_LOCAL left = 0;
   AST_LOCAL right = 0;
 
-  BinOpEmitInfo info = {};
-  BINARY_OPERATOR_FUNCTION emit = nullptr;
+  BinOpEmitInfo emit_info = {};
 };
 
 struct ASTTupleLitExpr : public AST {
@@ -175,7 +174,18 @@ struct ASTArrayExpr : public AST {
 };
 
 struct ASTIdentifier : public AST {
+  enum TYPE {
+    LOCAL,
+    GLOBAL
+  };
+
+  TYPE id_type;
   const InternString* name;
+
+  union {
+    Local* local;
+    Global* global;
+  };
 };
 
 struct ASTMemberAccessExpr : public AST {
@@ -197,6 +207,13 @@ struct ASTBlock : public AST {
   AST_ARR block = {};
 };
 
+struct ASTTypedName : public AST {
+  AST_LOCAL type = {};
+  const InternString* name = nullptr;
+
+  Local* local_ptr = nullptr;
+};
+
 struct ASTDecl : public AST {
   const InternString* name = nullptr;
   bool compile_time_const = false;
@@ -207,11 +224,11 @@ struct ASTDecl : public AST {
 };
 
 struct ASTGlobalDecl : public ASTDecl {
-  //Global* global_ptr;
+  Global* global_ptr;
 };
 
 struct ASTLocalDecl : public ASTDecl {
-  size_t local_index;
+  Local* local_ptr;
 };
 
 struct ASTFuncSig : public AST {
@@ -236,11 +253,6 @@ struct ASTLambda : public AST {
 
   AST_LOCAL sig = {};
   AST_LOCAL body = {};
-};
-
-struct ASTTypedName : public AST {
-  AST_LOCAL type = {};
-  const InternString* name = nullptr;
 };
 
 struct ASTStructBody : public AST {

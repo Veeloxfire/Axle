@@ -11,14 +11,14 @@ static const char* b8_reg_name(uint8_t reg) {
     case 5: return "bpl";
     case 6: return "sil";
     case 7: return "dil";
-    case 8: return "r8l";
-    case 9: return "r9l";
-    case 10: return "r10l";
-    case 11: return "r11l";
-    case 12: return "r12l";
-    case 13: return "r13l";
-    case 14: return "r14l";
-    case 15: return "r15l";
+    case 8: return "r8b";
+    case 9: return "r9b";
+    case 10: return "r10b";
+    case 11: return "r11b";
+    case 12: return "r12b";
+    case 13: return "r13b";
+    case 14: return "r14b";
+    case 15: return "r15b";
   }
 
   INVALID_CODE_PATH("INVALID REGISTER");
@@ -322,6 +322,12 @@ static void sete(FileData* f, u8 r) {
   write_str(f, "\n");
 }
 
+static void setne(FileData* f, u8 r) {
+  write_str(f, "setne ");
+  write_reg(f, r, b8_reg_name);
+  write_str(f, "\n");
+}
+
 static void setl(FileData* f, u8 r) {
   write_str(f, "setl ");
   write_reg(f, r, b8_reg_name);
@@ -334,6 +340,18 @@ static void setg(FileData* f, u8 r) {
   write_str(f, "\n");
 }
 
+static void seta(FileData* f, u8 r) {
+  write_str(f, "seta ");
+  write_reg(f, r, b8_reg_name);
+  write_str(f, "\n");
+}
+
+static void setb(FileData* f, u8 r) {
+  write_str(f, "setb ");
+  write_reg(f, r, b8_reg_name);
+  write_str(f, "\n");
+}
+
 static void check_cmp_jump(FileData* f,
                            const uint8_t** code_i_ptr, const uint8_t* end,
                            FUNCTION_PTR<void, FileData*, u64> success_jump_func,
@@ -341,7 +359,7 @@ static void check_cmp_jump(FileData* f,
                            FUNCTION_PTR<void, FileData*, u8> no_jump) {
 
   const uint8_t* const code_i = *code_i_ptr;
-  const uint8_t* const code_i_2 = code_i + ByteCode::SIZE_OF::EQ_R64S;
+  const uint8_t* const code_i_2 = code_i + ByteCode::OP_R_R::INSTRUCTION_SIZE;
 
   const auto p_e = ByteCode::OP_R_R::parse(code_i);
 
@@ -404,11 +422,12 @@ void write_complex_mem(FileData* f, const MemComplex& mem) {
     write_reg(f, mem.index, b64_reg_name);
 
     switch (mem.scale) {
-      case 1: write_str(f, " * 2)"); break;
-      case 2: write_str(f, " * 4)"); break;
-      case 3: write_str(f, " * 8)"); break;
+      case 1: write_str(f, ")"); break;
+      case 2: write_str(f, " * 2)"); break;
+      case 4: write_str(f, " * 4)"); break;
+      case 8: write_str(f, " * 8)"); break;
       default:
-        INVALID_CODE_PATH("TODO: Bigger values?");
+        INVALID_CODE_PATH("Invalid value");
     }
   }
 
@@ -526,6 +545,18 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
           code_i += ByteCode::SIZE_OF::ADD_R64S;
           break;
         }
+      case ByteCode::ADD_R8S: {
+          const auto p = ByteCode::PARSE::ADD_R8S(code_i);
+
+          write_str(f, "add ");
+          write_reg(f, p.val2, b8_reg_name);
+          write_str(f, ", ");
+          write_reg(f, p.val1, b8_reg_name);
+          write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::ADD_R8S;
+          break;
+        }
       case ByteCode::SUB_R64S: {
           const auto p = ByteCode::PARSE::SUB_R64S(code_i);
 
@@ -555,13 +586,23 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
 
           ASSERT(p.val2 == RAX.REG);
 
-          write_str(f, "div ");
-          write_reg(f, p.val2, b64_reg_name);
-          write_str(f, ", ");
+          write_str(f, "xor edx, edx\ndiv ");
           write_reg(f, p.val1, b64_reg_name);
           write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::DIV_RU64S;
+          break;
+        }
+      case ByteCode::MOD_RU64S: {
+          const auto p = ByteCode::PARSE::MOD_RU64S(code_i);
+
+          ASSERT(p.val2 == RAX.REG);
+
+          write_str(f, "xor edx, edx\ndiv ");
+          write_reg(f, p.val1, b64_reg_name);
+          write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::MOD_RU64S;
           break;
         }
       case ByteCode::DIV_RI64S: {
@@ -569,9 +610,7 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
 
           ASSERT(p.val2 == RAX.REG);
 
-          write_str(f, "idiv ");
-          write_reg(f, p.val2, b64_reg_name);
-          write_str(f, ", ");
+          write_str(f, "cdq\nidiv ");
           write_reg(f, p.val1, b64_reg_name);
           write_str(f, "\n");
 
@@ -657,19 +696,60 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
           code_i += ByteCode::SIZE_OF::AND_R64S;
           break;
         }
+      case ByteCode::OR_R8S: {
+          const auto p = ByteCode::PARSE::OR_R8S(code_i);
+
+          write_str(f, "or ");
+          write_reg(f, p.val2, b8_reg_name);
+          write_str(f, ", ");
+          write_reg(f, p.val1, b8_reg_name);
+          write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::OR_R8S;
+          break;
+        }
+        case ByteCode::XOR_R8S: {
+            const auto p = ByteCode::PARSE::XOR_R8S(code_i);
+
+            write_str(f, "xor ");
+            write_reg(f, p.val2, b8_reg_name);
+            write_str(f, ", ");
+            write_reg(f, p.val1, b8_reg_name);
+            write_str(f, "\n");
+
+            code_i += ByteCode::SIZE_OF::XOR_R8S;
+            break;
+          }
+        case ByteCode::AND_R8S: {
+            const auto p = ByteCode::PARSE::AND_R8S(code_i);
+
+            write_str(f, "and ");
+            write_reg(f, p.val2, b8_reg_name);
+            write_str(f, ", ");
+            write_reg(f, p.val1, b8_reg_name);
+            write_str(f, "\n");
+
+            code_i += ByteCode::SIZE_OF::AND_R8S;
+            break;
+          }
       case ByteCode::EQ_R64S: {
           check_cmp_jump(f, &code_i, code_end,
                          jump_equal, jump_not_equal, sete);
           break;
         }
+      case ByteCode::NEQ_R64S: {
+          check_cmp_jump(f, &code_i, code_end,
+                         jump_not_equal, jump_equal, setne);
+          break;
+        }
       case ByteCode::LESS_U64S: {
           check_cmp_jump(f, &code_i, code_end,
-                         jump_below, jump_not_below, setl);
+                         jump_below, jump_not_below, setb);
           break;
         }
       case ByteCode::GREAT_U64S: {
           check_cmp_jump(f, &code_i, code_end,
-                         jump_above, jump_not_above, setg);
+                         jump_above, jump_not_above, seta);
           break;
         }
       case ByteCode::LESS_I64S: {
@@ -748,6 +828,42 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
           write_str(f, "\n");
 
           code_i += ByteCode::SIZE_OF::COPY_R64_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_R32_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R32_TO_MEM(code_i);
+
+          write_str(f, "mov DWORD ");
+          write_complex_mem(f, i.mem);
+          write_str(f, ", ");
+          write_reg(f, i.val, b32_reg_name);
+          write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::COPY_R32_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_R16_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R16_TO_MEM(code_i);
+
+          write_str(f, "mov WORD ");
+          write_complex_mem(f, i.mem);
+          write_str(f, ", ");
+          write_reg(f, i.val, b16_reg_name);
+          write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::COPY_R16_TO_MEM;
+          break;
+        }
+      case ByteCode::COPY_R8_TO_MEM: {
+          const auto i = ByteCode::PARSE::COPY_R8_TO_MEM(code_i);
+
+          write_str(f, "mov BYTE ");
+          write_complex_mem(f, i.mem);
+          write_str(f, ", ");
+          write_reg(f, i.val, b8_reg_name);
+          write_str(f, "\n");
+
+          code_i += ByteCode::SIZE_OF::COPY_R8_TO_MEM;
           break;
         }
       case ByteCode::COPY_64_TO_MEM: {
@@ -966,7 +1082,7 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
       default: {
           uint8_t op = *code_i;
           comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
-                                    "Backend found unsupported bytecode instruction\n"
+                                    "NASM backend found unsupported bytecode instruction\n"
                                     "Code: {}, Name: {}",
                                     op, ByteCode::bytecode_string((ByteCode::ByteCodeOp)op));
           return;

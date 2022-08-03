@@ -611,7 +611,7 @@ void reset_parser(CompilerGlobals* const comp,
   Lexer* lex = &parser->lexer;
 
   //TEMP
-  parser->ast_store.total = 1024 * 16;
+  parser->ast_store.total = 1024 * 32;
   parser->ast_store.top = 0;
   parser->ast_store.mem = new u8[parser->ast_store.total];
 
@@ -712,6 +712,7 @@ static bool is_binary_operator(const Parser* const parser) {
     case AxleTokenType::Sub: return true;
     case AxleTokenType::Star: return true;
     case AxleTokenType::BackSlash: return true;
+    case AxleTokenType::Percent: return true;
     case AxleTokenType::Lesser: return true;
     case AxleTokenType::Greater: return true;
     case AxleTokenType::Or: return true;
@@ -731,6 +732,7 @@ static BINARY_OPERATOR parse_binary_operator(CompilerGlobals* const comp, Compil
     case AxleTokenType::Sub: advance(comp, comp_thread, parser); return BINARY_OPERATOR::SUB;
     case AxleTokenType::Star: advance(comp, comp_thread, parser); return BINARY_OPERATOR::MUL;
     case AxleTokenType::BackSlash: advance(comp, comp_thread, parser); return BINARY_OPERATOR::DIV;
+    case AxleTokenType::Percent: advance(comp, comp_thread, parser); return BINARY_OPERATOR::MOD;
     case AxleTokenType::Lesser: {
         advance(comp, comp_thread, parser);
 
@@ -1912,6 +1914,7 @@ static AST_LOCAL parse_typed_name(CompilerGlobals* const comp, CompilerThread* c
   tn->ast_type = AST_TYPE::TYPED_NAME;
   tn->name = name;
   tn->type = ty;
+  tn->local_ptr = nullptr;
 
   return tn;
 }
@@ -1989,13 +1992,13 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
   if (global) {
     ASTGlobalDecl* gd = PARSER_ALLOC(ASTGlobalDecl);
     gd->ast_type = AST_TYPE::GLOBAL_DECL;
-    //gd->global_ptr = nullptr;
+    gd->global_ptr = nullptr;
     d = gd;
   }
   else {
     ASTLocalDecl* ld = PARSER_ALLOC(ASTLocalDecl);
     ld->ast_type = AST_TYPE::LOCAL_DECL;
-    ld->local_index = 0;
+    ld->local_ptr = nullptr;
     d = ld;
   }
 
@@ -2422,7 +2425,7 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
   AST_LINKED* linked = nullptr;
 
   for (AxleTokenType current = parser->current.type;
-       !comp_thread->is_panic() && current != AxleTokenType::End;
+       current != AxleTokenType::End;
        current = parser->current.type)
   {
     if (linked == nullptr) {
@@ -2469,16 +2472,29 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
       imp->expr_location = expr;
       imp->node_span = span;
 
+      add_comp_unit_for_import(comp, parser->current_namespace, parser->file_path, imp);
+
       linked->curr = imp;
     }
     else if (parser->current.type == AxleTokenType::Identifier
              && parser->next.type == AxleTokenType::Colon) {
       //Decl
-      linked->curr = parse_decl(comp, comp_thread, parser, true);
+      ASTGlobalDecl* glob_decl = (ASTGlobalDecl*)parse_decl(comp, comp_thread, parser, true);
+      if (comp_thread->is_panic()) {
+        return;
+      }
+
+      linked->curr = glob_decl;
+
+      add_comp_unit_for_global(comp, comp_thread, parser->current_namespace, glob_decl);
+      if (comp_thread->is_panic()) {
+        return;
+      }
     }
     else {
       comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
                                 "Unexpected token");
+      return;
     }
   }
 
