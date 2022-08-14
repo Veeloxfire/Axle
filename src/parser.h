@@ -114,6 +114,8 @@ struct Parser {
   Lexer lexer = {};
 
   MemoryPool ast_store ={};  
+  Array<AST_LOCAL> eval_order = {};
+  Array<AST_LOCAL> infer_order = {};
 
   TokenStream stream;
   Namespace* current_namespace;
@@ -125,7 +127,11 @@ struct Parser {
   FileLocation file_path = {};
 };
 
-#define PARSER_ALLOC(T) parser->ast_store.push<T>()
+template<typename T>
+T* ast_alloc(Parser* p) {
+  static_assert(A_can_cast_to_B<T, AST>, "Only allocate ast nodes using this");
+  return p->ast_store.push<T>();
+}
 
 struct CompilerGlobals;
 struct CompilerThread;

@@ -815,7 +815,7 @@ NEW_LHS:
         PrecidenceState n = parse_binary_precidence(comp, comp_thread, parser, op2, pos_rhs);
 
         if (n.finished) {
-          ASTBinaryOperatorExpr* bin_op = PARSER_ALLOC(ASTBinaryOperatorExpr);
+          ASTBinaryOperatorExpr* bin_op = ast_alloc<ASTBinaryOperatorExpr>(parser);
           bin_op->ast_type = AST_TYPE::BINARY_OPERATOR;
           bin_op->left = lhs;
           bin_op->right = n.expr;
@@ -830,7 +830,7 @@ NEW_LHS:
         }
       }
       else {
-        ASTBinaryOperatorExpr* bin_op = PARSER_ALLOC(ASTBinaryOperatorExpr);
+        ASTBinaryOperatorExpr* bin_op = ast_alloc<ASTBinaryOperatorExpr>(parser);
         bin_op->ast_type = AST_TYPE::BINARY_OPERATOR;
         bin_op->left = lhs;
         bin_op->right = pos_rhs;
@@ -844,7 +844,7 @@ NEW_LHS:
     }
   }
   else {
-    ASTBinaryOperatorExpr* bin_op = PARSER_ALLOC(ASTBinaryOperatorExpr);
+    ASTBinaryOperatorExpr* bin_op = ast_alloc<ASTBinaryOperatorExpr>(parser);
     bin_op->ast_type = AST_TYPE::BINARY_OPERATOR;
     bin_op->left = lhs;
     bin_op->right = pos_rhs;
@@ -1130,7 +1130,7 @@ static AST_LOCAL parse_tup_literal(CompilerGlobals* const comp, CompilerThread* 
 
   SPAN_END;
 
-  ASTTupleLitExpr* tup_lit = PARSER_ALLOC(ASTTupleLitExpr);
+  ASTTupleLitExpr* tup_lit = ast_alloc<ASTTupleLitExpr>(parser);
   tup_lit->name = name;
   tup_lit->ast_type = AST_TYPE::TUPLE_LIT;
   tup_lit->elements = arr;
@@ -1203,7 +1203,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
           SPAN_END;
 
-          ASTStaticLink* li = PARSER_ALLOC(ASTStaticLink);
+          ASTStaticLink* li = ast_alloc<ASTStaticLink>(parser);
           li->import_type = it;
           li->node_span = span;
           li->ast_type = AST_TYPE::STATIC_LINK;
@@ -1277,7 +1277,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
         SPAN_END;
 
-        ASTArrayExpr* arr_expr = PARSER_ALLOC(ASTArrayExpr);
+        ASTArrayExpr* arr_expr = ast_alloc<ASTArrayExpr>(parser);
         arr_expr->ast_type = AST_TYPE::ARRAY_EXPR;
         arr_expr->elements = elements;
         arr_expr->node_span = span;
@@ -1297,7 +1297,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
         SPAN_END;
 
-        ASTAsciiString* s = PARSER_ALLOC(ASTAsciiString);
+        ASTAsciiString* s = ast_alloc<ASTAsciiString>(parser);
         s->ast_type = AST_TYPE::ASCII_STRING;
         s->node_span = span;
         s->string = str;
@@ -1317,7 +1317,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
         SPAN_END;
 
-        ASTAsciiChar* c = PARSER_ALLOC(ASTAsciiChar);
+        ASTAsciiChar* c = ast_alloc<ASTAsciiChar>(parser);
         c->ast_type = AST_TYPE::ASCII_CHAR;
         c->node_span = span;
         c->character = ch;
@@ -1356,7 +1356,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
         SPAN_END;
 
-        ASTCastExpr* cast = PARSER_ALLOC(ASTCastExpr);
+        ASTCastExpr* cast = ast_alloc<ASTCastExpr>(parser);
         cast->ast_type = AST_TYPE::CAST;
         cast->node_span = span;
         cast->type = ty;
@@ -1383,7 +1383,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
         SPAN_END;
 
-        ASTNumber* num = PARSER_ALLOC(ASTNumber);
+        ASTNumber* num = ast_alloc<ASTNumber>(parser);
         num->ast_type = AST_TYPE::NUMBER;
         num->node_span = span;
         num->value = val;
@@ -1458,7 +1458,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
           SPAN_END;
 
-          ASTFunctionCallExpr* call = PARSER_ALLOC(ASTFunctionCallExpr);
+          ASTFunctionCallExpr* call = ast_alloc<ASTFunctionCallExpr>(parser);
           call->ast_type = AST_TYPE::FUNCTION_CALL;
           call->node_span = span;
           call->function_name = function_name;
@@ -1480,7 +1480,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
           SPAN_END;
 
-          ASTIdentifier* i = PARSER_ALLOC(ASTIdentifier);
+          ASTIdentifier* i = ast_alloc<ASTIdentifier>(parser);
           i->ast_type = AST_TYPE::IDENTIFIER_EXPR;
           i->node_span = span;
           i->name = name;
@@ -1492,7 +1492,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
         AST_LOCAL s = parse_structure(comp, comp_thread, parser);
         SPAN_END;
 
-        ASTStructExpr* se = PARSER_ALLOC(ASTStructExpr);
+        ASTStructExpr* se = ast_alloc<ASTStructExpr>(parser);
         se->ast_type = AST_TYPE::STRUCT_EXPR;
         se->node_span = span;
         se->struct_body = s;
@@ -1522,7 +1522,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
           AST_LOCAL l = parse_lambda(comp, comp_thread, parser);
           SPAN_END;
 
-          ASTLambdaExpr* le = PARSER_ALLOC(ASTLambdaExpr);
+          ASTLambdaExpr* le = ast_alloc<ASTLambdaExpr>(parser);
           le->ast_type = AST_TYPE::LAMBDA_EXPR;
           le->node_span = span;
           le->lambda = l;
@@ -1579,7 +1579,7 @@ static AST_LOCAL parse_primary_and_suffix(CompilerGlobals* const comp, CompilerT
 
           SPAN_END;
 
-          ASTIndexExpr* index_expr = PARSER_ALLOC(ASTIndexExpr);
+          ASTIndexExpr* index_expr = ast_alloc<ASTIndexExpr>(parser);
           index_expr->ast_type = AST_TYPE::INDEX_EXPR;
           index_expr->expr = current;
           index_expr->index = index;
@@ -1604,7 +1604,7 @@ static AST_LOCAL parse_primary_and_suffix(CompilerGlobals* const comp, CompilerT
 
           SPAN_END;
 
-          ASTMemberAccessExpr* member = PARSER_ALLOC(ASTMemberAccessExpr);
+          ASTMemberAccessExpr* member = ast_alloc<ASTMemberAccessExpr>(parser);
           member->ast_type = AST_TYPE::MEMBER_ACCESS;
           member->expr = current;
           member->name = name;
@@ -1639,7 +1639,7 @@ static AST_LOCAL parse_unary_op(CompilerGlobals* const comp, CompilerThread* con
 
         SPAN_END;
 
-        ASTUnaryOperatorExpr* op = PARSER_ALLOC(ASTUnaryOperatorExpr);
+        ASTUnaryOperatorExpr* op = ast_alloc<ASTUnaryOperatorExpr>(parser);
         op->ast_type = AST_TYPE::UNARY_OPERATOR;
         op->op = UNARY_OPERATOR::NEG;
         op->node_span = span;
@@ -1660,7 +1660,7 @@ static AST_LOCAL parse_unary_op(CompilerGlobals* const comp, CompilerThread* con
 
         SPAN_END;
 
-        ASTUnaryOperatorExpr* op = PARSER_ALLOC(ASTUnaryOperatorExpr);
+        ASTUnaryOperatorExpr* op = ast_alloc<ASTUnaryOperatorExpr>(parser);
         op->ast_type = AST_TYPE::UNARY_OPERATOR;
         op->op = UNARY_OPERATOR::DEREF;
         op->node_span = span;
@@ -1681,7 +1681,7 @@ static AST_LOCAL parse_unary_op(CompilerGlobals* const comp, CompilerThread* con
 
         SPAN_END;
 
-        ASTUnaryOperatorExpr* op = PARSER_ALLOC(ASTUnaryOperatorExpr);
+        ASTUnaryOperatorExpr* op = ast_alloc<ASTUnaryOperatorExpr>(parser);
         op->ast_type = AST_TYPE::UNARY_OPERATOR;
         op->op = UNARY_OPERATOR::ADDRESS;
         op->node_span = span;
@@ -1784,7 +1784,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
 
           SPAN_END;
 
-          ASTLambdaType* l = PARSER_ALLOC(ASTLambdaType);
+          ASTLambdaType* l = ast_alloc<ASTLambdaType>(parser);
           l->ast_type = AST_TYPE::LAMBDA_TYPE;
           l->node_span = span;
           l->args = args;
@@ -1795,7 +1795,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
         else {
           SPAN_END;
 
-          ASTTupleType* tup = PARSER_ALLOC(ASTTupleType);
+          ASTTupleType* tup = ast_alloc<ASTTupleType>(parser);
           tup->ast_type = AST_TYPE::TUPLE_TYPE;
           tup->node_span = span;
           tup->types = args;
@@ -1812,7 +1812,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
 
         SPAN_END;
 
-        ASTNamedType* nt = PARSER_ALLOC(ASTNamedType);
+        ASTNamedType* nt = ast_alloc<ASTNamedType>(parser);
         nt->ast_type = AST_TYPE::NAMED_TYPE;
         nt->name = i;
         nt->node_span = span;
@@ -1852,7 +1852,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
 
         SPAN_END;
 
-        ASTArrayType* arr = PARSER_ALLOC(ASTArrayType);
+        ASTArrayType* arr = ast_alloc<ASTArrayType>(parser);
         arr->ast_type = AST_TYPE::ARRAY_TYPE;
         arr->node_span = span;
         arr->base = base;
@@ -1877,7 +1877,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
 
         SPAN_END;
 
-        ASTPtrType* arr = PARSER_ALLOC(ASTPtrType);
+        ASTPtrType* arr = ast_alloc<ASTPtrType>(parser);
         arr->ast_type = AST_TYPE::PTR_TYPE;
         arr->node_span = span;
         arr->base = base;
@@ -1910,7 +1910,7 @@ static AST_LOCAL parse_typed_name(CompilerGlobals* const comp, CompilerThread* c
     return 0;
   }
 
-  ASTTypedName* tn = PARSER_ALLOC(ASTTypedName);
+  ASTTypedName* tn = ast_alloc<ASTTypedName>(parser);
   tn->ast_type = AST_TYPE::TYPED_NAME;
   tn->name = name;
   tn->type = ty;
@@ -1990,13 +1990,13 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
 
   ASTDecl* d;
   if (global) {
-    ASTGlobalDecl* gd = PARSER_ALLOC(ASTGlobalDecl);
+    ASTGlobalDecl* gd = ast_alloc<ASTGlobalDecl>(parser);
     gd->ast_type = AST_TYPE::GLOBAL_DECL;
     gd->global_ptr = nullptr;
     d = gd;
   }
   else {
-    ASTLocalDecl* ld = PARSER_ALLOC(ASTLocalDecl);
+    ASTLocalDecl* ld = ast_alloc<ASTLocalDecl>(parser);
     ld->ast_type = AST_TYPE::LOCAL_DECL;
     ld->local_ptr = nullptr;
     d = ld;
@@ -2038,7 +2038,7 @@ static AST_LOCAL parse_statement(CompilerGlobals* const comp, CompilerThread* co
 
           SPAN_END;
 
-          ASTReturn* ret = PARSER_ALLOC(ASTReturn);
+          ASTReturn* ret = ast_alloc<ASTReturn>(parser);
           ret->ast_type = AST_TYPE::RETURN;
           ret->node_span = span;
           ret->expr = expr;
@@ -2052,7 +2052,7 @@ static AST_LOCAL parse_statement(CompilerGlobals* const comp, CompilerThread* co
 
           SPAN_END;
 
-          ASTReturn* ret = PARSER_ALLOC(ASTReturn);
+          ASTReturn* ret = ast_alloc<ASTReturn>(parser);
           ret->ast_type = AST_TYPE::RETURN;
           ret->node_span = span;
           ret->expr = nullptr;
@@ -2096,7 +2096,7 @@ static AST_LOCAL parse_statement(CompilerGlobals* const comp, CompilerThread* co
 
         SPAN_END;
 
-        ASTIfElse* if_else = PARSER_ALLOC(ASTIfElse);
+        ASTIfElse* if_else = ast_alloc<ASTIfElse>(parser);
         if_else->ast_type = AST_TYPE::IF_ELSE;
         if_else->node_span = span;
         if_else->condition = cond;
@@ -2130,7 +2130,7 @@ static AST_LOCAL parse_statement(CompilerGlobals* const comp, CompilerThread* co
 
         SPAN_END;
 
-        ASTWhile* w = PARSER_ALLOC(ASTWhile);
+        ASTWhile* w = ast_alloc<ASTWhile>(parser);
         w->ast_type = AST_TYPE::WHILE;
         w->node_span = span;
         w->condition = cond;
@@ -2171,7 +2171,7 @@ static AST_LOCAL parse_statement(CompilerGlobals* const comp, CompilerThread* co
 
           SPAN_END;
 
-          ASTAssign* assign = PARSER_ALLOC(ASTAssign);
+          ASTAssign* assign = ast_alloc<ASTAssign>(parser);
           assign->ast_type = AST_TYPE::ASSIGN;
           assign->node_span = span;
           assign->assign_to = assign_to;
@@ -2241,7 +2241,7 @@ static AST_LOCAL parse_block(CompilerGlobals* const comp, CompilerThread* const 
     return 0;
   }
 
-  ASTBlock* b = PARSER_ALLOC(ASTBlock);
+  ASTBlock* b = ast_alloc<ASTBlock>(parser);
   b->ast_type = AST_TYPE::BLOCK;
   b->block = statements;
 
@@ -2265,11 +2265,11 @@ static AST_LOCAL parse_function_signature(CompilerGlobals* const comp, CompilerT
   if (parser->current.type != AxleTokenType::Right_Bracket) {
     while (!comp_thread->is_panic()) {
       if (linked == nullptr) {
-        linked = PARSER_ALLOC(AST_LINKED);
+        linked = parser->ast_store.push<AST_LINKED>();
         args.start = linked;
       }
       else {
-        linked->next = PARSER_ALLOC(AST_LINKED);
+        linked->next = parser->ast_store.push<AST_LINKED>();
         linked = linked->next;
       }
 
@@ -2325,7 +2325,7 @@ static AST_LOCAL parse_function_signature(CompilerGlobals* const comp, CompilerT
 
   SPAN_END;
 
-  ASTFuncSig* sig = PARSER_ALLOC(ASTFuncSig);
+  ASTFuncSig* sig = ast_alloc<ASTFuncSig>(parser);
   sig->ast_type = AST_TYPE::FUNCTION_SIGNATURE;
   sig->parameters = args;
   sig->return_type = ret;
@@ -2356,7 +2356,7 @@ static AST_LOCAL parse_lambda(CompilerGlobals* const comp, CompilerThread* const
     return 0;
   }
 
-  ASTLambda* l = PARSER_ALLOC(ASTLambda);
+  ASTLambda* l = ast_alloc<ASTLambda>(parser);
   l->ast_type = AST_TYPE::LAMBDA;
   l->sig = sig;
   l->body = body;
@@ -2383,11 +2383,11 @@ static AST_LOCAL parse_structure(CompilerGlobals* const comp, CompilerThread* co
 
   while (!comp_thread->is_panic() && parser->current.type != AxleTokenType::Right_Brace) {
     if (linked == nullptr) {
-      linked = PARSER_ALLOC(AST_LINKED);
+      linked = parser->ast_store.push<AST_LINKED>();
       arr.start = linked;
     }
     else {
-      linked->next = PARSER_ALLOC(AST_LINKED);
+      linked->next = parser->ast_store.push<AST_LINKED>();
       linked = linked->next;
     }
 
@@ -2410,7 +2410,7 @@ static AST_LOCAL parse_structure(CompilerGlobals* const comp, CompilerThread* co
     return 0;
   }
 
-  ASTStructBody* s = PARSER_ALLOC(ASTStructBody);
+  ASTStructBody* s = ast_alloc<ASTStructBody>(parser);
   s->ast_type = AST_TYPE::STRUCT;
   s->elements = arr;
 
@@ -2467,7 +2467,7 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
 
       SPAN_END;
 
-      ASTImport* imp = PARSER_ALLOC(ASTImport);
+      ASTImport* imp = ast_alloc<ASTImport>(parser);
       imp->ast_type = AST_TYPE::IMPORT;
       imp->expr_location = expr;
       imp->node_span = span;

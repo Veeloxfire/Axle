@@ -1997,3 +1997,24 @@ template<typename T>
 inline void serialize_struct(Array<u8>& bytes, const T* data) {
   serialize_bytes(bytes, (u8*)data, sizeof(T), alignof(T));
 }
+
+
+namespace _IMPL_A_can_cast_to_B {
+  template<typename T>
+  struct TEST_TRUE {
+    static constexpr bool val = true;
+  };
+
+  struct TEST_FALSE {
+    static constexpr bool val = false;
+  };
+
+  template<typename A, typename B>
+  auto test_overload(const B* b) -> TEST_TRUE<decltype(static_cast<const A*>(b))>;
+
+  template<typename A>
+  auto test_overload(const void* v) ->TEST_FALSE;
+}
+
+template<typename A, typename B>
+constexpr bool A_can_cast_to_B = decltype(_IMPL_A_can_cast_to_B::test_overload<A>(static_cast<const B*>(nullptr)))::val;

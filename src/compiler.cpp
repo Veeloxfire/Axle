@@ -1351,7 +1351,6 @@ static void do_literal_cast(CompilerGlobals* const comp,
 }
 
 
-
 void type_check_ast_node(CompilerGlobals* const comp,
                          CompilerThread* const comp_thread,
                          Context* const context,
