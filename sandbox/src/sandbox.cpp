@@ -28,37 +28,39 @@ int main(int argc, const char** args) {
   options.build.current_directory = cwd.str;
   options.build.file_name = args[1];
   options.build.entry_point = "main";
-  //options.build.system_name                = "vm";
-  //options.build.default_calling_convention = "vm";
-  options.build.system_name = "x86_64";
-  options.build.default_calling_convention = "x64";
+  options.build.system_name                = "vm";
+  options.build.default_calling_convention = "vm";
+  //options.build.system_name = "x86_64";
+  //options.build.default_calling_convention = "x64";
   options.build.output_file = output_file;
   options.build.std_lib_folder = ".\\stdlib";
   options.build.lib_folder = ".\\lib";
 
   //options.print.ast = true;
-  options.print.pre_reg_alloc = true;
-  options.print.intersections = true;
+  //options.print.pre_reg_alloc = true;
+  //options.print.intersections = true;
   //options.print.normal_bytecode = true;
   //options.print.comptime_res = true;
   //options.print.coalesce_values = true;
-  options.print.fully_compiled = true;
-  options.print.reg_mapping = true;
+  //options.print.fully_compiled = true;
+  //options.print.reg_mapping = true;
   //options.print.run_headers = true;
   //options.print.comp_units = true;
   //options.print.comptime_exec = true;
 
   options.optimize.non_stack_locals = true;
-
   {
+    Program p = {};
     TRACING_SCOPE("Compiler");
-    int out = compile_file_and_write(options);
+    int out = compile_file(options, &p);
 
     if (out != 0) {
       std::cerr << "Error!";
       return out;
     }
   }
+
+  return 0;
 
   {
     TRACING_SCOPE("Nasm");

@@ -74,16 +74,6 @@ struct UnOpArgs {
   RuntimeValue emit_deref();
 };
 
-
-void compile_binary_operator(CompilerGlobals* comp,
-                             CompilerThread* comp_thread,
-                             State* state,
-                             struct ASTBinaryOperatorExpr* expr);
-
-struct UnaryOpOptions {
-  UNARY_OPERATOR_FUNCTION i64_emit = nullptr;
-};
-
 struct AddressUnOp {
   UNARY_OPERATOR_FUNCTION emit = nullptr;
 };
@@ -92,12 +82,6 @@ struct DerefUnOp {
   UNARY_OPERATOR_FUNCTION emit = nullptr;
 };
 
-//Overload for unary operators
-void compile_unary_operator(CompilerGlobals* comp,
-                            CompilerThread* comp_thread,
-                            State* state,
-                            struct ASTUnaryOperatorExpr* expr,
-                            const UnaryOpOptions& op);
 
 //Overload for taking address
 void compile_take_address(CompilerGlobals* comp,
@@ -109,9 +93,6 @@ void compile_deref(CompilerGlobals* comp,
                    CompilerThread* comp_thread,
                    struct ASTUnaryOperatorExpr* expr);
 
-inline constexpr UnaryOpOptions neg_operators ={
-  &UnOpArgs::emit_neg_i64,
-};
 
 inline constexpr AddressUnOp address_operators ={
   &UnOpArgs::emit_address,

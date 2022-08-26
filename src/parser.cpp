@@ -1386,7 +1386,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
         ASTNumber* num = ast_alloc<ASTNumber>(parser);
         num->ast_type = AST_TYPE::NUMBER;
         num->node_span = span;
-        num->value = val;
+        num->num_value = val;
         num->suffix = suffix;
 
         return num;
@@ -2597,7 +2597,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
       }
     case AST_TYPE::NUMBER: {
         ASTNumber* n = (ASTNumber*)a;
-        printf("%llu", n->value);
+        printf("%llu", n->num_value);
         if (n->suffix != nullptr) {
           IO::print(n->suffix->string);
         }
@@ -2730,17 +2730,47 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         IO::print('}');
         return;
       }
-    case AST_TYPE::LOCAL_DECL:
-    case AST_TYPE::GLOBAL_DECL: {
-        ASTDecl* d = (ASTDecl*)a;
-
+    case AST_TYPE::LOCAL_DECL: {
+        ASTLocalDecl* d = (ASTLocalDecl*)a;
+        
         if (d->type_ast == 0) {
-          IO::print(d->name->string, " := ");
+          IO::print(d->name->string, " :");
+          
         }
         else {
           IO::print(d->name->string, ": ");
           print_ast(printer, d->type_ast);
-          IO::print(" = ");
+          IO::print(" ");
+        }
+
+        if (d->compile_time_const) {
+          IO::print(": ");
+        }
+        else {
+          IO::print("= ");
+        }
+
+        print_ast(printer, d->expr);
+        return;
+      }
+    case AST_TYPE::GLOBAL_DECL: {
+        ASTGlobalDecl* d = (ASTGlobalDecl*)a;
+
+        if (d->type_ast == 0) {
+          IO::print(d->name->string, " :");
+
+        }
+        else {
+          IO::print(d->name->string, ": ");
+          print_ast(printer, d->type_ast);
+          IO::print(" ");
+        }
+
+        if (d->compile_time_const) {
+          IO::print(": ");
+        }
+        else {
+          IO::print("= ");
         }
 
         print_ast(printer, d->expr);

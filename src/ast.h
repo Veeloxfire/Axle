@@ -135,6 +135,8 @@ struct ASTBinaryOperatorExpr : public AST {
 
 struct ASTTupleLitExpr : public AST {
   const InternString* name;
+
+  Type named_type;
   AST_ARR elements = {};
 };
 
@@ -165,7 +167,7 @@ struct ASTIndexExpr : public AST {
 };
 
 struct ASTNumber : public AST {
-  uint64_t value = 0;
+  uint64_t num_value = 0;
   const InternString* suffix = nullptr;
 };
 
