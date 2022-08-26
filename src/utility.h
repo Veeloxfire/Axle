@@ -652,6 +652,12 @@ struct Array {
     (data + size)->~T();
   }
 
+  T take() noexcept {
+    size--;
+    T t = std::move(data[size]);
+    return t;
+  }
+
   void pop(size_t num) noexcept {
     const auto* old_end = data + size;
 

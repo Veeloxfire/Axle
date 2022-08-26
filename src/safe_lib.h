@@ -363,3 +363,5 @@ constexpr size_t strlen_ts(const char* c) {
 
   return c - base;
 }
+
+#define TODO() static_assert(false, "Code is broken")

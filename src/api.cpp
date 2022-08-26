@@ -153,14 +153,16 @@ int compile_file(const APIOptions& options,
   }
 
   //Backend
-  build_data_section_for_vm(out_program, &compiler);
-  
-  compile_backend(&compiler, &compiler_thread, out_program, compiler.build_options.endpoint_system);
-  if (compiler_thread.is_panic()) {
-    compiler_thread.errors.print_all();
-    return -3;
-  }
+  {
+    TRACING_SCOPE("Backend");
+    build_data_section_for_vm(out_program, &compiler);
 
+    compile_backend(&compiler, &compiler_thread, out_program, compiler.build_options.endpoint_system);
+    if (compiler_thread.is_panic()) {
+      compiler_thread.errors.print_all();
+      return -3;
+    }
+  }
   return 0;
 }
 

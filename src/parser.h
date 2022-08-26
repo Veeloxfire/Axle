@@ -113,7 +113,7 @@ struct Namespace;
 struct Parser {
   Lexer lexer = {};
 
-  MemoryPool ast_store ={};  
+  MemoryPool ast_store ={};
   Array<AST_LOCAL> eval_order = {};
   Array<AST_LOCAL> infer_order = {};
 
