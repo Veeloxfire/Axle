@@ -1464,7 +1464,7 @@ struct AtomicQueue {
 
   T* holder;
   usize start;
-  volatile __int64 atomic_size;
+  usize size;
   usize capacity;
 
   //No copy!
@@ -1473,7 +1473,6 @@ struct AtomicQueue {
   AtomicQueue() noexcept = default;
 
   void free() {
-    usize size = (usize)_InterlockedOr64(&atomic_size, 0);
     if (start + size > capacity) {
       usize temp = capacity - start;
       destruct_arr<T>(holder + start, temp);
@@ -1486,7 +1485,7 @@ struct AtomicQueue {
     ::free_no_destruct(holder);
     holder = nullptr;
     start = 0;
-    _InterlockedExchange64(&atomic_size, 0);
+    size = 0;
     capacity = 0;
   }
 
@@ -1499,25 +1498,20 @@ struct AtomicQueue {
     return (start + i) % capacity;
   }
 
-  bool is_immediately_empty() {
-    return (usize)_InterlockedOr64(&atomic_size, 0) == 0;
-  }
-
   //returns true if there is a value in out_t
   bool try_pop_front(T* out_t) {
-    mutex.acquire();
-    if (is_immediately_empty()) {
+    bool acquired = mutex.acquire_if_free();
+    if (!acquired) return false;
+
+    if (size == 0) {
       mutex.release();
       return false;
     }
 
-    _InterlockedDecrement64(&atomic_size);
+    size -= 1;
     *out_t = std::move(holder[start]);
     start++;
-
-    if (start >= capacity) {
-      start -= capacity;
-    }
+    start %= capacity;
 
     mutex.release();
     return true;
@@ -1525,13 +1519,13 @@ struct AtomicQueue {
 
   void push_back(T t) {
     mutex.acquire();
-    if ((usize)_InterlockedOr64(&atomic_size, 0) == capacity) {
+    if (size == capacity) {
       extend();
     }
 
-    usize s = (usize)_InterlockedIncrement64(&atomic_size);
+    size += 1;
 
-    new(holder + _ptr_index(s - 1)) T(std::move(t));
+    new(holder + _ptr_index(size - 1)) T(std::move(t));
     mutex.release();
   }
 
@@ -1547,7 +1541,7 @@ struct AtomicQueue {
     T* new_holder = allocate_default<T>(new_cap);
 
     usize i = 0;
-    usize end_i = (usize)_InterlockedOr64(&atomic_size, 0) + 1llu;
+    usize end_i = size + 1;
     for (; i < end_i; i++) {
       new_holder[i] = std::move(holder[_ptr_index(i)]);
     }

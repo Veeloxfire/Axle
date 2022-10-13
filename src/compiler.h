@@ -435,6 +435,8 @@ struct CompilerConstants {
   SystemsAndConventionNames system_names = {};
   Intrinsics intrinsics = {};
   ImportantNames important_names = {};
+
+  u32 active_threads;
 };
 
 constexpr void copy_compiler_constants(const CompilerConstants* from, CompilerConstants* to) {
@@ -443,6 +445,8 @@ constexpr void copy_compiler_constants(const CompilerConstants* from, CompilerCo
 
 //Things that may be modified by multiple threads
 struct CompilerGlobals : CompilerConstants {
+  std::atomic_uint32_t work_counter;
+
   Signal global_panic;
   SpinLockMutex global_errors_mutex;
   Array<ErrorMessage> global_errors;
@@ -513,6 +517,7 @@ struct CompilerGlobals : CompilerConstants {
 
 //Things that cannot be modified by other threads
 struct CompilerThread : CompilerConstants {
+  bool doing_work = true;
 
   Array<Token> current_stream = {};
   Errors errors = {};
@@ -530,6 +535,13 @@ struct CompilerThread : CompilerConstants {
     errors.report_error(code, span, f_message, ts...);
   }
 };
+
+inline constexpr void thead_doing_work(CompilerGlobals* comp, CompilerThread* comp_thread) {
+  if (!comp_thread->doing_work) {
+    comp->work_counter += 1;
+    comp_thread->doing_work = true;
+  }
+}
 
 #if 0
 void set_dependency(CompilerGlobals* const comp, Context* const context, CompilationUnit* current, CompilationUnit* waiting_on);

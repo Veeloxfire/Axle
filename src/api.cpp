@@ -122,6 +122,8 @@ int compile_file(const APIOptions& options,
   compiler.pipelines.emit_import._debug_name = "Emit Import";
   compiler.pipelines.exec_code._debug_name = "Exec Code";
 
+  compiler.active_threads = 4;
+
   //Load the builtin types
   init_compiler(options, &compiler, &compiler_thread);
   if (compiler_thread.is_panic()) {
@@ -243,6 +245,8 @@ int compile_file_and_write(const APIOptions& options) {
   compiler.pipelines.emit_global._debug_name = "Emit Global";
   compiler.pipelines.emit_import._debug_name = "Emit Import";
   compiler.pipelines.exec_code._debug_name = "Exec Code";
+
+  compiler.active_threads = 4;
 
   //Load the builtin types
   init_compiler(options, &compiler, &compiler_thread);

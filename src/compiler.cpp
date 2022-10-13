@@ -2637,7 +2637,7 @@ bool type_check_single_node(CompilerGlobals* const comp,
           set_runtime_flags(base, state, false, valids);
         }
 
-        
+
         a->node_type = base->node_type.unchecked_base<ArrayStructure>()->base;
 
         return true;
@@ -6652,6 +6652,8 @@ UnitID compile_and_execute(CompilerGlobals* const comp, Namespace* const availab
                                 state, extra, comp->print_options.comp_units);
   }
 
+  ASSERT(unit != nullptr);
+
   if (ast->node_type.is_valid()) {
     comp->pipelines.exec_code.push_back(unit);
   }
@@ -6663,11 +6665,9 @@ UnitID compile_and_execute(CompilerGlobals* const comp, Namespace* const availab
 }
 
 void compile_current_unparsed_files(CompilerGlobals* const comp,
-                                    CompilerThread* const comp_thread) {
+                                    CompilerThread* const comp_thread,
+                                    FileLoader* file_loader) {
   TRACING_FUNCTION();
-
-  auto file_loader = comp->services.file_loader.get();
-
 
   while (file_loader->unparsed_files.size > 0) {
     //still have files to parse
@@ -6768,6 +6768,7 @@ void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const 
                                     comp->print_options.comp_units);
   }
 
+  ASSERT(imp_unit != nullptr);
   comp->pipelines.depend_check.push_back(imp_unit);
 }
 
@@ -6804,6 +6805,7 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const
     return;
   }
 
+  ASSERT(glob_unit != nullptr);
   comp->pipelines.depend_check.push_back(glob_unit);
 }
 
@@ -6850,6 +6852,7 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const
 
   }
   //Last thing to do (stops certian threading bugs)
+  ASSERT(sig_unit != nullptr);
   comp->pipelines.depend_check.push_back(sig_unit);
 
   func->sig_unit_id = sig_unit->id;
@@ -6869,10 +6872,14 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
     struct_body->unit_id = unit->id;
   }
 
+  ASSERT(unit != nullptr);
   comp->pipelines.depend_check.push_back(unit);
 }
 
 void DependencyManager::remove_dependency_from(CompilationUnit* ptr) {
+  ASSERT(ptr != nullptr);
+
+
   ptr->waiting_on_count -= 1;
 
   if (ptr->waiting_on_count == 0) {
@@ -6881,7 +6888,8 @@ void DependencyManager::remove_dependency_from(CompilationUnit* ptr) {
 }
 
 void DependencyManager::add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on) {
-  ASSERT(now_waiting->insert_to != nullptr);
+  ASSERT(now_waiting != nullptr);
+  ASSERT(waiting_on != nullptr);
 
   now_waiting->waiting_on_count += 1;
 
@@ -6893,6 +6901,7 @@ void DependencyManager::add_dependency_to(CompilationUnit* now_waiting, Compilat
 }
 
 void DependencyManager::close_dependency(CompilationUnit* ptr) {
+  ASSERT(ptr != nullptr);
   DependencyListSingle* dep_single = ptr->dependency_list;
 
   while (dep_single != nullptr) {
@@ -6910,25 +6919,29 @@ void launch_free_dependencies(CompilerThread* comp_thread, Compilation* const co
   while (compilation->dependencies.free_dependencies.size > 0) {
     CompilationUnit* unit = compilation->dependencies.free_dependencies.pop_front();
 
+    ASSERT(unit != nullptr);
 
     ASSERT(unit->waiting_on_count == 0);
-    if (comp_thread->print_options.comp_units) {
-      format_print("Comp unit started again {}\n",
-                   unit->id);
-    }
-
     compilation->in_flight_units += 1;
 
     ASSERT(unit->insert_to != nullptr);
     Pipe* p = unit->insert_to;
-    unit->insert_to = NULL;
+    unit->insert_to = nullptr;
+
+    if (comp_thread->print_options.comp_units) {
+      format_print("Comp unit started again {} -> {}\n",
+                   unit->id, p->_debug_name);
+    }
+
     p->push_back(unit);
   }
 
   ASSERT(compilation->in_flight_units <= compilation->store.active_units.size);
 }
 
-void dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, Context* context) {
+//Might be that dependencies were already dispatched
+//Return true if depended
+bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, Context* context) {
   ASSERT(context->current_unit != nullptr);
   ASSERT(context->dependency_load_pipe != nullptr);
 
@@ -6946,8 +6959,6 @@ void dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, C
       }
 
       depended = true;
-      //Yes we do this every time. Probably not that slow
-      context->current_unit->insert_to = context->dependency_load_pipe;
       compilation->dependencies.add_dependency_to(unit, u);
     }
   }
@@ -6959,6 +6970,7 @@ void dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, C
   }
 
   if (depended) {
+    unit->insert_to = context->dependency_load_pipe;
     compilation->in_flight_units -= 1;
     if (comp_thread->print_options.comp_units) {
       format_print("Comp unit {} now waiting   | Active = {}, In flight = {}\n",
@@ -6967,6 +6979,7 @@ void dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, C
   }
 
   comp_thread->new_depends.clear();
+  return depended;
 }
 
 void close_compilation_unit(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
@@ -6988,473 +7001,461 @@ void close_compilation_unit(CompilerThread* comp_thread, Compilation* compilatio
 }
 
 void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
-  TRACING_FUNCTION();
 
   {
     bool acquired = comp->services.file_loader._mutex.acquire_if_free();
 
     if (acquired) {
       if (comp->services.file_loader._ptr->unparsed_files.size > 0) {
-        comp->services.file_loader._mutex.release();
+        thead_doing_work(comp, comp_thread);
 
-        compile_current_unparsed_files(comp, comp_thread);
+        compile_current_unparsed_files(comp, comp_thread, comp->services.file_loader._ptr);
         if (comp_thread->is_panic()) {
           return;
         }
 
         ASSERT(!comp_thread->is_depends());
       }
-      else {
-        comp->services.file_loader._mutex.release();
-      }
+
+      comp->services.file_loader._mutex.release();
     }
   }
 
-  if (!comp->pipelines.emit_import.is_immediately_empty()) {
-    CompilationUnit* unit = nullptr;
-
-    if (comp->pipelines.emit_import.try_pop_front(&unit)) {
-      TRACING_SCOPE("Import loop");
-      ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-
-      ASSERT(unit->waiting_on_count == 0);
-
-      State* state = unit->state;
-
-      Context context = {};
-      context.comptime_compilation = false;
-      context.dependency_load_pipe = &comp->pipelines.emit_import;
-      context.current_unit = unit;
-
-      ASSERT(unit->ast != nullptr);
-      ASSERT(unit->ast->ast_type == AST_TYPE::IMPORT);
-
-      ASTImport* imp = (ASTImport*)unit->ast;
+  CompilationUnit* unit = nullptr;
 
 
-      AST_LOCAL expr = imp->expr_location;
-      ASSERT(expr != nullptr);
+  if (comp->pipelines.emit_import.try_pop_front(&unit)) {
+    TRACING_SCOPE("Import loop");
+    thead_doing_work(comp, comp_thread);
 
-      //Only called if this isnt already a constant literal
-      if (can_compile_const_value(expr)) {
-        UnitID id = compile_and_execute(comp, unit->available_names, expr, {});
-        set_dependency(comp_thread, &context, id);
+    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
-        ASSERT(comp_thread->is_depends() && !comp_thread->is_panic());
-        dispatch_dependencies(comp, comp_thread, &context);
-        return;
-      }
+    ASSERT(unit->waiting_on_count == 0);
 
-      ImportExtra* imp_extra = (ImportExtra*)unit->extra;
+    State* state = unit->state;
 
-      compile_import_file(comp, comp_thread, &imp_extra->src_loc, imp, unit->available_names);
-      if (comp_thread->is_panic()) {
-        return;
-      }
+    Context context = {};
+    context.comptime_compilation = false;
+    context.dependency_load_pipe = &comp->pipelines.emit_import;
+    context.current_unit = unit;
 
-      //Finished
-      auto compilation = comp->services.compilation.get();
+    ASSERT(unit->ast != nullptr);
+    ASSERT(unit->ast->ast_type == AST_TYPE::IMPORT);
 
-      compilation->states.free(state);
-      compilation->import_extras.free(imp_extra);
-      close_compilation_unit(comp_thread, compilation._ptr, unit);
+    ASTImport* imp = (ASTImport*)unit->ast;
+
+
+    AST_LOCAL expr = imp->expr_location;
+    ASSERT(expr != nullptr);
+
+    //Only called if this isnt already a constant literal
+    if (can_compile_const_value(expr)) {
+      UnitID id = compile_and_execute(comp, unit->available_names, expr, {});
+      set_dependency(comp_thread, &context, id);
+
+      ASSERT(comp_thread->is_depends() && !comp_thread->is_panic());
+      try_dispatch_dependencies(comp, comp_thread, &context);
       return;
     }
-  }
 
-  if (!comp->pipelines.emit_global.is_immediately_empty()) {
-    CompilationUnit* unit = nullptr;
+    ImportExtra* imp_extra = (ImportExtra*)unit->extra;
 
-    if (comp->pipelines.emit_global.try_pop_front(&unit)) {
-      TRACING_SCOPE("Emit Global");
-      ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-
-      ASSERT(unit->waiting_on_count == 0);
-
-      State* state = unit->state;
-
-      Context context = {};
-      context.dependency_load_pipe = &comp->pipelines.emit_global;
-      context.current_unit = unit;
-
-      ASSERT(unit->ast != nullptr);
-      ASSERT(unit->ast->ast_type == AST_TYPE::GLOBAL_DECL);
-
-      ASTDecl* decl = (ASTDecl*)unit->ast;
-      GlobalExtra* global_extra = (GlobalExtra*)unit->extra;
-      Global* global = global_extra->global;
-
-      global->decl.type = decl->type;
-      if (decl->compile_time_const) {
-        global->decl.meta_flags |= META_FLAG::COMPTIME;
-      }
-      else {
-        global->decl.meta_flags |= META_FLAG::ASSIGNABLE;
-      }
-
-      ASSERT(global->decl.type.is_valid());
-
-      compile_init_expr_of_global(comp, comp_thread, &context, state, decl, global);
-      if (comp_thread->is_panic()) {
-        return;
-      }
-
-      //Finished
-      auto compilation = comp->services.compilation.get();
-
-      compilation->states.free(state);
-      compilation->global_extras.free(global_extra);
-      close_compilation_unit(comp_thread, compilation._ptr, unit);
+    compile_import_file(comp, comp_thread, &imp_extra->src_loc, imp, unit->available_names);
+    if (comp_thread->is_panic()) {
       return;
     }
+
+    //Finished
+    auto compilation = comp->services.compilation.get();
+
+    compilation->states.free(state);
+    compilation->import_extras.free(imp_extra);
+    close_compilation_unit(comp_thread, compilation._ptr, unit);
+    return;
   }
 
-  if (!comp->pipelines.emit_function.is_immediately_empty()) {
-    CompilationUnit* unit = nullptr;
+  if (comp->pipelines.emit_global.try_pop_front(&unit)) {
+    TRACING_SCOPE("Emit Global");
+    thead_doing_work(comp, comp_thread);
 
-    if (comp->pipelines.emit_function.try_pop_front(&unit)) {
-      TRACING_SCOPE("Emit Function Body");
-      ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
+    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
-      ASSERT(unit->waiting_on_count == 0);
+    ASSERT(unit->waiting_on_count == 0);
 
-      State* state = unit->state;
+    State* state = unit->state;
 
-      Context context = {};
-      context.dependency_load_pipe = &comp->pipelines.emit_function;
-      context.current_unit = unit;
+    Context context = {};
+    context.dependency_load_pipe = &comp->pipelines.emit_global;
+    context.current_unit = unit;
 
-      ASTLambda* lambda = (ASTLambda*)unit->ast;
-      FuncBodyExtra* func_body_extra = (FuncBodyExtra*)unit->extra;
+    ASSERT(unit->ast != nullptr);
+    ASSERT(unit->ast->ast_type == AST_TYPE::GLOBAL_DECL);
 
-      compile_function_body_code(comp, comp_thread,
-                                 &context,
-                                 state,
-                                 lambda,
-                                 func_body_extra->func);
-      ASSERT(!comp_thread->is_panic());
+    ASTDecl* decl = (ASTDecl*)unit->ast;
+    GlobalExtra* global_extra = (GlobalExtra*)unit->extra;
+    Global* global = global_extra->global;
 
-      //Finished
-      auto compilation = comp->services.compilation.get();
+    global->decl.type = decl->type;
+    if (decl->compile_time_const) {
+      global->decl.meta_flags |= META_FLAG::COMPTIME;
+    }
+    else {
+      global->decl.meta_flags |= META_FLAG::ASSIGNABLE;
+    }
 
-      compilation->states.free(state);
-      compilation->func_body_extras.free(func_body_extra);
-      close_compilation_unit(comp_thread, compilation._ptr, unit);
+    ASSERT(global->decl.type.is_valid());
+
+    compile_init_expr_of_global(comp, comp_thread, &context, state, decl, global);
+    if (comp_thread->is_panic()) {
       return;
     }
+
+    //Finished
+    auto compilation = comp->services.compilation.get();
+
+    compilation->states.free(state);
+    compilation->global_extras.free(global_extra);
+    close_compilation_unit(comp_thread, compilation._ptr, unit);
+    return;
   }
 
+  if (comp->pipelines.emit_function.try_pop_front(&unit)) {
+    TRACING_SCOPE("Emit Function Body");
+    thead_doing_work(comp, comp_thread);
 
-  if (!comp->pipelines.exec_code.is_immediately_empty()) {
-    CompilationUnit* unit = nullptr;
+    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
-    if (comp->pipelines.exec_code.try_pop_front(&unit)) {
-      TRACING_SCOPE("Exec Code Unit");
+    ASSERT(unit->waiting_on_count == 0);
 
-      ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
+    State* state = unit->state;
 
-      ASSERT(unit->waiting_on_count == 0);
+    Context context = {};
+    context.dependency_load_pipe = &comp->pipelines.emit_function;
+    context.current_unit = unit;
 
-      State* state = unit->state;
+    ASTLambda* lambda = (ASTLambda*)unit->ast;
+    FuncBodyExtra* func_body_extra = (FuncBodyExtra*)unit->extra;
 
-      Context context = {};
-      context.current_unit = unit;
-      context.comptime_compilation = true;
-      context.dependency_load_pipe = &comp->pipelines.exec_code;
+    compile_function_body_code(comp, comp_thread,
+                               &context,
+                               state,
+                               lambda,
+                               func_body_extra->func);
+    ASSERT(!comp_thread->is_panic());
 
-      ExecCodeExtra* exec_code_extra = (ExecCodeExtra*)unit->extra;
+    //Finished
+    auto compilation = comp->services.compilation.get();
+
+    compilation->states.free(state);
+    compilation->func_body_extras.free(func_body_extra);
+    close_compilation_unit(comp_thread, compilation._ptr, unit);
+    return;
+  }
+
+  if (comp->pipelines.exec_code.try_pop_front(&unit)) {
+    TRACING_SCOPE("Exec Code Unit");
+    thead_doing_work(comp, comp_thread);
+
+    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
+
+    ASSERT(unit->waiting_on_count == 0);
+
+    State* state = unit->state;
+
+    Context context = {};
+    context.current_unit = unit;
+    context.comptime_compilation = true;
+    context.dependency_load_pipe = &comp->pipelines.exec_code;
+
+    ExecCodeExtra* exec_code_extra = (ExecCodeExtra*)unit->extra;
+
+    {
+      AST_LOCAL ast = unit->ast;
+      const Type& cast_to = exec_code_extra->cast_to;
+
+      if (cast_to.is_valid()) {
+        ASSERT(ast->node_type == cast_to);
+      }
+
+      //maybe need??
+      //unit->constants = std::move(comp->working_state->constants);
+
+      CodeBlock block = {};
+      block.label = comp->labels++;
+
+
+      //Have to compile to vm
+      BuildOptions options;
+      options.default_calling_convention = &convention_vm;
+      options.endpoint_system = &system_vm;
+      options.entry_point = comp_thread->build_options.entry_point;
+      options.output_file = comp_thread->build_options.output_file;
+      options.file_name = comp_thread->build_options.file_name;
+
+      //Swap forward
+      std::swap(options, comp_thread->build_options);
+
+      const CallingConvention* convention = comp_thread->build_options.default_calling_convention;
+
+      init_state_regs(convention, state);
+      state->return_label = comp->labels++;
+
+      //Set up new flow
+      state->control_flow.new_flow();
+
+      const Type type = ast->node_type;
+
+      //Do we need to pass as a parameter
+      const bool return_as_ptr = register_passed_as_pointer(type);
+
+      const Structure* actual_return_type;
+      {
+        AtomicLock<Structures> structures = {};
+        AtomicLock<StringInterner> strings = {};
+        comp->services.get_multiple(&structures, &strings);
+        actual_return_type = find_or_make_pointer_structure(structures._ptr, strings._ptr,
+                                                            comp_thread->build_options.ptr_size, type);
+      }
+
+      uint8_t* const_val = comp->new_constant(type.structure->size);
 
       {
-        AST_LOCAL ast = unit->ast;
-        const Type& cast_to = exec_code_extra->cast_to;
+        CallingConvParamIterator param_itr = {
+          convention,
+          0,
+          convention->shadow_space_size
+        };
 
-        if (cast_to.is_valid()) {
-          ASSERT(ast->node_type == cast_to);
+        if (return_as_ptr) {
+          state->return_val = advance_runtime_param(state, &param_itr, actual_return_type);
+
+          UnOpArgs args = {};
+          args.comp = comp;
+          args.state = state;
+          args.code = &block;
+          args.prim = &state->return_val;
+
+          //Should fix any issues later on
+          state->return_val = args.emit_deref();
+
         }
+        else {
+          state->return_val.type = RVT::REGISTER;
+          state->return_val.reg = state->new_value();
 
-        //maybe need??
-        //unit->constants = std::move(comp->working_state->constants);
-
-        CodeBlock block = {};
-        block.label = comp->labels++;
-
-
-        //Have to compile to vm
-        BuildOptions options;
-        options.default_calling_convention = &convention_vm;
-        options.endpoint_system = &system_vm;
-        options.entry_point = comp_thread->build_options.entry_point;
-        options.output_file = comp_thread->build_options.output_file;
-        options.file_name = comp_thread->build_options.file_name;
-
-        //Swap forward
-        std::swap(options, comp_thread->build_options);
-
-        const CallingConvention* convention = comp_thread->build_options.default_calling_convention;
-
-        init_state_regs(convention, state);
-        state->return_label = comp->labels++;
-
-        //Set up new flow
-        state->control_flow.new_flow();
-
-        const Type type = ast->node_type;
-
-        //Do we need to pass as a parameter
-        const bool return_as_ptr = register_passed_as_pointer(type);
-
-        const Structure* actual_return_type;
-        {
-          AtomicLock<Structures> structures = {};
-          AtomicLock<StringInterner> strings = {};
-          comp->services.get_multiple(&structures, &strings);
-          actual_return_type = find_or_make_pointer_structure(structures._ptr, strings._ptr,
-                                                              comp_thread->build_options.ptr_size, type);
+          auto* ret_val = state->get_val(state->return_val.reg);
+          ret_val->value_type = ValueType::FIXED;
+          ret_val->reg = convention->return_register;
         }
-
-        uint8_t* const_val = comp->new_constant(type.structure->size);
-
-        {
-          CallingConvParamIterator param_itr = {
-            convention,
-            0,
-            convention->shadow_space_size
-          };
-
-          if (return_as_ptr) {
-            state->return_val = advance_runtime_param(state, &param_itr, actual_return_type);
-
-            UnOpArgs args = {};
-            args.comp = comp;
-            args.state = state;
-            args.code = &block;
-            args.prim = &state->return_val;
-
-            //Should fix any issues later on
-            state->return_val = args.emit_deref();
-
-          }
-          else {
-            state->return_val.type = RVT::REGISTER;
-            state->return_val.reg = state->new_value();
-
-            auto* ret_val = state->get_val(state->return_val.reg);
-            ret_val->value_type = ValueType::FIXED;
-            ret_val->reg = convention->return_register;
-          }
-        }
-
-        compile_bytecode_of_expression_existing(comp,
-                                                &context,
-                                                state,
-                                                &block,
-                                                ast,
-                                                &state->return_val);
-
-        ASSERT(!comp_thread->is_panic() && !comp_thread->is_depends());
-
-        if (state->return_val.type == RVT::REGISTER) {
-          state->use_value(state->return_val.reg);
-        }
-
-        ByteCode::EMIT::JUMP_TO_FIXED(block.code, state->return_label);
-
-        //Graph colour
-        graph_colour_algo(comp_thread, convention, &block, state);
-
-        //Backend
-        Program prog = {};
-        compile_backend_single_func(comp, comp_thread, &prog, &block, &system_vm);
-        if (comp_thread->is_panic()) {
-          return;
-        }
-
-        if (comp_thread->print_options.comptime_exec) {
-          IO::print("\nAbout to execute Compile Time Code:\n");
-          print_full_ast(ast);
-          IO::print("\n\nWhich produced this bytecode:\n");
-          ByteCode::print_bytecode(&vm_regs_name_from_num, stdout, prog.code.ptr, prog.code_size);
-        }
-
-        {
-          auto vm = comp->services.vm.get();
-
-          //Run the VM
-          if (return_as_ptr) {
-            X64_UNION pass_param = const_val;
-            vm_set_parameters(convention, vm._ptr, pass_param);
-          }
-
-          vm->errors = &comp_thread->errors;
-
-          vm_rum(vm._ptr, &prog);
-          if (comp_thread->is_panic()) {
-            return;
-          }
-
-          //Get the value back
-          if (return_as_ptr) {
-            if (comp_thread->print_options.comptime_res) {
-              IO::print("\nComptime Res In Bytes: ");
-              print_as_bytes(const_val, type.structure->size);
-              putc('\n', stdout);
-            }
-          }
-          else {
-            //Effectively stored in RAX
-            uint64_t val = vm->registers[convention_vm.return_register].b64.reg;
-            x64_to_bytes(val, const_val);
-
-            if (comp_thread->print_options.comptime_res) {
-              printf("\nComptime Res: %llx\n", val);
-            }
-          }
-        }
-
-        if (cast_to.is_valid()) {
-          uint8_t* res = comp->new_constant(cast_to.structure->size);
-          do_literal_cast(comp, comp_thread, ast, cast_to, const_val, res);
-          if (comp_thread->is_panic()) {
-            return;
-          }
-
-          comp->free_constant(const_val);
-          const_val = res;
-
-          ast->node_type = cast_to;
-        }
-
-        ast->value = const_val;
-
-        //Swap back
-        std::swap(options, comp_thread->build_options);
       }
+
+      compile_bytecode_of_expression_existing(comp,
+                                              &context,
+                                              state,
+                                              &block,
+                                              ast,
+                                              &state->return_val);
 
       ASSERT(!comp_thread->is_panic() && !comp_thread->is_depends());
 
-      //Finished
-      auto compilation = comp->services.compilation.get();
-
-      compilation->states.free(state);
-      compilation->exec_code_extras.free(exec_code_extra);
-      close_compilation_unit(comp_thread, compilation._ptr, unit);
-      return;
-    }
-  }
-
-  if (!comp->pipelines.depend_check.is_immediately_empty()) {
-    CompilationUnit* unit = nullptr;
-    if (comp->pipelines.depend_check.try_pop_front(&unit)) {
-      TRACING_SCOPE("Depend check");
-      ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-
-      ASSERT(unit->waiting_on_count == 0);
-
-
-      DependencyCheckStateAndContext st = {};
-
-      //RELOAD TO DEPEND CHECK IF THIS FAILS!!!!!
-      //This is because unfound names trigger dependencies and the global may not be type checked yet
-      //We wont know this unless we do a dependency check again
-      st.dependency_load_pipe = &comp->pipelines.depend_check;
-      st.comptime_compilation = false;//meaningless here
-      st.current_unit = unit;
-
-      ASSERT(unit->ast != nullptr);
-
-      dependency_check_ast_node(comp, comp_thread, &st, unit->ast);
-
-
-      if (!comp_thread->is_depends()) {
-        comp->pipelines.type_check.push_back(unit);
-      }
-      else {
-        dispatch_dependencies(comp, comp_thread, &st);
+      if (state->return_val.type == RVT::REGISTER) {
+        state->use_value(state->return_val.reg);
       }
 
-      return;
-    }
-  }
+      ByteCode::EMIT::JUMP_TO_FIXED(block.code, state->return_label);
 
-  if (!comp->pipelines.type_check.is_immediately_empty()) {
-    CompilationUnit* unit = nullptr;
+      //Graph colour
+      graph_colour_algo(comp_thread, convention, &block, state);
 
-    if (comp->pipelines.type_check.try_pop_front(&unit)) {
+      //Backend
+      Program prog = {};
+      compile_backend_single_func(comp, comp_thread, &prog, &block, &system_vm);
+      if (comp_thread->is_panic()) {
+        return;
+      }
 
-      TRACING_SCOPE("Type check");
-      ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
+      if (comp_thread->print_options.comptime_exec) {
+        IO::print("\nAbout to execute Compile Time Code:\n");
+        print_full_ast(ast);
+        IO::print("\n\nWhich produced this bytecode:\n");
+        ByteCode::print_bytecode(&vm_regs_name_from_num, stdout, prog.code.ptr, prog.code_size);
+      }
 
+      {
+        auto vm = comp->services.vm.get();
 
-      ASSERT(unit->waiting_on_count == 0);
+        //Run the VM
+        if (return_as_ptr) {
+          X64_UNION pass_param = const_val;
+          vm_set_parameters(convention, vm._ptr, pass_param);
+        }
 
-      State* state = unit->state;
+        vm->errors = &comp_thread->errors;
 
-      Context context = {};
-      context.dependency_load_pipe = &comp->pipelines.type_check;
-      context.current_unit = unit;
-
-      ASSERT(unit->ast != nullptr);
-
-      //HACK: deal with these dependencies better - perhaps transfer them?
-      if (!unit->ast->node_type.is_valid()) {
-        type_check_ast(comp, comp_thread, &context, state, unit->ast);
+        vm_rum(vm._ptr, &prog);
         if (comp_thread->is_panic()) {
           return;
         }
 
-        if (comp_thread->is_depends()) {
-          dispatch_dependencies(comp, comp_thread, &context);
-          return;
+        //Get the value back
+        if (return_as_ptr) {
+          if (comp_thread->print_options.comptime_res) {
+            IO::print("\nComptime Res In Bytes: ");
+            print_as_bytes(const_val, type.structure->size);
+            putc('\n', stdout);
+          }
+        }
+        else {
+          //Effectively stored in RAX
+          uint64_t val = vm->registers[convention_vm.return_register].b64.reg;
+          x64_to_bytes(val, const_val);
+
+          if (comp_thread->print_options.comptime_res) {
+            printf("\nComptime Res: %llx\n", val);
+          }
         }
       }
 
-      switch (unit->emit) {
-        case COMPILATION_EMIT_TYPE::STRUCTURE: {
-            auto compilation = comp->services.compilation.get();
+      if (cast_to.is_valid()) {
+        uint8_t* res = comp->new_constant(cast_to.structure->size);
+        do_literal_cast(comp, comp_thread, ast, cast_to, const_val, res);
+        if (comp_thread->is_panic()) {
+          return;
+        }
 
-            ASSERT(unit->extra == nullptr);
-            compilation->states.free(state);
+        comp->free_constant(const_val);
+        const_val = res;
 
-            close_compilation_unit(comp_thread, compilation._ptr, unit);
-            break;
-          }
-        case COMPILATION_EMIT_TYPE::EXEC_CODE: {
-            comp->pipelines.exec_code.push_back(unit);
-            break;
-          }
-        case COMPILATION_EMIT_TYPE::FUNC_SIG: {
-            ASSERT(unit->extra == nullptr);
-            //State is shared so don't free it
-            //comp->states.free(state);
-            auto compilation = comp->services.compilation.get();
-
-            close_compilation_unit(comp_thread, compilation._ptr, unit);
-            break;
-          }
-        case COMPILATION_EMIT_TYPE::FUNC_BODY: {
-            comp->pipelines.emit_function.push_back(unit);
-            break;
-          }
-        case COMPILATION_EMIT_TYPE::GLOBAL: {
-            comp->pipelines.emit_global.push_back(unit);
-            break;
-          }
-        case COMPILATION_EMIT_TYPE::IMPORT: {
-            comp->pipelines.emit_import.push_back(unit);
-            break;
-          }
+        ast->node_type = cast_to;
       }
 
+      ast->value = const_val;
 
-      return;
+      //Swap back
+      std::swap(options, comp_thread->build_options);
     }
+
+    ASSERT(!comp_thread->is_panic() && !comp_thread->is_depends());
+
+    //Finished
+    auto compilation = comp->services.compilation.get();
+
+    compilation->states.free(state);
+    compilation->exec_code_extras.free(exec_code_extra);
+    close_compilation_unit(comp_thread, compilation._ptr, unit);
+    return;
   }
+
+  if (comp->pipelines.type_check.try_pop_front(&unit)) {
+    TRACING_SCOPE("Type check");
+    thead_doing_work(comp, comp_thread);
+
+    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
+
+
+    ASSERT(unit->waiting_on_count == 0);
+
+    State* state = unit->state;
+
+    Context context = {};
+    context.dependency_load_pipe = &comp->pipelines.type_check;
+    context.current_unit = unit;
+
+    ASSERT(unit->ast != nullptr);
+
+    //HACK: deal with these dependencies better - perhaps transfer them?
+    if (!unit->ast->node_type.is_valid()) {
+      type_check_ast(comp, comp_thread, &context, state, unit->ast);
+      if (comp_thread->is_panic()) {
+        return;
+      }
+
+      if (comp_thread->is_depends()) {
+        if (try_dispatch_dependencies(comp, comp_thread, &context)) {
+          return;
+        }
+      }
+    }
+
+    switch (unit->emit) {
+      case COMPILATION_EMIT_TYPE::STRUCTURE: {
+          auto compilation = comp->services.compilation.get();
+
+          ASSERT(unit->extra == nullptr);
+          compilation->states.free(state);
+
+          close_compilation_unit(comp_thread, compilation._ptr, unit);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::EXEC_CODE: {
+          comp->pipelines.exec_code.push_back(unit);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::FUNC_SIG: {
+          ASSERT(unit->extra == nullptr);
+          //State is shared so don't free it
+          //comp->states.free(state);
+          auto compilation = comp->services.compilation.get();
+
+          close_compilation_unit(comp_thread, compilation._ptr, unit);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::FUNC_BODY: {
+          comp->pipelines.emit_function.push_back(unit);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::GLOBAL: {
+          comp->pipelines.emit_global.push_back(unit);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::IMPORT: {
+          comp->pipelines.emit_import.push_back(unit);
+          break;
+        }
+    }
+
+
+    return;
+  }
+
+  if (comp->pipelines.depend_check.try_pop_front(&unit)) {
+    TRACING_SCOPE("Depend check");
+    thead_doing_work(comp, comp_thread);
+    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
+
+    ASSERT(unit->waiting_on_count == 0);
+
+    DependencyCheckStateAndContext st = {};
+
+    //RELOAD TO DEPEND CHECK IF THIS FAILS!!!!!
+    //This is because unfound names trigger dependencies and the global may not be type checked yet
+    //We wont know this unless we do a dependency check again
+    st.dependency_load_pipe = &comp->pipelines.depend_check;
+    st.comptime_compilation = false;//meaningless here
+    st.current_unit = unit;
+
+    ASSERT(unit->ast != nullptr);
+
+    dependency_check_ast_node(comp, comp_thread, &st, unit->ast);
+
+    if (comp_thread->is_depends()) {
+      if (try_dispatch_dependencies(comp, comp_thread, &st)) {
+        return;
+      }
+    }
+    
+    comp->pipelines.type_check.push_back(unit);
+    return;
+  }
+
+  ASSERT(unit == nullptr);//shouldn't have been modified in this time
 
   {
     auto compilation = comp->services.compilation.get();
     //Wait for there to be no compiling to check unfound deps - best chance they exist
     if (compilation->unfound_names.names.size > 0) {
       TRACING_SCOPE("Check Unfound Names");
+      thead_doing_work(comp, comp_thread);
 
       usize num_unfound = compilation->unfound_names.names.size;
 
@@ -7500,10 +7501,70 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   //format_print("---- DEBUG: Did nothing in pass\n");
+
+  if (comp_thread->doing_work) {
+    comp_thread->doing_work = false;
+    comp->work_counter -= 1;
+
+    if (comp->work_counter == 0) {
+      auto compilation = comp->services.compilation.get();
+
+      auto i = compilation->store.active_units.begin();
+      const auto end = compilation->store.active_units.end();
+
+      Array<char> error = {};
+      format_to_array(error, "Work still exists but is not accessable\nThe following compilation units are inaccessable:\n");
+
+      for (; i < end; ++i) {
+        CompilationUnit* unit = *i;
+        ASSERT(unit != nullptr);
+        const char* debug_name = "Type unsupported in this mode";
+        if (unit->insert_to != nullptr) {
+          if (unit->insert_to->_debug_name != nullptr) {
+            debug_name = unit->insert_to->_debug_name;
+          }
+        }
+        else {
+          debug_name = "Should be active";
+        }
+
+
+        format_to_array(error, "- Id: {} | Next Type: {} | Waiting on count: {}\n", unit->id, debug_name, unit->waiting_on_count);
+      }
+
+      format_to_array(error, "Pipeline states:\n");
+      comp->pipelines.depend_check.mutex.acquire();
+      format_to_array(error, "- Depend Check Size: {}\n", comp->pipelines.depend_check.size);
+      comp->pipelines.depend_check.mutex.release();
+
+      comp->pipelines.type_check.mutex.acquire();
+      format_to_array(error, "- Type Check Size: {}\n", comp->pipelines.type_check.size);
+      comp->pipelines.type_check.mutex.release();
+
+      comp->pipelines.exec_code.mutex.acquire();
+      format_to_array(error, "- Exec Code Size: {}\n", comp->pipelines.exec_code.size);
+      comp->pipelines.exec_code.mutex.release();
+
+      comp->pipelines.emit_function.mutex.acquire();
+      format_to_array(error, "- Emit Function Size: {}\n", comp->pipelines.emit_function.size);
+      comp->pipelines.emit_function.mutex.release();
+
+      comp->pipelines.emit_global.mutex.acquire();
+      format_to_array(error, "- Emit Global Size: {}\n", comp->pipelines.emit_global.size);
+      comp->pipelines.emit_global.mutex.release();
+
+      comp->pipelines.emit_import.mutex.acquire();
+      format_to_array(error, "- Emit Import Size: {}\n", comp->pipelines.emit_import.size);
+      comp->pipelines.emit_import.mutex.release();
+
+      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, error.data);
+      return;
+    }
+  }
 }
 
 void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
-  copy_compiler_constants(comp, comp_thread);
+  comp_thread->doing_work = true;
 
   while (comp->is_compiling()) {
     run_compiler_pipes(comp, comp_thread);
@@ -7537,7 +7598,8 @@ void compiler_loop_thread_proc(const ThreadHandle* handle, void* data) {
 }
 
 void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const comp_thread) noexcept {
-  const usize EXTRA_THREADS = 3;
+  comp->work_counter = comp->active_threads;
+  const usize EXTRA_THREADS = comp->active_threads - 1;
 
   if (EXTRA_THREADS > 0) {
     ThreadData* datas = allocate_default<ThreadData>(EXTRA_THREADS);
@@ -7547,13 +7609,17 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
     for (usize i = 0; i < EXTRA_THREADS; i++) {
       datas[i].comp = comp;
       datas[i].comp_thread = comp_threads + i;
+      copy_compiler_constants(comp, comp_threads + i);
+    }
+
+    copy_compiler_constants(comp, comp_thread);//Just in case
+
+    //Start the threads
+    for (usize i = 0; i < EXTRA_THREADS; i++) {
       handles[i] = start_thread(compiler_loop_thread_proc, datas + i);
     }
 
-    {
-      CompilerThread comp_thread = {};
-      compiler_loop(comp, &comp_thread);
-    }
+    compiler_loop(comp, comp_thread);
 
     {
       TRACING_SCOPE("Close Threads");
@@ -7567,13 +7633,14 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
     }
   }
   else {
-    CompilerThread comp_thread = {};
-    compiler_loop(comp, &comp_thread);
+    compiler_loop(comp, comp_thread);
   }
 }
 
 void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
   TRACING_FUNCTION();
+
+  ASSERT(comp->active_threads >= 1);
 
   //compiler_loop(comp, comp_thread);
   compiler_loop_threaded(comp, comp_thread);
