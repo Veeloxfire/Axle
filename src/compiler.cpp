@@ -3575,7 +3575,6 @@ static void type_check_ast(CompilerGlobals* comp,
                            AST_LOCAL ast) {
   Typer typer = {};
 
-  //TODO: make a different api for this first one?
   typer.push_node(ast, {});
   typer.load_new_nodes();
 
@@ -4522,7 +4521,6 @@ static void compile_bytecode_of_expression(CompilerGlobals* const comp,
     return;
   }
 
-
   switch (expr->ast_type) {
     case AST_TYPE::STRUCT_EXPR: {
         ASTStructExpr* se = (ASTStructExpr*)expr;
@@ -4568,8 +4566,6 @@ static void compile_bytecode_of_expression(CompilerGlobals* const comp,
 
         STRUCTURE_TYPE st = m_base->node_type.struct_type();
         if (st == STRUCTURE_TYPE::COMPOSITE) {
-
-
           RuntimeValue obj = compile_bytecode_of_expression_new(comp,
                                                                 context,
                                                                 state,
