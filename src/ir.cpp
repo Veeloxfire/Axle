@@ -14,7 +14,6 @@ IR::ValueIndex IR::Function::emit_create_variable(IR::Primitive primitive, usize
   values.insert(val);
 
   instructions.insert(CreateInst{ v });
-
   return v;
 }
 
@@ -36,9 +35,7 @@ IR::ValueIndex IR::Function::emit_create_temporary(IR::Primitive primitive, usiz
 
   values.insert(val);
 
-
   instructions.insert(CreateInst{ v });
-
   return v;
 }
 
@@ -239,18 +236,25 @@ IR::ExecuionThread::RuntimeImmediate IR::ExecuionThread::eval_immediate(const IR
           {//Store in value when the size is small (8 or less) - just a simple way of doing that
           case 8:
             result.small |= ((u64)cnst.data[7]) << (7 * 8);
+            [[fallthrough]];
           case 7:
             result.small |= ((u64)cnst.data[6]) << (6 * 8);
+            [[fallthrough]];
           case 6:
             result.small |= ((u64)cnst.data[5]) << (5 * 8);
+            [[fallthrough]];
           case 5:
             result.small |= ((u64)cnst.data[4]) << (4 * 8);
+            [[fallthrough]];
           case 4:
             result.small |= ((u64)cnst.data[3]) << (3 * 8);
+            [[fallthrough]];
           case 3:
             result.small |= ((u64)cnst.data[2]) << (2 * 8);
+            [[fallthrough]];
           case 2:
             result.small |= ((u64)cnst.data[1]) << (1 * 8);
+            [[fallthrough]];
           case 1:
             result.small |= ((u64)cnst.data[0]);
             break;
@@ -327,14 +331,30 @@ IR::ExecuionThread::RuntimeImmediate IR::ExecuionThread::eval_immediate(const IR
                     return {};
                   }
 
-                case 8: result.small |= ((u64)source_variable->large[offset + 7]) << ((offset + 7) * 8);
-                case 7: result.small |= ((u64)source_variable->large[offset + 6]) << ((offset + 6) * 8);
-                case 6: result.small |= ((u64)source_variable->large[offset + 5]) << ((offset + 5) * 8);
-                case 5: result.small |= ((u64)source_variable->large[offset + 4]) << ((offset + 4) * 8);
-                case 4: result.small |= ((u64)source_variable->large[offset + 3]) << ((offset + 3) * 8);
-                case 3: result.small |= ((u64)source_variable->large[offset + 2]) << ((offset + 2) * 8);
-                case 2: result.small |= ((u64)source_variable->large[offset + 1]) << ((offset + 1) * 8);
-                case 1: result.small |= ((u64)source_variable->large[offset + 0]) << ((offset + 0) * 8); break;
+                case 8:
+                  result.small |= ((u64)source_variable->large[offset + 7]) << ((offset + 7) * 8);
+                  [[fallthrough]];
+                case 7:
+                  result.small |= ((u64)source_variable->large[offset + 6]) << ((offset + 6) * 8);
+                  [[fallthrough]];
+                case 6:
+                  result.small |= ((u64)source_variable->large[offset + 5]) << ((offset + 5) * 8);
+                  [[fallthrough]];
+                case 5:
+                  result.small |= ((u64)source_variable->large[offset + 4]) << ((offset + 4) * 8);
+                  [[fallthrough]];
+                case 4:
+                  result.small |= ((u64)source_variable->large[offset + 3]) << ((offset + 3) * 8);
+                  [[fallthrough]];
+                case 3:
+                  result.small |= ((u64)source_variable->large[offset + 2]) << ((offset + 2) * 8);
+                  [[fallthrough]];
+                case 2:
+                  result.small |= ((u64)source_variable->large[offset + 1]) << ((offset + 1) * 8);
+                  [[fallthrough]];
+                case 1:
+                  result.small |= ((u64)source_variable->large[offset + 0]) << ((offset + 0) * 8);
+                  break;
                 default: {
                     result.large = source_variable->large + (source_ref.offset + offset);
                     break;
@@ -404,15 +424,15 @@ void copy_number_to_reference_value(u64 small, const IR::Value& value, const IR:
 }
 
 void IR::ExecuionThread::execute() {
-  usize i = 0;
+  usize ip = 0;
   while (true) {
-    if (i >= func->instructions.size) {
+    if (ip >= func->instructions.size) {
       errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Instruction pointer went out of bounds without finishing execution");
       return;
     }
 
-    const IR::Instruction& inst = func->instructions.data[i];
-    i += 1;
+    const IR::Instruction& inst = func->instructions.data[ip];
+    ip += 1;
 
     switch (inst.op) {
       case IR::Op::Nul: {
@@ -537,15 +557,15 @@ void IR::ExecuionThread::execute() {
 
             default: {
                 if (source.size > 8) {
-                  for (usize i = 0; i < source.size; i++) {
-                    dest_base->large[dest_ref.offset + i] = source_imm.large[i];
+                  for (usize j = 0; j < source.size; j++) {
+                    dest_base->large[dest_ref.offset + j] = source_imm.large[j];
                   }
                 }
                 else {
                   u64 val = source_imm.small;
                   //Remove the data as if it were little endian, the shift
-                  for (u64 i = 0; i < source.size; i++, val >>= 8) {
-                    dest_base->large[dest_ref.offset + i] = val & 0xff;
+                  for (u64 j = 0; j < source.size; j++, val >>= 8) {
+                    dest_base->large[dest_ref.offset + j] = val & 0xff;
                   }
                 }
 
