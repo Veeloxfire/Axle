@@ -23,6 +23,10 @@ FILES::OpenedFile FILES::open(const char* name,
         share = 0;
         break;
       }
+    default: {
+        opened_file.error_code = ErrorCode::INVALID_OPTIONS;
+        return opened_file;
+      }
   }
 
 
@@ -57,6 +61,10 @@ FILES::OpenedFile FILES::create(const char* name,
         share = 0;
         break;
       }
+    default: {
+        opened_file.error_code = ErrorCode::INVALID_OPTIONS;
+        return opened_file;
+      }
   }
 
 
@@ -90,6 +98,10 @@ FILES::OpenedFile FILES::replace(const char* name,
         access = GENERIC_WRITE;
         share = 0;
         break;
+      }
+    default: {
+        opened_file.error_code = ErrorCode::INVALID_OPTIONS;
+        return opened_file;
       }
   }
 

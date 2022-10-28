@@ -473,40 +473,40 @@ void vm_backend_code_block(CompilerGlobals* const comp,
   }
 }
 
-void compile_backend_to_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, const char* out_file_name, const System* system) {
-
-  size_t entry_point_label = 0;
-
-  //Find the entry point first - allows us to say its called
-  {
-    const InternString* entry_name = comp->build_options.entry_point;
-
-    auto names = comp->services.names.get();
-    GlobalName* nm = names->find_global_name(comp->build_file_namespace, entry_name);
-
-    if (nm == nullptr) {
-      CallSignature sig = {};
-      sig.name = entry_name;
-
-      comp_thread->report_error(ERROR_CODE::NAME_ERROR, Span{},
-                                "No function '{}' exists in the build file to be the entry point",
-                                sig);
-      return;
-    }
-
-    Function* entry_point_func = *(Function**)nm->global->constant_value.ptr;
-
-    if (entry_point_func == nullptr) {
-      comp_thread->report_error(ERROR_CODE::NAME_ERROR, Span{},
-                                "Could not find a function '{}' in the build file for the entry point",
-                                entry_name);
-      return;
-    }
-
-    //entry_point_func->is_called = true;//makes it compile
-    entry_point_label = entry_point_func->code_block.label;
-  }
-}
+//void compile_backend_to_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, const char* out_file_name, const System* system) {
+//
+//  size_t entry_point_label = 0;
+//
+//  //Find the entry point first - allows us to say its called
+//  {
+//    const InternString* entry_name = comp->build_options.entry_point;
+//
+//    auto names = comp->services.names.get();
+//    GlobalName* nm = names->find_global_name(comp->build_file_namespace, entry_name);
+//
+//    if (nm == nullptr) {
+//      CallSignature sig = {};
+//      sig.name = entry_name;
+//
+//      comp_thread->report_error(ERROR_CODE::NAME_ERROR, Span{},
+//                                "No function '{}' exists in the build file to be the entry point",
+//                                sig);
+//      return;
+//    }
+//
+//    Function* entry_point_func = *(Function**)nm->global->constant_value.ptr;
+//
+//    if (entry_point_func == nullptr) {
+//      comp_thread->report_error(ERROR_CODE::NAME_ERROR, Span{},
+//                                "Could not find a function '{}' in the build file for the entry point",
+//                                entry_name);
+//      return;
+//    }
+//
+//    //entry_point_func->is_called = true;//makes it compile
+//    entry_point_label = entry_point_func->code_block.label;
+//  }
+//}
 
 void compile_backend(CompilerGlobals* const comp, CompilerThread* const comp_thread, Program* prog, const System* system) {
   TRACING_FUNCTION();

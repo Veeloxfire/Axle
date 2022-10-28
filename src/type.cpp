@@ -365,9 +365,9 @@ RuntimeValue CASTS::i32_to_r64(CompilerGlobals* const comp,
   return impl_single_cast(comp, state, code, comp->builtin_types->t_i8.structure, val, ByteCode::EMIT::CONV_RI32_TO_R64);
 }
 
-RuntimeValue CASTS::no_op(CompilerGlobals* const comp,
-                          State* const state,
-                          CodeBlock* const code,
+RuntimeValue CASTS::no_op(CompilerGlobals* const,
+                          State* const,
+                          CodeBlock* const,
                           const RuntimeValue* const val) {
   return *val;
 }

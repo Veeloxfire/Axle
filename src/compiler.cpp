@@ -160,14 +160,14 @@ void State::set_value(ValueIndex index) {
   use_value(index, index);
 }
 
-void State::use_mem(const MemIndex index) {
-  const MemValue* val = get_mem(index);
+void State::use_mem(const MemIndex mem_index) {
+  const MemValue* val = get_mem(mem_index);
   ValueIndex base = ValueIndex{ val->mem.base };
   use_value(base);
 
   if (val->mem.scale != 0) {
-    ValueIndex index = ValueIndex{ val->mem.index };
-    use_value(index);
+    ValueIndex v_index = ValueIndex{ val->mem.index };
+    use_value(v_index);
   }
 }
 

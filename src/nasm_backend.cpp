@@ -1187,11 +1187,11 @@ void nasm_backend(const char* file_name, CompilerGlobals* comp, CompilerThread* 
     auto end = comp->functions_single_threaded.end_const_iter();
 
     for (; i != end; i.next()) {
-      const Function* f = i.get();
+      const Function* func = i.get();
 
       //write_label(&file, f->code_block.label);
       //write_str(&file, ":\n");
-      write_code(&file, comp, comp_thread, &f->code_block);
+      write_code(&file, comp, comp_thread, &func->code_block);
       if (comp_thread->is_panic()) {
         return;
       }

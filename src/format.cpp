@@ -47,10 +47,10 @@ void load_string(Array<char>& res, MagicNumber c) {
 
   constexpr auto display_char = [](int c) -> char {
     if (0 <= c && c <= 9) {
-      return c + '0';
+      return (char)(c + '0');
     }
     else if (0xa <= c && c <= 0xf) {
-      return (c - 0xa) + 'a';
+      return (char)((c - 0xa) + 'a');
     }
     return '\0';
   };
