@@ -45,6 +45,7 @@ void load_string(Array<char>& res, int32_t i32);
 void load_string(Array<char>& res, uint32_t u32);
 void load_string(Array<char>& res, int64_t i64);
 void load_string(Array<char>& res, uint64_t u64);
+void load_string(Array<char>& res, long l);
 void load_string(Array<char>& res, PrintPtr ptr);
 
 void load_string(Array<char>& res, DisplayChar c);

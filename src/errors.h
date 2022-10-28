@@ -38,6 +38,7 @@ struct Errors {
     error_messages.insert({ code, span, std::move(message) });
   }
 
+  inline constexpr bool is_panic() const { return panic; }
   ERROR_CODE print_all() const;
 };
 

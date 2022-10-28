@@ -7,63 +7,63 @@ TEST_FUNCTION(Util_Array_Insert_Remove) {
     a.insert(i ^ (i + 1));
   }
 
-  ASSERT(a.size == 1000);
-  ASSERT(*a.back() == (999 ^1000));
+  TEST_EQ(1000, a.size);
+  TEST_EQ((999 ^ 1000), *a.back());
 
   for (usize i = 0; i < 1000; i++) {
-    ASSERT(a.data[i] == (i ^ (i + 1)));
+    TEST_EQ((i ^ (i + 1)), a.data[i]);
   }
 
   {
     auto b = a.begin();
     const auto end = a.end();
     for (usize i = 0; i < 1000; i++) {
-      ASSERT(*b == (i ^ (i + 1)));
+      TEST_EQ((i ^ (i + 1)), *b);
       b++;
     }
 
-    ASSERT(b == end);
+    TEST_EQ(b, end);
 
     b = a.mut_begin();
 
     for (usize i = 0; i < 1000; i++) {
-      ASSERT(*b == (i ^ (i + 1)));
+      TEST_EQ((i ^ (i + 1)), *b);
       b++;
     }
 
-    ASSERT(b == end);
+    TEST_EQ(end, b);
   }
 
 
   a.remove_at(500);
 
-  ASSERT(a.size == 999);
-  ASSERT(a.data[998] == (999 ^ 1000));
-  ASSERT(a.data[499] == (499 ^ 500));
-  ASSERT(a.data[500] == (501 ^ 502));
+  TEST_EQ(999, a.size);
+  TEST_EQ((999 ^ 1000), a.data[998]);
+  TEST_EQ((499 ^ 500), a.data[499]);
+  TEST_EQ((501 ^ 502), a.data[500]);
 
   a.insert_at(500, (500 ^ 501));
 
   for (usize i = 0; i < 1000; i++) {
-    ASSERT(a.data[i] == (i ^ (i + 1)));
+    TEST_EQ((i ^ (i + 1)), a.data[i]);
   }
 
   a.insert_at(0, 0);
-  ASSERT(a.data[0] == 0);
+  TEST_EQ(0, a.data[0]);
   a.remove_at(0);
   a.insert_at(1000, 0);
-  ASSERT(a.data[1000] == 0);
+  TEST_EQ(0, a.data[1000]);
   a.remove_at(1000);
 
   for (usize i = 0; i < 1000; i++) {
-    ASSERT(a.data[i] == (i ^ (i + 1)));
+    TEST_EQ((i ^ (i + 1)), a.data[i]);
   }
 
   for (usize i = 0; i < 1000; i++) {
     a.pop();
   }
 
-  ASSERT(a.size == 0);
+  TEST_EQ(0, a.size);
 }
 
 
@@ -74,22 +74,22 @@ TEST_FUNCTION(Util_Queue_Insert_Remove) {
     a.push_back(i ^ (i + 1));
   }
 
-  ASSERT(a.size == 100);
+  TEST_EQ(100, a.size);
 
   for (usize i = 0; i < 100; i++) {
-    ASSERT(a.pop_front() == (i ^ (i + 1)));
+    TEST_EQ((i ^ (i + 1)), a.pop_front());
   }
 
   for (usize i = 0; i < 100; i++) {
     a.push_front(i ^ (i + 1));
   }
 
-  ASSERT(a.size == 100);
+  TEST_EQ(100, a.size);
 
-  ASSERT(a.pop_back() == (0 ^ 1));
+  TEST_EQ((0 ^ 1), a.pop_back());
 
   for (usize i = 1; i < 100; i++) {
-    ASSERT(a.pop_back() == (i ^ (i + 1)));
+    TEST_EQ((i ^ (i + 1)), a.pop_back());
   }
 }
 
@@ -106,11 +106,11 @@ TEST_FUNCTION(sort) {
 
   sort_range(ints.mut_begin(), ints.mut_end(), [](int l, int r) { return l < r; });
 
-  ASSERT(ints.data[0] == 1);
-  ASSERT(ints.data[1] == 2);
-  ASSERT(ints.data[2] == 3);
-  ASSERT(ints.data[3] == 4);
-  ASSERT(ints.data[4] == 5);
-  ASSERT(ints.data[5] == 6);
-  ASSERT(ints.data[6] == 7);
+  TEST_EQ(1, ints.data[0]);
+  TEST_EQ(2, ints.data[1]);
+  TEST_EQ(3, ints.data[2]);
+  TEST_EQ(4, ints.data[3]);
+  TEST_EQ(5, ints.data[4]);
+  TEST_EQ(6, ints.data[5]);
+  TEST_EQ(7, ints.data[6]);
 }

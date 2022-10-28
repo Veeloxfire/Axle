@@ -44,41 +44,55 @@ constexpr inline _AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
   }
 }
 
+#define AST_TYPE_MOD \
+MOD(NAMED_TYPE) \
+MOD(ARRAY_TYPE) \
+MOD(PTR_TYPE) \
+MOD(LAMBDA_TYPE) \
+MOD(TUPLE_TYPE) \
+MOD(CAST) \
+MOD(UNARY_OPERATOR) \
+MOD(BINARY_OPERATOR) \
+MOD(IDENTIFIER_EXPR) \
+MOD(LOCAL_DECL) \
+MOD(GLOBAL_DECL) \
+MOD(NUMBER) \
+MOD(FUNCTION_CALL) \
+MOD(TUPLE_LIT) \
+MOD(ARRAY_EXPR) \
+MOD(ASCII_STRING) \
+MOD(ASCII_CHAR) \
+MOD(INDEX_EXPR) \
+MOD(MEMBER_ACCESS) \
+MOD(LAMBDA) \
+MOD(LAMBDA_EXPR) \
+MOD(STRUCT) \
+MOD(STRUCT_EXPR) \
+MOD(TYPED_NAME) \
+MOD(ASSIGN) \
+MOD(BLOCK) \
+MOD(IF_ELSE) \
+MOD(WHILE) \
+MOD(RETURN) \
+MOD(FUNCTION_SIGNATURE) \
+MOD(IMPORT) \
+MOD(STATIC_LINK)
+
 enum struct AST_TYPE : u8 {
   INVALID = 0,
-  NAMED_TYPE,
-  ARRAY_TYPE,
-  PTR_TYPE,
-  LAMBDA_TYPE,
-  TUPLE_TYPE,
-  CAST,
-  UNARY_OPERATOR,
-  BINARY_OPERATOR,
-  IDENTIFIER_EXPR,
-  LOCAL_DECL,
-  GLOBAL_DECL,
-  NUMBER,
-  FUNCTION_CALL,
-  TUPLE_LIT,
-  ARRAY_EXPR,
-  ASCII_STRING,
-  ASCII_CHAR,
-  INDEX_EXPR,
-  MEMBER_ACCESS,
-  LAMBDA,
-  LAMBDA_EXPR,
-  STRUCT,
-  STRUCT_EXPR,
-  TYPED_NAME,
-  ASSIGN,
-  BLOCK,
-  IF_ELSE,
-  WHILE,
-  RETURN,
-  FUNCTION_SIGNATURE,
-  IMPORT,
-  STATIC_LINK,
+#define MOD(n) n,
+  AST_TYPE_MOD
+#undef MOD
 };
+
+constexpr const char* ast_type_string(AST_TYPE ty) {
+  switch (ty) {
+#define MOD(n) case AST_TYPE:: ## n : return #n ;
+    AST_TYPE_MOD;
+#undef MOD
+    default: return "invalid-ast-type";
+  }
+}
 
 constexpr bool valid_type_node(AST_TYPE t) {
   switch (t) {

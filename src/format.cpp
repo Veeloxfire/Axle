@@ -186,6 +186,10 @@ void load_string(Array<char>& res, uint64_t u64) {
   load_unsigned(res, u64);
 }
 
+void load_string(Array<char>& res, long l) {
+  load_unsigned(res, l);
+}
+
 void load_string(Array<char>& res, int64_t i64) {
   if (i64 < 0) {
     res.insert('-');

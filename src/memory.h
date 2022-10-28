@@ -28,3 +28,42 @@ struct MemoryPool {
     return ast;
   }
 };
+
+template<usize BLOCK_SIZE> 
+struct GrowingMemoryPool {
+  struct Block {
+    Block* prev = nullptr;
+    usize top = 0;
+    u8 mem[BLOCK_SIZE];
+  };
+
+  Block* curr = nullptr;
+
+  u8* push_unaligned_bytes(usize size) {
+    ASSERT(size <= BLOCK_SIZE);
+
+    if (curr == nullptr || (curr->top + size > BLOCK_SIZE)) {
+      Block* old = curr;
+      curr = new Block();
+      curr->prev = old;
+    }
+
+    u8* ptr = curr->mem + curr->top;
+    curr->top += size;
+
+    return ptr;
+  }
+
+  GrowingMemoryPool() = default;
+  GrowingMemoryPool(const GrowingMemoryPool&) = delete;
+  GrowingMemoryPool(GrowingMemoryPool&&) = delete;
+  ~GrowingMemoryPool() {
+    while (curr != nullptr) {
+      Block* save = curr->prev;
+
+      delete curr;
+
+      curr = save;
+    }
+  }
+};

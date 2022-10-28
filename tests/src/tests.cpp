@@ -6,9 +6,17 @@ Array<UnitTest>& unit_tests_ref() {
   return t;
 }
 
-int main() {
+_TestAdder::_TestAdder(const char* test_name, TEST_FN fn) {
+  unit_tests_ref().insert({ test_name, fn });
+}
 
-  Array<const char*> failed_tests ={};
+struct FailedTest {
+  Errors errors;
+  const char* test_name;
+};
+
+int main() {
+  Array<FailedTest> failed_tests ={};
 
   for (const auto& t : unit_tests_ref()) {
 
@@ -16,15 +24,17 @@ int main() {
     IO::print(t.test_name);
     IO::print('\n');
 
+    Errors errors = {};
+
     try {
-      t.test_func();
+      t.test_func(&errors);
     }
     catch (std::exception& e) {
-      IO::err_print("Test failed with exception: \"");
-      IO::err_print(e.what());
-      IO::err_print("\"\n");
-
-      failed_tests.insert(t.test_name);
+      errors.report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test failed with exception: {}", e.what());
+    }
+    
+    if (errors.is_panic()) {
+      failed_tests.insert({ std::move(errors), t.test_name });
     }
   }
 
@@ -32,11 +42,12 @@ int main() {
     IO::print("\nAll tests succeeded!");
   }
   else {
-    IO::err_print("\nSome tests failed :(\n");
+    IO::err_print("\nSome tests failed!\n");
 
-    for (const char* t : failed_tests) {
-      IO::err_print(" - ");
-      IO::err_print(t);
+    for (const auto& t : failed_tests) {
+      IO::err_print("\n===========\n\n", t.test_name, "failed with errors : \n");
+
+      t.errors.print_all();
       IO::err_print('\n');
     }
   }

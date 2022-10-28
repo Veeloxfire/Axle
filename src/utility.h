@@ -154,18 +154,33 @@ constexpr bool can_be_from_sign_extension(uint64_t u64) {
   }
 }
 
-template<typename T>
-constexpr T bit_fill_upper(uint8_t bits) {
-  int64_t fill = ((uint64_t)1) << 63;
+template<typename T, typename B>
+constexpr T bit_fill_upper(B bits) {
+  const auto n_bits = static_cast<uint64_t>(bits) & 0b111111llu;
+  const auto has_bits = static_cast<uint64_t>(n_bits == 0);
+  const auto has_max_bits = static_cast<uint64_t>(n_bits > (sizeof(T) * 8llu));
+  //Negative signed integers fill their top bits when shifting down
+  // to preserve the negativity
 
-  fill >>= ((uint64_t)bits - (uint64_t)1 + (uint64_t)(bits == 0));
+  //Initially needs to just have the top bit filled
+  //Only needs to be filled if we actually have bits to fill
+  int64_t fill = static_cast<int64_t>(has_bits << 63);
 
-  return static_cast<T>(fill << (uint8_t)(bits == 0));
+  //Now the problem is that if n_bits = 0 then n_bits - 1 = -1
+  //Shifting by a negative is not allowed(?)
+  //To avoid this we shift too far and then shift back 1 (if there are bits)
+  //Now the problem is that if n_bits = MAX_SHIFT then we always leave the bottom
+  // bit unfilled
+  //To avoid this we only do the second re-shift if 
+
+  fill >>= (n_bits - 1llu + has_bits);
+
+  return static_cast<T>(static_cast<uint64_t>(fill) << (has_bits + has_max_bits));
 }
 
-template<typename T>
-constexpr T bit_fill_lower(uint8_t bits) {
-  return ~bit_fill_upper<T>(64 - bits);
+template<typename T, typename B>
+constexpr T bit_fill_lower(B bits) {
+  return ~bit_fill_upper<T, B>((64 - bits) & 0xff);
 }
 
 template<typename T, size_t i>
