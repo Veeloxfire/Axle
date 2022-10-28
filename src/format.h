@@ -101,7 +101,7 @@ Formatter& operator<<(Formatter& f, const T& t) {
 template<typename ... T>
 void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
   //Account for no formatting
-  format = ([]([[maybe_unused]]Array<char>& result, const char* format, const auto& ... ts) {
+  format = ([](Array<char>& result, const char* format, const auto& ... ts) {
     if constexpr (sizeof...(T) == 0) {
       return format;
     }

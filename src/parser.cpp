@@ -895,7 +895,7 @@ static const Token* step_scope(CompilerGlobals* const comp, CompilerThread* cons
 static const Token* step_brackets(CompilerGlobals* const comp, CompilerThread* const comp_thread, const Token* tok, const Token* end);
 static const Token* step_squares(CompilerGlobals* const comp, CompilerThread* const comp_thread, const Token* tok, const Token* end);
 
-static void mismatched_brackets_error(CompilerGlobals*, CompilerThread* const comp_thread, const Token* start, const Token* last, const char* message) {
+static void mismatched_brackets_error(CompilerGlobals* comp, CompilerThread* const comp_thread, const Token* start, const Token* last, const char* message) {
   Span span{};
   set_span_start(*start, span);
   set_span_end(*last, span);

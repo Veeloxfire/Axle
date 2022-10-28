@@ -2,13 +2,13 @@
 #include "calling_conventions.h"
 
 namespace ByteCode {
-  //static void print_bytecodeop(FILE* const stream, const uint8_t b) {
-  //  switch (b) {
-  //  #define X(NAME, statement) case NAME: fprintf(stream, #NAME); break;
-  //    BYTECODES_X
-  //    #undef X
-  //  }
-  //}
+  static void print_bytecodeop(FILE* const stream, const uint8_t b) {
+    switch (b) {
+    #define X(NAME, statement) case NAME: fprintf(stream, #NAME); break;
+      BYTECODES_X
+      #undef X
+    }
+  }
 
   void log_bytecode(REG_NAME reg_name_from_num, const uint8_t* bytecode, uint64_t size) {
     print_bytecode(reg_name_from_num, stdout, bytecode, size);

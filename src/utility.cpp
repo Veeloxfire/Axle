@@ -365,10 +365,12 @@ size_t SquareBitMatrix::new_value() {
     const size_t diff = bytes_per_val_next - bytes_per_val_now;
 
     while (block_i > block_end) {
-      for (size_t i = 0; i < diff; i++) {
+      size_t i = 0;
+      for (; i < diff; i++) {
         new_i[bytes_per_val_next - (i + 1)] = 0;
       }
 
+      i = 0;
       for (size_t i = 0; i < bytes_per_val_now; i++) {
         new_i[bytes_per_val_now - (i + 1)] = block_i[bytes_per_val_now - (i + 1)];
       }

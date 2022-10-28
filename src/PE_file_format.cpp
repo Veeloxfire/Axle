@@ -327,11 +327,11 @@ ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name)
     COFF_file_header coff ={};
 
     coff.machine = MACHINE_TYPE::AMD64;
-    coff.number_of_sections = (uint16_t)important_vals.num_sections;
+    coff.number_of_sections = important_vals.num_sections;
     coff.time_date_stamp = TIME;
     coff.pointer_to_symbol_table = 0;
     coff.number_of_symbols = 0;
-    coff.size_of_optional_header = (uint16_t)important_vals.size_of_optional_header;
+    coff.size_of_optional_header = important_vals.size_of_optional_header;
     coff.characteristics = COFF_Characteristics::EXECUTABLE_IMAGE | COFF_Characteristics::LARGE_ADDRESS_AWARE;
 
     FILES::write_obj(out, coff);

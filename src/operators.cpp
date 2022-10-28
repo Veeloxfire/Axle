@@ -32,7 +32,7 @@ static RuntimeValue load_to_const_op(CompilerGlobals* comp, State* state, CodeBl
   }
 };
 
-static void bin_op_impl(CompilerGlobals* const,
+static void bin_op_impl(CompilerGlobals* const comp,
                         State* const state,
                         CodeBlock* const code,
                         const RuntimeValue* left, const RuntimeValue* right,
@@ -48,7 +48,7 @@ static void bin_op_impl(CompilerGlobals* const,
   state->use_value(right->reg);
 }
 
-static void un_op_impl(CompilerGlobals* const,
+static void un_op_impl(CompilerGlobals* const comp,
                        State* const state,
                        CodeBlock* const code,
                        const RuntimeValue* val,
@@ -601,7 +601,7 @@ void compile_take_address(CompilerGlobals* comp,
 }
 
 //Overload for dereferencing
-void compile_deref(CompilerGlobals*,
+void compile_deref(CompilerGlobals* comp,
                    CompilerThread* comp_thread,
                    ASTUnaryOperatorExpr* expr) {
 
