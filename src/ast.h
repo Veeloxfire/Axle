@@ -87,7 +87,7 @@ enum struct AST_TYPE : u8 {
 
 constexpr const char* ast_type_string(AST_TYPE ty) {
   switch (ty) {
-#define MOD(n) case AST_TYPE:: ## n : return #n ;
+#define MOD(n) case AST_TYPE :: n : return #n ;
     AST_TYPE_MOD;
 #undef MOD
     default: return "invalid-ast-type";

@@ -47,7 +47,7 @@ void build_data_section_for_vm(Program* prog, CompilerGlobals* const comp) {
   Array<uint8_t> data = {};
 
   //Writes a string if its not alread written
-  const auto write_string = [&](Array<uint8_t>& bytes, const InternString* s) -> size_t {
+  [[maybe_unused]] const auto write_string = [&](Array<uint8_t>& bytes, const InternString* s) -> size_t {
     if (!loaded_strings.contains(s)) {
       //doesnt contain this string
       //have to write it to data
@@ -314,7 +314,7 @@ void compile_backend_single_func(CompilerGlobals* const comp, CompilerThread* co
 
   Array<Relocation> relocations = {};
 
-  size_t entry_point_label = 0;
+  [[maybe_unused]]size_t entry_point_label = 0;
 
   system->backend_translate(comp, comp_thread, prog, out_code, code, label_indexes, relocations);
   if (comp_thread->is_panic()) {
@@ -475,7 +475,7 @@ void vm_backend_code_block(CompilerGlobals* const comp,
 
 void compile_backend_to_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, const char* out_file_name, const System* system) {
 
-  size_t entry_point_label = 0;
+  [[maybe_unused]]size_t entry_point_label = 0;
 
   //Find the entry point first - allows us to say its called
   {
@@ -1504,7 +1504,7 @@ void x86_64_backend_code_block(CompilerGlobals* const comp,
           break;
         }
       case ByteCode::PUSH_FRAME: {
-          const auto p = ByteCode::PARSE::PUSH_FRAME(code_i);
+          //const auto p = ByteCode::PARSE::PUSH_FRAME(code_i);
 
           X64::push(out_code, RBP.REG);
           X64::mov(out_code, RSP.REG, RBP.REG);
@@ -1513,7 +1513,7 @@ void x86_64_backend_code_block(CompilerGlobals* const comp,
           break;
         }
       case ByteCode::POP_FRAME: {
-          const auto p = ByteCode::PARSE::POP_FRAME(code_i);
+          //const auto p = ByteCode::PARSE::POP_FRAME(code_i);
 
           X64::mov(out_code, RBP.REG, RSP.REG);
           X64::pop(out_code, RBP.REG);

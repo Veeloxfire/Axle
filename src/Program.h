@@ -2,7 +2,13 @@
 #include "safe_lib.h"
 #include "utility.h"
 
+struct System;
+struct CallingConvention;
+
 struct Program {
+  const System* sys = nullptr;
+  const CallingConvention* default_conv = nullptr;
+  
   OwnedPtr<uint8_t> imports = nullptr;
 
   OwnedPtr<uint8_t> data = nullptr;

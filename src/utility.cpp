@@ -423,46 +423,42 @@ uint8_t* BumpAllocator::allocate_no_construct(size_t bytes) {
 
 static SpinLockMutex io_mutex = {};
 
-void IO::print_impl(const char* string) {
-  TRACING_FUNCTION();
+void IO_Single::lock() {
   io_mutex.acquire();
+}
+
+void IO_Single::unlock() {
+  io_mutex.release();
+}
+
+void IO_Single::print_impl(const char* string) {
+  TRACING_FUNCTION();
   fputs(string, stdout);
-  io_mutex.release();
 }
 
-void IO::print_impl(const OwnedPtr<char>& string) {
+void IO_Single::print_impl(const OwnedPtr<char>& string) {
   TRACING_FUNCTION();
-  io_mutex.acquire();
   fputs(string.ptr, stdout);
-  io_mutex.release();
 }
 
-void IO::print_impl(const char c) {
+void IO_Single::print_impl(const char c) {
   TRACING_FUNCTION();
-  io_mutex.acquire();
   putc(c, stdout);
-  io_mutex.release();
 }
 
-void IO::err_print_impl(const char* string) {
+void IO_Single::err_print_impl(const char* string) {
   TRACING_FUNCTION();
-  io_mutex.acquire();
   fputs(string, stderr);
-  io_mutex.release();
 }
 
-void IO::err_print_impl(const OwnedPtr<char>& string) {
+void IO_Single::err_print_impl(const OwnedPtr<char>& string) {
   TRACING_FUNCTION();
-  io_mutex.acquire();
   fputs(string.ptr, stderr);
-  io_mutex.release();
 }
 
-void IO::err_print_impl(const char c)  {
+void IO_Single::err_print_impl(const char c)  {
   TRACING_FUNCTION();
-  io_mutex.acquire();
   putc(c, stderr);
-  io_mutex.release();
 }
 
 void serialize_zeros(Array<u8>& bytes, usize size, usize alignment) {

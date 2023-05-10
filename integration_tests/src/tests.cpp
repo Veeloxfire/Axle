@@ -4,6 +4,7 @@
 #include <chrono>
 
 #include "api.h"
+#include "Program.h"
 #include "utility.h"
 #include "type.h"
 
@@ -113,19 +114,19 @@ struct Test {
   uint64_t return_value;
 };
 
-#define TEST_DIR(t) "src/" t
+static constexpr char TEST_DIR[] = "src/";
 
 //Add tests here to make a new test
 static constexpr Test tests[] ={
-  Test{"Fibonnaci Recursive", TEST_DIR("fib_recurse.axl"), fib_recurse_main()},
-  Test{"Operators Unsigned", TEST_DIR("operators_unsigned.axl"), operations_unsigned_cpp()},
-  Test{"Operators Signed", TEST_DIR("operators_signed.axl"), operations_signed_cpp()},
-  Test{"Operators Comptime", TEST_DIR("operators_comptime.axl"), operations_optim()},
-  Test{"Arrays", TEST_DIR("arrays.axl"), arrays_main()},
-  Test{"Pointers", TEST_DIR("pointers.axl"), 3},
-  Test{"FNV1 Hash", TEST_DIR("fnv1_hash.axl"), fnv1_hash("hello", 5)},
-  Test{"Globals", TEST_DIR("globals.axl"), fib_recurse_main()},
-  Test{"Structs", TEST_DIR("structs.axl"), 3},
+  Test{"Fibonnaci Recursive", "fib_recurse.axl", fib_recurse_main()},
+  Test{"Operators Unsigned", "operators_unsigned.axl", operations_unsigned_cpp()},
+  Test{"Operators Signed", "operators_signed.axl", operations_signed_cpp()},
+  Test{"Operators Comptime", "operators_comptime.axl", operations_optim()},
+  Test{"Arrays", "arrays.axl", arrays_main()},
+  Test{"Pointers", "pointers.axl", 3},
+  Test{"FNV1 Hash", "fnv1_hash.axl", fnv1_hash("hello", 5)},
+  Test{"Globals", "globals.axl", fib_recurse_main()},
+  Test{"Structs", "structs.axl", 3},
 };
 
 static constexpr size_t num_tests = sizeof(tests)/sizeof(Test);
@@ -162,8 +163,7 @@ bool run_test(const APIOptions& opts, const uint64_t res) {
       }
       else {
         std::cout << "Program returned: " << out.program_return << ", Expected: " << res << '\n';
-        std::cout << "Printing Program:\n";
-        print_program(opts, prog);
+        debug_print_program(prog);
         std::cout << "\n\n";
         return false;
       }
@@ -215,21 +215,23 @@ bool run_all_tests_in_env_and_optimization(const Environment& env, const APIOpti
     options.build.system_name             = env.system_name;
     options.build.default_calling_convention = env.convention;
     options.build.entry_point        = "main";
+    options.build.current_directory  = TEST_DIR;
     options.build.file_name          = test.file_name;
     options.build.std_lib_folder     = ".\\stdlib";
     options.build.lib_folder         = ".\\lib";
 
-
-
-    //options.print.ast             = true;
-    //options.print.fully_compiled  = true;
-    //options.print.comptime_exec   = true;
-    //options.print.comptime_res    = true;
-    //options.print.pre_reg_alloc   = true;
-    //options.print.coalesce_values = true;
-    //options.print.file_loads      = true;
-    //options.print.comp_units      = true;
-    //options.print.unfound_dep     = true;
+    //options.print.ast              = true;
+    //options.print.pre_reg_alloc    = true;
+    //options.print.comptime_res     = true;
+    //options.print.comptime_exec    = true;
+    //options.print.normal_bytecode  = true;
+    //options.print.fully_compiled   = true;
+    //options.print.coalesce_values  = true;
+    //options.print.intersections    = true;
+    //options.print.reg_mapping      = true;
+    //options.print.run_headers      = true;
+    //options.print.file_loads       = true;
+    //options.print.comp_units       = true;
 
     std::cout << "\nStarting Test: " << test.test_name << "\n";
 

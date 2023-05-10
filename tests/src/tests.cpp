@@ -22,7 +22,6 @@ int main() {
 
     IO::print("Starting test: ");
     IO::print(t.test_name);
-    IO::print('\n');
 
     Errors errors = {};
 
@@ -34,7 +33,11 @@ int main() {
     }
     
     if (errors.is_panic()) {
+      IO::print("\t - failed\n");
       failed_tests.insert({ std::move(errors), t.test_name });
+    }
+    else {
+      IO::print("\t - passed\n");
     }
   }
 
@@ -45,7 +48,7 @@ int main() {
     IO::err_print("\nSome tests failed!\n");
 
     for (const auto& t : failed_tests) {
-      IO::err_print("\n===========\n\n", t.test_name, "failed with errors : \n");
+      IO::err_print("\n===========\n\n", t.test_name, " failed with errors : \n");
 
       t.errors.print_all();
       IO::err_print('\n');

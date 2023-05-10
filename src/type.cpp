@@ -418,13 +418,13 @@ static bool can_implicit_cast(const Type& from, const Type& to) {
 
         return true;
       }
-  }
 
-  return false;
+    default: return false;
+  }
 }
 
 //Can cast without any value modification or checks
-static bool can_literal_cast(const Type& from, const Type& to) {
+[[maybe_unused]]static bool can_literal_cast(const Type& from, const Type& to) {
   if (can_implicit_cast(from, to)) {
     return true;
   }
@@ -495,10 +495,14 @@ static bool can_literal_cast(const Type& from, const Type& to) {
 
               break;
             }
+
+          default: break;
         }
 
         return true;
       }
+
+    default: break;
   }
 
   return false;

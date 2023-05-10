@@ -65,7 +65,7 @@ struct Register {
 struct Function;
 
 struct VM {
-  Errors* errors;
+  Errors* errors = nullptr;
 
   constexpr static size_t STACK_SIZE = 256 * 8;
   uint8_t stack[STACK_SIZE] ={};

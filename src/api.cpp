@@ -56,6 +56,23 @@ void print_globals(CompilerGlobals* comp) {
   }
 }
 
+void debug_print_program(const Program& prog) {
+  if (prog.sys == &system_x86_64) {
+    IO::print("-- X86_64 program --\n");
+    print_x86_64(prog.code.ptr, prog.code_size);
+    IO::print("--------------\n");
+  }
+  else if (prog.sys == &system_vm) {
+    IO::print("-- VM program --\n");
+    ByteCode::print_bytecode(prog.sys->reg_name_from_num, stdout, prog.code.ptr, prog.code_size);
+    IO::print("--------------\n");
+  }
+  else {
+    IO::print("Error invalid system to print");
+    return;
+  }
+}
+
 RunOutput run_in_vm(Program* prog) {
   Errors errors ={};
   VM vm ={};
@@ -130,6 +147,9 @@ int compile_file(const APIOptions& options,
     compiler_thread.errors.print_all();
     return -1;
   }
+
+  out_program->sys = compiler.build_options.endpoint_system;
+  out_program->default_conv = compiler.build_options.default_calling_convention;
 
   {
     FileLocation loc = parse_file_location(file_loader.cwd.full_name->string, compiler.build_options.file_name->string, compiler.services.strings.get()._ptr);

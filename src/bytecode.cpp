@@ -2,13 +2,13 @@
 #include "calling_conventions.h"
 
 namespace ByteCode {
-  static void print_bytecodeop(FILE* const stream, const uint8_t b) {
+  /*static void print_bytecodeop(FILE* const stream, const uint8_t b) {
     switch (b) {
     #define X(NAME, statement) case NAME: fprintf(stream, #NAME); break;
       BYTECODES_X
       #undef X
     }
-  }
+  }*/
 
   void log_bytecode(REG_NAME reg_name_from_num, const uint8_t* bytecode, uint64_t size) {
     print_bytecode(reg_name_from_num, stdout, bytecode, size);
@@ -21,7 +21,7 @@ namespace ByteCode {
   static void print_mem_complex(REG_NAME reg_name_from_num, const MemComplex& mem) {
     const char* reg_name = reg_name_from_num(mem.base);
     char c = mem.disp > 0 ? '+' : '-';
-    printf("[$%s %c 0x%lx", reg_name, c, absolute(mem.disp));
+    printf("[$%s %c 0x%x", reg_name, c, absolute(mem.disp));
 
     if (mem.scale > 0) {
       reg_name = reg_name_from_num(mem.index);
@@ -41,7 +41,7 @@ namespace ByteCode {
                     print_mem_complex(reg_name_from_num, p.mem);\
                     printf("\n")
 
-  #define OP_32_MEM printf(": 0x%lx ", p.u32);\
+  #define OP_32_MEM printf(": 0x%x ", p.u32);\
                     print_mem_complex(reg_name_from_num, p.mem);\
                     printf("\n")
 
@@ -57,7 +57,7 @@ namespace ByteCode {
                        printf(": $%s 0x%llx\n", reg_name, p.u64.val)
 
   #define OP_R_32 const char* const reg_name = reg_name_from_num(p.val);\
-                       printf(": $%s 0x%lx\n", reg_name, p.u32)
+                       printf(": $%s 0x%x\n", reg_name, p.u32)
 
   #define OP_R_16 const char* const reg_name = reg_name_from_num(p.val);\
                        printf(": $%s 0x%hx\n", reg_name, p.u16)
@@ -90,10 +90,10 @@ namespace ByteCode {
 
 
   #define X(name, structure) case name: {\
-      auto p = ByteCode::PARSE:: ## name ## (bytecode + i);\
+      auto p = ByteCode::PARSE :: name (bytecode + i);\
       printf("0x%-4llx: %s", i, bytecode_string((ByteCodeOp)p.op));\
       structure;\
-      i += ByteCode::SIZE_OF:: ## name;\
+      i += ByteCode::SIZE_OF :: name;\
       break;\
     }
 

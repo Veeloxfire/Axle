@@ -10,7 +10,7 @@
 
 TokenTypeString token_type_string(AxleTokenType t) {
   switch (t) {
-#define MODIFY(tt, str) case AxleTokenType:: ## tt : return { #tt, sizeof(#tt) };
+#define MODIFY(tt, str) case AxleTokenType :: tt : return { #tt, sizeof(#tt) };
     AXLE_TOKEN_MODIFY
 #undef MODIFY
   }
@@ -19,7 +19,7 @@ TokenTypeString token_type_string(AxleTokenType t) {
 }
 
 constexpr KeywordPair keywords[] = {
-#define MODIFY(n, str) {str, AxleTokenType:: ## n},
+#define MODIFY(n, str) {str, AxleTokenType :: n},
   AXLE_TOKEN_KEYWORDS
 #undef MODIFY
 };
@@ -27,7 +27,7 @@ constexpr KeywordPair keywords[] = {
 constexpr size_t num_keywords = sizeof(keywords) / sizeof(KeywordPair);
 
 constexpr KeywordPair operators[] = {
-#define MODIFY(n, str) {str, AxleTokenType:: ## n},
+#define MODIFY(n, str) {str, AxleTokenType :: n},
   AXLE_TOKEN_OPERATORS
   AXLE_TOKEN_STRUCTURAL
 #undef MODIFY
@@ -49,14 +49,14 @@ constexpr static bool is_dec_number(const char c) {
 }
 
 constexpr static bool is_hex_number(const char c) {
-  return is_dec_number(c) || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F';
+  return is_dec_number(c) || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F');
 }
 
 constexpr static bool is_any_digit(const char c) {
   return is_hex_number(c);
 }
 
-constexpr static  bool is_letter_or_number(const char c) {
+[[maybe_unused]]constexpr static  bool is_letter_or_number(const char c) {
   return is_letter(c)
     || is_any_digit(c);
 }
@@ -147,7 +147,7 @@ static u64 string_to_uint(const char* str) {
   return parse_dec_uint(str, len);
 }
 
-constexpr static Token make_token(Lexer* const lex, const AxleTokenType type, const InternString* string) {
+[[maybe_unused]]constexpr static Token make_token(Lexer* const lex, const AxleTokenType type, const InternString* string) {
   Token tok;
 
   tok.type = type;
@@ -780,6 +780,8 @@ static BINARY_OPERATOR parse_binary_operator(CompilerGlobals* const comp, Compil
     case AxleTokenType::Or: advance(comp, comp_thread, parser); return BINARY_OPERATOR::OR;
     case AxleTokenType::Xor: advance(comp, comp_thread, parser); return BINARY_OPERATOR::XOR;
     case AxleTokenType::And: advance(comp, comp_thread, parser); return BINARY_OPERATOR::AND;
+
+    default: break;
   }
 
   comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
@@ -2503,82 +2505,83 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
 }
 
 void Printer::newline() const {
-  IO::print('\n');
+  IO_Single::print('\n');
 
   for (size_t i = 0; i < tabs; i++) {
-    IO::print("  ");
+    IO_Single::print("  ");
   }
 }
 
 static void print_ast(Printer* const printer, AST_LOCAL a) {
   switch (a->ast_type) {
+    case AST_TYPE::INVALID: INVALID_CODE_PATH(); break;
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
-        IO::print(nt->name->string);
+        IO_Single::print(nt->name->string);
         return;
       }
     case AST_TYPE::ARRAY_TYPE: {
         ASTArrayType* at = (ASTArrayType*)a;
-        IO::print('[');
+        IO_Single::print('[');
         print_ast(printer, at->base);
-        IO::print("; ");
+        IO_Single::print("; ");
         print_ast(printer, at->expr);
-        IO::print(']');
+        IO_Single::print(']');
         return;
       }
     case AST_TYPE::PTR_TYPE: {
         ASTPtrType* pt = (ASTPtrType*)a;
-        IO::print('*');
+        IO_Single::print('*');
         print_ast(printer, pt->base);
         return;
       }
     case AST_TYPE::LAMBDA_TYPE: {
         ASTLambdaType* lt = (ASTLambdaType*)a;
-        IO::print('(');
+        IO_Single::print('(');
         AST_LINKED* linked = lt->args.start;
 
         if (linked) {
           print_ast(printer, linked->curr);
           linked = linked->next;
           while (linked) {
-            IO::print(", ");
+            IO_Single::print(", ");
             print_ast(printer, linked->curr);
             linked = linked->next;
           }
         }
-        IO::print(") -> ");
+        IO_Single::print(") -> ");
         print_ast(printer, lt->ret);
         return;
       }
     case AST_TYPE::TUPLE_TYPE: {
         ASTTupleType* tt = (ASTTupleType*)a;
-        IO::print('(');
+        IO_Single::print('(');
         AST_LINKED* linked = tt->types.start;
 
         if (linked) {
           print_ast(printer, linked->curr);
           linked = linked->next;
           while (linked) {
-            IO::print(", ");
+            IO_Single::print(", ");
             print_ast(printer, linked->curr);
             linked = linked->next;
           }
         }
-        IO::print(')');
+        IO_Single::print(')');
         return;
       }
     case AST_TYPE::CAST: {
         ASTCastExpr* cast = (ASTCastExpr*)a;
-        IO::print("cast(");
+        IO_Single::print("cast(");
         print_ast(printer, cast->type);
-        IO::print(", ");
+        IO_Single::print(", ");
         print_ast(printer, cast->expr);
-        IO::print(')');
+        IO_Single::print(')');
         return;
       }
     case AST_TYPE::UNARY_OPERATOR: {
         ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)a;
-        IO::print(UNARY_OP_STRING::get(un_op->op));
+        IO_Single::print(UNARY_OP_STRING::get(un_op->op));
         print_ast(printer, un_op->expr);
         return;
       }
@@ -2586,27 +2589,27 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         ASTBinaryOperatorExpr* bin_op = (ASTBinaryOperatorExpr*)a;
 
         print_ast(printer, bin_op->left);
-        IO::print(' ', BINARY_OP_STRING::get(bin_op->op), ' ');
+        IO_Single::print(' ', BINARY_OP_STRING::get(bin_op->op), ' ');
         print_ast(printer, bin_op->right);
         return;
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* i = (ASTIdentifier*)a;
-        IO::print(i->name->string);
+        IO_Single::print(i->name->string);
         return;
       }
     case AST_TYPE::NUMBER: {
         ASTNumber* n = (ASTNumber*)a;
         printf("%llu", n->num_value);
         if (n->suffix != nullptr) {
-          IO::print(n->suffix->string);
+          IO_Single::print(n->suffix->string);
         }
         return;
       }
     case AST_TYPE::FUNCTION_CALL: {
         ASTFunctionCallExpr* c = (ASTFunctionCallExpr*)a;
 
-        IO::print(c->function_name->string, '(');
+        IO_Single::print(c->function_name->string, '(');
 
         AST_LINKED* l = c->arguments.start;
 
@@ -2615,19 +2618,19 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
           l = l->next;
 
           while (l) {
-            IO::print(", ");
+            IO_Single::print(", ");
             print_ast(printer, l->curr);
             l = l->next;
           }
         }
 
-        IO::print(')');
+        IO_Single::print(')');
         return;
       }
     case AST_TYPE::TUPLE_LIT: {
         ASTTupleLitExpr* t = (ASTTupleLitExpr*)a;
 
-        IO::print("{ ");
+        IO_Single::print("{ ");
 
         AST_LINKED* l = t->elements.start;
 
@@ -2636,19 +2639,19 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
           l = l->next;
 
           while (l) {
-            IO::print(", ");
+            IO_Single::print(", ");
             print_ast(printer, l->curr);
             l = l->next;
           }
         }
 
-        IO::print(" }");
+        IO_Single::print(" }");
         return;
       }
     case AST_TYPE::ARRAY_EXPR: {
         ASTArrayExpr* ae = (ASTArrayExpr*)a;
 
-        IO::print("[ ");
+        IO_Single::print("[ ");
 
         AST_LINKED* l = ae->elements.start;
 
@@ -2657,37 +2660,37 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
           l = l->next;
 
           while (l) {
-            IO::print(", ");
+            IO_Single::print(", ");
             print_ast(printer, l->curr);
             l = l->next;
           }
         }
 
-        IO::print(" ]");
+        IO_Single::print(" ]");
         return;
       }
     case AST_TYPE::ASCII_STRING: {
         ASTAsciiString* as = (ASTAsciiString*)a;
-        IO::print('"', as->string->string, '"');
+        IO_Single::print('"', as->string->string, '"');
         return;
       }
     case AST_TYPE::ASCII_CHAR: {
         ASTAsciiChar* ac = (ASTAsciiChar*)a;
-        IO::print('"', ac->character, '"');
+        IO_Single::print('"', ac->character, '"');
         return;
       }
     case AST_TYPE::INDEX_EXPR: {
         ASTIndexExpr* ie = (ASTIndexExpr*)a;
         print_ast(printer, ie->expr);
-        IO::print('[');
+        IO_Single::print('[');
         print_ast(printer, ie->index);
-        IO::print(']');
+        IO_Single::print(']');
         return;
       }
     case AST_TYPE::MEMBER_ACCESS: {
         ASTMemberAccessExpr* ma = (ASTMemberAccessExpr*)a;
         print_ast(printer, ma->expr);
-        IO::print('.', ma->name->string);
+        IO_Single::print('.', ma->name->string);
         return;
       }
     case AST_TYPE::LAMBDA_EXPR: {
@@ -2708,46 +2711,46 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
       }
     case AST_TYPE::STRUCT: {
         ASTStructBody* s = (ASTStructBody*)a;
-        IO::print("struct {");
+        IO_Single::print("struct {");
         printer->tabs += 1;
         printer->newline();
 
         AST_LINKED* l = s->elements.start;
         if (l) {
           print_ast(printer, l->curr);
-          IO::print(';');
+          IO_Single::print(';');
           l = l->next;
 
           while (l) {
             printer->newline();
             print_ast(printer, l->curr);
-            IO::print(';');
+            IO_Single::print(';');
             l = l->next;
           }
         }
         printer->tabs -= 1;
         printer->newline();
-        IO::print('}');
+        IO_Single::print('}');
         return;
       }
     case AST_TYPE::LOCAL_DECL: {
         ASTLocalDecl* d = (ASTLocalDecl*)a;
         
         if (d->type_ast == 0) {
-          IO::print(d->name->string, " :");
+          IO_Single::print(d->name->string, " :");
           
         }
         else {
-          IO::print(d->name->string, ": ");
+          IO_Single::print(d->name->string, ": ");
           print_ast(printer, d->type_ast);
-          IO::print(" ");
+          IO_Single::print(" ");
         }
 
         if (d->compile_time_const) {
-          IO::print(": ");
+          IO_Single::print(": ");
         }
         else {
-          IO::print("= ");
+          IO_Single::print("= ");
         }
 
         print_ast(printer, d->expr);
@@ -2757,20 +2760,20 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         ASTGlobalDecl* d = (ASTGlobalDecl*)a;
 
         if (d->type_ast == 0) {
-          IO::print(d->name->string, " :");
+          IO_Single::print(d->name->string, " :");
 
         }
         else {
-          IO::print(d->name->string, ": ");
+          IO_Single::print(d->name->string, ": ");
           print_ast(printer, d->type_ast);
-          IO::print(" ");
+          IO_Single::print(" ");
         }
 
         if (d->compile_time_const) {
-          IO::print(": ");
+          IO_Single::print(": ");
         }
         else {
-          IO::print("= ");
+          IO_Single::print("= ");
         }
 
         print_ast(printer, d->expr);
@@ -2779,7 +2782,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::TYPED_NAME: {
         ASTTypedName* d = (ASTTypedName*)a;
 
-        IO::print(d->name->string, ": ");
+        IO_Single::print(d->name->string, ": ");
         print_ast(printer, d->type);
         return;
       }
@@ -2787,14 +2790,14 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         ASTAssign* as = (ASTAssign*)a;
 
         print_ast(printer, as->assign_to);
-        IO::print(" = ");
+        IO_Single::print(" = ");
         print_ast(printer, as->value);
         return;
       }
     case AST_TYPE::BLOCK: {
         ASTBlock* b = (ASTBlock*)a;
 
-        IO::print('{');
+        IO_Single::print('{');
         printer->tabs += 1;
         printer->newline();
 
@@ -2802,33 +2805,33 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
 
         if (l) {
           print_ast(printer, l->curr);
-          IO::print(';');
+          IO_Single::print(';');
           l = l->next;
 
 
           while (l) {
             printer->newline();
             print_ast(printer, l->curr);
-            IO::print(';');
+            IO_Single::print(';');
             l = l->next;
           }
         }
 
         printer->tabs -= 1;
         printer->newline();
-        IO::print('}');
+        IO_Single::print('}');
         return;
       }
     case AST_TYPE::IF_ELSE: {
         ASTIfElse* ie = (ASTIfElse*)a;
 
-        IO::print("if (");
+        IO_Single::print("if (");
         print_ast(printer, ie->condition);
-        IO::print(") ");
+        IO_Single::print(") ");
         print_ast(printer, ie->if_statement);
 
         if (ie->else_statement != 0) {
-          IO::print("else ");
+          IO_Single::print("else ");
           print_ast(printer, ie->else_statement);
         }
 
@@ -2837,51 +2840,51 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::WHILE: {
         ASTWhile* w = (ASTWhile*)a;
 
-        IO::print("while (");
+        IO_Single::print("while (");
         print_ast(printer, w->condition);
-        IO::print(") ");
+        IO_Single::print(") ");
         print_ast(printer, w->statement);
         return;
       }
     case AST_TYPE::RETURN: {
         ASTReturn* r = (ASTReturn*)a;
 
-        IO::print("return ");
+        IO_Single::print("return ");
         print_ast(printer, r->expr);
         return;
       }
     case AST_TYPE::FUNCTION_SIGNATURE: {
         ASTFuncSig* s = (ASTFuncSig*)a;
-        IO::print('(');
+        IO_Single::print('(');
         AST_LINKED* linked = s->parameters.start;
 
         if (linked) {
           print_ast(printer, linked->curr);
           linked = linked->next;
           while (linked) {
-            IO::print(", ");
+            IO_Single::print(", ");
             print_ast(printer, linked->curr);
             linked = linked->next;
           }
         }
-        IO::print(") -> ");
+        IO_Single::print(") -> ");
         print_ast(printer, s->return_type);
         return;
       }
     case AST_TYPE::IMPORT: {
         ASTImport* i = (ASTImport*)a;
 
-        IO::print("#import ");
+        IO_Single::print("#import ");
         print_ast(printer, i->expr_location);
         return;
       }
     case AST_TYPE::STATIC_LINK: {
         ASTStaticLink* imp = (ASTStaticLink*)a;
 
-        IO::print("#lib_import(");
+        IO_Single::print("#lib_import(");
         print_ast(printer, imp->import_type);
 
-        IO::print(", ", imp->lib_file->string, ", ", imp->name->string, ")");
+        IO_Single::print(", ", imp->lib_file->string, ", ", imp->name->string, ")");
         return;
       }
   }
@@ -2904,7 +2907,7 @@ void print_full_ast(const FileAST* file) {
   if (l) {
     print_ast(&printer, l->curr);
     if (l->curr->ast_type != AST_TYPE::LAMBDA) {
-      IO::print(';');
+      IO_Single::print(';');
     }
 
     l = l->next;
@@ -2914,7 +2917,7 @@ void print_full_ast(const FileAST* file) {
       printer.newline();
       print_ast(&printer, l->curr);
       if (l->curr->ast_type != AST_TYPE::LAMBDA) {
-        IO::print(';');
+        IO_Single::print(';');
       }
 
       l = l->next;

@@ -616,7 +616,7 @@ void vm_rum(VM* const vm, Program* prog) noexcept {
           break;
         }
       case ByteCode::RETURN: {
-          const auto i = ByteCode::PARSE::RETURN(vm->IP);
+          //const auto i = ByteCode::PARSE::RETURN(vm->IP);
 
           vm->IP = vm->pop();
           if (vm->errors->panic || vm->IP == nullptr) {

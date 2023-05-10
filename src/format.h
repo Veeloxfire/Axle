@@ -158,4 +158,14 @@ void format_print(const char* format, const T& ... ts) {
   IO::print(result.data);
 }
 
+template<typename ... T>
+void format_print_ST(const char* format, const T& ... ts) {
+  Array<char> result = {};
+
+  format_to_array(result, format, ts...);
+  result.insert('\0');
+
+  IO_Single::print(result.data);
+}
+
 OwnedPtr<char> format_type_set(const char* format, size_t prepend_spaces, size_t max_width);

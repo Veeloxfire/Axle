@@ -730,25 +730,25 @@ namespace ByteCode {
       ByteCode::OP_MEM::emit(arr, op, mem);
     }
 
-  #define X(name, structure) constexpr auto name = structure<ByteCode:: ## name>;
+  #define X(name, structure) constexpr auto name = structure<ByteCode :: name >;
     BYTECODES_X
     #undef X
   }
 
   namespace PARSE {
-  #define X(name, structure) inline constexpr auto name = structure ## ::parse; 
+  #define X(name, structure) inline constexpr auto name = structure :: parse; 
     BYTECODES_X
     #undef X
   }
 
   namespace SIZE_OF {
-  #define X(name, structure) inline constexpr auto name = structure ## ::INSTRUCTION_SIZE; 
+  #define X(name, structure) inline constexpr auto name = structure :: INSTRUCTION_SIZE; 
     BYTECODES_X
     #undef X
   }
 
   constexpr size_t instruction_size(uint8_t op) {
-  #define X(name, s) case name: return SIZE_OF:: ## name;
+  #define X(name, s) case name: return SIZE_OF :: name;
     switch ((ByteCodeOp)op) {
       BYTECODES_X
     }
@@ -833,7 +833,7 @@ namespace ByteCode {
       ByteCode::OP_R_MEM::write(arr, op, val, mem);
     }
 
-  #define X(name, structure) constexpr auto name = structure<ByteCode:: ## name>;
+  #define X(name, structure) constexpr auto name = structure<ByteCode :: name >;
     BYTECODES_X
     #undef X
   }

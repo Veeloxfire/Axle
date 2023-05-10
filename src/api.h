@@ -1,6 +1,7 @@
 #pragma once
 #include "safe_lib.h"
-#include "Program.h"
+
+struct Program;
 
 struct APIOptimizationOptions {
   bool non_stack_locals = false;
@@ -49,9 +50,10 @@ struct RunOutput {
 RunOutput run_as_machine_code(Program* prog);
 RunOutput run_in_vm(Program* prog);
 
-
 RunOutput compile_file_and_run(const APIOptions& options);
 int compile_file_and_write(const APIOptions& options);
 
 int compile_file(const APIOptions& options, Program* out_program);
 RunOutput run_program(const APIOptions& options, Program* prog);
+
+void debug_print_program(const Program& prog);

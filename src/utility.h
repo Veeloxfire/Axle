@@ -330,7 +330,7 @@ constexpr T ceil_to_8(T val) {
 }
 
 constexpr inline uint8_t absolute(int8_t i) {
-  if (i == INT32_MIN) {
+  if (i == INT8_MIN) {
     return static_cast<uint16_t>(INT8_MAX) + 1u;
   }
   else if (i < 0) {
@@ -342,7 +342,7 @@ constexpr inline uint8_t absolute(int8_t i) {
 }
 
 constexpr inline uint16_t absolute(int16_t i) {
-  if (i == INT32_MIN) {
+  if (i == INT16_MIN) {
     return static_cast<uint16_t>(INT16_MAX) + 1u;
   }
   else if (i < 0) {
@@ -592,7 +592,7 @@ struct Array {
   }
 
   //TODO: rename intert_default
-  void insert_uninit(const size_t num) noexcept {
+  void insert_uninit(const size_t num = 1) noexcept {
     if (num > 0) {
       reserve_extra(num);
 
@@ -1702,7 +1702,7 @@ namespace ErrorCodeString {
 
 constexpr const char* error_code_string(const ErrorCode code) {
   switch (code) {
-  #define modify(NAME) case ErrorCode:: ## NAME : return ErrorCodeString:: ## NAME ;
+  #define modify(NAME) case ErrorCode :: NAME : return ErrorCodeString :: NAME ;
     ERROR_CODES_X
     #undef modify
   }
@@ -1948,7 +1948,7 @@ EXECUTE_AT_END(T&& t)->EXECUTE_AT_END<T>;
 
 #define DEFER(...) EXECUTE_AT_END JOIN(defer, __LINE__) = [__VA_ARGS__]() mutable ->void 
 
-namespace IO {
+namespace IO_Single {
   void print_impl(const char* string);
   void print_impl(const OwnedPtr<char>& string);
   void print_impl(const char c);
@@ -1965,6 +1965,25 @@ namespace IO {
   template<typename ... T>
   void err_print(const T& ... t) {
     (err_print_impl(t), ...);
+  }
+
+  void lock();
+  void unlock();
+}
+
+namespace IO {
+  template<typename ... T>
+  void print(const T& ... t) {
+    IO_Single::lock();
+    IO_Single::print(t...);
+    IO_Single::unlock();
+  }
+
+  template<typename ... T>
+  void err_print(const T& ... t) {
+    IO_Single::lock();
+    IO_Single::err_print(t...);
+    IO_Single::unlock();
   }
 }
 

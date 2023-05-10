@@ -106,7 +106,6 @@ void set_dependency(CompilerThread* const comp_thread, Context* const context, U
 
   comp_thread->new_depends.insert(id);
 
-  CompilationUnit* current = context->current_unit;
 }
 
 void set_external_dependency(CompilationUnit* now_waiting) {
@@ -599,14 +598,21 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
   ASSERT(a != nullptr);
 
   switch (a->ast_type) {
+    case AST_TYPE::INVALID: INVALID_CODE_PATH(); break;
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
+
+        nt->meta_flags |= META_FLAG::CONST;
+        nt->meta_flags |= META_FLAG::COMPTIME;
+
 
         test_global_dependency(comp, comp_thread, state, nt->node_span, nt->name);
         return;
       }
     case AST_TYPE::ARRAY_TYPE: {
         ASTArrayType* at = (ASTArrayType*)a;
+        at->meta_flags |= META_FLAG::CONST;
+        at->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, at->base);
 
@@ -622,6 +628,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::PTR_TYPE: {
         ASTPtrType* ptr = (ASTPtrType*)a;
+        ptr->meta_flags |= META_FLAG::CONST;
+        ptr->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, ptr->base);
 
@@ -629,6 +637,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::LAMBDA_TYPE: {
         ASTLambdaType* lt = (ASTLambdaType*)a;
+        lt->meta_flags |= META_FLAG::CONST;
+        lt->meta_flags |= META_FLAG::COMPTIME;
 
         FOR_AST(lt->args, ty) {
           dependency_check_ast_node(comp, comp_thread, state, ty);
@@ -640,6 +650,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::TUPLE_TYPE: {
         ASTTupleType* tt = (ASTTupleType*)a;
+        tt->meta_flags |= META_FLAG::CONST;
+        tt->meta_flags |= META_FLAG::COMPTIME;
 
         FOR_AST(tt->types, ty) {
           dependency_check_ast_node(comp, comp_thread, state, ty);
@@ -649,6 +661,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::CAST: {
         ASTCastExpr* cast = (ASTCastExpr*)a;
+        cast->meta_flags |= META_FLAG::CONST;
+        cast->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, cast->type);
         dependency_check_ast_node(comp, comp_thread, state, cast->expr);
@@ -656,12 +670,16 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::UNARY_OPERATOR: {
         ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)a;
+        un_op->meta_flags |= META_FLAG::CONST;
+        un_op->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, un_op->expr);
         return;
       }
     case AST_TYPE::BINARY_OPERATOR: {
         ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)a;
+        bin_op->meta_flags |= META_FLAG::CONST;
+        bin_op->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, bin_op->left);
         dependency_check_ast_node(comp, comp_thread, state, bin_op->right);
@@ -669,6 +687,10 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* ident = (ASTIdentifier*)a;
+        ident->meta_flags |= META_FLAG::CONST;
+        //ident->meta_flags |= META_FLAG::COMPTIME; TODO: get this working
+        ident->meta_flags |= META_FLAG::ASSIGNABLE;
+
         const InternString* name = ident->name;
 
         {
@@ -717,6 +739,10 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::FUNCTION_CALL: {
         ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)a;
 
+        call->meta_flags |= META_FLAG::CONST;
+        //call->meta_flags |= META_FLAG::COMPTIME; TODO: get this working
+        
+
         //TODO: Local functions
         test_global_dependency(comp, comp_thread, state, call->node_span, call->function_name);
 
@@ -729,6 +755,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::TUPLE_LIT: {
         ASTTupleLitExpr* tup = (ASTTupleLitExpr*)a;
 
+        tup->meta_flags |= META_FLAG::CONST;
+        tup->meta_flags |= META_FLAG::COMPTIME;
+
         if (tup->name != nullptr) {
           test_global_dependency(comp, comp_thread, state, tup->node_span, tup->name);
         }
@@ -740,6 +769,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::ARRAY_EXPR: {
         ASTArrayExpr* arr = (ASTArrayExpr*)a;
+        arr->meta_flags |= META_FLAG::CONST;
+        arr->meta_flags |= META_FLAG::COMPTIME;
+
         FOR_AST(arr->elements, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
         }
@@ -748,6 +780,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
 
     case AST_TYPE::INDEX_EXPR: {
         ASTIndexExpr* index = (ASTIndexExpr*)a;
+        index->meta_flags |= META_FLAG::CONST;
+        index->meta_flags |= META_FLAG::COMPTIME;
+        index->meta_flags |= META_FLAG::ASSIGNABLE;
 
         dependency_check_ast_node(comp, comp_thread, state, index->expr);
         dependency_check_ast_node(comp, comp_thread, state, index->index);
@@ -755,12 +790,18 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::MEMBER_ACCESS: {
         ASTMemberAccessExpr* member = (ASTMemberAccessExpr*)a;
+        member->meta_flags |= META_FLAG::CONST;
+        member->meta_flags |= META_FLAG::COMPTIME;
+        member->meta_flags |= META_FLAG::ASSIGNABLE;
 
         dependency_check_ast_node(comp, comp_thread, state, member->expr);
         return;
       }
     case AST_TYPE::LAMBDA_EXPR: {
         ASTLambdaExpr* le = (ASTLambdaExpr*)a;
+        le->meta_flags |= META_FLAG::CONST;
+        le->meta_flags |= META_FLAG::COMPTIME;
+
         ASTLambda* lambda = (ASTLambda*)le->lambda;
         ASTFuncSig* sig = (ASTFuncSig*)lambda->sig;
 
@@ -772,6 +813,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::STRUCT_EXPR: {
         ASTStructExpr* se = (ASTStructExpr*)a;
+        se->meta_flags |= META_FLAG::CONST;
+        se->meta_flags |= META_FLAG::COMPTIME;
+
         ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
 
         if (struct_body->value == nullptr || !((const Type*)struct_body->value)->is_valid()) {
@@ -783,6 +827,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::LOCAL_DECL: {
         ASTLocalDecl* decl = (ASTLocalDecl*)a;
+        decl->meta_flags |= META_FLAG::CONST;
+        decl->meta_flags |= META_FLAG::COMPTIME;
 
         if (decl->type_ast != 0) {
           dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
@@ -818,6 +864,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::GLOBAL_DECL: {
         ASTGlobalDecl* decl = (ASTGlobalDecl*)a;
+        decl->meta_flags |= META_FLAG::CONST;
+        decl->meta_flags |= META_FLAG::COMPTIME;
 
         if (decl->type_ast != 0) {
           dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
@@ -831,6 +879,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::TYPED_NAME: {
         ASTTypedName* tn = (ASTTypedName*)a;
+        tn->meta_flags |= META_FLAG::CONST;
+        tn->meta_flags |= META_FLAG::COMPTIME;
 
         if (tn->type != 0) {
           dependency_check_ast_node(comp, comp_thread, state, tn->type);
@@ -867,6 +917,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::BLOCK: {
         ASTBlock* block = (ASTBlock*)a;
+        block->meta_flags |= META_FLAG::CONST;
+        block->meta_flags |= META_FLAG::COMPTIME;
 
         const usize count = state->locals.size;
 
@@ -880,6 +932,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::IF_ELSE: {
         ASTIfElse* if_else = (ASTIfElse*)a;
+        if_else->meta_flags |= META_FLAG::CONST;
+        if_else->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, if_else->condition);
 
@@ -898,6 +952,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::WHILE: {
         ASTWhile* while_s = (ASTWhile*)a;
+        //index->meta_flags |= META_FLAG::CONST;
+        while_s->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, while_s->condition);
 
@@ -908,6 +964,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::RETURN: {
         ASTReturn* ret = (ASTReturn*)a;
+        ret->meta_flags |= META_FLAG::CONST;
+        ret->meta_flags |= META_FLAG::COMPTIME;
+
         if (ret->expr != nullptr) {
           dependency_check_ast_node(comp, comp_thread, state, ret->expr);
         }
@@ -915,6 +974,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::FUNCTION_SIGNATURE: {
         ASTFuncSig* func_sig = (ASTFuncSig*)a;
+
+        func_sig->meta_flags |= META_FLAG::CONST;
+        func_sig->meta_flags |= META_FLAG::COMPTIME;
 
         FOR_AST(func_sig->parameters, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
@@ -927,11 +989,16 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::IMPORT: {
         ASTImport* imp = (ASTImport*)a;
 
+        imp->meta_flags |= META_FLAG::CONST;
+        imp->meta_flags |= META_FLAG::COMPTIME;
+
         dependency_check_ast_node(comp, comp_thread, state, imp->expr_location);
         return;
       }
     case AST_TYPE::STATIC_LINK: {
         ASTStaticLink* imp = (ASTStaticLink*)a;
+
+        imp->meta_flags |= META_FLAG::CONST;
 
         dependency_check_ast_node(comp, comp_thread, state, imp->import_type);
 
@@ -940,6 +1007,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
 
     case AST_TYPE::LAMBDA: {
         ASTLambda* l = (ASTLambda*)a;
+
+        l->meta_flags |= META_FLAG::CONST;
+        l->meta_flags |= META_FLAG::COMPTIME;
 
         ASSERT(state->locals.size == 0);
 
@@ -951,6 +1021,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::STRUCT: {
         ASTStructBody* s = (ASTStructBody*)a;
 
+        s->meta_flags |= META_FLAG::CONST;
+        s->meta_flags |= META_FLAG::COMPTIME;
+
         FOR_AST(s->elements, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
         }
@@ -961,6 +1034,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::ASCII_CHAR:
     case AST_TYPE::ASCII_STRING:
     case AST_TYPE::NUMBER: {
+        a->meta_flags |= META_FLAG::CONST;
+        a->meta_flags |= META_FLAG::COMPTIME;
+
         //No dependencies :)
         return;
       }
@@ -993,6 +1069,7 @@ void set_runtime_flags(AST_LOCAL ast, State* const state, bool modified, uint8_t
         set_runtime_flags(((ASTIndexExpr*)ast)->expr, state, modified, valid_rvts);
         break;
       }
+    default: break;
   }
 }
 
@@ -1044,7 +1121,7 @@ static bool type_check_unary_operator(CompilerGlobals* const comp,
   switch (expr->op) {
     case UNARY_OPERATOR::NEG: {
         if (!prim->node_type.is_valid()) {
-          pass_meta_flags_up(expr->meta_flags, &prim->meta_flags);
+          pass_meta_flags_up(&expr->meta_flags, &prim->meta_flags);
 
           if (infer_type.is_valid()) {
             if (infer_type.struct_type() == STRUCTURE_TYPE::INTEGER) {
@@ -1065,7 +1142,7 @@ static bool type_check_unary_operator(CompilerGlobals* const comp,
           return false;
         }
 
-        pass_meta_flags_down(&expr->meta_flags, prim->meta_flags);
+        pass_meta_flags_down(&expr->meta_flags, &prim->meta_flags);
         Type ty = prim->node_type;
 
         if (ty.struct_type() != STRUCTURE_TYPE::INTEGER) {
@@ -1106,24 +1183,24 @@ static bool type_check_unary_operator(CompilerGlobals* const comp,
     case UNARY_OPERATOR::ADDRESS:
       //TODO: can we infer anything here??
       if (!prim->node_type.is_valid()) {
-        pass_meta_flags_up(expr->meta_flags, &prim->meta_flags);
+        pass_meta_flags_up(&expr->meta_flags, &prim->meta_flags);
         typer->push_node(prim, {});
         return false;
       }
 
       //Expects type checked expr
-      pass_meta_flags_down(&expr->meta_flags, prim->meta_flags);
+      pass_meta_flags_down(&expr->meta_flags, &prim->meta_flags);
       compile_take_address(comp, comp_thread, state, expr);
       return true;
     case UNARY_OPERATOR::DEREF:
       //TODO: can we infer anything here
       if (!prim->node_type.is_valid()) {
-        pass_meta_flags_up(expr->meta_flags, &prim->meta_flags);
+        pass_meta_flags_up(&expr->meta_flags, &prim->meta_flags);
         typer->push_node(prim, {});
         return false;
       }
 
-      pass_meta_flags_down(&expr->meta_flags, prim->meta_flags);
+      pass_meta_flags_down(&expr->meta_flags, &prim->meta_flags);
       compile_deref(comp, comp_thread, expr);
       return true;
     default: {
@@ -1195,6 +1272,8 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
@@ -1214,6 +1293,8 @@ void type_check_binary_operator(CompilerGlobals* comp,
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1239,6 +1320,8 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
@@ -1256,10 +1339,14 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1281,14 +1368,20 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             expr->emit_info.func = &BinOpArgs::emit_mul_64s;
                             return;
                           }
+
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1315,14 +1408,19 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             }
                             return;
                           }
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1347,10 +1445,14 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1383,6 +1485,8 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->emit_info.func = &BinOpArgs::emit_eq_8s;
                       return;
                     }
+
+                  default: break;
                 }
               }
 
@@ -1411,10 +1515,14 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             expr->emit_info.func = &BinOpArgs::emit_eq_64s;
                             return;
                           }
+
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
@@ -1432,10 +1540,14 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1468,6 +1580,8 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->emit_info.func = &BinOpArgs::emit_neq_8s;
                       return;
                     }
+
+                  default: break;
                 }
               }
 
@@ -1496,10 +1610,14 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             expr->emit_info.func = &BinOpArgs::emit_neq_64s;
                             return;
                           }
+
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
@@ -1517,10 +1635,14 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1547,14 +1669,20 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             }
                             return;
                           }
+
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1581,14 +1709,20 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             }
                             return;
                           }
+
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1609,6 +1743,8 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->emit_info.func = &BinOpArgs::emit_or_8s;
                       return;
                     }
+
+                  default: break;
                 }
               }
 
@@ -1636,14 +1772,20 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             expr->emit_info.func = &BinOpArgs::emit_or_64s;
                             return;
                           }
+
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1672,14 +1814,20 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             expr->emit_info.func = &BinOpArgs::emit_or_64s;
                             return;
                           }
+
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1700,6 +1848,8 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->emit_info.func = &BinOpArgs::emit_and_8s;
                       return;
                     }
+
+                  default: break;
                 }
               }
 
@@ -1727,14 +1877,20 @@ void type_check_binary_operator(CompilerGlobals* comp,
                             expr->emit_info.func = &BinOpArgs::emit_and_64s;
                             return;
                           }
+
+                        default: break;
                       }
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1759,10 +1915,14 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -1793,10 +1953,14 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     }
                     break;
                   }
+
+                default: break;
               }
 
               break;
             }
+
+          default: break;
         }
 
         break;
@@ -2076,6 +2240,8 @@ static void cast_operator_type(CompilerGlobals* const comp,
                                   cast_from.name, cast_from.name, cast_to.name);
         break;
       }
+
+    default: break;
   }
 
   comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, cast->node_span,
@@ -2160,6 +2326,8 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
   TRACING_FUNCTION();
   switch (a->ast_type) {
+    case AST_TYPE::INVALID: INVALID_CODE_PATH(); break;
+
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
 
@@ -2190,9 +2358,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
         nt->value = global->constant_value.ptr;
         nt->node_type = comp_thread->builtin_types->t_type;
-        nt->meta_flags |= META_FLAG::COMPTIME;
-        nt->meta_flags |= META_FLAG::CONST;
-        nt->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
         return true;
       }
@@ -2255,9 +2420,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
         at->value = type;
         at->node_type = comp_thread->builtin_types->t_type;
-        at->meta_flags |= META_FLAG::COMPTIME;
-        at->meta_flags |= META_FLAG::CONST;
-        at->meta_flags &= ~META_FLAG::ASSIGNABLE;
 
         return true;
       }
@@ -2291,10 +2453,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
         ptr->value = type;
         ptr->node_type = comp_thread->builtin_types->t_type;
-
-        ptr->meta_flags |= META_FLAG::COMPTIME;
-        ptr->meta_flags |= META_FLAG::CONST;
-        ptr->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return true;
       }
     case AST_TYPE::LAMBDA_TYPE: {
@@ -2362,9 +2520,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
         lt->value = type;
 
         lt->node_type = comp_thread->builtin_types->t_type;
-        lt->meta_flags |= META_FLAG::COMPTIME;
-        lt->meta_flags |= META_FLAG::CONST;
-        lt->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return true;
       }
     case AST_TYPE::TUPLE_TYPE: {
@@ -2412,9 +2567,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
         tt->value = type;
         tt->node_type = comp_thread->builtin_types->t_type;
-        tt->meta_flags |= META_FLAG::COMPTIME;
-        tt->meta_flags |= META_FLAG::CONST;
-        tt->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return true;
       }
     case AST_TYPE::STRUCT_EXPR: {
@@ -2424,9 +2576,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
         ASSERT(struct_body->value != nullptr && ((const Type*)struct_body->value)->is_valid());
 
         a->node_type = comp_thread->builtin_types->t_type;
-        a->meta_flags |= META_FLAG::COMPTIME;
-        a->meta_flags |= META_FLAG::CONST;
-        a->meta_flags &= ~META_FLAG::ASSIGNABLE;
         return true;
       }
     case AST_TYPE::LAMBDA_EXPR: {
@@ -2513,12 +2662,12 @@ bool type_check_single_node(CompilerGlobals* const comp,
         AST_LOCAL base = member->expr;
 
         if (!base->node_type.is_valid()) {
-          pass_meta_flags_up(a->meta_flags, &base->meta_flags);
+          pass_meta_flags_up(&a->meta_flags, &base->meta_flags);
           typer->push_node(base, {});
           return false;
         }
 
-        pass_meta_flags_down(&a->meta_flags, base->meta_flags);
+        pass_meta_flags_down(&a->meta_flags, &base->meta_flags);
 
         ASSERT(base->node_type.is_valid());
 
@@ -2598,10 +2747,8 @@ bool type_check_single_node(CompilerGlobals* const comp,
         AST_LOCAL base = index_expr->expr;
         AST_LOCAL index = index_expr->index;
 
-        pass_meta_flags_up(a->meta_flags, &base->meta_flags);
-
         if (!base->node_type.is_valid()) {
-          pass_meta_flags_up(index_expr->meta_flags, &base->meta_flags);
+          pass_meta_flags_up(&index_expr->meta_flags, &base->meta_flags);
           typer->push_node(base, {});
           return false;
         }
@@ -2614,14 +2761,14 @@ bool type_check_single_node(CompilerGlobals* const comp,
         }
 
         if (!index->node_type.is_valid()) {
-          pass_meta_flags_down(&a->meta_flags, base->meta_flags);
-          pass_meta_flags_up(a->meta_flags, &index->meta_flags);
+          pass_meta_flags_down(&a->meta_flags, &base->meta_flags);
+          pass_meta_flags_up(&a->meta_flags, &index->meta_flags);
 
           typer->push_node(index, comp_thread->builtin_types->t_u64);
           return false;
         }
 
-        pass_meta_flags_down(&a->meta_flags, index->meta_flags);
+        pass_meta_flags_down(&a->meta_flags, &index->meta_flags);
 
         ASSERT(index->node_type == comp_thread->builtin_types->t_u64);
 
@@ -2644,12 +2791,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::TUPLE_LIT: {
         ASTTupleLitExpr* tup = (ASTTupleLitExpr*)a;
-
-        //Temp?
-        a->meta_flags &= ~META_FLAG::ASSIGNABLE;
-
-        //Assume comptime to start with
-        SET_MASK(a->meta_flags, META_FLAG::COMPTIME);
 
         if (!tup->named_type.is_valid() && tup->name != nullptr) {
           //Need to check that the types match
@@ -2758,7 +2899,7 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
           FOR_AST(tup->elements, it) {
             if (!it->node_type.is_valid()) {
-              pass_meta_flags_up(a->meta_flags, &it->meta_flags);
+              pass_meta_flags_up(&a->meta_flags, &it->meta_flags);
               typer->push_node(it, {});
               pushed_any = true;
             }
@@ -2771,7 +2912,7 @@ bool type_check_single_node(CompilerGlobals* const comp,
           Array<Type> element_types = {};
 
           FOR_AST(tup->elements, it) {
-            pass_meta_flags_down(&a->meta_flags, it->meta_flags);
+            pass_meta_flags_down(&a->meta_flags, &it->meta_flags);
             element_types.insert(it->node_type);
           }
 
@@ -2793,11 +2934,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::ARRAY_EXPR: {
         ASTArrayExpr* arr_expr = (ASTArrayExpr*)a;
-
-        arr_expr->meta_flags &= ~META_FLAG::ASSIGNABLE;
-
-        //Assume true to start with
-        a->meta_flags |= META_FLAG::COMPTIME;
 
         if (infer_type.is_valid()) {
           if (infer_type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
@@ -2822,7 +2958,8 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
           bool pushed_any = false;
           FOR_AST(arr_expr->elements, it) {
-            if (it->node_type.is_valid()) {
+            if (!it->node_type.is_valid()) {
+              pass_meta_flags_up(&a->meta_flags, &it->meta_flags);
               typer->push_node(it, base);
               pushed_any = true;
             }
@@ -2845,33 +2982,22 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
 
             if (!base_test->node_type.is_valid()) {
-              pass_meta_flags_up(a->meta_flags, &base_test->meta_flags);
+              pass_meta_flags_up(&a->meta_flags, &base_test->meta_flags);
               typer->push_node(base_test, {});
               return false;
             }
 
             base = base_test->node_type;
 
-            u32 index = 0;
-
-            bool pushed_any = false;
-
-            l->next;
             for (; l; l = l->next) {
-              index++;
               AST_LOCAL it = l->curr;
 
               if (!it->node_type.is_valid()) {
-                pass_meta_flags_up(a->meta_flags, &it->meta_flags);
+                pass_meta_flags_up(&a->meta_flags, &it->meta_flags);
                 typer->push_node(it, base);
                 return false;
               }
             }
-          }
-
-          //TODO: Is this needed?
-          FOR_AST(arr_expr->elements, it) {
-            pass_meta_flags_down(&a->meta_flags, it->meta_flags);
           }
 
           if (!base.is_valid()) {
@@ -2896,12 +3022,15 @@ bool type_check_single_node(CompilerGlobals* const comp,
           a->node_type = to_type(arr_s);
         }
 
+        FOR_AST(arr_expr->elements, it) {
+          pass_meta_flags_down(&a->meta_flags, &it->meta_flags);
+        }
+
         ASSERT(a->node_type.is_valid());
         return true;
       }
     case AST_TYPE::ASCII_CHAR: {
         a->node_type = comp_thread->builtin_types->t_ascii;
-        a->meta_flags |= META_FLAG::COMPTIME;
         return true;
       }
     case AST_TYPE::ASCII_STRING: {
@@ -2920,13 +3049,10 @@ bool type_check_single_node(CompilerGlobals* const comp,
         }
 
         a->node_type = to_type(s);
-        a->meta_flags |= META_FLAG::COMPTIME;
         return true;
       }
     case AST_TYPE::NUMBER: {
         ASTNumber* num = (ASTNumber*)a;
-
-        a->meta_flags |= META_FLAG::COMPTIME;
 
         if (num->suffix == nullptr) {
           if (infer_type.is_valid()) {
@@ -2980,11 +3106,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
       }
 
     case AST_TYPE::STATIC_LINK: {
-        a->meta_flags |= META_FLAG::COMPTIME;
-        a->meta_flags |= META_FLAG::CONST;
-        a->meta_flags &= ~META_FLAG::ASSIGNABLE;
-
-
         ASTStaticLink* imp = (ASTStaticLink*)a;
 
         if (!imp->import_type->node_type.is_valid()) {
@@ -3029,28 +3150,24 @@ bool type_check_single_node(CompilerGlobals* const comp,
         //Because shadowing isn't allowed this should always work?
         ASTIdentifier* ident = (ASTIdentifier*)a;
 
+        //TODO: Make this work
+        //Currently fails because the declaration constant doesnt load in time
+        //Might work for globals? Definitely doesnt work for locals
+        ASSERT((ident->meta_flags & META_FLAG::COMPTIME) == 0);
+
         if (ident->id_type == ASTIdentifier::LOCAL) {
           Local* local = ident->local;
 
           ASSERT(local->decl.type.is_valid());
 
-          //Is a local not a global
-          a->meta_flags |= META_FLAG::ASSIGNABLE;
-          a->meta_flags &= ~META_FLAG::COMPTIME;//for now
-          a->meta_flags |= META_FLAG::CONST;
-
           a->node_type = local->decl.type;
-          pass_meta_flags_down(&a->meta_flags, local->decl.meta_flags);
+          pass_meta_flags_down(&a->meta_flags, &local->decl.meta_flags);
         }
         else if (ident->id_type == ASTIdentifier::GLOBAL) {
           Global* glob = ident->global;
 
-          a->meta_flags |= META_FLAG::ASSIGNABLE;
-          a->meta_flags &= ~META_FLAG::COMPTIME;
-          a->meta_flags |= META_FLAG::CONST;
-
           a->node_type = glob->decl.type;
-          pass_meta_flags_down(&a->meta_flags, glob->decl.meta_flags);
+          pass_meta_flags_down(&a->meta_flags, &glob->decl.meta_flags);
         }
         else {
           comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
@@ -3072,7 +3189,7 @@ bool type_check_single_node(CompilerGlobals* const comp,
         }
 
         if (!cast->node_type.is_valid()) {
-          pass_meta_flags_up(a->meta_flags, &cast->meta_flags);
+          pass_meta_flags_up(&a->meta_flags, &cast->meta_flags);
           typer->push_node(cast, {});
           return false;
         }
@@ -3083,15 +3200,12 @@ bool type_check_single_node(CompilerGlobals* const comp,
           return false;
         }
 
-        pass_meta_flags_down(&a->meta_flags, cast->meta_flags);
+        pass_meta_flags_down(&a->meta_flags, &cast->meta_flags);
 
         a->node_type = *(const Type*)ty->value;
         return true;
       }
     case AST_TYPE::UNARY_OPERATOR: {
-        ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)a;
-        AST_LOCAL prim = un_op->expr;
-
         return type_check_unary_operator(comp, comp_thread, state, typer, this_untyped);
       }
     case AST_TYPE::BINARY_OPERATOR: {
@@ -3106,13 +3220,13 @@ bool type_check_single_node(CompilerGlobals* const comp,
           bool pushed_any = false;
 
           if (!left->node_type.is_valid()) {
-            pass_meta_flags_up(a->meta_flags, &left->meta_flags);
+            pass_meta_flags_up(&a->meta_flags, &left->meta_flags);
             typer->push_node(left, {});
             pushed_any = true;
           }
 
           if (!right->node_type.is_valid()) {
-            pass_meta_flags_up(a->meta_flags, &right->meta_flags);
+            pass_meta_flags_up(&a->meta_flags, &right->meta_flags);
             typer->push_node(right, {});
             pushed_any = true;
           }
@@ -3121,6 +3235,9 @@ bool type_check_single_node(CompilerGlobals* const comp,
             return false;
           }
         }
+
+        pass_meta_flags_down(&a->meta_flags, &right->meta_flags);
+        pass_meta_flags_down(&a->meta_flags, &left->meta_flags);
 
         if (!TEST_MASK(a->meta_flags, META_FLAG::COMPTIME)) {
           if (can_compile_const_value(left)) {
@@ -3186,16 +3303,14 @@ bool type_check_single_node(CompilerGlobals* const comp,
 
         //TODO: Allow function execution at compile time
         //Means we need to have a way to know which functions to load
-        //Currently it just expects to find a function but doesnt and calls the start of the code
         a->meta_flags |= META_FLAG::MAKES_CALL;
-        a->meta_flags |= META_FLAG::CONST;
 
         //TODO: Try to find the function call first? Then infer arguments
 
         FOR_AST(call->arguments, it) {
 
           if (!it->node_type.is_valid()) {
-            pass_meta_flags_up(a->meta_flags, &it->meta_flags);
+            pass_meta_flags_up(&a->meta_flags, &it->meta_flags);
             it->meta_flags |= META_FLAG::CALL_LEAF;
 
             typer->push_node(it, {});
@@ -3205,7 +3320,7 @@ bool type_check_single_node(CompilerGlobals* const comp,
         }
 
         FOR_AST(call->arguments, it) {
-          pass_meta_flags_down(&a->meta_flags, it->meta_flags);
+          pass_meta_flags_down(&a->meta_flags, &it->meta_flags);
         }
 
         compile_find_function_call(comp, comp_thread, context, state, call);
@@ -3224,9 +3339,6 @@ bool type_check_single_node(CompilerGlobals* const comp,
                                     size, call->arguments.count);
           return false;
         }
-
-        //Temp
-        a->meta_flags &= ~META_FLAG::COMPTIME;
 
         /*if (!TEST_MASK(a->meta_flags, META_FLAG::COMPTIME)) {
           FOR_AST(call->arguments, it) {
@@ -3432,8 +3544,11 @@ bool type_check_single_node(CompilerGlobals* const comp,
         loc->decl.type = decl->type;
         if (decl->compile_time_const) {
           loc->decl.meta_flags |= META_FLAG::COMPTIME;
+          loc->decl.meta_flags |= META_FLAG::CONST;
+          loc->decl.meta_flags &= ~META_FLAG::ASSIGNABLE;
         }
         else {
+          loc->decl.meta_flags &= ~META_FLAG::COMPTIME;
           loc->decl.meta_flags |= META_FLAG::ASSIGNABLE;
         }
 
@@ -3756,7 +3871,9 @@ static void load_const_to_mem(CompilerGlobals* const comp,
                               MemIndex mem) {
 
   const uint32_t size = s->size;
-  const uint32_t align = s->alignment;
+  
+  //TODO: alignment
+  //const uint32_t align = s->alignment;
 
   const size_t s_div_8 = size / 8;
   const size_t s_mod_8 = size % 8;
@@ -3868,7 +3985,9 @@ static void copy_mem_to_mem(CompilerGlobals* const comp,
                             MemIndex to) {
 
   const uint32_t size = s->size;
-  const uint32_t align = s->alignment;
+  
+  //TODO: alignment
+  //const uint32_t align = s->alignment;
 
   const size_t s_div_8 = size / 8;
   size_t s_mod_8 = size % 8;
@@ -4131,6 +4250,7 @@ static void copy_mem_to_runtime(CompilerGlobals* const comp,
   DEFER(&) { state->control_flow.expression_num++; };
 
   switch (to->type) {
+    case RVT::CONST: INVALID_CODE_PATH(); break;
     case RVT::UNKNOWN: {
         to->type = RVT::MEMORY;
         to->mem = mem;
@@ -4208,6 +4328,7 @@ void copy_runtime_to_runtime(CompilerGlobals* const comp,
   ASSERT(from->type != RVT::UNKNOWN);
 
   switch (from->type) {
+    case RVT::UNKNOWN: INVALID_CODE_PATH(); break;
     case RVT::CONST: {
         load_const_to_runtime_val(comp, state, code, structure, from->constant, to);
         break;
@@ -4446,7 +4567,7 @@ static void compile_function_call(CompilerGlobals* const comp,
     }
   }
 
-  size_t stack_params = state->stack.current_passed;
+  //size_t stack_params = state->stack.current_passed;
 
   ByteCode::EMIT::CALL_LABEL(code->code, call->label);
   state->control_flow.calls.insert(state->control_flow.now());
@@ -4827,7 +4948,7 @@ static void compile_bytecode_of_expression(CompilerGlobals* const comp,
 
         const size_t base_size = arr_type->base.structure->size;
 
-        const size_t full_align = arr_type->alignment;
+        //const size_t full_align = arr_type->alignment;
         const size_t full_size = arr_type->size;
 
         ASTArrayExpr* arr_expr = (ASTArrayExpr*)expr;
@@ -5003,7 +5124,7 @@ static void compile_bytecode_of_expression(CompilerGlobals* const comp,
         const size_t size = expr->node_type.structure->size;
 
         uint8_t* val_c = comp->new_constant(size);
-        memcpy_ts(val_c, size, (uint8_t*)&num->value, size);
+        memcpy_ts(val_c, size, (uint8_t*)&num->num_value, size);
 
         const ConstantVal constant = { val_c, size };
 
@@ -5417,12 +5538,15 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
                                                           decl->expr,
                                                           (u8)RVT::CONST);
         }
+
+        ASSERT(local->val.type != RVT::UNKNOWN);
         return;
       }
     default: {
         AST_LOCAL expr = statement;
 
-        auto unused = compile_bytecode_of_expression_new(comp, context, state, code, expr, ALL_RVTS);
+        auto _unused = compile_bytecode_of_expression_new(comp, context, state, code, expr, ALL_RVTS);
+        (void)_unused;
         return;
       }
   }
@@ -5578,9 +5702,9 @@ static void map_values(const System* sys,
     ByteCode::OP_64_MEM::emit(temp, p.op, p.u64, check_mem(p.mem));
   };
 
-  const auto OP_MEM = [&](ByteCode::OP_MEM&& p) {
+  /*const auto OP_MEM = [&](ByteCode::OP_MEM&& p) {
     ByteCode::OP_MEM::emit(temp, p.op, check_mem(p.mem));
-  };
+  };*/
 
   const auto OP_64 = [&](ByteCode::OP_64&& p) {
     ByteCode::OP_64::emit(temp, p.op, p.u64);
@@ -5605,9 +5729,9 @@ static void map_values(const System* sys,
     ByteCode::OP_R_R::emit(temp, p.op, v1->reg, v2->reg);
   };
 
-#define X(name, structure) case ByteCode:: ## name: {\
-      structure(ByteCode::PARSE:: ## name ## (bytecode));\
-      bytecode += ByteCode::SIZE_OF:: ## name;\
+#define X(name, structure) case ByteCode :: name: {\
+      structure(ByteCode::PARSE :: name (bytecode));\
+      bytecode += ByteCode::SIZE_OF :: name;\
       break;\
     }
 
@@ -5692,8 +5816,16 @@ static void compute_value_intersections(const CompilerConstants* comp, ValueTree
   TRACING_FUNCTION();
 
   if (comp->print_options.intersections) {
-    IO::print("--- Intersections ---\n");
+    IO_Single::lock();
+    IO_Single::print("--- Intersections ---\n");
   }
+
+  DEFER(&) {
+    if (comp->print_options.intersections) {
+      IO_Single::print("---------------------\n");
+      IO_Single::unlock();
+    }
+  };
 
   for (size_t i = 0; i < tree.values.size - 1; i++) {
     auto i_val = tree.values.data + i;
@@ -5711,7 +5843,7 @@ static void compute_value_intersections(const CompilerConstants* comp, ValueTree
       if (i_val->creation.time.flow == j_val->creation.time.flow
           && i_val->creation.time.time == j_val->creation.time.time) {
         if (comp->print_options.intersections) {
-          format_print("{} - {}\n", i, j);
+          format_print_ST("{} - {}\n", i, j);
         }
         tree.set_intersection(ValueIndex{ i }, ValueIndex{ j });
         continue;
@@ -5735,7 +5867,7 @@ static void compute_value_intersections(const CompilerConstants* comp, ValueTree
           //j is created between i start and end -> intersection
 
           if (comp->print_options.intersections) {
-            format_print("{} - {}\n", i, j);
+            format_print_ST("{} - {}\n", i, j);
           }
           tree.set_intersection(ValueIndex{ i }, ValueIndex{ j });
           break;
@@ -5758,17 +5890,13 @@ static void compute_value_intersections(const CompilerConstants* comp, ValueTree
           //i is created between j start and end -> intersection
 
           if (comp->print_options.intersections) {
-            format_print("{} - {}\n", i, j);
+            format_print_ST("{} - {}\n", i, j);
           }
           tree.set_intersection(ValueIndex{ i }, ValueIndex{ j });
           break;
         }
       }
     }
-  }
-
-  if (comp->print_options.intersections) {
-    IO::print("---------------------\n");
   }
 }
 
@@ -5976,7 +6104,8 @@ static uint64_t select(const CompilerConstants* comp, const CallingConvention* c
 
 
   if (comp->print_options.reg_mapping) {
-    printf("--- Reg Mapping ---\n");
+    IO_Single::lock();
+    IO_Single::print("--- Reg Mapping ---\n");
   }
 
   uint64_t used_regs = 0;
@@ -6012,7 +6141,8 @@ static uint64_t select(const CompilerConstants* comp, const CallingConvention* c
   }
 
   if (comp->print_options.reg_mapping) {
-    printf("-----\n");
+    IO_Single::print("-----\n");
+    IO_Single::unlock();
   }
 
   return used_regs;
@@ -6244,9 +6374,11 @@ void graph_colour_algo(CompilerConstants* const comp_const,
   TRACING_FUNCTION();
 
   if (comp_const->print_options.pre_reg_alloc) {
-    IO::print("\n=== Pre Register Allocation Bytecode ===\n\n");
+    IO_Single::lock();
+    IO_Single::print("\n=== Pre Register Allocation Bytecode ===\n\n");
     ByteCode::print_bytecode(&reg_num_as_string, stdout, code->code.data, code->code.size);
-    IO::print("\n=============================\n\n");
+    IO_Single::print("\n=============================\n\n");
+    IO_Single::unlock();
   }
 
   //Computers all the intersections in the value tree based on control flow
@@ -6267,9 +6399,11 @@ void graph_colour_algo(CompilerConstants* const comp_const,
   code->code.shrink();
 
   if (comp_const->print_options.normal_bytecode) {
-    IO::print("\n=== Normal Bytecode ===\n\n");
+    IO_Single::lock();
+    IO_Single::print("\n=== Normal Bytecode ===\n\n");
     ByteCode::print_bytecode(comp_const->build_options.endpoint_system->reg_name_from_num, stdout, code->code.data, code->code.size);
-    IO::print("\n=============================\n\n");
+    IO_Single::print("\n=============================\n\n");
+    IO_Single::unlock();
   }
 }
 
@@ -6730,9 +6864,11 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       }
 
       if (comp->print_options.ast) {
-        IO::print("\n=== Print Parsed AST ===\n\n");
+        IO_Single::lock();
+        IO_Single::print("\n=== Print Parsed AST ===\n\n");
         print_full_ast(ast_file);
-        IO::print("\n========================\n\n");
+        IO_Single::print("\n========================\n\n");
+        IO_Single::unlock();
       }
 
       if (comp_thread->is_panic()) {
@@ -7271,10 +7407,12 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       }
 
       if (comp_thread->print_options.comptime_exec) {
-        IO::print("\nAbout to execute Compile Time Code:\n");
+        IO_Single::lock();
+        IO_Single::print("\nAbout to execute Compile Time Code:\n");
         print_full_ast(ast);
-        IO::print("\n\nWhich produced this bytecode:\n");
+        IO_Single::print("\n\nWhich produced this bytecode:\n");
         ByteCode::print_bytecode(&vm_regs_name_from_num, stdout, prog.code.ptr, prog.code_size);
+        IO_Single::unlock();
       }
 
       {
@@ -7868,12 +8006,12 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   //Intrinsics
-#define MOD(n) comp->intrinsics. ## n = strings->intern(#n);
+#define MOD(n) comp->intrinsics . n = strings->intern(#n);
   INTRINSIC_MODS;
 #undef MOD
 
   //Other important names
-#define MOD(n) comp->important_names. ## n = strings->intern(#n);
+#define MOD(n) comp->important_names . n = strings->intern(#n);
   IMPORTANT_NAMES_INC;
 #undef MOD
 

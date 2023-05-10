@@ -145,7 +145,7 @@ enum struct ERROR_CODE : uint8_t {
 
 constexpr const char* error_code_string(ERROR_CODE c) {
   switch (c) {
-  #define MOD(E) case ERROR_CODE:: ## E: return #E;
+  #define MOD(E) case ERROR_CODE ::  E : return #E;
     COMPCODEINC
     #undef MOD
   }
@@ -183,7 +183,7 @@ namespace BINARY_OP_STRING {
   constexpr const char* get(BINARY_OPERATOR op) noexcept {
     switch (op)
     {
-    #define MODIFY(name, str, prec) case BINARY_OPERATOR:: ## name : return name;
+    #define MODIFY(name, str, prec) case BINARY_OPERATOR :: name : return name;
       BIN_OP_INCS;
     #undef MODIFY
 
@@ -211,7 +211,7 @@ namespace UNARY_OP_STRING {
   constexpr const char* get(UNARY_OPERATOR op) noexcept {
     switch (op)
     {
-    #define MODIFY(name, str) case UNARY_OPERATOR:: ## name : return name;
+    #define MODIFY(name, str) case UNARY_OPERATOR :: name : return name;
       UN_OP_INCS;
     #undef MODIFY
 

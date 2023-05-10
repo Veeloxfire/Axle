@@ -524,6 +524,7 @@ struct CompilerThread : CompilerConstants {
 
   UnfoundNames local_unfound_names;
   Array<UnitID> new_depends;
+  Array<CompilationUnit*> new_units;
 
   inline constexpr bool is_panic() const { return errors.is_panic(); }
   inline bool is_depends() const {

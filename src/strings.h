@@ -12,7 +12,7 @@ struct InternString {
   }
 
   constexpr bool operator!=(const InternString& i)const {
-    return !operator!=(i);
+    return !operator==(i);
   }
 
   constexpr static size_t alloc_size(size_t string_len) {

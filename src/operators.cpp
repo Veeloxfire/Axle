@@ -531,6 +531,10 @@ RuntimeValue UnOpArgs::emit_deref() {
   deref_val.type = RVT::MEMORY;
 
   switch (prim->type) {
+    case RVT::UNKNOWN: {
+        INVALID_CODE_PATH();
+        break;
+      }
     case RVT::REGISTER: {
         MemIndex mi = state->new_mem();
         auto* mem = state->get_mem(mi);

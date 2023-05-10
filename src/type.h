@@ -74,22 +74,35 @@ inline constexpr auto operator&=(META_FLAGS& u, META_FLAG t) -> META_FLAGS& {
   return u;
 }
 
-constexpr inline META_FLAGS META_UP_FLAGS = 0
-| META_FLAG::CALL_LEAF;
+constexpr void balance_flags(META_FLAGS* a, META_FLAGS* b) {
+  constexpr META_FLAGS balanced_flags = 0
+    | META_FLAG::CONST
+    | META_FLAG::COMPTIME
+    | META_FLAG::ASSIGNABLE;
 
-constexpr inline META_FLAGS META_DOWN_FLAGS = 0
-| META_FLAG::CONST
-| META_FLAG::COMPTIME
-//| META_FLAG::LITERAL
-| META_FLAG::ASSIGNABLE
-| META_FLAG::MAKES_CALL;
+  META_FLAGS balanced = (*a & *b) & balanced_flags;
 
-inline constexpr void pass_meta_flags_up(META_FLAGS low, META_FLAGS* high) {
-  *high |= low & META_UP_FLAGS;
+  *a = (*a & ~balanced_flags) | balanced;
+  *b = (*b & ~balanced_flags) | balanced;
 }
 
-inline constexpr void pass_meta_flags_down(META_FLAGS* low, META_FLAGS high) {
-  *low |= high & META_DOWN_FLAGS;
+constexpr void pass_meta_flags_up(META_FLAGS* low, META_FLAGS* high) {
+  //balance_flags(low, high);
+
+  constexpr META_FLAGS pass_flags = 0
+    | META_FLAG::CALL_LEAF;
+
+  *high |= *low & pass_flags;
+}
+
+constexpr void pass_meta_flags_down(META_FLAGS* low, META_FLAGS* high) {
+  balance_flags(low, high);
+
+  constexpr META_FLAGS pass_flags = 0
+    | META_FLAG::MAKES_CALL;
+
+
+  *low |= *high & pass_flags;
 }
 
 using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*>;

@@ -793,7 +793,7 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
           break;
         }
       case ByteCode::PUSH_FRAME: {
-          const auto p = ByteCode::PARSE::PUSH_FRAME(code_i);
+          //const auto p = ByteCode::PARSE::PUSH_FRAME(code_i);
 
           write_str(f, "push rbp\nmov rbp, rsp\n");
 
@@ -801,7 +801,7 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
           break;
         }
       case ByteCode::POP_FRAME: {
-          const auto p = ByteCode::PARSE::POP_FRAME(code_i);
+          //const auto p = ByteCode::PARSE::POP_FRAME(code_i);
 
           write_str(f, "mov rsp, rbp\npop rbp\n");
 
@@ -963,7 +963,7 @@ void write_code(FileData* f, CompilerGlobals* const comp, CompilerThread* const 
           break;
         }
       case ByteCode::CONV_RU32_TO_R64: {
-          const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(code_i);
+          //const auto i = ByteCode::PARSE::CONV_RU8_TO_R64(code_i);
 
           //write_str(f, "mov ");
           //write_reg(f, i.val, b64_reg_name);
