@@ -1,6 +1,7 @@
 #include "compiler.h"
 #include "trace.h"
 
+#if 0
 static const char* b8_reg_name(uint8_t reg) {
   switch (reg) {
     case 0: return "al";
@@ -1241,3 +1242,5 @@ void nasm_backend(const char* file_name, CompilerGlobals* comp, CompilerThread* 
     write_str(&file, "\n");
   }
 }
+
+#endif

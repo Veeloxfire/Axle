@@ -39,8 +39,8 @@ struct Table {
 };
 
 struct StringInterner {
-  BumpAllocator allocs ={};
-  Table table ={};
+  BumpAllocator allocs = {};
+  Table table = {};
 
   const InternString* intern(const char* string);
   const InternString* intern(const char* string, size_t len);
@@ -66,8 +66,8 @@ struct InternStringSet {
   constexpr static float LOAD_FACTOR = 0.75;
 
   const InternString** data = nullptr;// ptr to data in the array
-  size_t el_capacity        = 0;
-  size_t used               = 0;
+  size_t el_capacity = 0;
+  size_t used = 0;
 
   constexpr bool needs_resize(size_t extra) const {
     return (el_capacity * LOAD_FACTOR) <= (used + extra);
@@ -85,9 +85,54 @@ template<typename T>
 struct InternHashTable {
   constexpr static float LOAD_FACTOR = 0.75;
 
-  uint8_t* data      = nullptr;// ptr to data in the array
+  uint8_t* data = nullptr;// ptr to data in the array
   size_t el_capacity = 0;
-  size_t used        = 0;
+  size_t used = 0;
+
+  struct Iterator {
+    InternHashTable<T>* table;
+    usize i;
+
+    const InternString* key() const {
+      if (!is_valid()) return nullptr;
+      return table->key_arr()[i];
+    }
+    T* val() const {
+      if (!is_valid()) return nullptr;
+      return table->val_arr() + i;
+    }
+
+    constexpr bool is_valid() const {
+      return table != nullptr;
+    }
+
+    void next() {
+      if (table == nullptr) return;
+
+      i += 1;
+
+      const InternString** keys = table->key_arr() + i;
+      while (i < table->el_capacity && (*keys == nullptr || *keys == TOMBSTONE)) {
+        keys += 1;
+        i += 1;
+      }
+
+      if (i == table->el_capacity) {
+        table = nullptr;
+      }
+    }
+  };
+
+  Iterator itr() {
+    Iterator i{
+        this,
+        (usize)-1,
+    };
+
+
+    i.next();
+    return i;
+  }
 
   constexpr bool needs_resize(size_t extra) const {
     return (el_capacity * LOAD_FACTOR) <= (used + extra);
@@ -123,7 +168,7 @@ struct InternHashTable {
   }
 
   bool contains(const InternString* key) const {
-    if(el_capacity == 0) return false;
+    if (el_capacity == 0) return false;
 
     const InternString** keys = key_arr();
 
@@ -189,10 +234,10 @@ struct InternHashTable {
 
       data = allocate_default<uint8_t>(required_alloc_bytes);
 
-      const InternString**hash_arr = (const InternString**)data;
+      const InternString** hash_arr = (const InternString**)data;
       T* val_arr = (T*)(data + el_capacity * sizeof(const InternString*));
 
-      const InternString**old_hash_arr = (const InternString**)old_data;
+      const InternString** old_hash_arr = (const InternString**)old_data;
       T* old_val_arr = (T*)(old_data + old_el_cap * sizeof(const InternString*));
 
       for (size_t i = 0; i < old_el_cap; i++) {
@@ -202,7 +247,7 @@ struct InternHashTable {
           const size_t new_index = get_soa_index(key);
 
           hash_arr[new_index] = key;
-          val_arr[new_index]  = std::move(old_val_arr[i]);
+          val_arr[new_index] = std::move(old_val_arr[i]);
         }
       }
 
@@ -217,7 +262,7 @@ struct InternHashTable {
   }
 
   T* get_val(const InternString* const key) const {
-    if(el_capacity == 0) return nullptr;
+    if (el_capacity == 0) return nullptr;
 
     const size_t soa_index = get_soa_index(key);
 
@@ -245,7 +290,7 @@ struct InternHashTable {
 
       used++;
       keys[soa_index] = key;
-      vals[soa_index] = std::move(val);   
+      vals[soa_index] = std::move(val);
     }
     else {
       size_t soa_index = get_soa_index(key);
@@ -267,11 +312,11 @@ struct InternHashTable {
 
       used++;
       keys[soa_index] = key;
-      vals[soa_index] = std::move(val);     
+      vals[soa_index] = std::move(val);
     }
   }
 
-  T* insert(const InternString* const key) {
+  T* get_or_create(const InternString* const key) {
     if (el_capacity == 0) {
       el_capacity = 8;
       data = allocate_default<uint8_t>(8 * (sizeof(const InternString*) + sizeof(T)));
@@ -283,29 +328,38 @@ struct InternHashTable {
 
       used++;
       keys[soa_index] = key;
-      return vals + soa_index;   
+      vals[soa_index] = T{};
+      return vals + soa_index;
     }
     else {
       size_t soa_index = get_soa_index(key);
 
-      {
-        const InternString* test_key = ((const InternString**)data)[soa_index];
 
-        if ((test_key == nullptr || test_key == TOMBSTONE) &&
-            needs_resize(1)) {
-          //need to resize
-          try_extend(1);
-          //need to reset the key
-          soa_index = get_soa_index(key);
-        }
+      const InternString* test_key = ((const InternString**)data)[soa_index];
+
+      if (test_key == key) {
+        T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
+
+        return vals + soa_index;
       }
+
+      ASSERT(test_key == nullptr || test_key == TOMBSTONE);
+
+      if (needs_resize(1)) {
+        //need to resize
+        try_extend(1);
+        //need to reset the key
+        soa_index = get_soa_index(key);
+      }
+
 
       const InternString** const keys = (const InternString**)data;
       T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
 
       used++;
       keys[soa_index] = key;
-      return vals + soa_index;     
+      vals[soa_index] = T{};
+      return vals + soa_index;
     }
   }
 };

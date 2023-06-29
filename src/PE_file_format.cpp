@@ -125,7 +125,7 @@ static void constants_to_bytes(const RVA rva, const VA va, ConstantTable* const 
   const auto end = constants->constants.mut_end();
 
   constants->table_rva = rva;
-  constants->table_va  = va;
+  constants->table_va = va;
 
   uint32_t offset = 0;
 
@@ -199,175 +199,577 @@ static void import_names_to_bytes(VA va, Array<ImportNameEntry>& import_names, A
   }
 }
 
-ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name) {
+static void write_code_partial(FILES::FileData* out,
+                               Backend::DataBucketIterator* code, usize end,
+                               usize* const file_ptr, usize* const mem_ptr) {
+  while (true) {
+    usize remaining = end - code->actual_location;
 
-  if (pe_file->imports != nullptr) {
-    ASSERT(pe_file->constants != nullptr);
+    if (Backend::BUCKET_SIZE - code->bucket_counter < remaining) {
+      usize write_size = Backend::BUCKET_SIZE - code->bucket_counter;
+      FILES::write(out, code->bucket->arr + code->bucket_counter, write_size);
+
+      code->actual_location += write_size;
+      code->bucket_counter = 0;
+      code->bucket = code->bucket->next;
+
+      *file_ptr += write_size;
+      *mem_ptr += write_size;
+
+      ASSERT(code->bucket->next != nullptr);
+      code->bucket = code->bucket->next;
+      code->bucket_counter = 0;
+    }
+    else {
+      FILES::write(out, code->bucket->arr + code->bucket_counter, remaining);
+      code->actual_location += remaining;
+      code->bucket_counter += remaining;
+      *file_ptr += remaining;
+      *mem_ptr += remaining;
+      break;
+    }
   }
 
-  uint32_t TIME = time(0) & 0x0000000000000000FFFFFFFFFFFFFFFF;
+  ASSERT(code->actual_location == end);
+}
 
-  ImportantValues important_vals ={};
-  Array<uint8_t> constants ={};
-  Array<uint8_t> import_names ={};
+static void file_align(FILES::FileData* out,
+                       usize* const file_ptr, usize file_al) {
+  usize current = *file_ptr;
+  usize new_size = ceil_to_n(current, file_al);
 
-  {
-    //Headers
+  if (new_size != current) {
+    FILES::write_padding_bytes(out, '\0', new_size - current);
+    *file_ptr = new_size;
+  }
+}
 
-    if (pe_file->code != nullptr) {
-      important_vals.num_sections++;
+static void mem_align(usize* const mem_ptr, usize mem_al) {
+  *mem_ptr = ceil_to_n(*mem_ptr, mem_al);
+}
+
+template<typename T>
+static void write_to_image(FILES::FileData* out, const T& t, usize* const file_pos, usize* const mem_pos) {
+  FILES::write_obj(out, t);
+  *file_pos += sizeof(T);
+  *mem_pos += sizeof(T);
+}
+
+static void write_raw_to_image(FILES::FileData* out, const u8* bytes, usize size, usize* const file_pos, usize* const mem_pos) {
+  FILES::write(out, bytes, size);
+  *file_pos += size;
+  *mem_pos += size;
+}
+
+namespace X64 {
+  bool try_relative_disp(usize from, usize to, i32* jump);
+}
+
+struct ProgramLocation {
+  u32 memory;
+  u32 file;
+
+};
+
+void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* program, const InternString* file_name) {
+  const uint32_t TIME = time(0) & 0x0000000000000000FFFFFFFFFFFFFFFF;
+
+  const bool has_dynamic_imports = program->dyn_imports.size > 0;
+
+  InternHashTable<ProgramLocation> strings = {};
+
+  FOR(program->dyn_imports, it) {
+    {
+      ProgramLocation* l = strings.get_or_create(it->library);
+      l->memory = 0;
+      l->file = 0;
     }
-
-    if (pe_file->constants != nullptr) {
-      important_vals.num_sections++;
+    {
+      ProgramLocation* f = strings.get_or_create(it->function);
+      f->memory = 0;
+      f->file = 0;
     }
-
-    if (pe_file->imports != nullptr) {
-      important_vals.num_sections++;
-    }
-
-    important_vals.size_of_optional_header = OPTIONAL_STANDARD_FIELDS_SIZE + OPTIONAL_WINDOWS_FIELDS_SIZE
-      + ALL_DATA_DIRECTORIES_SIZE;
-
-    important_vals.size_of_header =
-      BASE_HEADERS_SIZE
-      + ALL_DATA_DIRECTORIES_SIZE
-      + SINGLE_SECTION_HEADER_SIZE * important_vals.num_sections;
-
-    //Sections
-    uint32_t section_RVA = round_to_file_alignment(important_vals.size_of_header);
-    VA section_VA = round_to_section_alignment(important_vals.size_of_header);
-
-    important_vals.header_padding = section_RVA - important_vals.size_of_header;
-
-    if (pe_file->code != nullptr) {
-      important_vals.code_raw_size = (uint32_t)pe_file->code->size;
-      important_vals.code_va = section_VA;
-      important_vals.code_rva = section_RVA;
-
-      section_RVA += round_to_file_alignment(important_vals.code_raw_size);
-      section_VA += round_to_section_alignment(important_vals.code_raw_size);
-    }
-
-    if (pe_file->constants != nullptr) {
-      constants_to_bytes(section_RVA, section_VA, pe_file->constants, constants);
-
-      important_vals.constants_raw_size = (uint32_t)constants.size;
-      important_vals.constants_va = section_VA;
-      important_vals.constants_rva = section_RVA;
-
-      section_RVA += round_to_file_alignment(important_vals.constants_raw_size);
-      section_VA += round_to_section_alignment(important_vals.constants_raw_size);
-    }
-
-    if (pe_file->imports != nullptr) {
-      important_vals.imports_va = section_VA;
-      important_vals.imports_rva = section_RVA;
-
-      //1 for null termination
-      const uint32_t import_directory_table_size = (1ul + (uint32_t)pe_file->imports->imports.size) * IMPORT_DIRECTORY_SIZE;
-
-      uint32_t cumulative_import_lookup_tables = 0;
-
-      {
-        auto i = pe_file->imports->imports.mut_begin();
-        const auto end = pe_file->imports->imports.end();
-        for (; i < end; i++) {
-          uint32_t table_size =  8ul * (1ul + (uint32_t)i->imported_names.size);
-
-          i->lookup_table1 = import_directory_table_size + cumulative_import_lookup_tables + section_VA;
-          cumulative_import_lookup_tables += table_size;
-
-          //Identical tables
-          i->lookup_table2 = import_directory_table_size + cumulative_import_lookup_tables + section_VA;
-          cumulative_import_lookup_tables += table_size;
-        }
-      }
-
-      import_names_to_bytes(section_VA + import_directory_table_size + cumulative_import_lookup_tables,
-                            pe_file->imports->import_names, import_names);
-
-
-      important_vals.imports_raw_size = cumulative_import_lookup_tables + import_directory_table_size + (uint32_t)import_names.size;
-
-      section_RVA += round_to_file_alignment(important_vals.imports_raw_size);
-      section_VA += round_to_section_alignment(important_vals.imports_raw_size);
-    }
-
-    ASSERT(section_RVA % FILE_ALIGNMENT == 0);
-    ASSERT(section_VA % PAGE_SIZE == 0);
-
-    important_vals.size_of_image = section_VA;
   }
 
-  FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::WRITE);
+  const bool has_constants = strings.used > 0;
 
-  if (file.error_code != ErrorCode::OK) return file.error_code;
+  FILES::OpenedFile file = FILES::replace(file_name->string, FILES::OPEN_MODE::WRITE);
+
+  if (file.error_code != ErrorCode::OK) {
+    comp_thread->report_error(ERROR_CODE::FILE_ERROR, Span{}, "Could not open output file \"{}\" to write", file_name);
+    return;
+  }
 
   auto* const out = file.file;
 
+  usize file_pointer = 0;
+  usize memory_pointer = 0;
+
   {
     //MS-DOS header and stub
-    MS_DOS ms ={};
+    MS_DOS ms = {};
 
     ms.header.actual_start_of_header = MS_DO_HEADER_SIZE + MS_DOS_STUB_SIZE;
 
-    FILES::write_obj(out, ms.header);
-    FILES::write_obj(out, ms.stub);
+    write_to_image(out, ms.header, &file_pointer, &memory_pointer);
+    write_to_image(out, ms.stub, &file_pointer, &memory_pointer);
   }
 
   {
     constexpr uint8_t signature[SIGNATURE_SIZE] = PE_SIGNATURE;
 
-    FILES::write(out, signature, SIGNATURE_SIZE);
+    write_raw_to_image(out, signature, SIGNATURE_SIZE, &file_pointer, &memory_pointer);
   }
 
-  //COFF Header
+  size_t coff_header_location = file_pointer;
+
   {
-    COFF_file_header coff ={};
+    COFF_file_header coff = {};
+    static_assert(sizeof(coff) == 20);
+    write_to_image(out, coff, &file_pointer, &memory_pointer);
+  }
+
+  size_t optional_header_start = file_pointer;
+  size_t pe_header_location = optional_header_start;
+
+  {
+    PE32_StandardFields pe32 = {};
+    static_assert(sizeof(pe32) == 24);
+    write_to_image(out, pe32, &file_pointer, &memory_pointer);
+  }
+
+  constexpr usize section_alignment = PAGE_SIZE;
+  constexpr usize file_alignmnet = FILE_ALIGNMENT;
+
+  size_t pe_plus_header_location = file_pointer;
+
+  {
+    PE32Plus_windows_specific pe32_win = {};
+    static_assert(sizeof(pe32_win) == 88);
+    write_to_image(out, pe32_win, &file_pointer, &memory_pointer);
+  }
+
+  size_t data_directories_location = file_pointer;
+
+  {
+    Image_header_directories data_directories = {};
+
+    static_assert(sizeof(data_directories) == 128);
+    static_assert(sizeof(data_directories) == ALL_DATA_DIRECTORIES_NUM * 8);
+    write_to_image(out, data_directories, &file_pointer, &memory_pointer);
+  }
+
+
+  ///// Section headers right after main header /////
+  const size_t section_headers_start = file_pointer;
+
+  usize num_sections = 0;
+
+  const size_t constants_header_location = file_pointer;
+
+  if (has_constants) {
+    Section_Header constants_header = {};
+    num_sections += 1;
+    static_assert(sizeof(constants_header) == 40);
+    write_to_image(out, constants_header, &file_pointer, &memory_pointer);
+  }
+
+  const size_t imports_header_location = file_pointer;
+
+  if (has_dynamic_imports) {
+    Section_Header import_header = {};
+    num_sections += 1;
+    static_assert(sizeof(import_header) == 40);
+    write_to_image(out, import_header, &file_pointer, &memory_pointer);
+  }
+
+  const size_t code_header_location = file_pointer;
+
+  {
+    Section_Header code_header = {};
+    num_sections += 1;
+    static_assert(sizeof(code_header) == 40);
+    write_to_image(out, code_header, &file_pointer, &memory_pointer);
+  }
+
+  ///// SECTIONS /////
+
+  file_align(out, &file_pointer, file_alignmnet);
+  mem_align(&memory_pointer, section_alignment);
+  const usize end_of_headers = file_pointer;
+
+
+  usize initialized_data_size = 0;
+
+  const usize constants_start = file_pointer;
+  const usize constants_memory_start = memory_pointer;
+
+  if (has_constants) {
+    auto string_itr = strings.itr();
+
+    while (string_itr.is_valid()) {
+      const InternString* s = string_itr.key();
+      ProgramLocation* l = string_itr.val();
+
+      l->file = (uint32_t)file_pointer;
+      l->memory = (uint32_t)memory_pointer;
+
+      write_raw_to_image(out, (const u8*)s->string, s->len + 1, &file_pointer, &memory_pointer);
+
+      string_itr.next();
+    }
+
+  }
+
+  const usize constants_raw_size = file_pointer - constants_start;
+  file_align(out, &file_pointer, file_alignmnet);
+  mem_align(&memory_pointer, section_alignment);
+  const usize constants_file_size = file_pointer - constants_start;
+
+  initialized_data_size += constants_file_size;
+
+
+  const usize imports_start = file_pointer;
+  const usize imports_memory_start = memory_pointer;
+
+  usize import_address_table_memory_start = 0;
+  usize import_address_table_size = 0;
+
+  usize import_directory_memory_start = 0;
+  usize import_directory_size = 0;
+
+  struct  DynImport {
+    const InternString* function;
+    const InternString* library;
+    u32 index;
+  };
+
+  Array<usize> dyn_import_lookup = {};
+  Array<DynImport> dyn_imports = {};
+  if (has_dynamic_imports) {
+
+    {
+      dyn_import_lookup.insert_uninit(program->dyn_imports.size);
+      dyn_imports.reserve_total(program->dyn_imports.size);
+      
+      const Backend::DynImport* p_imports_start = program->dyn_imports.begin();
+      const Backend::DynImport* p_imports = p_imports_start;
+      const Backend::DynImport* p_imports_end = program->dyn_imports.end();
+
+      for (; p_imports < p_imports_end; ++p_imports) {
+        DynImport copy = {};
+        copy.function = p_imports->function;
+        copy.library = p_imports->library;
+        copy.index = (u32)(p_imports - p_imports_start);
+
+        dyn_imports.insert(copy);
+      }
+    }
+
+    sort_range(dyn_imports.mut_begin(), dyn_imports.mut_end(),
+               [](const DynImport& left, const DynImport& right) {
+      if (left.library != right.library) {
+        return left.library < right.library;
+      }
+      else {
+        return left.function < right.function;
+      }
+    });
+
+    const DynImport* const dyn_imports_start = dyn_imports.begin();
+    const DynImport* const dyn_imports_end = dyn_imports.end();
+
+    struct LI {
+      const InternString* lib_name;
+      u32 num_funcs;
+      usize lookup_table_estimate;
+      usize address_table_estimate;
+    };
+    Array<LI> library_infos = {};
+
+    {
+      const InternString* previous_lib = nullptr;
+      const DynImport* dyn_imports = dyn_imports_start;
+
+      LI* li = nullptr;
+
+      for (; dyn_imports < dyn_imports_end; dyn_imports += 1) {
+        if (previous_lib != dyn_imports->library) {
+          previous_lib = dyn_imports->library;
+          library_infos.insert_uninit(1);
+          li = library_infos.back();
+          li->lib_name = dyn_imports->library;
+          li->num_funcs = 1;
+        }
+        else {
+          li->num_funcs += 1;
+        }
+      }
+    }
+
+
+    usize import_tables_size = 0;
+    {
+      LI* li = library_infos.mut_begin();
+      LI* li_end = library_infos.mut_end();
+
+      for (; li < li_end; li += 1) {
+        import_tables_size += sizeof(u64) * (li->num_funcs + 1);
+      }
+    }
+
+    usize import_directory_start = file_pointer;
+    import_directory_memory_start = memory_pointer;
+    import_directory_size = (library_infos.size + 1) * sizeof(ImportDataDirectory);
+
+    usize import_lookup_start_estimate = file_pointer + import_directory_size + import_tables_size;
+
+    {
+      usize import_table_acc = 0;
+
+      LI* li = library_infos.mut_begin();
+      LI* li_end = library_infos.mut_end();
+
+      for(; li < li_end; li += 1) {
+        ImportDataDirectory idir = {};
+        idir.forwarder_chain = 0;
+        idir.date_time_stamp = 0;
+
+        const ProgramLocation* pl = strings.get_val(li->lib_name);
+        ASSERT(pl != nullptr);
+
+        idir.name_rva = pl->memory;
+
+        usize table_size = (li->num_funcs + 1) * sizeof(u64);
+
+        li->address_table_estimate = memory_pointer + import_directory_size + import_table_acc;
+        li->lookup_table_estimate = li->address_table_estimate + import_tables_size;
+        idir.import_address_table = (RVA)li->address_table_estimate;
+        idir.import_lookup_table = (RVA)li->lookup_table_estimate;
+        import_table_acc += table_size;
+
+        write_to_image(out, idir, &file_pointer, &memory_pointer);
+      }
+
+      {
+        ImportDataDirectory null_idir = {};
+        null_idir.import_lookup_table = 0;
+        null_idir.date_time_stamp = 0;
+        null_idir.forwarder_chain = 0;
+        null_idir.name_rva = 0;
+        null_idir.import_address_table = 0;
+
+        write_to_image(out, null_idir, &file_pointer, &memory_pointer);
+      }
+    }
+
+    ASSERT(file_pointer - import_directory_start == import_directory_size);
+
+    usize hint_name_table_start_estimate = memory_pointer + import_tables_size * 2;
+    usize hint_name_table_size = 0;
+
+    usize import_address_table_start = file_pointer;
+    import_address_table_memory_start = memory_pointer;
+
+    {
+      const DynImport* dyn_imports = dyn_imports_start;
+
+      const LI* li = library_infos.begin();
+      const LI* li_end = library_infos.end();
+      constexpr u64 NULL_ENTRY = 0;
+
+      for (; li < li_end; li += 1) {
+        ASSERT(li->address_table_estimate == memory_pointer);
+        for (; dyn_imports < dyn_imports_end && dyn_imports->library == li->lib_name; dyn_imports += 1) {
+          u64 entry = 0;
+          entry |= (hint_name_table_start_estimate + hint_name_table_size) & 0x7fffffff;
+
+          dyn_import_lookup.data[dyn_imports->index] = memory_pointer;
+          write_to_image(out, entry, &file_pointer, &memory_pointer);
+
+          const usize name_size = dyn_imports->function->len + 1;
+
+          hint_name_table_size += 2;
+          hint_name_table_size += name_size;
+          hint_name_table_size += name_size % 2;
+        }
+
+        write_to_image(out, NULL_ENTRY, &file_pointer, &memory_pointer);
+
+      }
+
+      ASSERT(dyn_imports == dyn_imports_end);
+    }
+
+    import_address_table_size = file_pointer - import_address_table_start;
+    ASSERT(import_lookup_start_estimate == file_pointer);
+
+    {
+      const DynImport* dyn_imports = dyn_imports_start;
+
+      const LI* li = library_infos.begin();
+      const LI* li_end = library_infos.end();
+      constexpr u64 NULL_ENTRY = 0;
+
+      usize hint_name_table_acc = 0;
+
+      for (; li < li_end; li += 1) {
+        ASSERT(li->lookup_table_estimate == memory_pointer);
+        for (; dyn_imports < dyn_imports_end && dyn_imports->library == li->lib_name; dyn_imports += 1) {
+          u64 entry = 0;
+          entry |= (hint_name_table_start_estimate + hint_name_table_acc) & 0x7fffffff;
+
+          write_to_image(out, entry, &file_pointer, &memory_pointer);
+
+          const usize name_size = dyn_imports->function->len + 1;
+
+          hint_name_table_acc += 2;
+          hint_name_table_acc += name_size;
+          hint_name_table_acc += name_size % 2;
+
+
+        }
+
+        write_to_image(out, NULL_ENTRY, &file_pointer, &memory_pointer);
+
+      }
+
+      ASSERT(hint_name_table_acc == hint_name_table_size);
+    }
+
+    ASSERT(hint_name_table_start_estimate == memory_pointer);
+
+    {
+      const DynImport* dyn_imports = dyn_imports_start;
+
+      constexpr u16 GUESS = 0;
+      constexpr u8 PAD = '\0';
+
+      for (; dyn_imports < dyn_imports_end; ++dyn_imports) {
+        const usize name_size = dyn_imports->function->len + 1;
+
+        write_to_image(out, GUESS, &file_pointer, &memory_pointer);
+        write_raw_to_image(out, (const u8*)dyn_imports->function->string, name_size, &file_pointer, &memory_pointer);
+        if (name_size % 2 == 1) {
+          write_to_image(out, PAD, &file_pointer, &memory_pointer);
+        }
+      }
+    }
+  }
+
+  const usize imports_raw_size = file_pointer - imports_start;
+  file_align(out, &file_pointer, file_alignmnet);
+  mem_align(&memory_pointer, section_alignment);
+  const usize imports_file_size = file_pointer - imports_start;
+
+  initialized_data_size += imports_file_size;
+
+  const usize code_start = file_pointer;
+  const usize code_memory_start = memory_pointer;
+
+  {
+    //Write all the code
+
+    Backend::DataBucketIterator code = program->code_store.start();
+
+    const Backend::Relocation* reloc = program->relocations.begin();
+    const Backend::Relocation* reloc_end = program->relocations.end();
+
+    for (; reloc < reloc_end; reloc += 1) {
+      ASSERT(code.actual_location <= reloc->location);
+
+      write_code_partial(out, &code, reloc->location, &file_pointer, &memory_pointer);
+
+      switch (reloc->type) {
+        case Backend::RelocationType::Label: {
+            ASSERT(program->functions.size > reloc->label.label);
+
+            usize jump_to = program->functions.data[reloc->label.label].code_start.actual_location;
+
+            i32 disp = 0;
+            bool can_local_jump = X64::try_relative_disp(reloc->location + 4, jump_to, &disp);
+            ASSERT(can_local_jump);//TODO: handle trampolining
+
+            write_to_image(out, disp, &file_pointer, &memory_pointer);
+            code.jump_to(reloc->location + 4);
+            break;
+          }
+        case Backend::RelocationType::LibraryLabel: {
+            ASSERT(dyn_import_lookup.size > reloc->library_call);
+            usize jump_to = dyn_import_lookup.data[reloc->label.label];
+
+            i32 disp = 0;
+            bool can_local_jump = X64::try_relative_disp(memory_pointer + 4, jump_to, &disp);
+            ASSERT(can_local_jump);//TODO: handle trampolining
+
+            write_to_image(out, disp, &file_pointer, &memory_pointer);
+            code.jump_to(reloc->location + 4);
+            break;
+          }
+      }
+    }
+
+    write_code_partial(out, &code, program->code_store.total_size, &file_pointer, &memory_pointer);
+  }
+
+  const usize code_raw_size = file_pointer - code_start;
+
+  file_align(out, &file_pointer, file_alignmnet);
+  mem_align(&memory_pointer, section_alignment);
+
+  const usize code_file_size = file_pointer - code_start;
+
+  usize end_of_file = file_pointer;
+  usize image_size = memory_pointer;
+  ASSERT(end_of_file % file_alignmnet == 0);
+
+  //Go back and fix the headers
+  FILES::seek_from_start(out, coff_header_location);
+
+  {
+    COFF_file_header coff = {};
 
     coff.machine = MACHINE_TYPE::AMD64;
-    coff.number_of_sections = important_vals.num_sections;
+    coff.number_of_sections = (uint16_t)num_sections;
     coff.time_date_stamp = TIME;
-    coff.pointer_to_symbol_table = 0;
+    coff.pointer_to_symbol_table = 0;//COFF symbol table not supported in image
     coff.number_of_symbols = 0;
-    coff.size_of_optional_header = important_vals.size_of_optional_header;
+    coff.size_of_optional_header = (uint16_t)(section_headers_start - optional_header_start);//size of image header
     coff.characteristics = COFF_Characteristics::EXECUTABLE_IMAGE | COFF_Characteristics::LARGE_ADDRESS_AWARE;
 
+    static_assert(sizeof(coff) == 20);
     FILES::write_obj(out, coff);
   }
 
-  //PE32 Optional header
+  FILES::seek_from_start(out, pe_header_location);
+
   {
-    PE32Plus_optional_header pe32 ={};
+    PE32_StandardFields pe32 = {};
     pe32.magic_number = MAGIC_NUMBER::PE32_PLUS;
-    pe32.major_linker_version = 14;
-    pe32.minor_linker_version = 30;
-    pe32.size_of_code = round_to_file_alignment(important_vals.code_raw_size);
-
-    pe32.size_of_initialized_data
-      = round_to_file_alignment(important_vals.constants_raw_size)
-      + round_to_file_alignment(important_vals.imports_raw_size);
-
+    pe32.major_linker_version = 14;//TODO: get these right
+    pe32.minor_linker_version = 36;//TODO: get these right
+    pe32.size_of_code = (uint32_t)code_file_size;
+    pe32.size_of_initialized_data = (uint32_t)initialized_data_size;
     pe32.size_of_uninitialized_data = 0;
-    if (pe_file->code == nullptr) {
-      pe32.address_of_entry_point = 0;
-    }
-    else {
-      pe32.address_of_entry_point = important_vals.code_va + (uint32_t)pe_file->code->entry_point;
-    }
-    pe32.base_of_code = important_vals.code_rva;
 
+    pe32.base_of_code = (PE_Address)code_memory_start;
+
+    ASSERT(program->entry_point.label != 0);
+    ASSERT(program->start_code.code_size > 0);
+    pe32.address_of_entry_point = (PE_Address)program->start_code.code_start.actual_location + (PE_Address)code_memory_start;
+
+    static_assert(sizeof(pe32) == 24);
     FILES::write_obj(out, pe32);
   }
 
-  //PE32 Optional Windows specific header
+  FILES::seek_from_start(out, pe_plus_header_location);
+
   {
-    PE32Plus_windows_specific pe32_win ={};
+    PE32Plus_windows_specific pe32_win = {};
 
     pe32_win.image_base = NT_IMAGE_BASE;
-    pe32_win.section_alignment = PAGE_SIZE;
-    pe32_win.file_alignment = FILE_ALIGNMENT;
+    pe32_win.section_alignment = section_alignment;
+    pe32_win.file_alignment = file_alignmnet;
 
     //not sure if these versions are correct ... 
 
@@ -380,11 +782,11 @@ ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name)
     pe32_win.major_sub_version = 6;
     pe32_win.minor_sub_version = 0;
 
-    pe32_win.size_of_image = important_vals.size_of_image;
-    pe32_win.size_of_header = round_to_file_alignment(important_vals.size_of_header);
-    pe32_win.subsystem = 3;
+    pe32_win.size_of_image = (uint32_t)image_size;
+    pe32_win.size_of_header = (uint32_t)end_of_headers;
+    pe32_win.subsystem = SUBSYSTEMS::CONSOLE;
 
-    pe32_win.DLL_characteristics = DLL_Characteristics::NX_COMPAT | DLL_Characteristics::TERMINAL_SERVER_AWARE;
+    pe32_win.DLL_characteristics = DLL_Characteristics::NX_COMPAT | DLL_Characteristics::DYNAMIC_BASE;
 
     pe32_win.size_of_stack_reserve = 0x100000;
     pe32_win.size_of_stack_commit = 0x1000;
@@ -394,98 +796,73 @@ ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name)
 
     pe32_win.number_of_rva_and_sizes = ALL_DATA_DIRECTORIES_NUM;
 
+    static_assert(sizeof(pe32_win) == 88);
     FILES::write_obj(out, pe32_win);
   }
 
-  //Optional Header Directories
-  {
-    Image_header_directories data_directories ={};
+  FILES::seek_from_start(out, data_directories_location);
 
-    if (pe_file->imports != nullptr) {
-      data_directories.import_table.virtual_address = important_vals.imports_va;
-      data_directories.import_table.size = important_vals.imports_raw_size;
+  {
+    Image_header_directories data_directories = {};
+
+    if (has_dynamic_imports) {
+      ASSERT(imports_raw_size > 0);
+      ASSERT(imports_file_size > 0);
+
+      data_directories.import_table.virtual_address = (RVA)import_directory_memory_start;
+      data_directories.import_table.size = (u32)import_directory_size;
+
+      data_directories.import_address_table.virtual_address = (RVA)import_address_table_memory_start;
+      data_directories.import_address_table.size = (u32)import_address_table_size;
     }
 
+    static_assert(sizeof(data_directories) == 128);
+    static_assert(sizeof(data_directories) == ALL_DATA_DIRECTORIES_NUM * 8);
     FILES::write_obj(out, data_directories);
   }
 
+  if (has_constants) {
+    FILES::seek_from_start(out, constants_header_location);
 
-  ///// Section headers right after main header /////
+    Section_Header constants_header = {};
 
-  if (pe_file->code != nullptr) {
-    Section_Header code_header ={};
-
-    //utf-8 ".text"
-    code_header.name[0] = 0x2E;
-    code_header.name[1] = 0x74;
-    code_header.name[2] = 0x65;
-    code_header.name[3] = 0x78;
-    code_header.name[4] = 0x74;
-    code_header.name[5] = 0x00;
-    code_header.name[6] = 0x00;
-    code_header.name[7] = 0x00;
-
-    code_header.virtual_size = important_vals.code_raw_size;
-    code_header.virtual_address = important_vals.code_va;
-    code_header.size_of_raw_data = round_to_file_alignment(important_vals.code_raw_size);
-    code_header.pointer_to_raw_data = important_vals.code_rva;
-
-    //All irrelevant in this
-    code_header.pointer_to_relocations = 0x0;
-    code_header.pointer_to_line_numbers = 0x0;
-    code_header.number_of_relocations = 0x0;
-    code_header.number_of_line_numbers = 0x0;
-
-    code_header.characteristics = Section_Flags::CONTAINS_CODE | Section_Flags::EXECTUTABLE | Section_Flags::READABLE;
-
-    FILES::write_obj(out, code_header);
-  }
-
-  if (pe_file->constants != nullptr) {
-    Section_Header constants_header ={};
-
-    //utf-8 ".rdata"
-    constants_header.name[0] = 0x2E;
-    constants_header.name[1] = 0x72;
-    constants_header.name[2] = 0x64;
-    constants_header.name[3] = 0x61;
-    constants_header.name[4] = 0x74;
-    constants_header.name[5] = 0x61;
+    constants_header.name[0] = '.';
+    constants_header.name[1] = 'r';
+    constants_header.name[2] = 'd';
+    constants_header.name[3] = 'a';
+    constants_header.name[4] = 't';
+    constants_header.name[5] = 'a';
     constants_header.name[6] = 0x00;
     constants_header.name[7] = 0x00;
 
-    constants_header.virtual_size = important_vals.constants_raw_size;
-    constants_header.virtual_address = important_vals.constants_va;
-    constants_header.size_of_raw_data = round_to_file_alignment(important_vals.constants_raw_size);
-    constants_header.pointer_to_raw_data = important_vals.constants_rva;
-
-    //All irrelevant in this
-    constants_header.pointer_to_relocations = 0x0;
-    constants_header.pointer_to_line_numbers = 0x0;
-    constants_header.number_of_relocations = 0x0;
-    constants_header.number_of_line_numbers = 0x0;
+    constants_header.virtual_size = (uint32_t)constants_raw_size;
+    constants_header.virtual_address = (RVA)constants_memory_start;
+    constants_header.size_of_raw_data = (uint32_t)constants_file_size;
+    constants_header.pointer_to_raw_data = (uint32_t)constants_start;
 
     constants_header.characteristics = Section_Flags::READABLE | Section_Flags::CONTAINS_INITIALIZED;
 
     FILES::write_obj(out, constants_header);
   }
 
-  if (pe_file->imports != nullptr) {
-    Section_Header imports_header ={};
+  if (has_dynamic_imports) {
+    FILES::seek_from_start(out, imports_header_location);
 
-    imports_header.name[0] = 0x2E;//.
-    imports_header.name[1] = 0x69;//i
-    imports_header.name[2] = 0x64;//d
-    imports_header.name[3] = 0x61;//a
-    imports_header.name[4] = 0x74;//t
-    imports_header.name[5] = 0x61;//a
+    Section_Header imports_header = {};
+
+    imports_header.name[0] = '.';
+    imports_header.name[1] = 'i';
+    imports_header.name[2] = 'd';
+    imports_header.name[3] = 'a';
+    imports_header.name[4] = 't';
+    imports_header.name[5] = 'a';
     imports_header.name[6] = 0x00;
     imports_header.name[7] = 0x00;
 
-    imports_header.virtual_size = important_vals.imports_raw_size;
-    imports_header.virtual_address = important_vals.imports_va;
-    imports_header.size_of_raw_data = round_to_file_alignment(important_vals.imports_raw_size);
-    imports_header.pointer_to_raw_data = important_vals.imports_rva;
+    imports_header.virtual_size = (uint32_t)imports_raw_size;
+    imports_header.virtual_address = (RVA)imports_memory_start;
+    imports_header.size_of_raw_data = (uint32_t)imports_file_size;
+    imports_header.pointer_to_raw_data = (uint32_t)imports_start;
 
     //All irrelevant in this
     imports_header.pointer_to_relocations = 0x0;
@@ -498,69 +875,43 @@ ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name)
     FILES::write_obj(out, imports_header);
   }
 
-  FILES::write_padding_bytes(out, '\0', important_vals.header_padding);
+  FILES::seek_from_start(out, code_header_location);
 
-  ///// SECTIONS /////
+  {
+    Section_Header code_header = {};
 
-  if (pe_file->code != nullptr) {
-    FILES::write_aligned_array(out, pe_file->code->bytes, pe_file->code->size, FILE_ALIGNMENT);
+    code_header.name[0] = '.';
+    code_header.name[1] = 't';
+    code_header.name[2] = 'e';
+    code_header.name[3] = 'x';
+    code_header.name[4] = 't';
+    code_header.name[5] = 0x00;
+    code_header.name[6] = 0x00;
+    code_header.name[7] = 0x00;
+
+    code_header.virtual_size = (uint32_t)code_raw_size;
+    code_header.virtual_address = (RVA)code_memory_start;
+    code_header.size_of_raw_data = (uint32_t)code_file_size;
+    code_header.pointer_to_raw_data = (uint32_t)code_start;
+
+    code_header.pointer_to_relocations = 0;
+    code_header.pointer_to_line_numbers = 0;
+    code_header.number_of_relocations = 0;
+    code_header.number_of_line_numbers = 0;
+
+    code_header.characteristics = Section_Flags::CONTAINS_CODE | Section_Flags::EXECTUTABLE | Section_Flags::READABLE;
+
+    static_assert(sizeof(code_header) == 40);
+    FILES::write_obj(out, code_header);
   }
 
-  if (pe_file->constants != nullptr) {
-    FILES::write_aligned_array(out, constants, FILE_ALIGNMENT);
+#if 0
+  static_assert(false, "Checksum?");
+  static_assert(false, "Attribute Certificate?");
+#endif
+
+  FILES::close(out);
   }
-
-  if (pe_file->imports != nullptr) {
-    //Data directories
-    {
-      auto i = pe_file->imports->imports.begin();
-      const auto end = pe_file->imports->imports.end();
-
-      for (; i < end; i++) {
-        ImportDataDirectory data_directory ={};
-
-        data_directory.import_lookup_table = i->lookup_table1;
-        data_directory.date_time_stamp = 0;
-        data_directory.forwarder_chain = 0;
-        data_directory.name_rva = pe_file->constants->get_constant_va(i->DLL_name);
-        data_directory.import_address_table = i->lookup_table2;
-
-        FILES::write_obj(out, data_directory);
-      }
-
-      //Null terminated
-      FILES::write_padding_bytes(out, '\0', IMPORT_DIRECTORY_SIZE);
-    }
-
-    //Entry tables
-    {
-      auto i = pe_file->imports->imports.begin();
-      const auto end = pe_file->imports->imports.end();
-
-      const ImportNameEntry* entries = pe_file->imports->import_names.data;
-
-      for (; i < end; i++) {
-        for (size_t itr = 0; itr < 2; itr++) {
-          //Write it out twice
-          for (auto imp : i->imported_names) {
-            uint64_t entry = 0;
-            //31 bits for some reason
-            entry |= (entries[imp].va & 0x7fffffff);
-            FILES::write_obj(out, entry);
-          }
-          FILES::write_padding_bytes(out, '\0', 8);
-        }
-      }
-    }
-
-    FILES::write(out, import_names.data, import_names.size);
-
-    size_t padding = (size_t)round_to_file_alignment(important_vals.imports_raw_size) - (size_t)important_vals.imports_raw_size;
-    FILES::write_padding_bytes(out, '\0', padding);
-  }
-
-  return FILES::close(out);
-}
 
 struct RVA_Resolver {
   int32_t ptr_base = 0;
@@ -577,7 +928,7 @@ static RVA_Resolver get_rva_section_resolver(PEFile* pe_file, RVA rva) {
   for (; i < end; i++) {
     size_t end_of_section = i->virtual_address + (uint64_t)i->virtual_size;
     if (i->virtual_address <= rva && rva < end_of_section) {
-      RVA_Resolver res ={};
+      RVA_Resolver res = {};
       res.ptr_base = i->pointer_to_raw_data;
       res.va_base = i->virtual_address;
       return res;
@@ -597,9 +948,9 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
   if (file.error_code != ErrorCode::OK) {
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
-                       "Could not open file '{}'\n"
-                       "Perhaps it does not exist",
-                       file_name);
+                              "Could not open file '{}'\n"
+                              "Perhaps it does not exist",
+                              file_name);
     return;
   }
 
@@ -610,11 +961,11 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
   if (pe_file->header.ms_dos.magic != MAGIC_NUMBER::MZ) {
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
-                       "File '{}' did not have correct type\n"
-                       "Magic numbers did not match\n"
-                       "Expected '{}'. Found '{}'",
-                       file_name, MagicNumber{ MAGIC_NUMBER::MZ },
-                       MagicNumber{ pe_file->header.ms_dos.magic });
+                              "File '{}' did not have correct type\n"
+                              "Magic numbers did not match\n"
+                              "Expected '{}'. Found '{}'",
+                              file_name, MagicNumber{ MAGIC_NUMBER::MZ },
+                              MagicNumber{ pe_file->header.ms_dos.magic });
     return;
   }
 
@@ -628,13 +979,13 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
     if (memcmp_ts(expected_sig, sig, 4) != 0) {
       comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
-                         "File '{}' did not have correct signature\n"
-                         "Expected: {} {} {} {}. Found: {} {} {} {}",
-                         file_name,
-                         DisplayChar{ expected_sig[0] }, DisplayChar{ expected_sig[1] },
-                         DisplayChar{ expected_sig[2] }, DisplayChar{ expected_sig[3] },
-                         DisplayChar{ sig[0] }, DisplayChar{ sig[1] },
-                         DisplayChar{ sig[2] }, DisplayChar{ sig[3] });
+                                "File '{}' did not have correct signature\n"
+                                "Expected: {} {} {} {}. Found: {} {} {} {}",
+                                file_name,
+                                DisplayChar{ expected_sig[0] }, DisplayChar{ expected_sig[1] },
+                                DisplayChar{ expected_sig[2] }, DisplayChar{ expected_sig[3] },
+                                DisplayChar{ sig[0] }, DisplayChar{ sig[1] },
+                                DisplayChar{ sig[2] }, DisplayChar{ sig[3] });
       return;
     }
   }
@@ -645,11 +996,11 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
   if (pe_file->header.pe32.magic_number != MAGIC_NUMBER::PE32_PLUS) {
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
-                       "File '{}' did not have correct type\n"
-                       "2nd magic numbers did not match\n"
-                       "Expected '{}'. Found '{}'",
-                       file_name, (uint16_t)MAGIC_NUMBER::PE32_PLUS,
-                       (uint16_t)pe_file->header.pe32.magic_number);
+                              "File '{}' did not have correct type\n"
+                              "2nd magic numbers did not match\n"
+                              "Expected '{}'. Found '{}'",
+                              file_name, (uint16_t)MAGIC_NUMBER::PE32_PLUS,
+                              (uint16_t)pe_file->header.pe32.magic_number);
     return;
   }
 
@@ -660,9 +1011,9 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
     if (win.win32_version != 0 || win.loader_flags != 0) {
       comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
-                         "Parts of file '{}' that are reserved as 0 were not 0\n"
-                         "This is probably an internal reading error",
-                         file_name);
+                                "Parts of file '{}' that are reserved as 0 were not 0\n"
+                                "This is probably an internal reading error",
+                                file_name);
       return;
     }
   }
@@ -677,9 +1028,9 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
     if (currpos != expected) {
       comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
-                         "Size mismatch in header\n"
-                         "Expected optional header position '{}'. Found '{}'",
-                         expected, currpos);
+                                "Size mismatch in header\n"
+                                "Expected optional header position '{}'. Found '{}'",
+                                expected, currpos);
       return;
     }
   }
@@ -710,9 +1061,9 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     const ExportDirectoryTable& directory_table = pe_file->export_table.directory_table;
     if (directory_table.export_flags != 0) {
       comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
-                         "Export table export flags should be '0'. Found '{}'\n"
-                         "This is probably an internal error",
-                         directory_table.export_flags);
+                                "Export table export flags should be '0'. Found '{}'\n"
+                                "This is probably an internal error",
+                                directory_table.export_flags);
       return;
     }
 
@@ -732,7 +1083,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     const size_t num_ordinals = directory_table.num_name_pointers;
 
     //Load name rvas
-    Array<RVA> name_rvas ={};
+    Array<RVA> name_rvas = {};
     name_rvas.insert_uninit(num_ordinals);
     //Seek to names
     FILES::seek_from_start(file.file, resolver.load_rva_ptr(directory_table.name_pointer_table_address));
@@ -740,7 +1091,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     FILES::read(file.file, name_rvas.data, num_ordinals);
 
     //Load ordinals
-    Array<uint16_t> ordinals ={};
+    Array<uint16_t> ordinals = {};
     ordinals.insert_uninit(num_ordinals);
     //Seek to ordinals
     FILES::seek_from_start(file.file, resolver.load_rva_ptr(directory_table.ordinal_table_address));
@@ -751,7 +1102,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     {
       pe_file->export_table.element_table.reserve_extra(num_ordinals);
 
-      Array<char> name_holder ={};
+      Array<char> name_holder = {};
 
       for (size_t i = 0; i < num_ordinals; i++) {
         pe_file->export_table.element_table.insert_uninit(1);
@@ -790,3 +1141,4 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     }
   }
 }
+

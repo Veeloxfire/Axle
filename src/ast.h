@@ -3,16 +3,9 @@
 #include "strings.h"
 #include "operators.h"
 #include "type.h"
+#include "ir.h"
 #include "parser.h"
 #include "comp_utilities.h"
-
-struct Type;
-struct Function;
-struct EnumValue;
-struct State;
-struct Global;
-struct AST;
-struct Namespace;
 
 struct AST_LINKED {
   AST_LOCAL curr = 0;
@@ -76,7 +69,7 @@ MOD(WHILE) \
 MOD(RETURN) \
 MOD(FUNCTION_SIGNATURE) \
 MOD(IMPORT) \
-MOD(STATIC_LINK)
+MOD(LINK)
 
 enum struct AST_TYPE : u8 {
   INVALID = 0,
@@ -94,6 +87,7 @@ constexpr const char* ast_type_string(AST_TYPE ty) {
   }
 }
 
+#if 0
 constexpr bool valid_type_node(AST_TYPE t) {
   switch (t) {
     case AST_TYPE::NAMED_TYPE:
@@ -104,12 +98,12 @@ constexpr bool valid_type_node(AST_TYPE t) {
     default: return false;
   }
 }
+#endif
 
 struct AST {
   META_FLAGS meta_flags = 0;
-  uint8_t valid_rvts = ALL_RVTS;
 
-  void* value = nullptr;
+  bool can_be_constant;
 
   AST_TYPE ast_type;
   Type node_type = {};
@@ -117,24 +111,30 @@ struct AST {
 };
 
 struct ASTNamedType : public AST {
-  const InternString* name = {};
+  Type actual_type = {};
+  const InternString* name = nullptr;
 };
 
 struct ASTArrayType : public AST {
+  Type actual_type = {};
+  u64 array_length = 0;
   AST_LOCAL base = 0;
   AST_LOCAL expr = 0;
 };
 
 struct ASTPtrType : public AST {
+  Type actual_type = {};
   AST_LOCAL base = 0;
 };
 
 struct ASTLambdaType : public AST {
+  Type actual_type = {};
   AST_LOCAL ret = 0;
   AST_ARR args = {};
 };
 
 struct ASTTupleType : public AST {
+  Type actual_type = {};
   AST_ARR types = {};
 };
 
@@ -159,20 +159,20 @@ struct ASTFunctionCallExpr : public AST {
 
   const InternString* function_name = nullptr;
   const SignatureStructure* sig = nullptr;
-  usize label = 0;
+  IR::GlobalLabel label = { 0 };
 };
 
 struct ASTUnaryOperatorExpr : public AST {
   UNARY_OPERATOR op;
   AST_LOCAL expr = 0;
 
-  UNARY_OPERATOR_FUNCTION emit = nullptr;
+  UnOpEmitInfo emit_info = {};
 };
 
 struct ASTCastExpr : public AST {
   AST_LOCAL type = 0;
   AST_LOCAL expr = 0;
-  CAST_FUNCTION emit = nullptr;
+  CASTS::CAST_FUNCTION emit = nullptr;
 };
 
 struct ASTIndexExpr : public AST {
@@ -248,7 +248,7 @@ struct ASTLocalDecl : public ASTDecl {
 };
 
 struct ASTFuncSig : public AST {
-  FunctionSignature* sig = nullptr;
+  IR::FunctionSignature* sig = nullptr;
   const CallingConvention* convention = nullptr;
 
   AST_LOCAL return_type = 0;
@@ -265,7 +265,7 @@ struct ASTStructExpr : public AST {
 
 
 struct ASTLambda : public AST {
-  Function* function = nullptr;
+  IR::Function* function = nullptr;
 
   AST_LOCAL sig = {};
   AST_LOCAL body = {};
@@ -274,6 +274,7 @@ struct ASTLambda : public AST {
 struct ASTStructBody : public AST {
   UnitID unit_id;
   AST_ARR elements = {};
+  Type actual_type = {};
 };
 
 struct ASTWhile : public AST {
@@ -300,8 +301,10 @@ struct ASTImport : public AST {
   AST_LOCAL expr_location;
 };
 
-struct ASTStaticLink : public AST {
+struct ASTLink : public AST {
   AST_LOCAL import_type;
+
+  bool dynamic;
 
   const InternString* lib_file;
   const InternString* name;

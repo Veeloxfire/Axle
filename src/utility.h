@@ -138,22 +138,6 @@ constexpr u64 fnv1a_hash_u64(u64 start, u64 u) {
   return start;
 }
 
-constexpr bool can_be_from_sign_extension(uint64_t u64) {
-  if ((u64 & 0xFFFFFFFF00000000ull) == 0xFFFFFFFF00000000ull) {
-    //Want to extend with 1s
-    //Must be a negative value
-    return (u64 & 0x80000000) > 0;
-  }
-  else if ((u64 & 0xFFFFFFFF00000000ull) == 0x0000000000000000ull) {
-    //Want to extend with 0s
-    //Must be positive value
-    return (u64 & 0x80000000) == 0;
-  }
-  else {
-    return false;
-  }
-}
-
 template<typename T, typename B>
 constexpr T bit_fill_upper(B bits) {
   const auto n_bits = static_cast<uint64_t>(bits) & 0b111111llu;
@@ -224,7 +208,7 @@ constexpr inline uint64_t pow_10(uint64_t v) {
     return 0;
   }
 
-  constexpr uint64_t pow10[] ={
+  constexpr uint64_t pow10[] = {
     1ull,
     10ull,
     100ull,
@@ -460,8 +444,8 @@ void sort_range(T* start, T* end, const L& pred) {
 
 template<typename T>
 struct Array {
-  T* data         = nullptr;// ptr to data in the array
-  size_t size     = 0;// used size
+  T* data = nullptr;// ptr to data in the array
+  size_t size = 0;// used size
   size_t capacity = 0;
 
   //No copy!
@@ -723,6 +707,57 @@ struct Array {
   }
 };
 
+
+template<typename T>
+void copy_array(const Array<T>& from, Array<T>& to) noexcept {
+  to.clear();
+  to.reserve_total(from.size);
+
+  for (size_t i = 0; i < from.size; i++) {
+    to.data[i] = from.data[i];
+  }
+
+  to.size += from.size;
+}
+
+template<typename T>
+void combine_unique(const Array<T>& from, Array<T>& to) noexcept {
+  auto i = from.begin();
+  const auto end = from.end();
+
+  const size_t initial_size = to.size;
+  for (; i < end; i++) {
+    for (size_t i_to = 0; i_to < initial_size; i_to++) {
+      if (*i == to.data[i_to]) {
+        goto NEXT_COMBINE;
+      }
+    }
+
+    to.insert(*i);
+
+  NEXT_COMBINE:
+    continue;
+  }
+}
+
+template<typename T>
+void reverse_array(Array<T>& arr) noexcept {
+  if (arr.size == 0) { return; }
+
+  auto* i_beg = arr.data;
+  auto* i_back = arr.data + arr.size - 1;
+
+  //Swap first with back - then step inwards
+  while (i_beg < i_back) {
+    T temp = std::move(*i_beg);
+    *i_beg = std::move(*i_back);
+    *i_back = std::move(temp);
+
+    i_beg++;
+    i_back--;
+  }
+}
+
 template<typename T>
 struct SparseHash;
 
@@ -742,9 +777,9 @@ struct SparseHashSet {
 
   constexpr static float LOAD_FACTOR = 0.75;
 
-  uint8_t* data      = nullptr;// ptr to data in the array
+  uint8_t* data = nullptr;// ptr to data in the array
   size_t el_capacity = 0;//number of elements
-  size_t used        = 0;
+  size_t used = 0;
 
   constexpr bool needs_resize(size_t extra) const {
     return (el_capacity * LOAD_FACTOR) <= (used + extra);
@@ -861,7 +896,7 @@ struct SparseHashSet {
           const size_t new_index = get_soa_index(key);
 
           hash_arr[new_index] = key;
-          val_arr[new_index]  = std::move(old_val_arr[i]);
+          val_arr[new_index] = std::move(old_val_arr[i]);
         }
       }
 
@@ -1088,7 +1123,7 @@ struct ArenaAllocator {
 
   struct Block {
     constexpr static size_t BLOCK_SIZE = 128;
-    uint64_t data[BLOCK_SIZE] ={};
+    uint64_t data[BLOCK_SIZE] = {};
 
     Block* next = nullptr;
 
@@ -1134,7 +1169,7 @@ struct BumpAllocator {
     size_t filled = 0;
     BLOCK* prev = nullptr;
 
-    uint8_t data[BLOCK_SIZE] ={};
+    uint8_t data[BLOCK_SIZE] = {};
   };
 
   BLOCK* top = nullptr;
@@ -1157,7 +1192,7 @@ struct FreelistBlockAllocator {
 
   struct Element {
     union {
-      Header header ={};
+      Header header = {};
       T el;
     };
 
@@ -1171,7 +1206,7 @@ struct FreelistBlockAllocator {
 
     //size_t filled = 0;
     BLOCK* prev = nullptr;
-    Element data[BLOCK_SIZE] ={};
+    Element data[BLOCK_SIZE] = {};
   };
 
   BLOCK* top;
@@ -1320,6 +1355,17 @@ struct SquareBitMatrix {
   size_t new_value();
 };
 
+struct BitArray {
+  uint8_t* data;
+  size_t length;
+
+  BitArray(size_t length);
+  ~BitArray();
+
+  void set(size_t a);
+  bool test(size_t a) const;
+};
+
 template<typename T>
 struct Queue {
   T* holder;
@@ -1399,7 +1445,7 @@ struct Queue {
     T val = std::move(holder[start]);
     start++;
     size--;
-    
+
     if (start >= capacity) {
       start -= capacity;
     }
@@ -1593,8 +1639,8 @@ struct OwnedPtr {
     arr.shrink();
     ptr = arr.data;
 
-    arr.data     = nullptr;
-    arr.size     = 0;
+    arr.data = nullptr;
+    arr.size = 0;
     arr.capacity = 0;
   }
 
@@ -1608,77 +1654,90 @@ struct OwnedPtr {
   }
 };
 
-//template<typename T>
-//struct LinkedList {
-//
-//  struct LinkedNode;
-//
-//  T* alloc() {
-//
-//  }
-//
-//  void remove(T* t) {
-//
-//  }
-//};
-
 template<typename U, typename T>
 OwnedPtr<U> cast_ptr(OwnedPtr<T>&& ptr) {
-  OwnedPtr<U> u ={};
+  OwnedPtr<U> u = {};
   u.ptr = (U*)ptr.ptr;
   ptr.ptr = nullptr;
   return u;
 }
 
 template<typename T>
-void copy_array(const Array<T>& from, Array<T>& to) noexcept {
-  to.clear();
-  to.reserve_total(from.size);
+struct OwnedArr {
+  T* data = nullptr;
+  usize size = 0;
 
-  for (size_t i = 0; i < from.size; i++) {
-    to.data[i] = from.data[i];
+  constexpr OwnedArr() = default;
+  constexpr OwnedArr(T* t, usize s) : data(t), size(s) {}
+  constexpr OwnedArr(OwnedArr&& arr) 
+    : data(std::exchange(arr.ptr, nullptr)),
+    size(std::exchange(arr.size, 0))
+  {}
+
+  ~OwnedArr() {
+    free_destruct_n(data, size);
   }
 
-  to.size += from.size;
+  OwnedArr& operator=(OwnedArr&& arr) {
+    free_destruct_n(data, size);
+
+    data = std::exchange(arr.data, nullptr);
+    size = std::exchange(arr.size, 0);
+
+    return *this;
+  }
+
+  const T* begin() const { return data; }
+  const T* end() const { return data + size; }
+};
+
+template<typename T>
+OwnedArr<T> bake_arr(Array<T>&& arr) {
+  T* d = std::exchange(arr.data, nullptr);
+  usize s = std::exchange(arr.size, 0);
+  arr.capacity = 0;
+
+  return OwnedArr(d, s);
 }
 
 template<typename T>
-void combine_unique(const Array<T>& from, Array<T>& to) noexcept {
-  auto i = from.begin();
-  const auto end = from.end();
+OwnedArr<const T> bake_const_arr(Array<T>&& arr) {
+  const T* d = std::exchange(arr.data, nullptr);
+  usize s = std::exchange(arr.size, 0);
+  arr.capacity = 0;
 
-  const size_t initial_size = to.size;
-  for (; i < end; i++) {
-    for (size_t i_to = 0; i_to < initial_size; i_to++) {
-      if (*i == to.data[i_to]) {
-        goto NEXT_COMBINE;
-      }
+  return OwnedArr(d, s);
+}
+
+template<typename T, size_t size>
+struct ConstArray {
+  struct Loader {
+    T* arr;
+
+    template<typename U>
+    constexpr Loader& operator<<(U&& u) {
+      arr[0] = std::forward<U>(u);
+      arr++;
+      return *this;
     }
+  };
 
-    to.insert(*i);
 
-  NEXT_COMBINE:
-    continue;
+  T arr[size];
+
+  template<typename ... U>
+  constexpr static auto fill_arr(U&& ... u) {
+    ConstArray<T, size> arr = {};
+
+    static_assert(sizeof...(U) == size, "Must be fully filled");
+
+
+    Loader load{ arr.arr };
+    (load << ... << std::forward<U>(u));
+
+    return arr;
   }
-}
-
-template<typename T>
-void reverse_array(Array<T>& arr) noexcept {
-  if (arr.size == 0) { return; }
-
-  auto* i_beg  = arr.data;
-  auto* i_back = arr.data + arr.size - 1;
-
-  //Swap first with back - then step inwards
-  while (i_beg < i_back) {
-    T temp  = std::move(*i_beg);
-    *i_beg  = std::move(*i_back);
-    *i_back = std::move(temp);
-
-    i_beg++;
-    i_back--;
-  }
-}
+};
 
 #define ERROR_CODES_X \
 modify(OK)\
@@ -1697,14 +1756,14 @@ enum struct ErrorCode : uint8_t {
 namespace ErrorCodeString {
 #define modify(NAME) inline constexpr char NAME[] = #NAME;
   ERROR_CODES_X
-  #undef modify
+#undef modify
 }
 
 constexpr const char* error_code_string(const ErrorCode code) {
   switch (code) {
-  #define modify(NAME) case ErrorCode :: NAME : return ErrorCodeString :: NAME ;
+#define modify(NAME) case ErrorCode :: NAME : return ErrorCodeString :: NAME ;
     ERROR_CODES_X
-    #undef modify
+#undef modify
   }
 
   return nullptr;
@@ -1811,7 +1870,7 @@ inline constexpr X64_UNION x64_from_bytes(const uint8_t* const bytes) noexcept {
     | (static_cast<uint64_t>(bytes[3]) << 24)
     | (static_cast<uint64_t>(bytes[2]) << 16)
     | (static_cast<uint64_t>(bytes[1]) << 8)
-    |  static_cast<uint64_t>(bytes[0]);
+    | static_cast<uint64_t>(bytes[0]);
 
   return val;
 }
@@ -1834,12 +1893,12 @@ inline constexpr uint32_t x32_from_bytes(const uint8_t* const bytes) noexcept {
   return (static_cast<uint32_t>(bytes[3]) << 24)
     | (static_cast<uint32_t>(bytes[2]) << 16)
     | (static_cast<uint32_t>(bytes[1]) << 8)
-    |  static_cast<uint32_t>(bytes[0]);
+    | static_cast<uint32_t>(bytes[0]);
 }
 
 inline constexpr uint16_t x16_from_bytes(const uint8_t* const bytes) noexcept {
   return (static_cast<uint16_t>(bytes[1]) << 8)
-    |  static_cast<uint16_t>(bytes[0]);
+    | static_cast<uint16_t>(bytes[0]);
 }
 
 //TODO: Big endian??
@@ -1938,13 +1997,13 @@ struct EXECUTE_AT_END {
 
   constexpr EXECUTE_AT_END(T&& t_) : t(std::move(t_)) {}
 
-  ~EXECUTE_AT_END() {
+  ~EXECUTE_AT_END() noexcept(false) {
     t();
   }
 };
 
 template<typename T>
-EXECUTE_AT_END(T&& t)->EXECUTE_AT_END<T>;
+EXECUTE_AT_END(T&& t) -> EXECUTE_AT_END<T>;
 
 #define DEFER(...) EXECUTE_AT_END JOIN(defer, __LINE__) = [__VA_ARGS__]() mutable ->void 
 
@@ -2047,7 +2106,7 @@ namespace _IMPL_A_can_cast_to_B {
   auto test_overload(const B* b) -> TEST_TRUE<decltype(static_cast<const A*>(b))>;
 
   template<typename A>
-  auto test_overload(const void* v) ->TEST_FALSE;
+  auto test_overload(const void* v) -> TEST_FALSE;
 }
 
 template<typename A, typename B>

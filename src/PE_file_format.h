@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include "utility.h"
 #include "strings.h"
+#include "backends.h"
 
 #define PE_SIGNATURE {'P', 'E', '\0', '\0'}
 #define DOS_STUB \
@@ -34,7 +35,7 @@ MS_DO_HEADER_SIZE
 + OPTIONAL_WINDOWS_FIELDS_SIZE;
 
 constexpr inline uint32_t SINGLE_SECTION_HEADER_SIZE = 40;
-constexpr inline uint64_t NT_IMAGE_BASE = 0x140000000llu;
+constexpr inline uint64_t NT_IMAGE_BASE = 0x00400000llu;
 constexpr inline uint32_t IMPORT_DIRECTORY_SIZE = 20;
 
 
@@ -88,7 +89,7 @@ namespace MAGIC_NUMBER {
 }
 
 //Not really optional. Just called that because other file formats dont include it
-struct PE32Plus_optional_header {
+struct PE32_StandardFields {
   uint16_t magic_number;
 
   uint8_t major_linker_version;// heh but this is a linker
@@ -118,6 +119,15 @@ namespace DLL_Characteristics {
     TERMINAL_SERVER_AWARE = 0x8000,
   };
 };
+
+namespace SUBSYSTEMS {
+  enum SUBSYSTEM : uint16_t {
+    UNKNOWN = 0,
+    NATIVE = 1,
+    GUI = 2,
+    CONSOLE = 3,
+  };
+}
 
 struct PE32Plus_windows_specific {
   uint64_t image_base;// 8 bytes in PE32+ format
@@ -215,7 +225,7 @@ struct PE_File_Header {
   MS_DOS_Header ms_dos;//does not include the stub
   uint8_t signature[SIGNATURE_SIZE] = PE_SIGNATURE;
   COFF_file_header coff;
-  PE32Plus_optional_header pe32;
+  PE32_StandardFields pe32;
   PE32Plus_windows_specific pe32_windows;
   Image_header_directories directories;
 };
@@ -348,13 +358,6 @@ struct ImportTable {
 Import* new_import(const InternString* dll_name, ImportTable* imports, ConstantTable* constants);
 void add_name_to_import(Import* import_ptr, const InternString* name_to_import, VA estimated_va, ImportTable* table);
 
-
-struct PE_File_Build {
-  CodeSection* code = nullptr;
-  ConstantTable* constants = nullptr;
-  ImportTable* imports = nullptr;
-};
-
 struct ImportantValues {
   uint32_t num_sections;
 
@@ -381,10 +384,18 @@ struct CompilerGlobals;
 struct CompilerThread;
 struct Span;
 
-ErrorCode write_obj_to_file(const PE_File_Build* pe_file, const char* file_name);
+void write_pe_to_file(CompilerThread* comp_thread,
+                      const Backend::Program* program, const InternString* file_name);
 
 void load_portable_executable_from_file(CompilerGlobals* const comp,
                                         CompilerThread* const comp_thread,
                                         const Span& span,
                                         PEFile* pe_file,
                                         const char* file_name);
+
+constexpr Backend::ExecutableFormatInterface pe_plus_file_interface() {
+  Backend::ExecutableFormatInterface in = {};
+  in.output_executable = write_pe_to_file;
+
+  return in;
+}

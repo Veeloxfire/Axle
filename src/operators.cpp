@@ -5,435 +5,222 @@
 using UN_OP_EMIT = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;
 using BIN_OP_EMIT = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t, uint8_t>;
 
-//Will always move to a register
-static RuntimeValue load_to_mod_op(CompilerGlobals* comp, State* state, CodeBlock* code, const Structure* ty, const RuntimeValue* v) {
-  RuntimeValue temp = {};
-  temp.type = RVT::REGISTER;
-  temp.reg = state->new_value();
+template<typename BIN_OP_TYPE>
+static IR::RuntimeReference bin_op_impl(IR::Builder* const ir,
+                                        const IR::RuntimeReference& left_in, const IR::RuntimeReference& right_in,
+                                        const Type& dest_type,
+                                        IR::Emitter<BIN_OP_TYPE> emit) {
+  //TODO: we could do constant folding here! But for now I wont
 
-  copy_runtime_to_runtime(comp, state, code, ty, v, &temp);
-
-  return temp;
-};
-
-//Will only move to a new register if its not a register
-static RuntimeValue load_to_const_op(CompilerGlobals* comp, State* state, CodeBlock* code, const Structure* ty, const RuntimeValue* v) {
-  if (v->type != RVT::REGISTER) {
-    RuntimeValue temp = {};
-    temp.type = RVT::REGISTER;
-    temp.reg = state->new_value();
-
-    copy_runtime_to_runtime(comp, state, code, ty, v, &temp);
-
-    return temp;
+  IR::RuntimeReference left;
+  if (left_in.is_constant) {
+    left = IR::HELPERS::copy_constant(ir, left_in.constant + left_in.offset, left_in.type);
   }
   else {
-    return *v;
+    left = left_in;
   }
-};
 
-static void bin_op_impl(CompilerGlobals* const comp,
-                        State* const state,
-                        CodeBlock* const code,
-                        const RuntimeValue* left, const RuntimeValue* right,
-                        BIN_OP_EMIT func) {
-  ASSERT(left->type == RVT::REGISTER);
-  ASSERT(right->type == RVT::REGISTER);
-
-  func(code->code, (uint8_t)right->reg.val, (uint8_t)left->reg.val);
-
-  state->get_val(left->reg)->is_modified = true;
-
-  state->use_value(left->reg);
-  state->use_value(right->reg);
-}
-
-static void un_op_impl(CompilerGlobals* const comp,
-                       State* const state,
-                       CodeBlock* const code,
-                       const RuntimeValue* val,
-                       UN_OP_EMIT func) {
-  ASSERT(val->type == RVT::REGISTER);
-
-  func(code->code, (uint8_t)val->reg.val);
-
-  state->get_val(val->reg)->is_modified = true;
-  state->use_value(val->reg);
-}
-
-RuntimeValue BinOpArgs::emit_add_64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
-
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::ADD_R64S);
-
-  return temp_left;
-}
-
-RuntimeValue BinOpArgs::emit_add_8s() {
-  const Structure* ty = comp->builtin_types->t_u8.structure;
-
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::ADD_R8S);
-
-  return temp_left;
-}
-
-RuntimeValue BinOpArgs::emit_sub_64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
-
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::SUB_R64S);
-
-  return temp_left;
-}
-
-RuntimeValue BinOpArgs::emit_sub_ptrs() {
-  RuntimeValue res = emit_sub_64s();
-
-  const auto* ptr = info->main_type.unchecked_base<PointerStructure>();
-
-  uint64_t size_num = ptr->base.structure->size;
-  if (size_num > 1) {
-    RuntimeValue size = new_const_in_reg(comp, state, code, (uint8_t*)&size_num, 8);
-
-    left = &res;
-    right = &size;
-
-    return emit_div_u64s();
+  IR::RuntimeReference right;
+  if (right_in.is_constant) {
+    right = IR::HELPERS::copy_constant(ir, right_in.constant + right_in.offset, right_in.type);
   }
   else {
-    return res;
-  }
-}
-
-RuntimeValue BinOpArgs::emit_add_64_to_ptr() {
-  const RuntimeValue* save_left = left;
-  const RuntimeValue* save_right = right;
-
-  RuntimeValue mult_size = {};
-
-  ASSERT(info->main_type.struct_type() == STRUCTURE_TYPE::POINTER);
-  const auto* ptr = info->main_type.unchecked_base<PointerStructure>();
-
-  uint64_t size_num = ptr->base.structure->size;
-  //Multiply up the add if its base is not 1
-  if (size_num > 1) {
-    RuntimeValue size = new_const_in_reg(comp, state, code, (uint8_t*)&size_num, 8);
-
-    if (info->main_op == MainOp::LEFT) {
-      left = save_right;
-      right = &size;
-      mult_size = emit_mul_64s();
-
-      left = save_left;
-      right = &mult_size;
-    }
-    else {
-      left = save_left;
-      right = &size;
-      mult_size = emit_mul_64s();
-
-      left = save_right;
-      right = &mult_size;
-    }
-
+    right = right_in;
   }
 
-  return emit_add_64s();
+  IR::RuntimeReference to = ir->new_temporary(dest_type);
+
+  BIN_OP_TYPE bin_op = {};
+  bin_op.to = to.base;
+  bin_op.t_offset = to.offset;
+  bin_op.t_format = to.type.struct_format();
+  bin_op.left = left.base;
+  bin_op.l_offset = left.offset;
+  bin_op.l_format = left.type.struct_format();
+  bin_op.right = right.base;
+  bin_op.r_offset = right.offset;
+  bin_op.r_format = right.type.struct_format();
+
+  emit(ir->ir_bytecode, bin_op);
+
+  return to;
 }
 
-RuntimeValue BinOpArgs::emit_mul_64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+template<typename T>
+using CONSTANT_FOLD = IR::RuntimeReference(*)(CompilerGlobals*, const u8*, const Type&);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::MUL_R64S);
-
-  return temp_left;
-}
-
-RuntimeValue BinOpArgs::emit_div_u64s() {
-  const Structure* type = comp->builtin_types->t_u64.structure;
-
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
-  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
-
-  if (comp->build_options.endpoint_system == &system_x86_64) {
-    {
-      auto* res_val = state->value_tree.values.data + temp_left.reg.val;
-      res_val->value_type = ValueType::FIXED;
-      res_val->reg = RAX.REG;
+template<typename UN_OP_TYPE>
+static IR::RuntimeReference un_op_impl(CompilerGlobals* comp, 
+                                       IR::Builder* const ir,
+                                       const IR::RuntimeReference& from_in,
+                                       const Type& dest_type,
+                                       IR::Emitter<UN_OP_TYPE> emit,
+                                       CONSTANT_FOLD<UN_OP_TYPE> constant_fold) {
+  IR::RuntimeReference from;
+  if (from_in.is_constant) {
+    if (constant_fold != nullptr) {
+      return constant_fold(comp, from_in.constant, from_in.type);
+    
     }
 
-    ValueIndex save_rdx = state->new_value();
-    state->set_value(save_rdx);
-
-    auto* save_val = state->value_tree.values.data + save_rdx.val;
-    save_val->value_type = ValueType::FIXED;
-    save_val->reg = RDX.REG;
-
-    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);//Just show its being reserved
-
-    state->control_flow.expression_num++;
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RU64S);
-
-    //Stop it from being removed
-    state->use_value(save_rdx);
-    state->control_flow.expression_num++;
-
-
-    return temp_left;
+    from = IR::HELPERS::copy_constant(ir, from_in.constant + from_in.offset, from_in.type);
   }
   else {
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RU64S);
-
-    return temp_left;
+    from = from_in;
   }
+
+  IR::RuntimeReference to = ir->new_temporary(dest_type);
+
+  UN_OP_TYPE un_op = {};
+  un_op.to = to.base;
+  un_op.t_offset = to.offset;
+  un_op.t_format = to.type.struct_format();
+  un_op.from = from.base;
+  un_op.f_offset = from.offset;
+  un_op.f_format = from.type.struct_format();
+
+  emit(ir->ir_bytecode, un_op);
+
+  return to;
 }
 
-RuntimeValue BinOpArgs::emit_mod_u64s() {
-  const Structure* type = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_add_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
-  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
-
-  if (comp->build_options.endpoint_system == &system_x86_64) {
-    {
-      auto* passed_val = state->value_tree.values.data + temp_left.reg.val;
-      passed_val->value_type = ValueType::FIXED;
-      passed_val->reg = RAX.REG;
-    }
-
-    ValueIndex save_rdx = state->new_value();
-    state->set_value(save_rdx);
-
-    auto* save_val = state->value_tree.values.data + save_rdx.val;
-    save_val->value_type = ValueType::FIXED;
-    save_val->reg = RDX.REG;
-
-    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);//Just show its being reserved
-
-    state->control_flow.expression_num++;
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::MOD_RU64S);
-
-    //Stop it from being removed
-    state->use_value(save_rdx);
-    state->control_flow.expression_num++;
-
-    RuntimeValue res = {};
-    res.type = RVT::REGISTER;
-    res.reg = save_rdx;
-
-    return res;
-  }
-  else {
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::MOD_RU64S);
-
-    return temp_left;
-  }
+  return bin_op_impl<IR::Types::Add>(ir, left, right, info->dest_type, IR::Emit::Add);
 }
 
-RuntimeValue BinOpArgs::emit_div_i64s() {
-  const Structure* type = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_add_int_to_ptr() {
+  Type dest_type = info->dest_type;
+  ASSERT(dest_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, type, left);
-  const RuntimeValue temp_right = load_to_mod_op(comp, state, code, type, right);
+  const auto* ptr = dest_type.unchecked_base<PointerStructure>();
 
-  if (comp->build_options.endpoint_system == &system_x86_64) {
-    {
-      auto* res_val = state->value_tree.values.data + temp_left.reg.val;
-      res_val->value_type = ValueType::FIXED;
-      res_val->reg = RAX.REG;
-    }
+  u64 size_holder = ptr->size;
+  Type size_type = comp->builtin_types->t_u64;
+  const IR::RuntimeReference ptr_size = IR::HELPERS::as_constant(&size_holder, size_type);
 
-    ValueIndex save_rdx = state->new_value();
-    state->set_value(save_rdx);
+  IR::RuntimeReference int_val;
+  IR::RuntimeReference ptr_val;
 
-    auto* save_val = state->value_tree.values.data + save_rdx.val;
-    save_val->value_type = ValueType::FIXED;
-    save_val->reg = RDX.REG;
+  if (info->main_side == MainSide::LEFT) {
+    ASSERT(dest_type == left.type);
+    ASSERT(size_type == right.type);
 
-    ByteCode::EMIT::RESERVE(code->code, (uint8_t)save_rdx.val);//Just show its being reserved
-
-    state->control_flow.expression_num++;
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RI64S);
-
-    //Stop it from being removed
-    state->use_value(save_rdx);
-    state->control_flow.expression_num++;
-
-
-    return temp_left;
+    int_val = right;
+    ptr_val = left;
   }
   else {
-    bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::DIV_RI64S);
+    ASSERT(info->main_side == MainSide::RIGHT);
+    ASSERT(dest_type == right.type);
+    ASSERT(size_type == left.type);
 
-    return temp_left;
+    int_val = left;
+    ptr_val = right;
   }
+
+
+  const IR::RuntimeReference to_add = bin_op_impl<IR::Types::Mul>(ir, right, ptr_size, size_type, IR::Emit::Mul);
+
+  return bin_op_impl<IR::Types::Add>(ir, ptr_val, to_add, size_type, IR::Emit::Add);
 }
 
-RuntimeValue BinOpArgs::emit_eq_64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_sub_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::EQ_R64S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Sub>(ir, left, right, info->dest_type, IR::Emit::Sub);
 }
 
-RuntimeValue BinOpArgs::emit_neq_64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_sub_ptrs() {
+  ASSERT(left.type == right.type);
+  ASSERT(info->dest_type == comp->builtin_types->t_u64);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
+  const auto* ptr = left.type.unchecked_base<PointerStructure>();
 
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::NEQ_R64S);
+  u64 size_holder = ptr->size;
+  ASSERT(size_holder > 0);
 
-  return temp_left;
+  Type size_type = comp->builtin_types->t_u64;
+  const IR::RuntimeReference ptr_size = IR::HELPERS::as_constant(&size_holder, size_type);
+
+  const IR::RuntimeReference scaled = bin_op_impl<IR::Types::Sub>(ir, right, ptr_size, size_type, IR::Emit::Sub);
+
+  return bin_op_impl<IR::Types::Div>(ir, scaled, ptr_size, size_type, IR::Emit::Div);
 }
 
-RuntimeValue BinOpArgs::emit_eq_8s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_mul_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::EQ_R8S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Mul>(ir, left, right, info->dest_type, IR::Emit::Mul);
 }
 
-RuntimeValue BinOpArgs::emit_neq_8s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_div_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::NEQ_R8S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Div>(ir, left, right, info->dest_type, IR::Emit::Div);
 }
 
-RuntimeValue BinOpArgs::emit_lesser_u64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_mod_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::LESS_U64S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Mod>(ir, left, right, info->dest_type, IR::Emit::Mod);
 }
 
-RuntimeValue BinOpArgs::emit_greater_u64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_eq_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(info->dest_type == comp->builtin_types->t_bool);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::GREAT_U64S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Eq>(ir, left, right, info->dest_type, IR::Emit::Eq);
 }
 
-RuntimeValue BinOpArgs::emit_lesser_i64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_neq_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(info->dest_type == comp->builtin_types->t_bool);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::LESS_I64S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Neq>(ir, left, right, info->dest_type, IR::Emit::Neq);
 }
 
-RuntimeValue BinOpArgs::emit_greater_i64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_lesser_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(info->dest_type == comp->builtin_types->t_bool);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::GREAT_I64S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Less>(ir, left, right, info->dest_type, IR::Emit::Less);
 }
 
-RuntimeValue BinOpArgs::emit_or_64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_greater_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(info->dest_type == comp->builtin_types->t_bool);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::OR_R64S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Great>(ir, left, right, info->dest_type, IR::Emit::Great);
 }
 
-RuntimeValue BinOpArgs::emit_xor_64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_or_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::XOR_R64S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Or>(ir, left, right, info->dest_type, IR::Emit::Or);
 }
 
-RuntimeValue BinOpArgs::emit_and_64s() {
-  const Structure* ty = comp->builtin_types->t_u64.structure;
+IR::RuntimeReference BinOpArgs::emit_and_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::AND_R64S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::And>(ir, left, right, info->dest_type, IR::Emit::And);
 }
 
-RuntimeValue BinOpArgs::emit_or_8s() {
-  const Structure* ty = comp->builtin_types->t_u8.structure;
+IR::RuntimeReference BinOpArgs::emit_xor_ints() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
 
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::OR_R8S);
-
-  return temp_left;
+  return bin_op_impl<IR::Types::Xor>(ir, left, right, info->dest_type, IR::Emit::Xor);
 }
 
-RuntimeValue BinOpArgs::emit_xor_8s() {
-  const Structure* ty = comp->builtin_types->t_u8.structure;
-
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::XOR_R8S);
-
-  return temp_left;
-}
-
-RuntimeValue BinOpArgs::emit_and_8s() {
-  const Structure* ty = comp->builtin_types->t_u8.structure;
-
-  const RuntimeValue temp_left = load_to_mod_op(comp, state, code, ty, left);
-  const RuntimeValue temp_right = load_to_const_op(comp, state, code, ty, right);
-
-  bin_op_impl(comp, state, code, &temp_left, &temp_right, ByteCode::EMIT::AND_R8S);
-
-  return temp_left;
-}
-
+#if 0
 RuntimeValue BinOpArgs::emit_shift_l_64_by_8() {
   const Structure* left_t = comp->builtin_types->t_u64.structure;
   const Structure* right_t = comp->builtin_types->t_u8.structure;
@@ -502,126 +289,58 @@ RuntimeValue BinOpArgs::emit_shift_r_i64_by_8() {
     return temp_left;
   }
 }
+#endif
 
-RuntimeValue UnOpArgs::emit_neg_i64() {
+static IR::RuntimeReference constant_fold_neg(CompilerGlobals* comp, const u8* data, const Type& type) {
+  ASSERT(type.is_valid());
+  ASSERT(TYPE_TESTS::is_signed_int(type));
 
-  const RuntimeValue temp = load_to_mod_op(comp, state, code, comp->builtin_types->t_i64.structure, prim);
+  const auto* ptr = type.unchecked_base<IntegerStructure>();
 
-  un_op_impl(comp, state, code, &temp, ByteCode::EMIT::NEG_R64);
+  u8* out = comp->new_constant(type.size());
 
-  return temp;
-}
-
-RuntimeValue UnOpArgs::emit_address() {
-  ASSERT(prim->type == RVT::MEMORY);
-
-  RuntimeValue ptr_val = {};
-  ptr_val.type = RVT::REGISTER;
-  ptr_val.reg = state->new_value();
-
-  ByteCode::EMIT::LOAD_ADDRESS(code->code, (uint8_t)ptr_val.reg.val, state->get_mem(prim->mem)->mem);
-  state->set_value(ptr_val.reg);
-
-  return ptr_val;
-}
-
-RuntimeValue UnOpArgs::emit_deref() {
-
-  RuntimeValue deref_val = {};
-  deref_val.type = RVT::MEMORY;
-
-  switch (prim->type) {
-    case RVT::UNKNOWN: {
-        INVALID_CODE_PATH();
+  switch (ptr->size) {
+    case 1: {
+        i8 i = data[0];
+        *out = -i;
         break;
       }
-    case RVT::REGISTER: {
-        MemIndex mi = state->new_mem();
-        auto* mem = state->get_mem(mi);
-
-        mem->mem.base = (uint8_t)prim->reg.val;
-        mem->size = 0;
-
-        deref_val.mem = mi;
+    case 2: {
+        i16 i = x16_from_bytes(data);
+        x16_to_bytes(-i, out);
         break;
       }
-    case RVT::MEMORY: {
-        ValueIndex r = state->new_value();
-
-        ByteCode::EMIT::COPY_R64_FROM_MEM(code->code, (uint8_t)r.val, state->get_mem(prim->mem)->mem);
-        state->set_value(r);
-
-        MemIndex mi = state->new_mem();
-        auto* mem = state->get_mem(mi);
-        mem->mem.base = (uint8_t)r.val;
-        mem->size = 0;
-
-        deref_val.mem = mi;
+    case 4: {
+        i32 i = x32_from_bytes(data);
+        x32_to_bytes(-i, out);
         break;
       }
-    case RVT::CONST: {
-        ValueIndex r = state->new_value();
-
-        const uint64_t ptr_v = x64_from_bytes((const u8*)prim->constant.ptr);
-
-        ByteCode::EMIT::SET_R64_TO_64(code->code, (uint8_t)r.val, ptr_v);
-        state->set_value(r);
-
-        MemIndex mi = state->new_mem();
-        auto* mem = state->get_mem(mi);
-        mem->mem.base = (uint8_t)r.val;
-        mem->size = 0;
-
-        deref_val.mem = mi;
+    case 8: {
+        i64 i = x64_from_bytes(data);
+        x64_to_bytes(-i, out);
+        break;
+      }
+    default: {
+        INVALID_CODE_PATH("Invalid integer size");
         break;
       }
   }
 
-  return deref_val;
+  return IR::HELPERS::as_constant(out, type);
 }
 
+IR::RuntimeReference UnOpArgs::emit_neg_int() {
+  ASSERT(info->dest_type == prim.type);
+  ASSERT(TYPE_TESTS::is_signed_int(prim.type));
 
-
-//Overload for taking address
-void compile_take_address(CompilerGlobals* comp,
-                          CompilerThread* comp_thread,
-                          State* state,
-                          ASTUnaryOperatorExpr* expr) {
-
-  AtomicLock<Structures> structures = {};
-  AtomicLock<StringInterner> strings = {};
-  comp->services.get_multiple(&structures, &strings);
-
-  const Structure* ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
-                                                        comp_thread->build_options.ptr_size, expr->expr->node_type);
-  expr->node_type = to_type(ptr);
-  expr->emit = &UnOpArgs::emit_address;
-
-  //Current cant do these at comptime
-  expr->meta_flags &= ~META_FLAG::COMPTIME;
-
-  //Can only load the address of somewhere in memory
-  set_runtime_flags(expr->expr, state, false, (uint8_t)RVT::MEMORY);
+  return un_op_impl<IR::Types::Neg>(comp, ir, prim, prim.type, IR::Emit::Neg, constant_fold_neg);
 }
 
-//Overload for dereferencing
-void compile_deref(CompilerGlobals* comp,
-                   CompilerThread* comp_thread,
-                   ASTUnaryOperatorExpr* expr) {
-
-  AST_LOCAL prim = expr->expr;
-
-  if (prim->node_type.struct_type() == STRUCTURE_TYPE::POINTER) {
-    const auto* ptr = prim->node_type.unchecked_base<PointerStructure>();
-
-    expr->emit = &UnOpArgs::emit_deref;
-    expr->node_type = ptr->base;
-  }
-  else {
-    const char* const op_string = UNARY_OP_STRING::get(expr->op);
-
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
-                              "No unary operator '{}' exists for type: '{}'",
-                              op_string, prim->node_type.name);
-  }
+IR::RuntimeReference UnOpArgs::emit_address() {
+  return IR::HELPERS::take_address(ir, prim, info->dest_type);
 }
+
+IR::RuntimeReference UnOpArgs::emit_deref_ptr() {
+  return IR::HELPERS::dereference(ir, prim, info->dest_type);
+}
+

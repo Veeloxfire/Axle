@@ -10,55 +10,56 @@ void load_string(Array<char>& res, char c) {
 
 void load_string(Array<char>& res, DisplayChar c) {
   switch (c.c) {
-  case '\n': {
-    res.insert('\\');
-    res.insert('n');
-    break;
-  }
-  case '\r': {
-    res.insert('\\');
-    res.insert('r');
-    break;
-  }
-  case '\f': {
-    res.insert('\\');
-    res.insert('f');
-    break;
-  }
-  case '\t': {
-    res.insert('\\');
-    res.insert('t');
-    break;
-  }
-  case '\0': {
-    res.insert('\\');
-    res.insert('0');
-    break;
-  }
-  default:
-    res.insert(c.c);
-    break;
+    case '\n': {
+        res.insert('\\');
+        res.insert('n');
+        break;
+      }
+    case '\r': {
+        res.insert('\\');
+        res.insert('r');
+        break;
+      }
+    case '\f': {
+        res.insert('\\');
+        res.insert('f');
+        break;
+      }
+    case '\t': {
+        res.insert('\\');
+        res.insert('t');
+        break;
+      }
+    case '\0': {
+        res.insert('\\');
+        res.insert('0');
+        break;
+      }
+    default:
+      res.insert(c.c);
+      break;
   }
 
 }
 
+constexpr char hex_char(int c) {
+  if (0 <= c && c <= 9) {
+    return c + '0';
+  }
+  else if (0xa <= c && c <= 0xf) {
+    return (c - 0xa) + 'a';
+  }
+  return '\0';
+};
+
 void load_string(Array<char>& res, MagicNumber c) {
-  char chars[5] ={};
+  char chars[5] = {};
 
-  constexpr auto display_char = [](int c) -> char {
-    if (0 <= c && c <= 9) {
-      return c + '0';
-    }
-    else if (0xa <= c && c <= 0xf) {
-      return (c - 0xa) + 'a';
-    }
-    return '\0';
-  };
 
-  chars[0] = display_char(((int)c.num & 0x00f0) >> 4);
-  chars[1] = display_char(((int)c.num & 0x000f));
-  chars[2] = display_char(((int)c.num & 0xf000) >> 12);
-  chars[3] = display_char(((int)c.num & 0x0f00) >> 8);
+  chars[0] = hex_char(((int)c.num & 0x00f0) >> 4);
+  chars[1] = hex_char(((int)c.num & 0x000f));
+  chars[2] = hex_char(((int)c.num & 0xf000) >> 12);
+  chars[3] = hex_char(((int)c.num & 0x0f00) >> 8);
 
   load_string(res, chars);
 }
@@ -150,11 +151,11 @@ static void load_unsigned(Array<char>& res, uint64_t u64) {
 
 static void load_unsigned_hex(Array<char>& res, uint64_t u) {
   constexpr size_t LEN = 16;
-  
-  char string_res[2 + LEN] ={
+
+  char string_res[2 + LEN] = {
     '0', 'x',
     '0', '0', '0', '0', '0', '0', '0', '0',
-    '0', '0', '0', '0', '0', '0', '0', '0' 
+    '0', '0', '0', '0', '0', '0', '0', '0'
   };
 
   for (u32 i = 0; i < LEN; i++) {
@@ -207,7 +208,7 @@ void load_string(Array<char>& res, int8_t i8) {
 }
 
 void load_string(Array<char>& res, uint8_t u8) {
-  load_unsigned(res, (uint64_t) u8);
+  load_unsigned(res, (uint64_t)u8);
 }
 
 void load_string(Array<char>& res, int16_t i16) {
@@ -219,7 +220,7 @@ void load_string(Array<char>& res, int16_t i16) {
 }
 
 void load_string(Array<char>& res, uint16_t u16) {
-  load_unsigned(res, (uint64_t) u16);
+  load_unsigned(res, (uint64_t)u16);
 }
 
 void load_string(Array<char>& res, int32_t i32) {
@@ -231,7 +232,29 @@ void load_string(Array<char>& res, int32_t i32) {
 }
 
 void load_string(Array<char>& res, uint32_t u32) {
-  load_unsigned(res, (uint64_t) u32);
+  load_unsigned(res, (uint64_t)u32);
+}
+
+void load_string(Array<char>& res, const ByteArray& arr) {
+  char as_string[] = ", 0x00";
+
+  const u8* i = arr.ptr;
+  const u8* end = i + arr.size;
+
+  if (i < end) {
+    as_string[4] = hex_char(((*i) >> 4) & 0xf);
+    as_string[5] = hex_char((*i) & 0x0f);
+
+    load_string(res, as_string + 2);
+    i += 1;
+
+    while (i < end) {
+      as_string[4] = hex_char(((*i) >> 4) & 0xf);
+      as_string[5] = hex_char((*i) & 0x0f);
+      load_string(res, as_string);
+      i += 1;
+    }
+  }
 }
 
 void load_string(Array<char>& res, PrintCallSignature p_call) {
@@ -245,7 +268,7 @@ void load_string(Array<char>& res, PrintCallSignature p_call) {
     load_string(res, l->curr->node_type.name);
     l = l->next;
 
-    while(l) {
+    while (l) {
       load_string(res, ", ");
       load_string(res, l->curr->node_type.name);
       l = l->next;
@@ -256,7 +279,7 @@ void load_string(Array<char>& res, PrintCallSignature p_call) {
 }
 
 void load_string(Array<char>& res, PrintFuncSignature p_func) {
-  load_string(res, PrintSignatureType{p_func.func->signature.sig_struct});
+  load_string(res, PrintSignatureType{ p_func.func->signature.sig_struct });
 }
 
 void load_string(Array<char>& res, PrintSignatureType p_sig) {
@@ -301,7 +324,7 @@ void load_string(Array<char>& res, const CallSignature& call_sig) {
 }
 
 OwnedPtr<char> format_type_set(const char* format, const size_t prepend_spaces, const size_t max_width) {
-  Array<char> result ={};
+  Array<char> result = {};
 
   const char* string = format;
   const char* last_space = format;

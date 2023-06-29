@@ -1,9 +1,0 @@
-#import "..\\..\\stdlib\\io.axl";
-
-main :: () -> u64 {
-  arr := "Hello World!\n";
-
-  print(arr.ptr, arr.len - 1);
-  print_u64(64);
-}
-

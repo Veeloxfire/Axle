@@ -125,6 +125,7 @@ struct Parser {
   Token next ={};
 
   FileLocation file_path = {};
+
 };
 
 template<typename T>

@@ -1,23 +1,29 @@
 #pragma once
-#include "safe_lib.h"
+#include "comp_utilities.h"
 
-struct Program;
+namespace Backend {
+  struct PlatformInterface;
+  struct ExecutableFormatInterface;
+}
 
 struct APIOptimizationOptions {
+#if 0
   bool non_stack_locals = false;
+#endif
 };
 
 struct APIBuildOptions {
   const char* current_directory = nullptr;
   const char* file_name   = nullptr;
   const char* entry_point = nullptr;
-  const char* output_file = nullptr;
 
   const char* std_lib_folder = nullptr;
   const char* lib_folder = nullptr;
 
-  const char* system_name = nullptr;
-  const char* default_calling_convention = nullptr;
+  u32 default_calling_convention = 0;
+
+  const char* output_file = nullptr;
+  OutputFileType output_file_type;
 };
 
 struct APIPrintOptions {
@@ -25,11 +31,7 @@ struct APIPrintOptions {
   bool pre_reg_alloc   = false;
   bool comptime_res    = false;
   bool comptime_exec   = false;
-  bool normal_bytecode = false;
-  bool fully_compiled  = false;
-  bool coalesce_values = false;
-  bool intersections   = false;
-  bool reg_mapping     = false;
+  bool finished_ir     = false;
   bool run_headers     = false;
   bool file_loads      = false;
   bool comp_units      = false;
@@ -39,21 +41,11 @@ struct APIOptions {
   APIOptimizationOptions optimize;
   APIBuildOptions build;
   APIPrintOptions print;
+
+  const Backend::PlatformInterface* platform_interface;
+  const Backend::ExecutableFormatInterface* executable_format_interface;
 };
 
 
-struct RunOutput {
-  int return_code;
-  uint64_t program_return;
-};
-
-RunOutput run_as_machine_code(Program* prog);
-RunOutput run_in_vm(Program* prog);
-
-RunOutput compile_file_and_run(const APIOptions& options);
-int compile_file_and_write(const APIOptions& options);
-
-int compile_file(const APIOptions& options, Program* out_program);
-RunOutput run_program(const APIOptions& options, Program* prog);
-
-void debug_print_program(const Program& prog);
+int compile_and_write(const APIOptions& options);
+int compile_and_print(const APIOptions& options);

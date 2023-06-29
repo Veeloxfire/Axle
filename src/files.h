@@ -21,19 +21,14 @@ namespace FILES {
   OpenedFile replace(const char* name,
                      OPEN_MODE open_mode);
 
-  ErrorCode close(FileData* file);
+  void close(FileData* file);
 
-  ErrorCode read_as_string(FileData* file, size_t num_bytes, char** out_string);
   ErrorCode read_to_bytes(FileData* file, uint8_t* bytes, size_t num_bytes);
   uint8_t read_byte(FileData* file);
 
-  ErrorCode read_to_structures(FileData* file,
-                               uint8_t* ptr_to_s,
-                               size_t size_of_s, size_t num_of_s);
-
   template<typename T>
   ErrorCode read(FileData* file, T* ptr, size_t num) {
-    return read_to_structures(file, (uint8_t*)ptr, sizeof(T), num);
+    return read_to_bytes(file, (uint8_t*)ptr, sizeof(T) * num);
   }
 
   size_t size_of_file(FileData* file);

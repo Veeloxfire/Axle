@@ -384,6 +384,27 @@ size_t SquareBitMatrix::new_value() {
   return side_length++;
 }
 
+BitArray::BitArray(size_t length_) : data(new u8[length_]), length(length_) {}
+BitArray::~BitArray() { delete[] data; }
+
+void BitArray::set(size_t a) {
+  ASSERT(a < length);
+
+  size_t index = a / 8;
+  size_t offset = a % 8;
+
+  data[index] |= 1 << offset;
+}
+
+bool BitArray::test(size_t a) const {
+  ASSERT(a < length);
+
+  size_t index = a / 8;
+  size_t offset = a % 8;
+
+  return (data[index] & (1 << offset)) > 0;
+}
+
 void print_as_bytes(const uint8_t* bytes, size_t length) {
   for (size_t i = 0; i < length; i++) {
     printf("0x%hhx ", bytes[i]);

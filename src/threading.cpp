@@ -8,7 +8,7 @@ bool SpinLockMutex::acquire_if_free() {
 }
 
 void SpinLockMutex::acquire() {
-  while (_InterlockedCompareExchange8(&held, '\1', '\0') != '\0') {}
+  while (!acquire_if_free()) {}
 }
 
 void SpinLockMutex::release() {

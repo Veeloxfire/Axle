@@ -1,14 +1,10 @@
 #pragma once
 #include "utility.h"
-#include "bytecode.h"
 #include "strings.h"
 #include "comp_utilities.h"
 #include "names.h"
 #include "errors.h"
 
-//struct Type;
-struct State;
-struct Function;
 struct CompilationUnit;
 struct CallingConvention;
 struct Span;
@@ -105,8 +101,6 @@ constexpr void pass_meta_flags_down(META_FLAGS* low, META_FLAGS* high) {
   *low |= *high & pass_flags;
 }
 
-using CAST_FUNCTION = FUNCTION_PTR<RuntimeValue, CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*>;
-
 enum struct STRUCTURE_TYPE : u8 {
   VOID = 0,
   TYPE,
@@ -122,10 +116,11 @@ enum struct STRUCTURE_TYPE : u8 {
 
 struct Structure {
   STRUCTURE_TYPE type = STRUCTURE_TYPE::VOID;
-  const InternString* struct_name;
+  IR::Format ir_format;
 
   u32 size;//bytes
   u32 alignment;//bytes
+  const InternString* struct_name;
 };
 
 struct Type {
@@ -146,9 +141,19 @@ struct Type {
     return structure->type;
   }
 
-  //inline constexpr const Structure* structure() const {
-  //  return named_struct.structure;
-  //}
+  inline constexpr IR::Format struct_format() const {
+    return structure->ir_format;
+  }
+
+  inline constexpr u32 size() const {
+    return structure->size;
+  }
+
+#if 0
+  inline constexpr const Structure* structure() const {
+    return named_struct.structure;
+  }
+#endif
 
   template<typename T>
   inline constexpr const T* unchecked_base() const {
@@ -170,7 +175,7 @@ struct Type {
     }
   }
 
-  bool inline constexpr is_valid() const {
+  inline constexpr bool is_valid() const {
     return structure != nullptr;
   }
 };
@@ -252,34 +257,7 @@ struct SignatureStructure : public Structure {
   Array<Type> parameter_types ={};
   Type return_type ={};
 
-  bool return_via_addres = false;
-  Array<Type> actual_parameter_types ={};
-
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::LAMBDA;
-};
-
-struct FunctionSignature {
-  const ASTFuncSig* declaration = nullptr;
-  const SignatureStructure* sig_struct = nullptr;
-
-  const InternString* name ={};
-};
-
-//enum struct FUNCTION_TYPE {
-//  DEFAULT, EXTERN
-//};
-
-struct Function {
-  const ASTLambda* declaration = nullptr;
-
-  FunctionSignature signature ={};
-  UnitID sig_unit_id = 0;
-  UnitID body_unit_id = 0;
-
-//  FUNCTION_TYPE func_type = FUNCTION_TYPE::DEFAULT;
-
-  size_t data_index = 0;
-  CodeBlock code_block;
 };
 
 struct BuiltinTypes {
@@ -287,6 +265,8 @@ struct BuiltinTypes {
 
   Type t_u8   ={};
   Type t_i8   ={};
+  Type t_u16  ={};
+  Type t_i16  ={};
   Type t_u32  ={};
   Type t_i32  ={};
   Type t_u64  ={};
@@ -295,6 +275,7 @@ struct BuiltinTypes {
   Type t_type ={};
   Type t_void ={};
   Type t_void_ptr ={};
+  Type t_void_call = {};
   Type t_ascii ={};
 
   const EnumValue* e_false = nullptr;
@@ -341,19 +322,11 @@ namespace STRUCTS {
                             const InternString* value_name);
 }
 
-const Structure* find_or_make_array_structure(Structures* comp, StringInterner* strings, const Type& base, size_t length);
+const ArrayStructure* find_or_make_array_structure(Structures* comp, StringInterner* strings, const Type& base, size_t length);
 
-const Structure* find_or_make_pointer_structure(Structures* comp, StringInterner* strings, usize ptr_size, const Type& base);
+const PointerStructure* find_or_make_pointer_structure(Structures* comp, StringInterner* strings, usize ptr_size, const Type& base);
 
-const Structure* find_or_make_tuple_structure(Structures* comp, StringInterner* strings, Array<Type>&& types);
-
-namespace CASTS {
-  RuntimeValue u8_to_r64(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
-  RuntimeValue i8_to_r64(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
-  RuntimeValue u32_to_r64(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
-  RuntimeValue i32_to_r64(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
-  RuntimeValue no_op(CompilerGlobals*, State*, CodeBlock*, const RuntimeValue*);
-}
+const TupleStructure* find_or_make_tuple_structure(Structures* comp, StringInterner* strings, Array<Type>&& types);
 
 namespace TYPE_TESTS {
   constexpr inline bool match_sizes(const Structure* a, const Structure* b) {

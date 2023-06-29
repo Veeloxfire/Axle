@@ -5,7 +5,7 @@ struct TokenTypeString;
 enum struct AxleTokenType : uint8_t;
 enum struct ErrorCode : uint8_t;
 
-struct Function;
+namespace IR { struct Function; }
 struct CallSignature;
 struct FileLocation;
 struct SignatureStructure;
@@ -17,7 +17,7 @@ struct DisplayChar {
 };
 
 struct PrintFuncSignature {
-  const Function* func;
+  const IR::Function* func;
 };
 
 struct PrintSignatureType {
@@ -36,6 +36,11 @@ struct MagicNumber {
   uint16_t num;
 };
 
+struct ByteArray {
+  const u8* ptr;
+  usize size;
+};
+
 void load_string(Array<char>& res, char c);
 void load_string(Array<char>& res, int8_t i8);
 void load_string(Array<char>& res, uint8_t u8);
@@ -47,6 +52,7 @@ void load_string(Array<char>& res, int64_t i64);
 void load_string(Array<char>& res, uint64_t u64);
 void load_string(Array<char>& res, long l);
 void load_string(Array<char>& res, PrintPtr ptr);
+void load_string(Array<char>& res, const ByteArray& byte_array);
 
 void load_string(Array<char>& res, DisplayChar c);
 void load_string(Array<char>& res, MagicNumber mn);

@@ -1,12 +1,20 @@
 #pragma once
-#include <stdint.h>
+#include <cstdint>
+
+using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using u64 = uint64_t;
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
+using i64 = int64_t;
+using usize = size_t;
 
 //Important forward declarations
 struct CompilerGlobals;
 struct CompilerThread;
 struct Context;
-struct State;
-struct CodeBlock;
 struct AST;
 struct Local;
 struct Global;
@@ -14,112 +22,6 @@ struct InternString;
 struct Span;
 
 using AST_LOCAL = AST*;
-
-//New structures
-
-struct ValueIndex {
-  uint64_t val;
-
-  constexpr bool operator==(const ValueIndex v) const {
-    return v.val == val;
-  }
-};
-
-struct ConstantVal {
-  void* ptr;
-  size_t size;
-
-  constexpr bool operator==(const ConstantVal& cv) const {
-    return cv.ptr == ptr && cv.size == size;
-  }
-};
-
-struct MemIndex {
-  size_t index;
-  //size_t array_index;//used if the stack type is an array
-
-  constexpr bool operator==(const MemIndex& si) const {
-    return index == si.index ;//&& array_index == si.array_index;
-  }
-};
-
-//Runtime value type
-enum struct RVT : uint8_t {
-  UNKNOWN  = 0,
-  REGISTER = 1 << 0,
-  MEMORY   = 1 << 1,
-  CONST    = 1 << 3,
-};
-
-constexpr uint8_t operator|(RVT l, RVT r) {
-  return (uint8_t)l | (uint8_t)r;
-}
-
-constexpr uint8_t operator|(uint8_t l, RVT r) {
-  return l | (uint8_t)r;
-}
-
-constexpr uint8_t operator|(RVT l, uint8_t r) {
-  return (uint8_t)l | r;
-}
-
-constexpr uint8_t operator|=(uint8_t& l, RVT r) {
-  l |= (uint8_t)r;
-  return l;
-}
-
-constexpr uint8_t operator&(RVT l, RVT r) {
-  return (uint8_t)l & (uint8_t)r;
-}
-
-constexpr uint8_t operator&(uint8_t l, RVT r) {
-  return l & (uint8_t)r;
-}
-
-constexpr uint8_t operator&(RVT l, uint8_t r) {
-  return (uint8_t)l & r;
-}
-
-constexpr uint8_t operator&=(uint8_t& l, RVT r) {
-  l &= (uint8_t)r;
-  return l;
-}
-
-constexpr uint8_t NON_CONST_RVTS = RVT::REGISTER | RVT::MEMORY;
-constexpr uint8_t ALL_RVTS = NON_CONST_RVTS | RVT::CONST;
-
-
-struct RuntimeValue {
-  RVT type = RVT::UNKNOWN;//Type in value union - not the structure
-
-  union {
-    char _dummy = '\0';
-    ValueIndex reg;//index into the values array
-    MemIndex mem;//index into the stack_values array
-    ConstantVal constant;// a pointer to a constant - same type as the structure
-  };
-
-  constexpr bool operator==(const RuntimeValue& rv) const {
-    if (rv.type != type) {
-      return false;
-    }
-
-    switch (type) {
-      case RVT::REGISTER: return rv.reg == reg;
-      case RVT::CONST: return rv.constant == constant;
-      case RVT::MEMORY: return rv.mem == mem;
-      default: return true;
-    }
-  }
-};
-
-struct RuntimeHint {
-  bool is_hint = true;
-  union {
-    uint8_t hint_types;
-    RuntimeValue val;
-  };
-};
 
 #define COMPCODEINC \
 MOD(NO_ERRORS)\
@@ -223,6 +125,7 @@ namespace UNARY_OP_STRING {
 #define INTRINSIC_MODS \
 MOD(import) \
 MOD(static_link) \
+MOD(dynamic_link) \
 MOD(type) \
 
 struct Intrinsics {
@@ -232,4 +135,34 @@ struct Intrinsics {
 };
 
 using UnitID = u64;
-constexpr UnitID NULL_ID = 0;
+inline constexpr UnitID NULL_ID = 0;
+
+namespace IR {
+  enum struct Format : u8 {
+    opaque = 0,
+    uint8,
+    sint8,
+    uint16,
+    sint16,
+    uint32,
+    sint32,
+    uint64,
+    sint64,
+  };
+
+  struct LocalLabel {
+    u32 label;
+  };
+
+  struct GlobalLabel {
+    uintptr_t label;
+  };
+}
+
+enum struct System : u8 {
+  X86_64,
+};
+
+enum struct OutputFileType : u8 {
+  PE,
+};

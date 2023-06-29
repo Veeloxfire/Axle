@@ -40,6 +40,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
   TupleStructure* const type = structures->tuple_structures.allocate();
 
   type->type = STRUCTURE_TYPE::TUPLE;
+  type->ir_format = IR::Format::opaque;
 
   //Load the name
   {
@@ -107,6 +108,7 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
                                                   Type ret_type) {
   SignatureStructure* type = structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
+  type->ir_format = IR::Format::opaque;
   type->parameter_types = std::move(params);
   type->return_type = ret_type;
   type->calling_convention = conv;
@@ -154,6 +156,7 @@ IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const Inter
 CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, StringInterner* strings) {
   CompositeStructure* const type = structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
+  type->ir_format = IR::Format::opaque;
   type->struct_name = strings->intern("anoymous-struct");
 
   structures->structures.insert(type);
@@ -164,6 +167,7 @@ CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Str
 EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterner* strings, const Type& base) {
   EnumStructure* const type = structures->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
+  type->ir_format = base.struct_format();
   type->struct_name = strings->intern(EnumStructure::gen_name(base).ptr);
   type->base = base;
 
@@ -190,6 +194,7 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
 
   ArrayStructure* const type = structures->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
+  type->ir_format = IR::Format::opaque;
   type->base = base;
   type->length = length;
   type->struct_name = name;
@@ -207,6 +212,7 @@ PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringI
 
   PointerStructure* const type = structures->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
+  type->ir_format = IR::Format::uint64;
   type->base = base;
   type->struct_name = name;
 
@@ -315,63 +321,6 @@ Structures::~Structures() {
   }
 }
 
-using CAST_BYTECODE = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;
-
-RuntimeValue impl_single_cast(CompilerGlobals* const comp,
-                              State* const state,
-                              CodeBlock* const code,
-                              const Structure* type,
-                              const RuntimeValue* const val,
-                              CAST_BYTECODE cast) {
-  RuntimeValue reg = {};
-  reg.type = RVT::REGISTER;
-  reg.reg = state->new_value();
-
-  copy_runtime_to_runtime(comp, state, code, type, val, &reg);
-
-  cast(code->code, (uint8_t)reg.reg.val);
-
-  state->get_val(reg.reg)->is_modified = true;
-  state->use_value(reg.reg);
-
-  return reg;
-}
-
-RuntimeValue CASTS::u8_to_r64(CompilerGlobals* const comp,
-                              State* const state,
-                              CodeBlock* const code,
-                              const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->builtin_types->t_u8.structure, val, ByteCode::EMIT::CONV_RU8_TO_R64);
-}
-
-RuntimeValue CASTS::i8_to_r64(CompilerGlobals* const comp,
-                              State* const state,
-                              CodeBlock* const code,
-                              const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->builtin_types->t_i8.structure, val, ByteCode::EMIT::CONV_RI8_TO_R64);
-}
-
-RuntimeValue CASTS::u32_to_r64(CompilerGlobals* const comp,
-                               State* const state,
-                               CodeBlock* const code,
-                               const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->builtin_types->t_u8.structure, val, ByteCode::EMIT::CONV_RU32_TO_R64);
-}
-
-RuntimeValue CASTS::i32_to_r64(CompilerGlobals* const comp,
-                               State* const state,
-                               CodeBlock* const code,
-                               const RuntimeValue* const val) {
-  return impl_single_cast(comp, state, code, comp->builtin_types->t_i8.structure, val, ByteCode::EMIT::CONV_RI32_TO_R64);
-}
-
-RuntimeValue CASTS::no_op(CompilerGlobals* const comp,
-                          State* const state,
-                          CodeBlock* const code,
-                          const RuntimeValue* const val) {
-  return *val;
-}
-
 //Can cast without any value modification or checks
 static bool can_implicit_cast(const Type& from, const Type& to) {
   if (from == to) {
@@ -424,7 +373,7 @@ static bool can_implicit_cast(const Type& from, const Type& to) {
 }
 
 //Can cast without any value modification or checks
-[[maybe_unused]]static bool can_literal_cast(const Type& from, const Type& to) {
+[[maybe_unused]] static bool can_literal_cast(const Type& from, const Type& to) {
   if (can_implicit_cast(from, to)) {
     return true;
   }
@@ -507,6 +456,7 @@ static bool can_implicit_cast(const Type& from, const Type& to) {
 
   return false;
 }
+
 
 //No longer supported
 //bool TYPE_TESTS::check_implicit_cast(META_FLAGS flags, const Type& from, const Type& to) {

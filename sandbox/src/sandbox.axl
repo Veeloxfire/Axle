@@ -1,32 +1,12 @@
-#import "..\\..\\stdlib\\io.axl";
+HANDLE :: u64;
+DWORD :: u32;
 
-fizzbuzz :: (max: u64) -> void {
-  i := 1;
-
-  FIZZBUZZ :: "FizzBuzz\n";
-  FIZZ :: "Fizz\n";
-  BUZZ :: "Buzz\n";
-
-  while(i < max) {
-    if(i % 15 == 0) {
-      print(FIZZBUZZ.ptr, FIZZBUZZ.len);
-    } else if(i % 3 == 0) {
-      print(FIZZ.ptr, FIZZ.len);
-    } else if(i % 5 == 0) {
-      print(BUZZ.ptr, BUZZ.len);
-    } else {
-      print_u64(i);
-      print_newline();
-    }
-
-    i = i + 1;
-  }
-}
+GetStdHandle :: #dynamic_link((i32) -> u64, "kernel32.dll", "GetStdHandle");
+WriteConsoleA :: #dynamic_link((HANDLE, *void, DWORD, *DWORD, *void) -> u32, "kernel32.dll", "WriteConsoleA");
 
 main :: () -> u64 {
-  
-  fizzbuzz(10);
+  h := GetStdHandle(-11i32);
+  message := 0x0000006f6c6c6568;
 
-  return 0;
+  return WriteConsoleA(h, cast(*void, &message), 5u32, cast(*u32, nullptr), nullptr);
 }
-

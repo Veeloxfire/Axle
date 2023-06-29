@@ -1148,7 +1148,11 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
   switch (parser->current.type) {
     case AxleTokenType::Intrinsic: {
-        if (parser->current.string == comp_thread->intrinsics.static_link) {
+        if (parser->current.string == comp_thread->intrinsics.static_link || parser->current.string == comp_thread->intrinsics.dynamic_link) {
+          
+          const InternString* type = parser->current.string;
+          bool dynamic = parser->current.string == comp_thread->intrinsics.dynamic_link;
+
           advance(comp, comp_thread, parser);
           if (comp_thread->is_panic()) {
             return 0;
@@ -1171,7 +1175,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
           if (parser->current.type != AxleTokenType::String) {
             comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                                      "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", comp_thread->intrinsics.static_link);
+                                      "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", type);
             return 0;
           }
 
@@ -1188,7 +1192,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
           if (parser->current.type != AxleTokenType::String) {
             comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->current),
-                                      "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", comp_thread->intrinsics.static_link);
+                                      "Expected syntax: #{}(TYPE, \"LIBRARY_NAME\", \"IMPORT_NAME\")", type);
             return 0;
           }
 
@@ -1205,10 +1209,11 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
 
           SPAN_END;
 
-          ASTStaticLink* li = ast_alloc<ASTStaticLink>(parser);
+          ASTLink* li = ast_alloc<ASTLink>(parser);
+          li->dynamic = dynamic;
           li->import_type = it;
           li->node_span = span;
-          li->ast_type = AST_TYPE::STATIC_LINK;
+          li->ast_type = AST_TYPE::LINK;
           li->lib_file = lib;
           li->name = imp;
 
@@ -1897,6 +1902,9 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
 }
 
 static AST_LOCAL parse_typed_name(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {
+  Span span = {};
+  SPAN_START;
+
   const InternString* name = parse_name(comp, comp_thread, parser);
   if (comp_thread->is_panic()) {
     return 0;
@@ -1912,8 +1920,11 @@ static AST_LOCAL parse_typed_name(CompilerGlobals* const comp, CompilerThread* c
     return 0;
   }
 
+  SPAN_END;
+
   ASTTypedName* tn = ast_alloc<ASTTypedName>(parser);
   tn->ast_type = AST_TYPE::TYPED_NAME;
+  tn->node_span = span;
   tn->name = name;
   tn->type = ty;
   tn->local_ptr = nullptr;
@@ -2514,7 +2525,7 @@ void Printer::newline() const {
 
 static void print_ast(Printer* const printer, AST_LOCAL a) {
   switch (a->ast_type) {
-    case AST_TYPE::INVALID: INVALID_CODE_PATH(); break;
+    case AST_TYPE::INVALID: INVALID_CODE_PATH("Invalid Ast Node"); break;
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
         IO_Single::print(nt->name->string);
@@ -2878,10 +2889,15 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         print_ast(printer, i->expr_location);
         return;
       }
-    case AST_TYPE::STATIC_LINK: {
-        ASTStaticLink* imp = (ASTStaticLink*)a;
+    case AST_TYPE::LINK: {
+        ASTLink* imp = (ASTLink*)a;
 
-        IO_Single::print("#lib_import(");
+        if (imp->dynamic) {
+          IO_Single::print("#dynamic_link(");
+        }
+        else {
+          IO_Single::print("#static_link(");
+        }
         print_ast(printer, imp->import_type);
 
         IO_Single::print(", ", imp->lib_file->string, ", ", imp->name->string, ")");

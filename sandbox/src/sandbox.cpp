@@ -1,12 +1,12 @@
 #include "api.h"
 #include "format.h"
-#include "vm.h"
 #include "windows_specifics.h"
-#include "backends.h"
+#include "x64_backend.h"
+#include "PE_file_format.h"
 #include <iostream>
 #include "trace.h"
 
-constexpr char output_file[] = ".\\out\\output.nasm";
+constexpr char output_file[] = ".\\out\\output.exe";
 
 int main(int argc, const char** args) {
 #ifdef TRACING_ENABLE
@@ -23,23 +23,28 @@ int main(int argc, const char** args) {
 
   Windows::MAX_PATH_STR cwd = Windows::get_current_directory();
 
+  constexpr Backend::PlatformInterface pi = x86_64_platform_interface();
+  constexpr Backend::ExecutableFormatInterface efi = pe_plus_file_interface();
+
   APIOptions options = {};
+
+  options.platform_interface = &pi;
+  options.executable_format_interface = &efi;
+
+  options.build.default_calling_convention = 0;
 
   options.build.current_directory = cwd.str;
   options.build.file_name = args[1];
   options.build.entry_point = "main";
-  options.build.system_name                = "vm";
-  options.build.default_calling_convention = "vm";
-  //options.build.system_name = "x86_64";
-  //options.build.default_calling_convention = "x64";
+
   options.build.output_file = output_file;
+  options.build.output_file_type = OutputFileType::PE;
+
   options.build.std_lib_folder = ".\\stdlib";
   options.build.lib_folder = ".\\lib";
 
-  //options.print.ast = true;
-  //options.print.pre_reg_alloc = true;
-  //options.print.intersections = true;
-  //options.print.normal_bytecode = true;
+  options.print.ast = true;
+  options.print.finished_ir = true;
   //options.print.comptime_res = true;
   //options.print.coalesce_values = true;
   //options.print.fully_compiled = true;
@@ -48,11 +53,11 @@ int main(int argc, const char** args) {
   //options.print.comp_units = true;
   //options.print.comptime_exec = true;
 
-  options.optimize.non_stack_locals = true;
+  //options.optimize.non_stack_locals = true;
+  
   {
-    Program p = {};
     TRACING_SCOPE("Compiler");
-    int out = compile_file(options, &p);
+    int out = compile_and_write(options);
 
     if (out != 0) {
       std::cerr << "Error!";
@@ -60,26 +65,5 @@ int main(int argc, const char** args) {
     }
   }
 
-  return 0;
-
-  {
-    TRACING_SCOPE("Nasm");
-    int res = system("nasm -g -fwin64 .\\out\\output.nasm");
-
-    if (res != 0) {
-      std::cerr << "Nasm returned non-zero";
-      return res;
-    }
-  }
-
-  {
-    TRACING_SCOPE("Link");
-    int res = system("link /LARGEADDRESSAWARE:NO /ENTRY:main /SUBSYSTEM:CONSOLE /OUT:.\\out\\output.exe .\\out\\output.obj ..\\lib\\kernel32.lib");
-
-    if (res != 0) {
-      std::cerr << "Link returned non-zero";
-      return res;
-    }
-  }
   return 0;
 }

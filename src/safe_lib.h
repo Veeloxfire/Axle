@@ -6,17 +6,8 @@
 
 #include <memory>
 
+#include "comp_utilities.h"
 //#include "trace.h"
-
-using u8 = uint8_t;
-using u16 = uint16_t;
-using u32 = uint32_t;
-using u64 = uint64_t;
-using i8 = int8_t;
-using i16 = int16_t;
-using i32 = int32_t;
-using i64 = int64_t;
-using usize = size_t;
 
 #define STR_REPLAC2(a) #a
 #define STR_REPLACE(a) STR_REPLAC2(a)
@@ -299,7 +290,7 @@ T* allocate_single_constructed(U&& ... u) {
   ALLOC_COUNTER::allocated().insert(t, 1);
 #endif
 
-  new(t) T(std::forward<U>(u...));
+  new(t) T(std::forward<U>(u)...);
   return t;
 }
 

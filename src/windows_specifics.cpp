@@ -30,6 +30,7 @@ uint32_t Windows::run_exe(const char* name) {
   }
 }
 
+#if 0
 Array<Windows::ActiveDll> Windows::load_dlls(Program* prog) {
   Array<ActiveDll> dlls = {};
 
@@ -60,6 +61,7 @@ Array<Windows::ActiveDll> Windows::load_dlls(Program* prog) {
 
   return dlls;
 }
+#endif
 
 u8* virtual_alloc(usize bytes) {
   return (u8*)VirtualAlloc(0, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
