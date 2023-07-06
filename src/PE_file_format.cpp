@@ -1,6 +1,7 @@
 #include "PE_file_format.h"
 #include "files.h"
 #include "compiler.h"
+#include "trace.h"
 #include <time.h>
 
 //// Sizes ////
@@ -272,6 +273,8 @@ struct ProgramLocation {
 };
 
 void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* program, const InternString* file_name) {
+  TRACING_FUNCTION();
+
   const uint32_t TIME = time(0) & 0x0000000000000000FFFFFFFFFFFFFFFF;
 
   const bool has_dynamic_imports = program->dyn_imports.size > 0;
@@ -447,6 +450,7 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
   Array<usize> dyn_import_lookup = {};
   Array<DynImport> dyn_imports = {};
   if (has_dynamic_imports) {
+    TRACING_SCOPE("Write Dynamic Imports");
 
     {
       dyn_import_lookup.insert_uninit(program->dyn_imports.size);
@@ -668,6 +672,7 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
   const usize code_memory_start = memory_pointer;
 
   {
+    TRACING_SCOPE("Write Machine Code");
     //Write all the code
 
     Backend::DataBucketIterator code = program->code_store.start();

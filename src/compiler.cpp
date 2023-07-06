@@ -5162,7 +5162,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   }
 
   {
-    TRACING_SCOPE("Create Start");
+    TRACING_SCOPE("Create Entry Point");
     if (comp->entry_point_label.label == 0) {
       comp_thread->report_error(ERROR_CODE::LINK_ERROR, Span{}, "Did not find entry point (expected name = \"{}\")",
                                 comp->build_options.entry_point);

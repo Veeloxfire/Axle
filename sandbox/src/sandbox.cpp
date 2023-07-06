@@ -10,10 +10,12 @@ constexpr char output_file[] = ".\\out\\output.exe";
 
 int main(int argc, const char** args) {
 #ifdef TRACING_ENABLE
-  Tracing::start_tracer_threaded("trace.json");
+  Tracing::start_tracer_threaded("info.trace");
   DEFER() {
     Tracing::end_tracer_threaded();
   };
+
+  Tracing::new_traced_thread();
 #endif
 
   if (argc != 2) {
@@ -43,8 +45,8 @@ int main(int argc, const char** args) {
   options.build.std_lib_folder = ".\\stdlib";
   options.build.lib_folder = ".\\lib";
 
-  options.print.ast = true;
-  options.print.finished_ir = true;
+  //options.print.ast = true;
+  //options.print.finished_ir = true;
   //options.print.comptime_res = true;
   //options.print.coalesce_values = true;
   //options.print.fully_compiled = true;

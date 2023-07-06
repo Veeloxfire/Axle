@@ -1,5 +1,6 @@
-#include "threading.h"
 #include "safe_lib.h"
+#include "threading.h"
+#include "trace.h"
 
 #include "windows_specifics.h"
 
@@ -42,6 +43,10 @@ DWORD WINAPI generic_thread_proc(
   _In_ LPVOID lpParameter
 ) {
   ThreadingInfo* info = (ThreadingInfo*)lpParameter;
+
+#ifdef TRACING_ENABLE
+  Tracing::new_traced_thread();
+#endif
 
   info->proc(info->handle, info->data);
 

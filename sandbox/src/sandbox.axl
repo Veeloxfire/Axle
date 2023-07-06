@@ -1,5 +1,5 @@
-HANDLE :: u64;
-DWORD :: u32;
+HANDLE :: #type u64;
+DWORD :: #type u32;
 
 GetStdHandle :: #dynamic_link((i32) -> u64, "kernel32.dll", "GetStdHandle");
 WriteConsoleA :: #dynamic_link((HANDLE, *void, DWORD, *DWORD, *void) -> u32, "kernel32.dll", "WriteConsoleA");
