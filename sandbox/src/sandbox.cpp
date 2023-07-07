@@ -45,6 +45,8 @@ int main(int argc, const char** args) {
   options.build.std_lib_folder = ".\\stdlib";
   options.build.lib_folder = ".\\lib";
 
+  options.build.extra_threads = 0;
+
   //options.print.ast = true;
   //options.print.finished_ir = true;
   //options.print.comptime_res = true;

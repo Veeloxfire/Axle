@@ -1,6 +1,7 @@
 #include "ir.h"
 #include "compiler.h"
 #include "x64_backend.h"
+#include "trace.h"
 
 namespace X64 {
   struct JumpRelocation {
@@ -2866,6 +2867,7 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
                                    RegisterResolver* resolver,
                                    const CallingConvention* convention,
                                    u32 stack_top) {
+  TRACING_FUNCTION();
   const u8* const bc_start = resolver->bytecode_start;
   const u8* const bc_end = resolver->bytecode_end;
 
@@ -3347,6 +3349,7 @@ namespace X64 {
 
 void x64_emit_dyn_library_function(CompilerThread* comp_thread, const IR::DynLibraryImport* lib_import, const CallingConvention* convention,
                                    Backend::Program* program) {
+  TRACING_FUNCTION();
 
   Backend::FunctionMetadata func = {};
   func.code_start = program->code_store.current_location();
@@ -3389,6 +3392,7 @@ void x64_emit_dyn_library_function(CompilerThread* comp_thread, const IR::DynLib
 void x64_emit_start(CompilerGlobals* comp,
                     IR::GlobalLabel entry,
                     Backend::Program* program) {
+  TRACING_FUNCTION();
   program->entry_point = entry;
   program->start_code.code_start = program->code_store.current_location();
 
@@ -3416,6 +3420,7 @@ void x64_emit_start(CompilerGlobals* comp,
 
 void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const IR::Builder* ir, const CallingConvention* convention,
                        Backend::Program* program) {
+  TRACING_FUNCTION();
 
   //TODO: allow variables in registers
   Array<u32> variables_memory_location;

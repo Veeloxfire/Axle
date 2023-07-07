@@ -94,7 +94,7 @@ int compile_and_write(const APIOptions& options) {
   compiler.pipelines.exec_ir._debug_name = "Exec IR";
   compiler.pipelines.compile_ir._debug_name = "Compile IR";
 
-  compiler.active_threads = 4;
+  compiler.active_threads = options.build.extra_threads + 1;
 
   //Load the builtin types
   init_compiler(options, &compiler, &compiler_thread);
@@ -104,6 +104,7 @@ int compile_and_write(const APIOptions& options) {
   }
 
   {
+    TRACING_FUNCTION();
     FileLocation loc = parse_file_location(file_loader.cwd.full_name->string, compiler.build_options.file_name->string, compiler.services.strings.get()._ptr);
 
     compiler.build_file_namespace = compiler.new_namespace();

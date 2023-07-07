@@ -16,6 +16,24 @@ namespace Tracing {
     u64 time_end;
   };
 
+  u64 get_time();
+  void upload_event(const Event& e);
+
+  template<size_t N>
+  Event start_event(const char(&name)[N]) {
+    Event e{};
+    e.name = name;
+    e.name_size = N - 1;
+    e.time_start = get_time();
+
+    return e;
+  }
+
+  inline void end_event(Event& e) {
+    e.time_end = get_time();
+    upload_event(e);
+  }
+
   template<size_t N>
   constexpr u32 ARRAY_SIZE(const char(&)[N]) {
     return static_cast<u32>(N);
@@ -26,23 +44,14 @@ namespace Tracing {
 
   void new_traced_thread();
 
-  u64 get_time();
-  void upload_event(const Event& e);
-
   struct AUTO_SCOPE_EVENT {
     Event e;
 
     template<size_t N>
-    AUTO_SCOPE_EVENT(const char(&name)[N]) : e() {
-      e.name = name;
-      e.name_size = N;
-      e.time_start = get_time();
-    }
+    AUTO_SCOPE_EVENT(const char(&name)[N]) : e(start_event(name)) {}
 
     ~AUTO_SCOPE_EVENT() {
-      e.time_end = get_time();
-
-      upload_event(e);
+      end_event(e);
     }
   };
 }

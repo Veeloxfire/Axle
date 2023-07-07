@@ -3188,12 +3188,15 @@ static void type_check_ast(CompilerGlobals* comp,
                            CompilerThread* comp_thread,
                            Context* const context,
                            AST_LOCAL ast) {
+  TRACING_FUNCTION();
   Typer typer = {};
 
   typer.push_node(ast, {});
   typer.load_new_nodes();
 
   while (typer.untyped_stack.size > 0) {
+    TRACING_SCOPE("Type Check Loop Step");
+
     UntypedNode* n = typer.untyped_stack.back();
 
     bool finished = type_check_single_node(comp, comp_thread, context, &typer, n);
@@ -3374,6 +3377,7 @@ IR::RuntimeReference CASTS::take_address(IR::Builder* const builder,
 }
 
 IR::RuntimeReference load_data_memory(CompilerGlobals* comp, IR::Builder* builder, const Global* global) {
+  TRACING_FUNCTION();
   builder->new_global_reference({ global->decl.type, global->dynamic_init_index });
   const PointerStructure* ps;
   {
@@ -3818,6 +3822,8 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
                                    Context* const context,
                                    IR::Builder* const builder,
                                    AST_LOCAL const statement) {
+  TRACING_FUNCTION();
+
   switch (statement->ast_type) {
     case AST_TYPE::ASSIGN: {
         ASTAssign* assign = (ASTAssign*)statement;
@@ -4410,6 +4416,8 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const
 }
 
 void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTLambda* lambda) noexcept {
+  TRACING_FUNCTION();
+
   //Setup the function object
   IR::Function* const func = comp->new_function();
   lambda->function = func;
@@ -4477,7 +4485,6 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
 void DependencyManager::remove_dependency_from(CompilationUnit* ptr) {
   ASSERT(ptr != nullptr);
 
-
   ptr->waiting_on_count -= 1;
 
   if (ptr->waiting_on_count == 0) {
@@ -4514,6 +4521,8 @@ void DependencyManager::close_dependency(CompilationUnit* ptr) {
 }
 
 void launch_free_dependencies(CompilerThread* comp_thread, Compilation* const compilation) {
+  TRACING_FUNCTION();
+
   while (compilation->dependencies.free_dependencies.size > 0) {
     CompilationUnit* unit = compilation->dependencies.free_dependencies.pop_front();
 
@@ -4540,6 +4549,8 @@ void launch_free_dependencies(CompilerThread* comp_thread, Compilation* const co
 //Might be that dependencies were already dispatched
 //Return true if depended
 bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, Context* context) {
+  TRACING_FUNCTION();
+
   ASSERT(context->current_unit != nullptr);
   ASSERT(context->dependency_load_pipe != nullptr);
 
@@ -4611,6 +4622,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       };
 
       if (file_loader->unparsed_files.size > 0) {
+        TRACING_SCOPE("Parse Files");
         thead_doing_work(comp, comp_thread);
 
         compile_current_unparsed_files(comp, comp_thread, file_loader);
@@ -4619,9 +4631,8 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         }
 
         ASSERT(!comp_thread->is_depends());
+        return;
       }
-
-
     }
   }
 
@@ -4636,6 +4647,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
       const IR::Builder* ir = nullptr;
       if (comp->finished_irs.try_pop_front(&ir)) {
+        TRACING_SCOPE("Emit IR");
         thead_doing_work(comp, comp_thread);
 
         comp_thread->platform_interface.emit_function(comp,
@@ -4647,6 +4659,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         }
 
         ASSERT(!comp_thread->is_depends());
+        return;
       }
     }
   }
@@ -5062,6 +5075,8 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 }
 
 void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
+  TRACING_FUNCTION();
+
   comp_thread->doing_work = true;
 
   while (comp->is_compiling()) {
@@ -5097,37 +5112,44 @@ void compiler_loop_thread_proc(const ThreadHandle* handle, void* data) {
 
 void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const comp_thread) noexcept {
   comp->work_counter = comp->active_threads;
-  const usize EXTRA_THREADS = comp->active_threads - 1;
+  const usize extra_threads = comp->active_threads - 1;
 
-  if (EXTRA_THREADS > 0) {
-    ThreadData* datas = allocate_default<ThreadData>(EXTRA_THREADS);
-    CompilerThread* comp_threads = allocate_default<CompilerThread>(EXTRA_THREADS);
-    const ThreadHandle** handles = allocate_default<const ThreadHandle*>(EXTRA_THREADS);
+  copy_compiler_constants(comp, comp_thread);//copy to this thread every time
 
-    for (usize i = 0; i < EXTRA_THREADS; i++) {
+  if (extra_threads > 0) {
+#ifdef TRACING_ENABLE
+    Tracing::Event tracing_start_threads = Tracing::start_event("Start Threads");
+#endif
+    ThreadData* datas = allocate_default<ThreadData>(extra_threads);
+    CompilerThread* comp_threads = allocate_default<CompilerThread>(extra_threads);
+    const ThreadHandle** handles = allocate_default<const ThreadHandle*>(extra_threads);
+
+    for (usize i = 0; i < extra_threads; i++) {
       datas[i].comp = comp;
       datas[i].comp_thread = comp_threads + i;
       copy_compiler_constants(comp, comp_threads + i);
     }
 
-    copy_compiler_constants(comp, comp_thread);//Just in case
-
     //Start the threads
-    for (usize i = 0; i < EXTRA_THREADS; i++) {
+    for (usize i = 0; i < extra_threads; i++) {
       handles[i] = start_thread(compiler_loop_thread_proc, datas + i);
     }
+
+#ifdef TRACING_ENABLE
+    Tracing::end_event(tracing_start_threads);
+#endif
 
     compiler_loop(comp, comp_thread);
 
     {
       TRACING_SCOPE("Close Threads");
-      for (usize i = 0; i < EXTRA_THREADS; i++) {
+      for (usize i = 0; i < extra_threads; i++) {
         wait_for_thread_end(handles[i]);
       }
 
-      free_destruct_n(handles, EXTRA_THREADS);
-      free_destruct_n(datas, EXTRA_THREADS);
-      free_destruct_n(comp_threads, EXTRA_THREADS);
+      free_destruct_n(handles, extra_threads);
+      free_destruct_n(datas, extra_threads);
+      free_destruct_n(comp_threads, extra_threads);
     }
   }
   else {

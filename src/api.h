@@ -24,6 +24,8 @@ struct APIBuildOptions {
 
   const char* output_file = nullptr;
   OutputFileType output_file_type;
+
+  u32 extra_threads = 0;
 };
 
 struct APIPrintOptions {
