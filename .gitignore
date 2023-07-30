@@ -14,8 +14,10 @@ x64/
 **.Lib
 **.pdb
 **.exe
+**.dll
 **.obj
 **.json
 
 /sandbox/out/**
+/integration_tests/out/**
 
