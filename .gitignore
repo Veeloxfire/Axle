@@ -17,6 +17,7 @@ x64/
 **.dll
 **.obj
 **.json
+**.trace
 
 /sandbox/out/**
 /integration_tests/out/**
