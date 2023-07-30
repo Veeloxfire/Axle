@@ -21,6 +21,8 @@ namespace FILES {
   OpenedFile replace(const char* name,
                      OPEN_MODE open_mode);
 
+  bool exist(const char* name);
+
   void close(FileData* file);
 
   ErrorCode read_to_bytes(FileData* file, uint8_t* bytes, size_t num_bytes);
@@ -35,7 +37,7 @@ namespace FILES {
   void seek_from_start(FileData* file, size_t offset);
   size_t get_current_pos(FileData* file);
 
-  OwnedPtr<const char> load_file_to_string(const char* file_name);
+  OwnedArr<const char> load_file_to_string(const char* file_name);
 
   ErrorCode write(FileData* file, const uint8_t* arr, size_t length);
   ErrorCode write_padding_bytes(FileData* file, uint8_t byte, size_t num);
@@ -57,6 +59,10 @@ namespace FILES {
 struct InternString;
 struct StringInterner;
 
+struct Directory {
+  const InternString* directory;
+};
+
 struct FileLocation {
   const InternString* directory;
   const InternString* extension;
@@ -67,9 +73,28 @@ struct FileLocation {
   }
 };
 
+struct AllocFilePath {
+  OwnedArr<const char> raw;
+  usize directory_size;
+  usize file_name_start;
+  usize file_name_size;
+  usize extension_start;
+  usize extension_size;
+};
+
+AllocFilePath format_file_path(const char* path_str,
+                               const char* file_str,
+                               const char* extension);
+
+AllocFilePath format_file_path(const char* path_str,
+                               const char* file_str);
+
+OwnedArr<const char> normalize_path(const char* current, const char* relative);
+OwnedArr<const char> normalize_path(const char* current);
+
 FileLocation parse_file_location(const char* path,
                                  const char* file,
                                  StringInterner* strings);
 
-const InternString* get_extension(const char* path,
-                                  StringInterner* strings);
+FileLocation parse_file_location(const AllocFilePath& path,
+                                 StringInterner* strings);

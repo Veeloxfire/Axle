@@ -31,6 +31,7 @@ struct CallingConvention {
   uint8_t num_parameter_registers = 0;
   uint8_t num_volatile_registers = 0;
   uint8_t num_non_volatile_registers = 0;
+  uint8_t num_available_registers = 0;
 
   CLEANUP cleanup = CLEANUP::calleE;
   STACK_PASS_TYPE stack_pass_type = STACK_PASS_TYPE::POINTER;
@@ -39,16 +40,17 @@ struct CallingConvention {
   uint8_t shadow_space_size = 0;//bytes
 
   uint64_t non_volatiles_bit_mask = 0;
+  uint64_t volatiles_bit_mask = 0;
 
   const uint8_t* parameter_registers = nullptr;
-  const uint8_t* all_regs_unordered = nullptr; //volatile then non_volatile
+  const uint8_t* all_regs_unordered = nullptr;//volatile then non_volatile
 
   constexpr bool is_non_volatile(uint8_t reg) const {
     return (non_volatiles_bit_mask & ((uint64_t)1 << reg)) != 0;
   }
 
   constexpr bool is_volatile(uint8_t reg) const {
-    return (non_volatiles_bit_mask & ((uint64_t)1 << reg)) == 0;
+    return (volatiles_bit_mask & ((uint64_t)1 << reg)) != 0;
   }
 
   constexpr size_t num_reg_parameters(size_t parameters) const {
@@ -149,7 +151,7 @@ namespace Backend {
   };
 
   struct FunctionMetadata {
-    DataBucketIterator code_start = {};
+    usize code_start = 0;
     usize code_size = 0;
   };
 
@@ -172,7 +174,12 @@ namespace Backend {
     const InternString* library;
   };
 
-  struct Program {
+  struct DynExport {
+    const InternString* name;
+    IR::GlobalLabel label;
+  };
+
+  struct GenericProgram {
     DataBucketStore code_store = {};
 
     IR::GlobalLabel entry_point;
@@ -182,22 +189,27 @@ namespace Backend {
 
     Array<Relocation> relocations;
     Array<DynImport> dyn_imports;
+    Array<DynExport> dyn_exports;
   };
+
+  using PROGRAM_INIT = void(*)(CompilerGlobals* comp,
+                               CompilerThread* comp_thread,
+                               GenericProgram* program);
 
   using EMIT_FUNCTION = void(*)(CompilerGlobals* comp,
                                 CompilerThread* comp_thread,
                                 const IR::Builder* ir,
                                 const CallingConvention* convention,
-                                Program* program);
+                                GenericProgram* program);
 
   using EMIT_START = void(*)(CompilerGlobals* comp,
                              IR::GlobalLabel entry_point,
-                             Program* program);
+                             GenericProgram* program);
 
   using EMIT_DYNAMIC_LIBRARY_FUNCTION = void(*) (CompilerThread* comp_thread,
                                                  const IR::DynLibraryImport* lib_import,
                                                  const CallingConvention* convention,
-                                                 Program* program);
+                                                 GenericProgram* program);
 
   struct PlatformInterface {
     CallingConvention const* const* valid_calling_conventions;
@@ -208,15 +220,18 @@ namespace Backend {
 
     usize ptr_size;
 
+    PROGRAM_INIT init;
     EMIT_START emit_start;
     EMIT_FUNCTION emit_function;
     EMIT_DYNAMIC_LIBRARY_FUNCTION emit_dyn_library_function;
   };
 
-  using OUTPUT_EXECUTABLE = void(*) (CompilerThread* comp_thread,
-                                     const Program* program, const InternString* file_name);
+  using OUTPUT_EXECUTABLE = void(*) (CompilerThread* comp_thread, const GenericProgram* program,
+                                     const InternString* out_name, const InternString* out_folder);
 
   struct ExecutableFormatInterface {
+    OutputFileType type;
     OUTPUT_EXECUTABLE output_executable;
+    OUTPUT_EXECUTABLE output_dynamic_library;
   };
 };

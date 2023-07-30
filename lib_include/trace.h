@@ -39,10 +39,13 @@ namespace Tracing {
     return static_cast<u32>(N);
   }
 
-  void start_tracer_threaded(const char* output_file_name);
-  void end_tracer_threaded();
+  void start_default_tracing_thread(const char* output_file_name);
+  void end_default_tracing_thread();
 
-  void new_traced_thread();
+  void tracer_thread_proc();
+  void create_trace_data(const char* output_file_name);
+
+  void signal_end_trace_thread();
 
   struct AUTO_SCOPE_EVENT {
     Event e;

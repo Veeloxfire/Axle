@@ -44,10 +44,6 @@ DWORD WINAPI generic_thread_proc(
 ) {
   ThreadingInfo* info = (ThreadingInfo*)lpParameter;
 
-#ifdef TRACING_ENABLE
-  Tracing::new_traced_thread();
-#endif
-
   info->proc(info->handle, info->data);
 
   free_destruct_single(info);

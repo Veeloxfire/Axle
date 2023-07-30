@@ -87,7 +87,7 @@ namespace X64 {
   template<size_t all, size_t num_volatile, size_t num_non_volatile>
   constexpr CallingConvention
     make_calling_convention(const char* name,
-                            const uint8_t(&all_regs)[all],
+                            const uint8_t(&all_regs_unordered)[all],
                             const uint8_t* params,
                             size_t num_params,
                             const uint8_t(&volatiles)[num_volatile],
@@ -105,22 +105,32 @@ namespace X64 {
     CallingConvention convention = {};
 
     convention.name = name;
-    convention.all_regs_unordered = all_regs;
+    convention.all_regs_unordered = all_regs_unordered;
+    convention.num_available_registers = all;
 
     convention.parameter_registers = params;
     convention.num_parameter_registers = (uint8_t)num_params;
 
+    {
+      uint64_t mask = 0;
+      for (size_t i = 0; i < num_non_volatile; i++) {
+        mask |= ((uint64_t)1 << non_volatiles[i]);
+      }
+      convention.non_volatiles_bit_mask = mask;
+    }
 
-    uint64_t mask = 0;
-    for (size_t i = 0; i < num_non_volatile; i++) {
-      mask |= ((uint64_t)1 << non_volatiles[i]);
+    {
+      uint64_t mask = 0;
+      for (size_t i = 0; i < num_volatile; i++) {
+        mask |= ((uint64_t)1 << volatiles[i]);
+      }
+      convention.volatiles_bit_mask = mask;
     }
 
     convention.return_register = ret_reg.REG;
     convention.stack_pointer_reg = sp_reg.REG;
     convention.base_pointer_reg = bp_reg.REG;
 
-    convention.non_volatiles_bit_mask = mask;
 
     convention.num_volatile_registers = num_volatile;
     convention.num_non_volatile_registers = num_non_volatile;
@@ -188,22 +198,29 @@ namespace X64 {
 
 
   inline constexpr const char SYSTEM_NAME[] = "x86_64";
+
+  struct Program : Backend::GenericProgram {
+    IR::GlobalLabel exit_process;
+  };
 }
 
 void x64_emit_dyn_library_function(CompilerThread* comp_thread,
                                    const IR::DynLibraryImport* lib_import,
                                    const CallingConvention* convention,
-                                   Backend::Program* program);
+                                   Backend::GenericProgram* program);
 
 void x64_emit_function(CompilerGlobals* comp,
                        CompilerThread* comp_thread,
                        const IR::Builder* ir,
                        const CallingConvention* convention,
-                       Backend::Program* program);
+                       Backend::GenericProgram* program);
 
 void x64_emit_start(CompilerGlobals* comp,
                     IR::GlobalLabel entry_point,
-                    Backend::Program* program);
+                    Backend::GenericProgram* program);
+
+void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
+              Backend::GenericProgram* program_in);
 
 constexpr Backend::PlatformInterface x86_64_platform_interface() {
   Backend::PlatformInterface in = {};
@@ -212,6 +229,7 @@ constexpr Backend::PlatformInterface x86_64_platform_interface() {
   in.system_name = X64::SYSTEM_NAME;
   in.ptr_size = 8;
 
+  in.init = x64_init;
   in.emit_function = x64_emit_function;
   in.emit_start = x64_emit_start;
   in.emit_dyn_library_function = x64_emit_dyn_library_function;

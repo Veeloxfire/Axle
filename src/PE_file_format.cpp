@@ -269,11 +269,14 @@ namespace X64 {
 struct ProgramLocation {
   u32 memory;
   u32 file;
-
 };
 
-void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* program, const InternString* file_name) {
+void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+                   const InternString* out_name, const InternString* out_folder, bool lib) {
   TRACING_FUNCTION();
+
+  ASSERT((lib && program->dyn_exports.size != 0) || program->dyn_exports.size == 0);
+  ASSERT(lib || program->entry_point.label != 0);
 
   const uint32_t TIME = time(0) & 0x0000000000000000FFFFFFFFFFFFFFFF;
 
@@ -294,14 +297,25 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
     }
   }
 
-  const bool has_constants = strings.used > 0;
+  const bool has_constants = strings.used > 0 || lib;
 
-  FILES::OpenedFile file = FILES::replace(file_name->string, FILES::OPEN_MODE::WRITE);
+  const char* suffix;
+  if (lib) {
+    suffix = "dll";
+  }
+  else {
+    suffix = "exe";
+  }
+
+  AllocFilePath file_path = format_file_path(out_folder->string, out_name->string, suffix);
+
+  FILES::OpenedFile file = FILES::replace(file_path.raw.data, FILES::OPEN_MODE::WRITE);
 
   if (file.error_code != ErrorCode::OK) {
-    comp_thread->report_error(ERROR_CODE::FILE_ERROR, Span{}, "Could not open output file \"{}\" to write", file_name);
+    comp_thread->report_error(ERROR_CODE::FILE_ERROR, Span{}, "Could not open output file \"{}\" to write", file_path.raw);
     return;
   }
+  IO::print("Writing to: ", file_path.raw, '\n');
 
   auto* const out = file.file;
 
@@ -395,6 +409,15 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
     write_to_image(out, code_header, &file_pointer, &memory_pointer);
   }
 
+  const size_t exports_header_location = file_pointer;
+
+  if (lib) {
+    Section_Header export_header = {};
+    num_sections += 1;
+    static_assert(sizeof(export_header) == 40);
+    write_to_image(out, export_header, &file_pointer, &memory_pointer);
+  }
+
   ///// SECTIONS /////
 
   file_align(out, &file_pointer, file_alignmnet);
@@ -403,11 +426,19 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
 
 
   usize initialized_data_size = 0;
+  usize lib_name_rva = 0;
 
   const usize constants_start = file_pointer;
   const usize constants_memory_start = memory_pointer;
 
   if (has_constants) {
+    if (lib) {
+      OwnedArr<char> lib_name = format("{}.{}", out_name, suffix);
+      lib_name_rva = memory_pointer;
+
+      write_raw_to_image(out, (const u8*)lib_name.data, lib_name.size, &file_pointer, &memory_pointer);
+    }
+
     auto string_itr = strings.itr();
 
     while (string_itr.is_valid()) {
@@ -455,7 +486,7 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
     {
       dyn_import_lookup.insert_uninit(program->dyn_imports.size);
       dyn_imports.reserve_total(program->dyn_imports.size);
-      
+
       const Backend::DynImport* p_imports_start = program->dyn_imports.begin();
       const Backend::DynImport* p_imports = p_imports_start;
       const Backend::DynImport* p_imports_end = program->dyn_imports.end();
@@ -534,7 +565,9 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
       LI* li = library_infos.mut_begin();
       LI* li_end = library_infos.mut_end();
 
-      for(; li < li_end; li += 1) {
+      const usize base_memory_pointer = memory_pointer;
+
+      for (; li < li_end; li += 1) {
         ImportDataDirectory idir = {};
         idir.forwarder_chain = 0;
         idir.date_time_stamp = 0;
@@ -544,9 +577,9 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
 
         idir.name_rva = pl->memory;
 
-        usize table_size = (li->num_funcs + 1) * sizeof(u64);
+        usize table_size = ((usize)li->num_funcs + 1) * sizeof(u64);
 
-        li->address_table_estimate = memory_pointer + import_directory_size + import_table_acc;
+        li->address_table_estimate = base_memory_pointer + import_directory_size + import_table_acc;
         li->lookup_table_estimate = li->address_table_estimate + import_tables_size;
         idir.import_address_table = (RVA)li->address_table_estimate;
         idir.import_lookup_table = (RVA)li->lookup_table_estimate;
@@ -671,46 +704,110 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
   const usize code_start = file_pointer;
   const usize code_memory_start = memory_pointer;
 
+  OwnedArr actual_function_locations = new_arr<ProgramLocation>(program->functions.size);
+
   {
     TRACING_SCOPE("Write Machine Code");
     //Write all the code
 
     Backend::DataBucketIterator code = program->code_store.start();
 
+    struct SortedFunction {
+      const Backend::FunctionMetadata* metadata = nullptr;
+    };
+
+    OwnedArr sorted_functions = new_arr<const Backend::FunctionMetadata*>(program->functions.size);
+    {
+      const Backend::FunctionMetadata* functions = program->functions.begin();
+      FOR_MUT(sorted_functions, it) {
+        *it = functions;
+        functions += 1;
+      }
+    }
+
+    sort_range(sorted_functions.mut_begin(), sorted_functions.mut_end(),
+               [](const Backend::FunctionMetadata * l, const Backend::FunctionMetadata * r) { return l->code_start < r->code_start; });
+
+    auto sf_i = sorted_functions.begin();
+    const auto sf_end = sorted_functions.end();
+
     const Backend::Relocation* reloc = program->relocations.begin();
     const Backend::Relocation* reloc_end = program->relocations.end();
 
-    for (; reloc < reloc_end; reloc += 1) {
-      ASSERT(code.actual_location <= reloc->location);
+    while (true) {
+      bool next_is_reloc;
+      usize location;
 
-      write_code_partial(out, &code, reloc->location, &file_pointer, &memory_pointer);
+      if ((reloc < reloc_end) && (sf_i < sf_end)) {
+        usize f_start = (*sf_i)->code_start;
+        if (reloc->location < f_start) {
+          next_is_reloc = true;
+          location = reloc->location;
+        }
+        else {
+          next_is_reloc = false;
+          location = f_start;
+        }
+      }
+      else if (reloc < reloc_end) {
+        next_is_reloc = true;
+        location = reloc->location;
+      }
+      else if (sf_i < sf_end) {
+        next_is_reloc = false;
+        location = (*sf_i)->code_start;
+      }
+      else {
+        break;//nothing to look up left
+      }
 
-      switch (reloc->type) {
-        case Backend::RelocationType::Label: {
-            ASSERT(program->functions.size > reloc->label.label);
+      ASSERT(code.actual_location <= location);
 
-            usize jump_to = program->functions.data[reloc->label.label].code_start.actual_location;
+      write_code_partial(out, &code, location, &file_pointer, &memory_pointer);
 
-            i32 disp = 0;
-            bool can_local_jump = X64::try_relative_disp(reloc->location + 4, jump_to, &disp);
-            ASSERT(can_local_jump);//TODO: handle trampolining
+      if (next_is_reloc) {
+        ASSERT(reloc->location == code.actual_location);
+        switch (reloc->type) {
+          case Backend::RelocationType::Label: {
+              ASSERT(program->functions.size > reloc->label.label);
 
-            write_to_image(out, disp, &file_pointer, &memory_pointer);
-            code.jump_to(reloc->location + 4);
-            break;
-          }
-        case Backend::RelocationType::LibraryLabel: {
-            ASSERT(dyn_import_lookup.size > reloc->library_call);
-            usize jump_to = dyn_import_lookup.data[reloc->label.label];
+              usize jump_to = program->functions.data[reloc->label.label].code_start;
 
-            i32 disp = 0;
-            bool can_local_jump = X64::try_relative_disp(memory_pointer + 4, jump_to, &disp);
-            ASSERT(can_local_jump);//TODO: handle trampolining
+              i32 disp = 0;
+              bool can_local_jump = X64::try_relative_disp(reloc->location + 4, jump_to, &disp);
+              ASSERT(can_local_jump);//TODO: handle trampolining
 
-            write_to_image(out, disp, &file_pointer, &memory_pointer);
-            code.jump_to(reloc->location + 4);
-            break;
-          }
+              write_to_image(out, disp, &file_pointer, &memory_pointer);
+              code.jump_to(reloc->location + 4);
+              break;
+            }
+          case Backend::RelocationType::LibraryLabel: {
+              ASSERT(dyn_import_lookup.size > reloc->library_call);
+              usize jump_to = dyn_import_lookup.data[reloc->label.label];
+
+              i32 disp = 0;
+              bool can_local_jump = X64::try_relative_disp(memory_pointer + 4, jump_to, &disp);
+              ASSERT(can_local_jump);//TODO: handle trampolining
+
+              write_to_image(out, disp, &file_pointer, &memory_pointer);
+              code.jump_to(reloc->location + 4);
+              break;
+            }
+        }
+
+        reloc += 1;
+      }
+      else {
+        const Backend::FunctionMetadata* func = *sf_i;
+        ASSERT(func->code_start == code.actual_location);
+        usize i = func - program->functions.data;
+        sf_i += 1;
+        ASSERT(i < actual_function_locations.size);
+
+        ProgramLocation f = {};
+        f.file = (u32)file_pointer;
+        f.memory = (u32)memory_pointer;
+        actual_function_locations.data[i] = f;
       }
     }
 
@@ -723,6 +820,109 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
   mem_align(&memory_pointer, section_alignment);
 
   const usize code_file_size = file_pointer - code_start;
+
+  const usize exports_start = file_pointer;
+  const usize exports_memory_start = memory_pointer;
+
+  if (lib) {
+    TRACING_SCOPE("Write Dynamic Exports");
+
+    OwnedArr name_offsets = new_arr<u32>(program->dyn_exports.size);
+
+    {
+      const auto* exp = program->dyn_exports.begin();
+      const auto* exp_end = program->dyn_exports.end();
+
+      auto* loc = name_offsets.mut_begin();
+      u32 start = 0;
+      for (; exp < exp_end; (exp += 1, loc += 1)) {
+        *loc = start;
+        start += (u32)(exp->name->len + 1);
+      }
+
+      ASSERT(loc == name_offsets.end());
+    }
+
+    u32 count = static_cast<u32>(program->dyn_exports.size);
+    
+    ASSERT(has_constants && lib_name_rva != 0);
+
+    const RVA expected_eta = static_cast<RVA>(exports_memory_start + sizeof(ExportDirectoryTable));
+    const RVA expected_npta = static_cast<RVA>(expected_eta + count * sizeof(ExportAddress));
+    const RVA expected_ota = static_cast<RVA>(expected_npta + count * sizeof(RVA));
+    const RVA expected_nta = static_cast<RVA>(expected_ota + count * sizeof(u16));
+
+    {
+      ExportDirectoryTable export_table = {};
+      export_table.time_and_date = 0xffffffff;
+      export_table.major_version = 0;
+      export_table.minor_version = 0;
+      export_table.name_rva = (RVA)lib_name_rva;
+      export_table.ordinal_base = 1;//for some reason usually 1
+      export_table.num_export_entries = count;
+      export_table.num_name_pointers = count;
+      export_table.export_table_address = expected_eta;
+      export_table.name_pointer_table_address = expected_npta;
+      export_table.ordinal_table_address = expected_ota;
+
+      write_to_image(out, export_table, &file_pointer, &memory_pointer);
+    }
+
+    ASSERT(expected_eta == memory_pointer);
+
+    //Export Address Table
+    FOR(program->dyn_exports, it) {
+      const ProgramLocation& l = actual_function_locations.data[it->label.label];
+      ASSERT(l.file != 0);
+      ASSERT(l.memory != 0);
+
+      ExportAddress addr = {};
+      addr.export_rva = l.memory;
+      write_to_image(out, addr, &file_pointer, &memory_pointer);
+    }
+
+    ASSERT(expected_npta == memory_pointer);
+    ASSERT(file_pointer % 4 == 0);
+
+    //Name Pointer Table
+    FOR(name_offsets, it) {
+      u32 offset = *it + expected_nta;
+      write_to_image<u32>(out, offset, &file_pointer, &memory_pointer);
+    }
+
+    ASSERT(expected_ota == memory_pointer);
+
+    ASSERT(count <= UINT16_MAX);
+    ASSERT(file_pointer % 2 == 0);
+
+    //Ordinal Table
+    for (u16 ord = 0; ord < static_cast<u16>(count); ++ord) {
+      write_to_image<u16>(out, ord, &file_pointer, &memory_pointer);
+    }
+
+    ASSERT(expected_nta == memory_pointer);
+    //Export Name Table
+    {
+      const auto* exp = program->dyn_exports.begin();
+      const auto* exp_end = program->dyn_exports.end();
+
+      const auto* loc = name_offsets.mut_begin();
+      for (; exp < exp_end; (exp += 1, loc += 1)) {
+        ASSERT(*loc + expected_nta == memory_pointer);
+
+        write_raw_to_image(out, (const u8*)exp->name->string, exp->name->len + 1, &file_pointer, &memory_pointer);
+      }
+
+      ASSERT(loc == name_offsets.end());
+    }
+  }
+
+  const usize exports_raw_size = file_pointer - exports_start;
+  file_align(out, &file_pointer, file_alignmnet);
+  mem_align(&memory_pointer, section_alignment);
+  const usize exports_file_size = file_pointer - exports_start;
+
+  initialized_data_size += exports_file_size;
 
   usize end_of_file = file_pointer;
   usize image_size = memory_pointer;
@@ -741,6 +941,9 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
     coff.number_of_symbols = 0;
     coff.size_of_optional_header = (uint16_t)(section_headers_start - optional_header_start);//size of image header
     coff.characteristics = COFF_Characteristics::EXECUTABLE_IMAGE | COFF_Characteristics::LARGE_ADDRESS_AWARE;
+    if (lib) {
+      coff.characteristics |= COFF_Characteristics::DLL;
+    }
 
     static_assert(sizeof(coff) == 20);
     FILES::write_obj(out, coff);
@@ -759,9 +962,13 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
 
     pe32.base_of_code = (PE_Address)code_memory_start;
 
-    ASSERT(program->entry_point.label != 0);
-    ASSERT(program->start_code.code_size > 0);
-    pe32.address_of_entry_point = (PE_Address)program->start_code.code_start.actual_location + (PE_Address)code_memory_start;
+    if (program->entry_point.label != 0) {
+      ASSERT(program->start_code.code_size > 0);
+      pe32.address_of_entry_point = (PE_Address)program->start_code.code_start + (PE_Address)code_memory_start;
+    }
+    else {
+      pe32.address_of_entry_point = 0;
+    }
 
     static_assert(sizeof(pe32) == 24);
     FILES::write_obj(out, pe32);
@@ -772,7 +979,12 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
   {
     PE32Plus_windows_specific pe32_win = {};
 
-    pe32_win.image_base = NT_IMAGE_BASE;
+    if (lib) {
+      pe32_win.image_base = DLL64_IMAGE_BASE;
+    }
+    else {
+      pe32_win.image_base = EXE64_IMAGE_BASE;
+    }
     pe32_win.section_alignment = section_alignment;
     pe32_win.file_alignment = file_alignmnet;
 
@@ -819,6 +1031,13 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
 
       data_directories.import_address_table.virtual_address = (RVA)import_address_table_memory_start;
       data_directories.import_address_table.size = (u32)import_address_table_size;
+    }
+
+    if (lib) {
+      ASSERT(exports_memory_start > 0);
+      ASSERT(exports_file_size > 0);
+      data_directories.export_table.virtual_address = (RVA)exports_memory_start;
+      data_directories.export_table.size = (u32)exports_raw_size;
     }
 
     static_assert(sizeof(data_directories) == 128);
@@ -910,6 +1129,36 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
     FILES::write_obj(out, code_header);
   }
 
+  if (lib) {
+    FILES::seek_from_start(out, exports_header_location);
+
+    Section_Header exports_header = {};
+
+    exports_header.name[0] = '.';
+    exports_header.name[1] = 'e';
+    exports_header.name[2] = 'd';
+    exports_header.name[3] = 'a';
+    exports_header.name[4] = 't';
+    exports_header.name[5] = 'a';
+    exports_header.name[6] = 0x00;
+    exports_header.name[7] = 0x00;
+
+    exports_header.virtual_size = (uint32_t)exports_raw_size;
+    exports_header.virtual_address = (RVA)exports_memory_start;
+    exports_header.size_of_raw_data = (uint32_t)exports_file_size;
+    exports_header.pointer_to_raw_data = (uint32_t)exports_start;
+
+    //All irrelevant in this
+    exports_header.pointer_to_relocations = 0x0;
+    exports_header.pointer_to_line_numbers = 0x0;
+    exports_header.number_of_relocations = 0x0;
+    exports_header.number_of_line_numbers = 0x0;
+
+    exports_header.characteristics = Section_Flags::READABLE | Section_Flags::CONTAINS_INITIALIZED;
+
+    FILES::write_obj(out, exports_header);
+  }
+
 #if 0
   static_assert(false, "Checksum?");
   static_assert(false, "Attribute Certificate?");
@@ -917,6 +1166,17 @@ void write_pe_to_file(CompilerThread* comp_thread, const Backend::Program* progr
 
   FILES::close(out);
   }
+
+void output_pe_exe(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+                   const InternString* out_name, const InternString* out_folder) {
+  write_pe_file(comp_thread, program, out_name, out_folder, false);
+}
+
+
+void output_pe_dll(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+                   const InternString* out_name, const InternString* out_folder) {
+  write_pe_file(comp_thread, program, out_name, out_folder, true);
+}
 
 struct RVA_Resolver {
   int32_t ptr_base = 0;

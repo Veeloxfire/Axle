@@ -1,3 +1,11 @@
-main :: () -> u64 {
+test :: () -> u64 {
   return cast(u64, 1i64 + -2i64 * 3i64 / 4i64);
+}
+
+#import "tester.axl";
+
+main :: () -> u64 {
+  result :: test();
+
+  SubmitTest(result);
 }

@@ -29,7 +29,7 @@ namespace IR {
   }
 
   struct Variable {
-    Type type;
+    Type type = {};
   };
 
   enum struct Indirection {
@@ -37,24 +37,24 @@ namespace IR {
   };
 
   struct Temporary {
-    Indirection indirection;
-    ValueIndex refers_to;//only used if some form of indirection
-    u32 refers_to_offset;
-    Type type;
+    Indirection indirection = Indirection::None;
+    ValueIndex refers_to = {};//only used if some form of indirection
+    u32 refers_to_offset = 0;
+    Type type = {};
   };
 
   struct ExpressionFrame {
-    u32 temporary_start;
-    u32 temporary_count;
+    u32 temporary_start = 0;
+    u32 temporary_count = 0;
 
-    u32 bytecode_start;
-    u32 bytecode_count;
+    u32 bytecode_start = 0;
+    u32 bytecode_count = 0;
   };
 
   struct RuntimeReference {
-    bool is_constant;
-    u32 offset;
-    Type type;
+    bool is_constant = false;
+    u32 offset = 0;
+    Type type = {};
 
     union {
       ValueIndex base = {};
@@ -63,37 +63,38 @@ namespace IR {
   };
 
   struct ControlBlock {
-    usize start;
-    usize size;
+    usize start = 0;
+    usize size = 0;
   };
 
   struct GlobalReference {
-    Type type;
-    usize data_member;
+    Type type = {};
+    usize data_member = 0;
   };
 
   struct DynLibraryImport {
-    GlobalLabel label;
-    const InternString* path;
-    const InternString* name;
+    GlobalLabel label = { 0 };
+    const InternString* path = nullptr;
+    const InternString* name = nullptr;
   };
 
   struct Builder {
-    bool require_variable_intermediates;
+    bool comptime_compilation = false;
+    bool require_variable_intermediates = false;
 
-    IR::GlobalLabel global_label;
+    IR::GlobalLabel global_label = { 0 };
 
-    Array<Temporary> temporaries;
-    Array<Variable> variables;
-    Array<GlobalReference> globals_used;
+    Array<Temporary> temporaries = {};
+    Array<Variable> variables = {};
+    Array<GlobalReference> globals_used = {};
 
-    LocalLabel current_block;
+    LocalLabel current_block = { 0 };
 
-    Array<ControlBlock> control_blocks;
-    Array<ExpressionFrame> expression_frames;
-    Array<u8> ir_bytecode;
+    Array<ControlBlock> control_blocks = {};
+    Array<ExpressionFrame> expression_frames = {};
+    Array<u8> ir_bytecode = {};
 
-    const SignatureStructure* signature;
+    const SignatureStructure* signature = nullptr;
 
     RuntimeReference new_temporary(const Type& t);
     ValueIndex new_variable(const Type& t);
@@ -137,8 +138,7 @@ namespace IR {
     const ASTLambda* declaration = nullptr;
 
     FunctionSignature signature = {};
-    UnitID sig_unit_id = 0;
-    UnitID body_unit_id = 0;
+    UnitID sig_unit_id= 0;
   };
 
 #define OPCODES_MOD \

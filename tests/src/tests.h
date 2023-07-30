@@ -15,20 +15,106 @@ struct _TestAdder {
   _TestAdder(const char* test_name, TEST_FN fn);
 };
 
-#define TEST_FUNCTION(name) void name (Errors*); _TestAdder JOIN(_test_adder_, __LINE__) = {#name, name }; void name(Errors* test_errors)
+#define TEST_FUNCTION(name) static void name (Errors*); _TestAdder JOIN(_test_adder_, __LINE__) = {#name, name }; static void name(Errors* test_errors)
 
-#define TEST_EQ(expected, actual) do { \
- if((expected) != (actual)) { \
-test_errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\nExpected: {}\nActual: {}", __LINE__, __func__, #expected, #actual); return; } } while(false)
+template<typename T>
+struct TestPrintTypeGetter {
+  using Type = const T&;
+};
 
-#define TEST_ARR_EQ(expected, actual, size) do { \
-for(usize _n = 0; _n < (size); _n++) { \
-if ((expected)[_n] != (actual)[_n]) { \
-    test_errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\nExpected: {}\nActual: {}", __LINE__, __func__, #expected, #actual); \
-    return;\
-} \
-} \
-} while (false)
+template<typename T>
+struct TestPrintTypeGetter<const T*> {
+  using Type = PrintPtr;
+};
+
+template<typename T>
+typename TestPrintTypeGetter<std::remove_reference_t<T>>::Type test_print_val(T const& t) {
+  return { t };
+}
+
+template<typename T>
+void test_eq(Errors* errors, usize line, const char* func, const char* expected_str, const T& expected, const char* actual_str, const T& actual) {
+  if (expected != actual) {
+    errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\nExpected: {} = {}\nActual: {} = {}",
+                         line, func, expected_str, test_print_val(expected), actual_str, test_print_val(actual));
+
+  }
+}
+
+template<typename T>
+void test_eq_arr(Errors* errors, usize line, const char* func,
+                 const char* expected_str, const T* expected, const char* esize_str, usize e_size,
+                 const char* actual_str, const T* actual, const char* asize_str, usize a_size) {
+  if (e_size != a_size) {
+    goto ERROR;
+  }
+
+  for (usize n = 0; n < e_size; ++n) {
+    const auto& l = expected[n];
+    const auto& r = actual[n];
+    if (l != r) {
+      goto ERROR;
+    }
+  }
+
+  return;
+
+ERROR:
+  errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{},
+                       "Test assert failed!\nLine: {}, Test: {}\n"
+                       "Expected Size: {} = {}\nActual Size: {} = {}\n"
+                       "Expected Array: {} = {}\n"
+                       "Actual Array: {} = {}",
+                       line, func, esize_str, e_size, asize_str, a_size,
+                       expected_str, PrintList<T>{expected, e_size},
+                       actual_str, PrintList<T>{actual, a_size});
+  return;
+}
+
+
+inline void test_eq_str(Errors* errors, usize line, const char* func,
+                 const char* expected_str, const char* expected,
+                 const char* actual_str, const char* actual) {
+  const char* e = expected;
+  const char* a = actual;
+  while (true) {
+    char ec = e[0];
+    char ac = a[0];
+
+    if (ec != ac) {
+      goto ERROR;
+    }
+
+    if (ec == '\0') {
+      return;
+    }
+
+    a += 1;
+    e += 1;
+  }
+
+ERROR:
+  errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{},
+                       "Test assert failed!\nLine: {}, Test: {}\n"
+                       "Expected String: {} = \"{}\"\n"
+                       "Actual String: {} = \"{}\"",
+                       line, func,
+                       expected_str, expected,
+                       actual_str, actual);
+  return;
+}
+
+#define TEST_EQ(expected, actual) do {\
+test_eq(test_errors, __LINE__, __func__, #expected, expected, #actual, actual);\
+if (test_errors->is_panic()) return; } while (false)
+
+#define TEST_ARR_EQ(expected, e_size, actual, a_size) do { \
+test_eq_arr(test_errors, __LINE__, __func__, #expected, expected, #e_size, e_size, #actual, actual, #a_size, a_size);\
+if (test_errors->is_panic()) return; } while (false)
+
+#define TEST_STR_EQ(expected, actual) do { \
+test_eq_str(test_errors, __LINE__, __func__, #expected, expected, #actual, actual);\
+if (test_errors->is_panic()) return; } while (false)
 
 
 #define TEST_CHECK_ERRORS() do { if(test_errors->is_panic()) return; } while(false)

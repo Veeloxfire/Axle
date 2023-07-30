@@ -64,9 +64,7 @@ void load_string(Array<char>& res, MagicNumber c) {
   load_string(res, chars);
 }
 
-void load_string(Array<char>& res, const char* str) {
-  const size_t size = strlen_ts(str);
-
+static void load_string_raw(Array<char>& res, const char* str, usize size) {
   res.reserve_extra(size);
 
   memcpy_ts(res.data + res.size,
@@ -76,14 +74,24 @@ void load_string(Array<char>& res, const char* str) {
   res.size += size;
 }
 
+void load_string(Array<char>& res, const char* str) {
+  load_string_raw(res, str, strlen_ts(str));
+}
+
+void load_string(Array<char>& res, const OwnedArr<const char>& str) {
+  load_string_raw(res, str.data, str.size);
+}
+
+void load_string(Array<char>& res, const OwnedArr<char>& str) {
+  load_string_raw(res, str.data, str.size);
+}
+
 void load_string(Array<char>& res, const Array<char>& str) {
-  res.reserve_extra(str.size);
+  load_string_raw(res, str.data, str.size);
+}
 
-  memcpy_ts(res.data + res.size,
-            res.capacity - res.size,
-            str.data, str.size);
-
-  res.size += str.size;
+void load_string(Array<char>& res, const Array<const char>& str) {
+  load_string_raw(res, str.data, str.size);
 }
 
 void load_string(Array<char>& res, const InternString* str) {
@@ -304,8 +312,6 @@ void load_string(Array<char>& res, PrintSignatureType p_sig) {
 }
 
 void load_string(Array<char>& res, const CallSignature& call_sig) {
-  load_string(res, call_sig.name);
-
   auto i = call_sig.arguments.begin();
   const auto end = call_sig.arguments.end();
 
@@ -313,17 +319,17 @@ void load_string(Array<char>& res, const CallSignature& call_sig) {
 
   if (i < end) {
     for (; i < (end - 1); i++) {
-      load_string(res, i->type.name->string);
+      load_string(res, i->name->string);
       load_string(res, ", ");
     }
 
-    load_string(res, i->type.name->string);
+    load_string(res, i->name->string);
   }
 
   res.insert(')');
 }
 
-OwnedPtr<char> format_type_set(const char* format, const size_t prepend_spaces, const size_t max_width) {
+OwnedArr<char> format_type_set(const char* format, const size_t prepend_spaces, const size_t max_width) {
   Array<char> result = {};
 
   const char* string = format;
@@ -375,7 +381,7 @@ OwnedPtr<char> format_type_set(const char* format, const size_t prepend_spaces, 
       load_to_string(string, format + 1);
 
       result.shrink();
-      return result;
+      return bake_arr(std::move(result));
     }
 
     format++;

@@ -14,7 +14,6 @@ using usize = size_t;
 //Important forward declarations
 struct CompilerGlobals;
 struct CompilerThread;
-struct Context;
 struct AST;
 struct Local;
 struct Global;
@@ -124,8 +123,8 @@ namespace UNARY_OP_STRING {
 
 #define INTRINSIC_MODS \
 MOD(import) \
-MOD(static_link) \
-MOD(dynamic_link) \
+MOD(dynamic_import) \
+MOD(dynamic_export) \
 MOD(type) \
 
 struct Intrinsics {

@@ -6,16 +6,15 @@
 #include <iostream>
 #include "trace.h"
 
-constexpr char output_file[] = ".\\out\\output.exe";
+constexpr char output_folder[] = ".\\out";
+constexpr char output_name[] = "output";
 
 int main(int argc, const char** args) {
 #ifdef TRACING_ENABLE
-  Tracing::start_tracer_threaded("info.trace");
+  Tracing::start_default_tracing_thread("info.trace");
   DEFER() {
-    Tracing::end_tracer_threaded();
+    Tracing::end_default_tracing_thread();
   };
-
-  Tracing::new_traced_thread();
 #endif
 
   if (argc != 2) {
@@ -28,7 +27,11 @@ int main(int argc, const char** args) {
   constexpr Backend::PlatformInterface pi = x86_64_platform_interface();
   constexpr Backend::ExecutableFormatInterface efi = pe_plus_file_interface();
 
+  X64::Program program = {};
+
   APIOptions options = {};
+
+  options.program = &program;
 
   options.platform_interface = &pi;
   options.executable_format_interface = &efi;
@@ -37,25 +40,30 @@ int main(int argc, const char** args) {
 
   options.build.current_directory = cwd.str;
   options.build.file_name = args[1];
-  options.build.entry_point = "main";
 
-  options.build.output_file = output_file;
-  options.build.output_file_type = OutputFileType::PE;
+  options.build.library = false;
+  if (!options.build.library) {
+    options.build.entry_point = "main";
+  }
 
-  options.build.std_lib_folder = ".\\stdlib";
-  options.build.lib_folder = ".\\lib";
+  options.build.output_name = output_name;
+  options.build.output_folder = output_folder;
+  options.build.output_file_type = efi.type;
 
-  options.build.extra_threads = 0;
+  options.build.std_lib_folder = "..\\stdlib";
+  options.build.lib_folder = ".";
 
-  //options.print.ast = true;
-  //options.print.finished_ir = true;
-  //options.print.comptime_res = true;
-  //options.print.coalesce_values = true;
-  //options.print.fully_compiled = true;
-  //options.print.reg_mapping = true;
-  //options.print.run_headers = true;
-  //options.print.comp_units = true;
-  //options.print.comptime_exec = true;
+  options.build.extra_threads = 3;
+
+  options.print.ast = false;
+  options.print.comptime_res = false;
+  options.print.comptime_exec = false;
+  options.print.finished_ir = false;
+  options.print.run_headers = false;
+  options.print.register_select = false;
+  options.print.file_loads = true;
+  options.print.comp_units = true;
+  options.print.work = true;
 
   //options.optimize.non_stack_locals = true;
   

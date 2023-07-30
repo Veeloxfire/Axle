@@ -29,8 +29,7 @@ abort()
 #else
 #define ASSERT(expr) assert(expr)
 
-#define INVALID_CODE_PATH(reason) assert(false);\
-throw std::exception("Invalid Code path \"" reason "\"")
+#define INVALID_CODE_PATH(reason) assert(false);
 
 #define INVALID_CODE_PATH_ABORT(reason) assert(false);\
 IO::err_print("Invalid Code path \"" reason "\"");\

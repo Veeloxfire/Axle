@@ -15,12 +15,12 @@ struct Span {
   size_t line_end = 0;
 };
 
-OwnedPtr<char> load_span_from_source(const Span& span, const char* source);
+OwnedArr<char> load_span_from_source(const Span& span, const char* source);
 
 struct ErrorMessage {
   ERROR_CODE type;
   Span span;
-  OwnedPtr<char> message = nullptr;
+  OwnedArr<char> message = {};
 };
 
 struct Errors {
@@ -33,8 +33,9 @@ struct Errors {
 
     ASSERT(f_message != nullptr);
 
-    OwnedPtr<char> message = format(f_message, ts...);
-    ASSERT(message.ptr != nullptr);
+    OwnedArr<char> message = format(f_message, ts...);
+    ASSERT(message.data != nullptr);
+    ASSERT(message.size > 0);
     error_messages.insert({ code, span, std::move(message) });
   }
 

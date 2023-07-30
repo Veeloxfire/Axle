@@ -61,6 +61,7 @@ namespace IR {
     ASSERT(control_blocks.size > current_block.label);
 
     ControlBlock* block = control_blocks.data + current_block.label;
+    ASSERT(block->size == 0);
     block->size = ir_bytecode.size - block->start;
   }
 
@@ -71,6 +72,8 @@ namespace IR {
     frame.bytecode_start = (u32)ir_bytecode.size;
     frame.bytecode_count = 0;
 
+    ASSERT(expression_frames.size == 0 || expression_frames.back()->bytecode_count > 0);
+
     expression_frames.insert(frame);
   }
 
@@ -78,6 +81,9 @@ namespace IR {
     ASSERT(expression_frames.size > 0);
 
     ExpressionFrame* f = expression_frames.back();
+    ASSERT(f->temporary_count == 0);
+    ASSERT(f->bytecode_count == 0);
+
     f->temporary_count = (u32)temporaries.size - f->temporary_start;
     f->bytecode_count = (u32)ir_bytecode.size - f->bytecode_start;
   }

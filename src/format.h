@@ -41,6 +41,12 @@ struct ByteArray {
   usize size;
 };
 
+template<typename T>
+struct PrintList {
+  const T* arr;
+  usize size;
+};
+
 void load_string(Array<char>& res, char c);
 void load_string(Array<char>& res, int8_t i8);
 void load_string(Array<char>& res, uint8_t u8);
@@ -57,6 +63,8 @@ void load_string(Array<char>& res, const ByteArray& byte_array);
 void load_string(Array<char>& res, DisplayChar c);
 void load_string(Array<char>& res, MagicNumber mn);
 void load_string(Array<char>& res, const char* str);
+void load_string(Array<char>& res, const OwnedArr<char>& str);
+void load_string(Array<char>& res, const OwnedArr<const char>& str);
 void load_string(Array<char>& res, const Array<char>& str);
 void load_string(Array<char>& res, const InternString* str);
 void load_string(Array<char>& res, const TokenTypeString& str);
@@ -68,6 +76,18 @@ void load_string(Array<char>& res, PrintSignatureType sig);
 void load_string(Array<char>& res, PrintCallSignature call);
 void load_string(Array<char>& res, const CallSignature& call_sig);
 
+template<typename T>
+void load_string(Array<char>& res, const PrintList<T>& arr) {
+  usize i = 0;
+  if (i < arr.size) {
+    load_string(res, arr.arr[i]);
+    ++i;
+    for (; i < arr.size; ++i) {
+      load_string(res, ", ");
+      load_string(res, arr.arr[i]);
+    }
+  }
+}
 
 struct Formatter {
   const char* format_string;
@@ -144,14 +164,13 @@ void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
 
 //Does null terminate
 template<typename ... T>
-OwnedPtr<char> format(const char* format, const T& ... ts) {
+OwnedArr<char> format(const char* format, const T& ... ts) {
   Array<char> result ={};
 
   format_to_array(result, format, ts...);
   result.insert('\0');
 
-  result.shrink();
-  return result;
+  return bake_arr(std::move(result));
 }
 
 template<typename ... T>
@@ -174,4 +193,4 @@ void format_print_ST(const char* format, const T& ... ts) {
   IO_Single::print(result.data);
 }
 
-OwnedPtr<char> format_type_set(const char* format, size_t prepend_spaces, size_t max_width);
+OwnedArr<char> format_type_set(const char* format, size_t prepend_spaces, size_t max_width);

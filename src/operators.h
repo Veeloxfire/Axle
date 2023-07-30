@@ -44,6 +44,7 @@ struct BinOpArgs {
   IR::RuntimeReference emit_lesser_ints();
   IR::RuntimeReference emit_greater_ints();
   IR::RuntimeReference emit_or_ints();
+  IR::RuntimeReference emit_or_enums();
   IR::RuntimeReference emit_xor_ints();
   IR::RuntimeReference emit_and_ints();
 #if 0

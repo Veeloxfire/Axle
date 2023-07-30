@@ -193,7 +193,7 @@ struct PointerStructure : public Structure {
   Type base ={};
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::POINTER;
-  static OwnedPtr<char> gen_name(const Type& nt);
+  static OwnedArr<char> gen_name(const Type& nt);
 };
 
 struct ArrayStructure : public Structure {
@@ -201,7 +201,7 @@ struct ArrayStructure : public Structure {
   size_t length = 0;
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::FIXED_ARRAY;
-  static OwnedPtr<char> gen_name(const Type& nt, size_t length);
+  static OwnedArr<char> gen_name(const Type& nt, size_t length);
 };
 
 struct IntegerStructure : public Structure {
@@ -223,7 +223,7 @@ struct EnumStructure : public Structure {
   Array<const EnumValue*> enum_values ={};
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::ENUM;
-  static OwnedPtr<char> gen_name(const Type& nt);
+  static OwnedArr<char> gen_name(const Type& nt);
 };
 
 struct TupleElement {

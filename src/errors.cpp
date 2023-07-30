@@ -1,8 +1,8 @@
 #include "errors.h"
 #include "files.h"
 
-OwnedPtr<char> load_span_from_source(const Span& span, const char* source) {
-  Array<char> res ={};
+OwnedArr<char> load_span_from_source(const Span& span, const char* source) {
+  Array<char> res = {};
 
   //size_t character = 0;
   size_t line = 0;
@@ -129,7 +129,7 @@ OwnedPtr<char> load_span_from_source(const Span& span, const char* source) {
     source++;
   }
 
-  return res;
+  return bake_arr(std::move(res));
 }
 
 ERROR_CODE Errors::print_all() const {
@@ -145,7 +145,7 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
   auto i = error_messages.begin();
   const auto end = error_messages.end();
 
-  InternHashTable<OwnedPtr<const char>> files ={};
+  InternHashTable<OwnedArr<const char>> files = {};
 
   for (; i < end; i++) {
     ret = i->type;
@@ -154,10 +154,11 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
     IO::err_print(message_type);
     IO::err_print(":\n");
 
-    OwnedPtr<char> type_set_message = format_type_set(i->message.ptr, 4, 70);
+    OwnedArr<char> type_set_message = format_type_set(i->message.data, 4, 70);
 
-    IO::err_print(type_set_message.ptr);
+    IO::err_print(type_set_message.data);
     IO::err_print('\n');
+    IO::err_print("\n");
 
     if (i->span.full_path != nullptr) {
       const Span& span = i->span;
@@ -170,15 +171,15 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
         files.insert(i->span.full_path, std::move(load_file));
       }
 
-      OwnedPtr<const char>* ptr_ptr = files.get_val(i->span.full_path);
+      OwnedArr<const char>* ptr_ptr = files.get_val(i->span.full_path);
       ASSERT(ptr_ptr != nullptr);
 
-      const char* source = ptr_ptr->ptr;
-      OwnedPtr<char> string = load_span_from_source(span, source);
+      const char* source = ptr_ptr->data;
+      OwnedArr<char> string = load_span_from_source(span, source);
 
       IO::err_print(format("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start));
-      IO::err_print(string.ptr);
-      IO::err_print("\n\n");
+      IO::err_print(string.data);
+      IO::err_print("\n");
     }
   }
 

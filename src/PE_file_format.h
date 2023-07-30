@@ -35,9 +35,9 @@ MS_DO_HEADER_SIZE
 + OPTIONAL_WINDOWS_FIELDS_SIZE;
 
 constexpr inline uint32_t SINGLE_SECTION_HEADER_SIZE = 40;
-constexpr inline uint64_t NT_IMAGE_BASE = 0x00400000llu;
+constexpr inline uint64_t EXE64_IMAGE_BASE = 0x140000000llu;
+constexpr inline uint64_t DLL64_IMAGE_BASE = 0x180000000llu;
 constexpr inline uint32_t IMPORT_DIRECTORY_SIZE = 20;
-
 
 using PE_Address = uint32_t;
 using RVA = uint32_t;
@@ -67,7 +67,7 @@ namespace COFF_Characteristics {
 
 enum struct MACHINE_TYPE : uint16_t {
   UNKNOWN = 0x0000,
-  AMD64   = 0x8664,
+  AMD64 = 0x8664,
 };
 
 struct COFF_file_header {
@@ -82,9 +82,9 @@ struct COFF_file_header {
 
 namespace MAGIC_NUMBER {
   enum MAGIC_NUMBER : uint16_t {
-    PE32      = 0x010b,
+    PE32 = 0x010b,
     PE32_PLUS = 0x020b,
-    MZ        = 0x5a4d,
+    MZ = 0x5a4d,
   };
 }
 
@@ -176,10 +176,10 @@ struct MS_DOS_Header {
   uint16_t initial_cs = 0x0000;
   uint16_t address_of_relocation_table = 0x0000;
   uint16_t overlay_number = 0x0000;
-  uint16_t reserved_words[4] ={ 0,0,0,0 };
+  uint16_t reserved_words[4] = { 0,0,0,0 };
   uint16_t oem_identifier = 0x0000;
   uint16_t oem_info = 0x0000;
-  uint16_t reserved_2_electric_boogaloo[10] ={ 0,0,0,0,0,0,0,0,0,0 };
+  uint16_t reserved_2_electric_boogaloo[10] = { 0,0,0,0,0,0,0,0,0,0 };
   PE_Address actual_start_of_header;
 };
 
@@ -202,22 +202,22 @@ static_assert(sizeof(Data_directory) == 8);
 
 //Not all emited
 struct Image_header_directories {
-  Data_directory export_table ={};
-  Data_directory import_table ={};
-  Data_directory resource_table ={};
-  Data_directory exception_table ={};
-  Data_directory certificate_table ={};
-  Data_directory base_relocation_table ={};
-  Data_directory debug ={};
+  Data_directory export_table = {};
+  Data_directory import_table = {};
+  Data_directory resource_table = {};
+  Data_directory exception_table = {};
+  Data_directory certificate_table = {};
+  Data_directory base_relocation_table = {};
+  Data_directory debug = {};
   uint64_t architecture = 0x0;// reserved, apparently must be all be 0
   PE_Address global_ptr = 0x0;
   uint32_t reserved1 = 0x0;
-  Data_directory tls_table ={};
-  Data_directory load_config_table ={};
-  Data_directory bound_import ={};
-  Data_directory import_address_table ={};
-  Data_directory delay_import_descriptor ={};
-  Data_directory clr_runtime_header ={};
+  Data_directory tls_table = {};
+  Data_directory load_config_table = {};
+  Data_directory bound_import = {};
+  Data_directory import_address_table = {};
+  Data_directory delay_import_descriptor = {};
+  Data_directory clr_runtime_header = {};
   uint64_t reserved2 = 0x0;// not entirely sure why but it has to be reserved
 };
 
@@ -269,6 +269,11 @@ struct ExportDirectoryTable {
 
 union ExportAddress {
   RVA export_rva;
+  RVA forwarder_rva;
+};
+
+union ExportAddressInternal {
+  RVA export_rva;
   const InternString* forwarder_rva;
 };
 
@@ -280,16 +285,16 @@ struct ExportElement {
 struct ExportTable {
   InternStringSet names = {};
 
-  ExportDirectoryTable directory_table ={};
-  Array<ExportAddress> address_table ={};
-  Array<ExportElement> element_table ={};
+  ExportDirectoryTable directory_table = {};
+  Array<ExportAddressInternal> address_table = {};
+  Array<ExportElement> element_table = {};
 };
 
 struct PEFile {
   PE_File_Header header;
   Array<Section_Header> section_headers;
 
-  ExportTable export_table ={};
+  ExportTable export_table = {};
 };
 
 struct ImportDataDirectory {
@@ -315,7 +320,7 @@ enum struct ConstantType : uint8_t {
 struct ConstantEntry {
   ConstantType type;
   union {
-    const InternString* string;
+    const InternString* string = nullptr;
     uint64_t integer;
   };
 
@@ -384,8 +389,11 @@ struct CompilerGlobals;
 struct CompilerThread;
 struct Span;
 
-void write_pe_to_file(CompilerThread* comp_thread,
-                      const Backend::Program* program, const InternString* file_name);
+void output_pe_exe(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+                   const InternString* out_name, const InternString* out_folder);
+
+void output_pe_dll(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+                   const InternString* out_name, const InternString* out_folder);
 
 void load_portable_executable_from_file(CompilerGlobals* const comp,
                                         CompilerThread* const comp_thread,
@@ -395,7 +403,9 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
 constexpr Backend::ExecutableFormatInterface pe_plus_file_interface() {
   Backend::ExecutableFormatInterface in = {};
-  in.output_executable = write_pe_to_file;
+  in.type = OutputFileType::PE;
+  in.output_executable = output_pe_exe;
+  in.output_dynamic_library = output_pe_dll;
 
   return in;
 }

@@ -1,8 +1,14 @@
-main :: () -> u64 {
+test :: () -> u64 {
   one : i64 = 1i64;
   minus_two : i64 = -2i64;
   three : i64 = 3i64;
   four: i64 = 4i64;
 
   return cast(u64, one + minus_two * three / four);
+}
+
+#import "tester.axl";
+
+main :: ()-> u64 {
+  SubmitTest(test());
 }

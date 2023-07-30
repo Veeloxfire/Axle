@@ -69,9 +69,14 @@ struct TokenTypeString {
 TokenTypeString token_type_string(AxleTokenType);
 
 struct Position {
-  const InternString* full_path ={};
   size_t line = 0;
   size_t character = 0;
+};
+
+struct TokenPos {
+  size_t line = 0;
+  size_t character_start = 0;
+  size_t character_end = 0;
 };
 
 struct Token {
@@ -80,21 +85,22 @@ struct Token {
 
   const InternString* string = nullptr;
 
-  Position pos ={};
+  TokenPos pos ={};
 };
 
 struct Span;
 
-void set_span_start(const Token& token, Span& span);
+void set_span_start(const InternString* file_path, const Token& token, Span& span);
 void set_span_end(const Token& token, Span& span);
 
-#define SPAN_START set_span_start(parser->current, span)
+#define SPAN_START set_span_start(parser->full_path(), parser->current, span)
 #define SPAN_END set_span_end(parser->prev, span)
 
-Span span_of_token(const Token& tok);
+Span span_of_token(const InternString* file_path, const Token& tok);
 
 
 struct Lexer {
+  const InternString* file_path;
   Position save_pos = {};
   Position curr_pos = {};
 
@@ -125,7 +131,7 @@ struct Parser {
   Token next ={};
 
   FileLocation file_path = {};
-
+  constexpr const InternString* full_path() const { return file_path.full_name; }
 };
 
 template<typename T>

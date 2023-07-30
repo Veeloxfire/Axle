@@ -7,7 +7,9 @@ fib :: (a: u64) -> u64 {
   }
 }
 
-main :: () -> u64 {
-  return fib(5);
+#import "tester.axl";
+
+main :: ()-> u64 {
+  SubmitTest(fib(5));
 }
 

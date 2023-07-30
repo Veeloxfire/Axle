@@ -1,0 +1,4 @@
+
+SubmitTest :: (u: u64) -> void {
+  #dynamic_import((*void, u64)->void, "tester.dll", "write_shared_memory") (cast(*void, &u), 8);
+}

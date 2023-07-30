@@ -168,7 +168,7 @@ EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterne
   EnumStructure* const type = structures->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
   type->ir_format = base.struct_format();
-  type->struct_name = strings->intern(EnumStructure::gen_name(base).ptr);
+  type->struct_name = strings->intern(EnumStructure::gen_name(base).data);
   type->base = base;
 
   type->size = base.structure->size;
@@ -190,7 +190,7 @@ Structure* STRUCTS::new_base_structure(Structures* structures, const InternStrin
 
 ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInterner* strings, const Type& base,
                                              size_t length) {
-  const InternString* name = strings->intern(ArrayStructure::gen_name(base, length).ptr);
+  const InternString* name = strings->intern(ArrayStructure::gen_name(base, length).data);
 
   ArrayStructure* const type = structures->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
@@ -208,7 +208,7 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
 }
 
 PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringInterner* strings, usize ptr_size, const Type& base) {
-  const InternString* name = strings->intern(PointerStructure::gen_name(base).ptr);
+  const InternString* name = strings->intern(PointerStructure::gen_name(base).data);
 
   PointerStructure* const type = structures->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
@@ -257,16 +257,16 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
 }
 
 
-OwnedPtr<char> PointerStructure::gen_name(const Type& base) {
+OwnedArr<char> PointerStructure::gen_name(const Type& base) {
   return format("*{}", base.name);
 }
 
-OwnedPtr<char> ArrayStructure::gen_name(const Type& base, size_t length) {
+OwnedArr<char> ArrayStructure::gen_name(const Type& base, size_t length) {
   return format("[{}, {}]", base.name, length);
 }
 
 
-OwnedPtr<char> EnumStructure::gen_name(const Type& base) {
+OwnedArr<char> EnumStructure::gen_name(const Type& base) {
   return format("anoymous-enum({})", base.name);
 }
 

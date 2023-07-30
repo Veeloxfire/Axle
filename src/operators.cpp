@@ -206,6 +206,13 @@ IR::RuntimeReference BinOpArgs::emit_or_ints() {
   return bin_op_impl<IR::Types::Or>(ir, left, right, info->dest_type, IR::Emit::Or);
 }
 
+IR::RuntimeReference BinOpArgs::emit_or_enums() {
+  ASSERT(left.type == right.type);
+  ASSERT(left.type == info->dest_type);
+
+  return bin_op_impl<IR::Types::Or>(ir, left, right, info->dest_type, IR::Emit::Or);
+}
+
 IR::RuntimeReference BinOpArgs::emit_and_ints() {
   ASSERT(left.type == right.type);
   ASSERT(left.type == info->dest_type);

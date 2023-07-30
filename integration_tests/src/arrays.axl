@@ -1,5 +1,11 @@
-main :: () -> u64 {
+test :: () -> u64 {
   a: [u64; 4] = [3, 2, 0, 1];
 
   return a[a[a[a[0]]]];
+}
+
+#import "tester.axl";
+
+main :: ()-> u64 {
+  SubmitTest(test());
 }

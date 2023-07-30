@@ -22,24 +22,17 @@ struct Decl {
 };
 
 struct Local {
-  Decl decl;
+  Decl decl = {};
 
-  bool is_constant;
+  bool is_constant = false;
   union {
     IR::ValueIndex val;
-    void* constant;
+    void* constant = nullptr;
   };
 };
 
 struct Pipe : AtomicQueue<CompilationUnit*> {
   const char* _debug_name;
-};
-
-struct Context {
-  bool comptime_compilation;
-  CompilationUnit* current_unit;
-
-  Pipe* dependency_load_pipe;
 };
 
 struct ComptimeExec {
@@ -48,43 +41,45 @@ struct ComptimeExec {
   Type type;
 };
 
-struct DependencyChecker : Context {
+struct DependencyChecker {
+  Namespace* available_names;
   Array<Local*> locals;
   
   Local* get_local(const InternString* name);
 };
 
 struct DynamicInitData {
-  const InternString* name;
+  const InternString* name = nullptr;
   size_t size = 0;
   size_t alignment = 0;
   size_t data_index = 0;
 
-  IR::GlobalLabel init_expr_label;
+  IR::GlobalLabel init_expr_label = { 0 };
 };
 
 struct Global {
-  Decl decl;
+  Decl decl = {};
 
-  bool is_constant;
+  bool is_constant = false;
   union {
-    u32 dynamic_init_index;
-    void* constant_value = nullptr;
+    u32 dynamic_init_index = 0;
+    void* constant_value;
   };
 };
 
 enum struct COMPILATION_EMIT_TYPE : uint8_t {
-  STRUCTURE, FUNC_BODY, FUNC_SIG, EXEC_CODE, GLOBAL, IMPORT
+  STRUCTURE, LAMBDA_BODY, LAMBDA_SIG, GLOBAL, IMPORT, EXPORT
 };
 
 struct CompPipes {
   Pipe depend_check;
-  Pipe type_check;
-  Pipe emit_function;
-  Pipe emit_global;
-  Pipe emit_import;
-  Pipe exec_ir;
-  Pipe compile_ir;
+
+  Pipe comp_structure;
+  Pipe comp_body;
+  Pipe comp_signature;
+  Pipe comp_global;
+  Pipe comp_import;
+  Pipe comp_export;
 };
 
 struct DependencyListSingle {
@@ -93,11 +88,13 @@ struct DependencyListSingle {
 };
 
 struct DependencyManager {
+  Pipe* depend_check_pipe;
   FreelistBlockAllocator<DependencyListSingle> dependency_list_entry;
-  Queue<CompilationUnit*> free_dependencies;
 
-  void close_dependency(CompilationUnit* ptr);
-  void remove_dependency_from(CompilationUnit* ptr);
+  u64 in_flight_units = 0;//Units that are not waiting somewhere
+
+  void close_dependency(CompilationUnit* ptr, bool print);
+  void remove_dependency_from(CompilationUnit* ptr, bool print);
   void add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on);
 #if 0
   void add_external_dependency(CompilationUnit* now_waiting);
@@ -108,36 +105,51 @@ struct CompilationUnit {
   UnitID id;
 
   u32 waiting_on_count;
+  u32 depend_list_size;
   DependencyListSingle* dependency_list;
-  Pipe* insert_to;
+  Pipe* main_pipe;
 
   COMPILATION_EMIT_TYPE emit;
   Namespace* available_names;
   AST_LOCAL ast;
 
-  void* extra;
+  void* detail;
 };
 
-struct ImportExtra {
-  FileLocation src_loc;
-};
-
-struct GlobalExtra {
+struct GlobalCompilation {
   Global* global;
 };
 
-struct FuncBodyExtra {
+struct LambdaBodyCompilation {
   IR::Function* func;
 };
 
-struct ExecCodeExtra {
-  Type expected_type;
-  void* destination;
+struct LambdaSigCompilation {
+  IR::Function* func;
+  ASTLambda* lambda;
+};
+
+struct StructCompilation {};
+
+struct ImportCompilation {
+  FileLocation src_loc;
+};
+
+struct ExportCompilation {};
+
+struct EvalPromise {
+  const u8* data;
+  Type type;
+};
+
+struct InProgressNode {
+  bool eval;
+  AST_LOCAL node;
+  Type infer;
 };
 
 struct CallSignature {
-  const InternString* name = nullptr;
-  Array<TypeAndFlags> arguments = {};
+  Array<Type> arguments = {};
 };
 
 struct UnknownName {
@@ -165,16 +177,24 @@ struct FileImport {
 };
 
 struct FileLoader {
-  FileLocation cwd = {};
+  Directory cwd = {};
+  Directory source_diretory = {};
+  Directory std_lib_directory = {};
 
   Array<FileImport> unparsed_files = {};
 };
 
 struct BuildOptions {
+  bool debug_break_on_entry = false;
+
   const InternString* file_name = nullptr;
+  const InternString* source_folder = nullptr;
+
+  bool is_library = false;
   const InternString* entry_point = nullptr;
 
-  const InternString* output_file = nullptr;
+  const InternString* output_folder = nullptr;
+  const InternString* output_name = nullptr;
 
   const InternString* lib_folder = nullptr;
   const InternString* std_lib_folder = nullptr;
@@ -208,26 +228,38 @@ struct Compilation {
   UnfoundNames unfound_names = {};
   DependencyManager dependencies = {};
 
-  u64 in_flight_units = 0;//Units that are not waiting somewhere
-
   CompilationUnitStore store = {};
 
-  FreelistBlockAllocator<FuncBodyExtra> func_body_extras = {};
-  FreelistBlockAllocator<GlobalExtra> global_extras = {};
-  FreelistBlockAllocator<ImportExtra> import_extras = {};
-  FreelistBlockAllocator<ExecCodeExtra> exec_code_extras = {};
+  FreelistBlockAllocator<StructCompilation> struct_compilation = {};
+  FreelistBlockAllocator<LambdaBodyCompilation> lambda_body_compilation = {};
+  FreelistBlockAllocator<LambdaSigCompilation> lambda_sig_compilation = {};
+  FreelistBlockAllocator<GlobalCompilation> global_compilation = {};
+  FreelistBlockAllocator<ExportCompilation> export_compilation = {};
+  FreelistBlockAllocator<ImportCompilation> import_compilation = {};
 };
 
 
 struct Services {
   //Must always be acquired in order!
   AtomicPtr<FileLoader> file_loader;
-  AtomicPtr<Backend::Program> out_program;
+  AtomicPtr<Backend::GenericProgram> out_program;
   AtomicPtr<Compilation> compilation;
   AtomicPtr<NameManager> names;
 
   AtomicPtr<Structures> structures;
   AtomicPtr<StringInterner> strings;
+
+  void get_multiple(AtomicLock<FileLoader>* files,
+                    AtomicLock<Compilation>* comp) {
+    file_loader._mutex.acquire();
+    compilation._mutex.acquire();
+
+    files->_mutex = &file_loader._mutex;
+    files->_ptr = file_loader._ptr;
+
+    comp->_mutex = &compilation._mutex;
+    comp->_ptr = compilation._ptr;
+  }
 
   void get_multiple(AtomicLock<Structures>* structs,
                     AtomicLock<StringInterner>* string_int) {
@@ -334,15 +366,6 @@ struct CompilerGlobals : CompilerConstants {
   inline bool is_global_panic() const {
     return global_panic.test();
   }
-
-  inline bool is_compiling() const {
-    if (is_global_panic()) return false;
-    if (finished_irs.size > 0) return true;
-    if (services.compilation.get()->store.active_units.size > 0) return true;
-    if (services.file_loader.get()->unparsed_files.size > 0) return true;
-
-    return false;
-  }
 };
 
 //Things that cannot be modified by other threads
@@ -397,8 +420,17 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
 void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const FileLocation& src_loc, ASTImport* imp) noexcept;
 
+void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExport* imp) noexcept;
+
 void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTLambda* lambda) noexcept;
 
 void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTGlobalDecl* global) noexcept;
 
 void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;
+
+const SignatureStructure* find_or_make_lamdba_structure(Structures* const structures,
+                                                        StringInterner* strings,
+                                                        usize ptr_size,
+                                                        const CallingConvention* conv,
+                                                        Array<Type>&& params,
+                                                        Type ret_type);

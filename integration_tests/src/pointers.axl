@@ -3,8 +3,14 @@ func :: (ptr: *u64) -> u64 {
 }
 
 
-main :: () -> u64 {
+test :: () -> u64 {
   a: u64 = 3;
 
   return func(&a);
+}
+
+#import "tester.axl";
+
+main :: ()-> u64 {
+  SubmitTest(test());
 }

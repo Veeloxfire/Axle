@@ -462,6 +462,16 @@ void IO_Single::print_impl(const OwnedPtr<char>& string) {
   fputs(string.ptr, stdout);
 }
 
+void IO_Single::print_impl(const OwnedArr<char>& string) {
+  TRACING_FUNCTION();
+  fputs(string.data, stdout);
+}
+
+void IO_Single::print_impl(const OwnedArr<const char>& string) {
+  TRACING_FUNCTION();
+  fputs(string.data, stdout);
+}
+
 void IO_Single::print_impl(const char c) {
   TRACING_FUNCTION();
   putc(c, stdout);
@@ -475,6 +485,16 @@ void IO_Single::err_print_impl(const char* string) {
 void IO_Single::err_print_impl(const OwnedPtr<char>& string) {
   TRACING_FUNCTION();
   fputs(string.ptr, stderr);
+}
+
+void IO_Single::err_print_impl(const OwnedArr<char>& string) {
+  TRACING_FUNCTION();
+  fputs(string.data, stderr);
+}
+
+void IO_Single::err_print_impl(const OwnedArr<const char>& string) {
+  TRACING_FUNCTION();
+  fputs(string.data, stderr);
 }
 
 void IO_Single::err_print_impl(const char c)  {

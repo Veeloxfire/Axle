@@ -14,11 +14,11 @@ struct AST_LINKED {
 
 struct AST_ARR {
   AST_LINKED* start = 0;
-  usize count;
+  usize count = 0;
 };
 
 #define FOR_AST(arr, it) \
-for(auto [_l, it] = _start_ast_iterate(arr); _l; (_l = _l->next, _l && (it = _l->curr)))
+for(auto [_l, it] = _start_ast_iterate(arr); _l; _step_ast_iterate(_l, it))
 
 struct _AST_ITERATE_HOLDER {
   AST_LINKED* l;
@@ -30,10 +30,20 @@ constexpr inline _AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
     return { nullptr, 0 };
   }
   else {
+    ASSERT(a.start != nullptr);
+    ASSERT(a.start->curr != nullptr);
     return {
       a.start,
       a.start->curr,
     };
+  }
+}
+
+constexpr inline void _step_ast_iterate(AST_LINKED*& _l, AST_LOCAL& loc) {
+  _l = _l->next;
+  if (_l != nullptr) {
+    loc = _l->curr;
+    ASSERT(loc != nullptr);
   }
 }
 
@@ -69,6 +79,8 @@ MOD(WHILE) \
 MOD(RETURN) \
 MOD(FUNCTION_SIGNATURE) \
 MOD(IMPORT) \
+MOD(EXPORT) \
+MOD(EXPORT_SINGLE) \
 MOD(LINK)
 
 enum struct AST_TYPE : u8 {
@@ -148,16 +160,17 @@ struct ASTBinaryOperatorExpr : public AST {
 };
 
 struct ASTTupleLitExpr : public AST {
-  const InternString* name;
-
-  Type named_type;
+  Type tuple_type;
+  
+  AST_LOCAL prefix;
   AST_ARR elements = {};
 };
 
 struct ASTFunctionCallExpr : public AST {
+  AST_LOCAL function;
+
   AST_ARR arguments = {};
 
-  const InternString* function_name = nullptr;
   const SignatureStructure* sig = nullptr;
   IR::GlobalLabel label = { 0 };
 };
@@ -263,7 +276,6 @@ struct ASTStructExpr : public AST {
   AST_LOCAL struct_body;
 };
 
-
 struct ASTLambda : public AST {
   IR::Function* function = nullptr;
 
@@ -298,25 +310,36 @@ struct ASTAssign : public AST {
 };
 
 struct ASTImport : public AST {
-  AST_LOCAL expr_location;
+  AST_LOCAL expr_location = 0;
 };
 
 struct ASTLink : public AST {
-  AST_LOCAL import_type;
+  AST_LOCAL import_type = 0;
 
-  bool dynamic;
+  bool dynamic = false;
 
-  const InternString* lib_file;
-  const InternString* name;
+  const InternString* lib_file = nullptr;
+  const InternString* name = nullptr;
 
-  usize import_index;
+  usize import_index = 0;
+};
+
+struct ASTExportSingle : public AST {
+  const InternString* name = nullptr;
+  AST_LOCAL value = 0;
+
+  usize export_index = 0;
+};
+
+struct ASTExport : public AST {
+  AST_ARR export_list = {};
 };
 
 struct FileAST {
-  AST_ARR top_level;
+  AST_ARR top_level = {};
 
-  Namespace* ns;
-  FileLocation file_loc;
+  Namespace* ns = nullptr;
+  FileLocation file_loc = {};
 };
 
 struct Printer {

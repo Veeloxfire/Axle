@@ -57,16 +57,12 @@ void print_globals(CompilerGlobals* comp) {
 #endif
 
 int compile_and_write(const APIOptions& options) {
-  if (options.build.output_file == nullptr) {
-    std::cerr << "No output file specified!";
-    return 1;
-  }
-
   TRACING_FUNCTION();
+
+  Backend::GenericProgram* program_in = options.program;
 
   //Setup
   FileLoader file_loader = {};
-  Backend::Program out_program = {};
   Structures structures = {};
   StringInterner strings = {};
   NameManager names = {};
@@ -78,7 +74,7 @@ int compile_and_write(const APIOptions& options) {
   CompilerGlobals compiler = {};
 
   compiler.services.file_loader.set(&file_loader);
-  compiler.services.out_program.set(&out_program);
+  compiler.services.out_program.set(program_in);
   compiler.services.structures.set(&structures);
   compiler.services.strings.set(&strings);
   compiler.services.names.set(&names);
@@ -86,13 +82,14 @@ int compile_and_write(const APIOptions& options) {
 
   compiler.builtin_types = &builtin_types;
 
-  compiler.pipelines.depend_check._debug_name = "Depend Check";
-  compiler.pipelines.type_check._debug_name = "Type Check";
-  compiler.pipelines.emit_function._debug_name = "Emit Function";
-  compiler.pipelines.emit_global._debug_name = "Emit Global";
-  compiler.pipelines.emit_import._debug_name = "Emit Import";
-  compiler.pipelines.exec_ir._debug_name = "Exec IR";
-  compiler.pipelines.compile_ir._debug_name = "Compile IR";
+  compiler.pipelines.comp_structure._debug_name = "Structure";
+  compiler.pipelines.comp_body._debug_name = "Body";
+  compiler.pipelines.comp_signature._debug_name = "Signature";
+  compiler.pipelines.comp_global._debug_name = "Global";
+  compiler.pipelines.comp_import._debug_name = "Import";
+  compiler.pipelines.comp_export._debug_name = "Export";
+
+  compilation.dependencies.depend_check_pipe = &compiler.pipelines.depend_check;
 
   compiler.active_threads = options.build.extra_threads + 1;
 
@@ -103,9 +100,22 @@ int compile_and_write(const APIOptions& options) {
     return -1;
   }
 
+  if (program_in == nullptr) {
+    compiler_thread.report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, "Program was missing from the api input");
+    compiler_thread.errors.print_all();
+    return -1;
+  }
+
+  options.platform_interface->init(&compiler, &compiler_thread, program_in);
+  if (compiler_thread.is_panic()) {
+    compiler_thread.errors.print_all();
+    return -1;
+  }
+
   {
-    TRACING_FUNCTION();
-    FileLocation loc = parse_file_location(file_loader.cwd.full_name->string, compiler.build_options.file_name->string, compiler.services.strings.get()._ptr);
+    FileLocation loc = parse_file_location(compiler.build_options.lib_folder->string,
+                                           compiler.build_options.file_name->string,
+                                           compiler.services.strings.get()._ptr);
 
     compiler.build_file_namespace = compiler.new_namespace();
 
@@ -123,16 +133,33 @@ int compile_and_write(const APIOptions& options) {
     }
   }
 
-#if 0
-  if (compiler.print_options.fully_compiled) {
-    print_globals(&compiler);
-  }
-#endif
   {
-    ASSERT(out_program.entry_point.label != 0);
+    TRACING_SCOPE("Write output file");
 
-    options.executable_format_interface->output_executable(&compiler_thread,
-                                                           &out_program, compiler.build_options.output_file);
+#ifdef ASSERT_EXCEPTIONS
+    try {
+#endif
+      if (compiler.build_options.is_library) {
+        ASSERT(program_in->entry_point.label == 0);
+        if (program_in->dyn_exports.size == 0) {
+          IO::print("Warning: Dynamic Library had 0 exports\n");
+        }
+
+        options.executable_format_interface->output_dynamic_library(&compiler_thread, program_in,
+                                                                    compiler.build_options.output_name, compiler.build_options.output_folder);
+      }
+      else {
+        ASSERT(program_in->entry_point.label != 0);
+        options.executable_format_interface->output_executable(&compiler_thread, program_in,
+                                                               compiler.build_options.output_name, compiler.build_options.output_folder);
+      }
+#ifdef ASSERT_EXCEPTIONS
+    }
+    catch (const std::exception& e) {
+      compiler_thread.report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Assertion Failed with message: {}", e.what());
+    }
+#endif
+
     if (compiler_thread.is_panic()) {
       ERROR_CODE code = print_error_messages(compiler_thread.errors.error_messages);
       std::cerr << "Compilation was not completed due to an error!\nError Code '"

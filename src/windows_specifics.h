@@ -37,8 +37,6 @@ namespace Windows {
     VirtualFree(ptr.ptr, 0, MEM_RELEASE);
   }
 
-  uint32_t run_exe(const char* name);
-
   struct ActiveDll {
     HMODULE lib = 0;
 

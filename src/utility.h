@@ -520,7 +520,7 @@ struct Array {
 
     for (size_t i = 0; i < size; i++) {
       if (lambda(data[i])) {
-        destruct_single(data + i);
+        T removed = std::move(data[i]);
         num_removed++;
       }
       else {
@@ -568,10 +568,17 @@ struct Array {
     }
   }
 
-  void insert(T t) noexcept {
+  void insert(T&& t) noexcept {
     try_reserve_next(size + 1);
 
     new(data + size) T(std::move(t));
+    size++;
+  }
+
+  void insert(const T& t) noexcept {
+    try_reserve_next(size + 1);
+
+    new(data + size) T(t);
     size++;
   }
 
@@ -652,8 +659,8 @@ struct Array {
   }
 
   T take() noexcept {
-    size--;
-    T t = std::move(data[size]);
+    const T t = std::move(data[size - 1]);
+    pop();
     return t;
   }
 
@@ -1635,15 +1642,6 @@ struct OwnedPtr {
 
   OwnedPtr(T* ptr_in) : ptr(ptr_in) {}
 
-  OwnedPtr(Array<T>&& arr) {
-    arr.shrink();
-    ptr = arr.data;
-
-    arr.data = nullptr;
-    arr.size = 0;
-    arr.capacity = 0;
-  }
-
   ~OwnedPtr() {
     free_no_destruct();
   }
@@ -1669,16 +1667,16 @@ struct OwnedArr {
 
   constexpr OwnedArr() = default;
   constexpr OwnedArr(T* t, usize s) : data(t), size(s) {}
-  constexpr OwnedArr(OwnedArr&& arr) 
-    : data(std::exchange(arr.ptr, nullptr)),
+  constexpr OwnedArr(OwnedArr&& arr) noexcept
+    : data(std::exchange(arr.data, nullptr)),
     size(std::exchange(arr.size, 0))
   {}
 
-  ~OwnedArr() {
+  ~OwnedArr() noexcept {
     free_destruct_n(data, size);
   }
 
-  OwnedArr& operator=(OwnedArr&& arr) {
+  OwnedArr& operator=(OwnedArr&& arr) noexcept {
     free_destruct_n(data, size);
 
     data = std::exchange(arr.data, nullptr);
@@ -1689,10 +1687,19 @@ struct OwnedArr {
 
   const T* begin() const { return data; }
   const T* end() const { return data + size; }
+  T* mut_begin() { return data; }
+  T* mut_end() { return data + size; }
 };
 
 template<typename T>
+OwnedArr<T> new_arr(usize size) {
+  T* arr = allocate_default<T>(size);
+  return OwnedArr(arr, size);
+}
+
+template<typename T>
 OwnedArr<T> bake_arr(Array<T>&& arr) {
+  arr.shrink();
   T* d = std::exchange(arr.data, nullptr);
   usize s = std::exchange(arr.size, 0);
   arr.capacity = 0;
@@ -1702,6 +1709,7 @@ OwnedArr<T> bake_arr(Array<T>&& arr) {
 
 template<typename T>
 OwnedArr<const T> bake_const_arr(Array<T>&& arr) {
+  arr.shrink();
   const T* d = std::exchange(arr.data, nullptr);
   usize s = std::exchange(arr.size, 0);
   arr.capacity = 0;
@@ -2010,10 +2018,14 @@ EXECUTE_AT_END(T&& t) -> EXECUTE_AT_END<T>;
 namespace IO_Single {
   void print_impl(const char* string);
   void print_impl(const OwnedPtr<char>& string);
+  void print_impl(const OwnedArr<char>& string);
+  void print_impl(const OwnedArr<const char>& string);
   void print_impl(const char c);
 
   void err_print_impl(const char* string);
   void err_print_impl(const OwnedPtr<char>& string);
+  void err_print_impl(const OwnedArr<char>& string);
+  void err_print_impl(const OwnedArr<const char>& string);
   void err_print_impl(const char c);
 
   template<typename ... T>
@@ -2091,8 +2103,7 @@ inline void serialize_struct(Array<u8>& bytes, const T* data) {
   serialize_bytes(bytes, (u8*)data, sizeof(T), alignof(T));
 }
 
-
-namespace _IMPL_A_can_cast_to_B {
+namespace _iMPL_A_can_cast_to_B {
   template<typename T>
   struct TEST_TRUE {
     static constexpr bool val = true;
@@ -2110,4 +2121,4 @@ namespace _IMPL_A_can_cast_to_B {
 }
 
 template<typename A, typename B>
-constexpr bool A_can_cast_to_B = decltype(_IMPL_A_can_cast_to_B::test_overload<A>(static_cast<const B*>(nullptr)))::val;
+constexpr bool A_can_cast_to_B = decltype(_iMPL_A_can_cast_to_B::test_overload<A>(static_cast<const B*>(nullptr)))::val;

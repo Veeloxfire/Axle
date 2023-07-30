@@ -1,10 +1,11 @@
 HANDLE :: #type u64;
-DWORD :: #type u32;
+DWORD  :: #type u32;
+BOOL   :: #type i32;
 
-GetStdHandle :: #static_link((i32) -> u64, "kernel32.lib", "GetStdHandle");
-WriteConsoleA :: #static_link((HANDLE, *void, u32, *u32, *void) -> u32, "kernel32.lib", "WriteConsoleA");
-
-
-GetProcessHeap :: #static_link(()->HANDLE, "kernel32.lib", "GetProcessHeap");
-HeapAlloc :: #static_link((HANDLE, DWORD, u64) -> *void, "kernel32.lib", "HeapAlloc");
-HeapFree :: #static_link((HANDLE, DWORD, *void) -> u32, "kernel32.lib", "HeapFree");
+GetStdHandle :: (i: i32)-> u64 {
+  return #dynamic_import((i32) -> u64, "kernel32.dll", "GetStdHandle")(i);
+}
+WriteConsoleA :: (handle: HANDLE, string: *void, count: DWORD, out_count: *DWORD) -> BOOL {
+  return #dynamic_import((HANDLE, *void, DWORD, *DWORD, *void) -> u32,
+                         "kernel32.dll", "WriteConsoleA") (handle, string, count, out_count, nullptr);
+}
