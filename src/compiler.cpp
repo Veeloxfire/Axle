@@ -3901,13 +3901,14 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     case AST_TYPE::WHILE: {
         ASTWhile* const while_loop = (ASTWhile*)statement;
 
-        IR::LocalLabel loop_label = builder->new_control_block();
+        IR::LocalLabel loop_check_label = builder->new_control_block();
+        IR::LocalLabel body_label = builder->new_control_block();
         IR::LocalLabel escape_label = builder->new_control_block();
 
         builder->end_control_block();
 
         {
-          builder->start_control_block(loop_label);
+          builder->start_control_block(loop_check_label);
           builder->start_expression();
 
           IR::RuntimeReference cond = compile_bytecode(comp, comp_thread,
@@ -3925,15 +3926,17 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           vll.val = cond.base;
           vll.offset = cond.offset;
           vll.format = cond.type.struct_format();
-          vll.label_if = loop_label;
+          vll.label_if = body_label;
           vll.label_else = escape_label;
 
           //Conditional jump out of the loop
           IR::Emit::IfSplit(builder->ir_bytecode, vll);
 
           builder->end_expression();
+          builder->end_control_block();
         }
 
+        builder->start_control_block(body_label);
 
         //loop branch
         compile_bytecode_of_statement(comp, comp_thread, builder, while_loop->statement);
@@ -3941,7 +3944,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           return;
         }
 
-        IR::Emit::Jump(builder->ir_bytecode, IR::Types::Jump{ loop_label });
+        IR::Emit::Jump(builder->ir_bytecode, IR::Types::Jump{ loop_check_label });
 
         builder->end_control_block();
         builder->start_control_block(escape_label);

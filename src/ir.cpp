@@ -39,14 +39,13 @@ namespace IR {
   }
 
   LocalLabel Builder::new_control_block() {
-    control_blocks.insert(ControlBlock{});
-
     block_counter.label += 1;
 
     return block_counter;
   }
 
   void Builder::start_control_block(LocalLabel label) {
+    ASSERT(label != IR::NULL_LOCAL_LABEL);
     ASSERT(control_blocks.size <= 0xffffffff);
     u32 i = (u32)control_blocks.size;
 
@@ -610,7 +609,7 @@ void IR::print_ir(const IR::Builder* builder) {
   DEFER() { IO_Single::unlock(); };
 
 
-  format_print_ST("== Function block GL{} ==\n", builder->global_label.label);
+  format_print_ST("== Function block GL{} ==\n", builder->global_label.label - 1);
   format_print_ST("Signature =  {}\n", PrintSignatureType{ builder->signature });
 
   u32 num_params = (u32)builder->signature->parameter_types.size;
@@ -683,7 +682,7 @@ void IR::print_ir(const IR::Builder* builder) {
     OpCode op = static_cast<OpCode>(op_byte);
 
     while (block_i < block_end && block_i->start <= (usize)(bc - bc_start)) {
-      format_print_ST("L{}:\n", block_i - block_start);
+      format_print_ST("L{}:\n", block_i->label.label - 1);
       block_i += 1;
     }
 
@@ -749,7 +748,7 @@ void IR::print_ir(const IR::Builder* builder) {
           const u8* sv_i = cl.values;
           const u8* sv_end = sv_i + (SingleVal::serialize_size() * cl.n_values);
 
-          format_print_ST("Call GL{} [", cl.label.label);
+          format_print_ST("Call GL{} [", cl.label.label - 1);
           if (cl.n_values > 0) {
             IR::SingleVal sv;
             sv_i += deserialize(sv_i, sv_end - sv_i, sv);
@@ -781,14 +780,14 @@ void IR::print_ir(const IR::Builder* builder) {
 
           IO_Single::print("if (");
           print_value(r.val, r.offset, r.format);
-          format_print_ST(") then jump L{} else jump L{}\n", r.label_if.label, r.label_else.label);
+          format_print_ST(") then jump L{} else jump L{}\n", r.label_if.label - 1, r.label_else.label - 1);
           break;
         }
       case IR::OpCode::Jump: {
           IR::Types::Jump j;
           bc = IR::Read::Jump(bc, bc_end, j);
 
-          format_print_ST("jump L{}\n", j.local_label.label);
+          format_print_ST("jump L{}\n", j.local_label.label - 1);
           break;
         }
 #define BIN_OP_PRINT(name, op) \
