@@ -5110,6 +5110,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     ASSERT(unit->ast != nullptr);
 
     dependency_check_ast_node(comp, comp_thread, &st, unit->ast);
+    if (comp_thread->is_panic()) {
+      return;
+    }
 
     if (comp_thread->is_depends()) {
       [[maybe_unused]] bool depended = try_dispatch_dependencies(comp, comp_thread, unit);
