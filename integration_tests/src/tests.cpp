@@ -201,6 +201,7 @@ bool run_test(const APIOptions& opts, const char* expected_output_path, const Ex
 
   const int return_code = compile_and_write(opts);
 
+  const auto compiler_end = std::chrono::high_resolution_clock::now();
   ProgramOutput output = ProgramOutput::INVALID_PROGRAM;
 
   u64 res = 0;
@@ -211,8 +212,8 @@ bool run_test(const APIOptions& opts, const char* expected_output_path, const Ex
   const auto end = std::chrono::high_resolution_clock::now();
 
   std::cout << "Test ran for: "
-    << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()
-    << "us\n";
+    << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us (compiler ran for: "
+    << std::chrono::duration_cast<std::chrono::microseconds>(compiler_end - start).count() << "us)\n";
 
   if (return_code != 0) {
     std::cout << "Compiler Error. Return code: " << return_code << '\n';
@@ -294,7 +295,7 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
     options.executable_format_interface = tester.efi;
 
     assert(tester.pi->num_calling_conventions > 0);
-    options.build.debug_break_on_entry = true;
+    options.build.debug_break_on_entry = false;
     options.build.default_calling_convention = 0;
     options.build.entry_point = "main";
     options.build.current_directory = ".";//TODO: actually get this

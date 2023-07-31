@@ -18,8 +18,8 @@ struct Span {
 OwnedArr<char> load_span_from_source(const Span& span, const char* source);
 
 struct ErrorMessage {
-  ERROR_CODE type;
-  Span span;
+  ERROR_CODE type = ERROR_CODE::NO_ERRORS;
+  Span span = {};
   OwnedArr<char> message = {};
 };
 

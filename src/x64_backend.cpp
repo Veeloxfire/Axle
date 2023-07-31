@@ -4119,11 +4119,11 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
                 X64::append_instruction(program, move);
               }
-                }
+            }
 #endif
 
             break;
-            }
+          }
         case IR::OpCode::Return: {
             IR::Types::Return ret;
             bc = IR::Read::Return(bc, bc_end, ret);
@@ -4442,9 +4442,9 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               return;
             }
           }
-          }
       }
     }
+  }
 
   while (blocks < blocks_end && blocks->size == 0) {
     blocks += 1;
@@ -5450,15 +5450,15 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
 
             printf("mov %s, %u\n", rm.ptr, val);
             break;
-      }
+          }
         default: {
             printf("UNKNOWN INSTRUCTION: 0x%.2hhx\n",
                    maybe_rex);
 
             return;
           }
+      }
     }
-  }
   }
 }
 
