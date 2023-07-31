@@ -369,16 +369,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
 
         dependency_check_ast_node(comp, comp_thread, state, at->base);
         dependency_check_ast_node(comp, comp_thread, state, at->expr);
-
-        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, at->node_span, "Currently don't support compile time values");
-
-#if 0
-        UnitID id = compile_and_execute(comp, state->current_unit->available_names, at->expr,
-                                        comp_thread->builtin_types->t_u64, &at->array_length);
-
-        set_dependency(comp_thread, state, id);
-#endif
-
         return;
       }
     case AST_TYPE::PTR_TYPE: {
