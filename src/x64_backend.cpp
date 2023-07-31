@@ -1222,16 +1222,6 @@ namespace X64 {
     arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(to.r, from.r));
   }
 
-  static void cmp(Instruction& arr, const RM8& rm, IMM8 imm8) {
-    if (need_rex(rm.r)) {
-      arr.insert(X64::REX | X64::rex_rm(rm.r));
-    }
-    arr.insert(X64::CMP_IMM_TO_RM8);
-    emit_mod_rm(arr, { 7 }, rm);
-
-    arr.insert(imm8.imm);
-  }
-
   static void sete(Instruction& arr, R8 r) {
     if (need_rex(r.r)) {
       arr.insert(X64::REX | X64::rex_rm(r.r));
@@ -1301,6 +1291,31 @@ namespace X64 {
     arr.insert(X64::ADD_R_TO_RM);
     arr.insert(X64::MODRM_MOD_DIRECT
                | X64::modrm_r_rm(from.r, to.r));
+  }
+
+  static void cmp(Instruction& arr, const RM8& rm, IMM8 imm8) {
+    if (need_rex(rm.r)) {
+      arr.insert(X64::REX | X64::rex_rm(rm.r));
+    }
+    arr.insert(X64::CMP_IMM_TO_RM8);
+    emit_mod_rm(arr, { 7 }, rm);
+
+    arr.insert(imm8.imm);
+  }
+
+  static void cmp(Instruction& arr, R8 rm, IMM8 imm8) {
+    if (rm.r == rax.REG) {
+      arr.insert(X64::CMP_IMM_TO_AX);
+      arr.insert(imm8.imm);
+    }
+    else {
+      if (need_rex(rm.r)) {
+        arr.insert(X64::REX | X64::rex_rm(rm.r));
+      }
+      arr.insert(X64::CMP_IMM_TO_RM8);
+      arr.insert(X64::MODRM_MOD_DIRECT | X64::modrm_r_rm(7, rm.r));
+      arr.insert(imm8.imm);
+    }
   }
 
   static void cmp(Instruction& arr, R8 from, R8 to) {
