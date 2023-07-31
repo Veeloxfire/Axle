@@ -63,6 +63,7 @@ namespace IR {
   };
 
   struct ControlBlock {
+    LocalLabel label = NULL_LOCAL_LABEL;
     usize start = 0;
     usize size = 0;
   };
@@ -73,7 +74,7 @@ namespace IR {
   };
 
   struct DynLibraryImport {
-    GlobalLabel label = { 0 };
+    GlobalLabel label = NULL_GLOBAL_LABEL;
     const InternString* path = nullptr;
     const InternString* name = nullptr;
   };
@@ -82,13 +83,14 @@ namespace IR {
     bool comptime_compilation = false;
     bool require_variable_intermediates = false;
 
-    IR::GlobalLabel global_label = { 0 };
+    IR::GlobalLabel global_label = NULL_GLOBAL_LABEL;
 
     Array<Temporary> temporaries = {};
     Array<Variable> variables = {};
     Array<GlobalReference> globals_used = {};
 
-    LocalLabel current_block = { 0 };
+    LocalLabel block_counter = NULL_LOCAL_LABEL;
+    u32 current_block = 0;
 
     Array<ControlBlock> control_blocks = {};
     Array<ExpressionFrame> expression_frames = {};
@@ -131,7 +133,7 @@ namespace IR {
 
     const InternString* name = {};
 
-    IR::GlobalLabel label = { 0 };
+    IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
   };
 
   struct Function {

@@ -150,12 +150,22 @@ namespace IR {
   };
 
   struct LocalLabel {
-    u32 label;
+    u32 label = 0;
+
+    constexpr bool operator==(const LocalLabel& l) const { return label == l.label; }
+    constexpr bool operator!=(const LocalLabel& l) const { return label != l.label; }
   };
 
+  inline constexpr LocalLabel NULL_LOCAL_LABEL = {};
+
   struct GlobalLabel {
-    uintptr_t label;
+    uintptr_t label = 0;
+
+    constexpr bool operator==(const GlobalLabel& g) const { return label == g.label; }
+    constexpr bool operator!=(const GlobalLabel& g) const { return label != g.label; }
   };
+
+  inline constexpr GlobalLabel NULL_GLOBAL_LABEL = {};
 }
 
 enum struct System : u8 {

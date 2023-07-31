@@ -161,12 +161,12 @@ namespace Backend {
   };
 
   struct Relocation {
-    RelocationType type;
+    RelocationType type = RelocationType::Label;
     union {
-      IR::GlobalLabel label;
+      IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
       u32 library_call;
     };
-    usize location;
+    usize location = 0;
   };
 
   struct DynImport {
@@ -182,7 +182,7 @@ namespace Backend {
   struct GenericProgram {
     DataBucketStore code_store = {};
 
-    IR::GlobalLabel entry_point;
+    IR::GlobalLabel entry_point = IR::NULL_GLOBAL_LABEL;
     FunctionMetadata start_code;
 
     Array<FunctionMetadata> functions;

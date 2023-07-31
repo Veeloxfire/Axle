@@ -172,7 +172,7 @@ struct ASTFunctionCallExpr : public AST {
   AST_ARR arguments = {};
 
   const SignatureStructure* sig = nullptr;
-  IR::GlobalLabel label = { 0 };
+  IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
 };
 
 struct ASTUnaryOperatorExpr : public AST {

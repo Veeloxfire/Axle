@@ -276,7 +276,7 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
   TRACING_FUNCTION();
 
   ASSERT((lib && program->dyn_exports.size != 0) || program->dyn_exports.size == 0);
-  ASSERT(lib || program->entry_point.label != 0);
+  ASSERT(lib || program->entry_point != IR::NULL_GLOBAL_LABEL);
 
   const uint32_t TIME = time(0) & 0x0000000000000000FFFFFFFFFFFFFFFF;
 
@@ -769,9 +769,9 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
         ASSERT(reloc->location == code.actual_location);
         switch (reloc->type) {
           case Backend::RelocationType::Label: {
-              ASSERT(program->functions.size > reloc->label.label);
+              ASSERT(program->functions.size >= reloc->label.label);
 
-              usize jump_to = program->functions.data[reloc->label.label].code_start;
+              usize jump_to = program->functions.data[reloc->label.label - 1].code_start;
 
               i32 disp = 0;
               bool can_local_jump = X64::try_relative_disp(reloc->location + 4, jump_to, &disp);
@@ -783,7 +783,7 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
             }
           case Backend::RelocationType::LibraryLabel: {
               ASSERT(dyn_import_lookup.size > reloc->library_call);
-              usize jump_to = dyn_import_lookup.data[reloc->label.label];
+              usize jump_to = dyn_import_lookup.data[reloc->library_call];
 
               i32 disp = 0;
               bool can_local_jump = X64::try_relative_disp(memory_pointer + 4, jump_to, &disp);
@@ -872,7 +872,7 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
     //Export Address Table
     FOR(program->dyn_exports, it) {
-      const ProgramLocation& l = actual_function_locations.data[it->label.label];
+      const ProgramLocation& l = actual_function_locations.data[it->label.label - 1];
       ASSERT(l.file != 0);
       ASSERT(l.memory != 0);
 
@@ -962,7 +962,7 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
     pe32.base_of_code = (PE_Address)code_memory_start;
 
-    if (program->entry_point.label != 0) {
+    if (program->entry_point != IR::NULL_GLOBAL_LABEL) {
       ASSERT(program->start_code.code_size > 0);
       pe32.address_of_entry_point = (PE_Address)program->start_code.code_start + (PE_Address)code_memory_start;
     }

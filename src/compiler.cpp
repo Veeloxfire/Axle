@@ -47,7 +47,7 @@ IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s
 }
 
 const SignatureStructure* CompilerGlobals::get_label_signature(IR::GlobalLabel label) {
-  ASSERT(label.label != 0);
+  ASSERT(label != IR::NULL_GLOBAL_LABEL);
   label_mutex.acquire();
   const SignatureStructure* s = label_signature_table.data[label.label - 1];
   label_mutex.release();
@@ -2891,7 +2891,7 @@ bool type_check_single_node(CompilerGlobals* const comp,
         ASSERT(eval.type == func_type);
 
         IR::GlobalLabel label = *(IR::GlobalLabel*)eval.data;
-        ASSERT(label.label != 0);
+        ASSERT(label != IR::NULL_GLOBAL_LABEL);
         call->label = label;
 
         //Last thing to do it set return type
@@ -4502,7 +4502,7 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
         return;
       }
 
-      if (comp->entry_point_label.label != 0) {
+      if (comp->entry_point_label != IR::NULL_GLOBAL_LABEL) {
         comp_thread->report_error(ERROR_CODE::LINK_ERROR, global->decl.span, "Found a second entry point");
         return;
       }
@@ -5376,7 +5376,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
 
   if (!comp->build_options.is_library) {
     TRACING_SCOPE("Create Entry Point");
-    if (comp->entry_point_label.label == 0) {
+    if (comp->entry_point_label == IR::NULL_GLOBAL_LABEL) {
       comp_thread->report_error(ERROR_CODE::LINK_ERROR, Span{}, "Did not find entry point (expected name = \"{}\")",
                                 comp->build_options.entry_point);
       return;

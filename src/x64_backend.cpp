@@ -3045,6 +3045,7 @@ struct RegisterResolver {
   u32 last_call = 0;
 
   u32 call_space_needed = 0;
+  u64 used_registers = 0;
 };
 
 static ValueType visit_ordered_value(Array<OrderedValue>& values, const RegisterResolver* resolver,
@@ -3142,8 +3143,7 @@ void new_fixed_intermediate(Array<OrderedValue>& values, u32 expr_id, u8 reg) {
 Array<OrderedValue> resolve_values(CompilerGlobals* comp,
                                    CompilerThread* comp_thread,
                                    RegisterResolver* resolver,
-                                   const CallingConvention* convention,
-                                   u32 stack_top) {
+                                   const CallingConvention* convention) {
   TRACING_FUNCTION();
   const u8* const bc_start = resolver->bytecode_start;
   const u8* const bc_end = resolver->bytecode_end;
@@ -3519,6 +3519,8 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
       }
     }
 
+    resolver->used_registers |= (1llu << reg_id);
+
     v.chosen_id = true;
     v.register_id = reg_id;
   }
@@ -3776,12 +3778,12 @@ void x64_emit_dyn_library_function(CompilerThread* comp_thread, const IR::DynLib
 
   func.code_size = program->code_store.total_size - func.code_start;
 
-  if (program->functions.size <= lib_import->label.label) {
-    usize to_append = lib_import->label.label + 1 - program->functions.size;
+  if (program->functions.size < lib_import->label.label) {
+    usize to_append = lib_import->label.label - program->functions.size;
     program->functions.insert_uninit(to_append);
   }
 
-  program->functions.data[lib_import->label.label] = func;
+  program->functions.data[lib_import->label.label - 1] = func;
 
 }
 
@@ -3790,17 +3792,20 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread, Backend::Gener
 
 
   const SignatureStructure* type;
-  IR::DynLibraryImport lib = {};
+
+  comp->dyn_lib_imports.insert_uninit(1);
+
+  IR::DynLibraryImport& lib = *comp->dyn_lib_imports.back();
   {
     AtomicLock<StringInterner> strings;
     AtomicLock<Structures> structs;
 
     comp->services.get_multiple(&structs, &strings);
 
-    {
-      lib.path = strings->intern("kernel32.dll");
-      lib.name = strings->intern("ExitProcess");
-    }
+
+    lib.path = strings->intern("kernel32.dll");
+    lib.name = strings->intern("ExitProcess");
+
 
     Array<Type> params = {};
     params.reserve_total(1);
@@ -3883,19 +3888,14 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                        Backend::GenericProgram* program_in) {
   TRACING_FUNCTION();
 
+  ASSERT(ir->global_label != IR::NULL_GLOBAL_LABEL);
+  ASSERT(ir->block_counter != IR::NULL_LOCAL_LABEL);//means we did nothing
+
   X64::Program* program = static_cast<X64::Program*>(program_in);
 
   //TODO: allow variables in registers
   Array<u32> variables_memory_location;
   variables_memory_location.reserve_total(ir->variables.size);
-
-  u32 stack_top = 0;
-
-  FOR(ir->variables, var) {
-    stack_top = ceil_to_n(stack_top, var->type.structure->alignment);
-    stack_top += var->type.size();
-    variables_memory_location.insert(stack_top);
-  }
 
   Array<X64::JumpRelocation> jump_relocations = {};
 
@@ -3905,13 +3905,13 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
     blocks += 1;
   }
 
-  IR::LocalLabel ret_label = { ir->current_block.label + 1 };
+  IR::LocalLabel ret_label = { ir->block_counter.label + 1 };
 
-  Array<u32> local_label_real_offsets = {};
-  local_label_real_offsets.reserve_total(ir->control_blocks.size + 1/*for return*/);
+  OwnedArr local_label_real_offsets = new_arr<u32>(ret_label.label);
 
   bool calls = false;
   u32 call_space_used = 0;
+  u64 used_registers = 0;
 
   Array<Selector> selectors = {};
   FOR(ir->expression_frames, e) {
@@ -3928,7 +3928,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
     resolver.temporaries_offset = e->temporary_start;
     resolver.num_temporaries = e->temporary_count;
 
-    Array<OrderedValue> ordered_values = resolve_values(comp, comp_thread, &resolver, convention, stack_top);
+    Array<OrderedValue> ordered_values = resolve_values(comp, comp_thread, &resolver, convention);
     if (comp_thread->is_panic()) {
       return;
     }
@@ -3940,6 +3940,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
     if (call_space_used < resolver.call_space_needed) {
       call_space_used = resolver.call_space_needed;
     }
+
+    used_registers |= resolver.used_registers;
 
     selectors.insert_uninit(1);
     Selector* selector = selectors.back();
@@ -3956,10 +3958,37 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
   Backend::FunctionMetadata func = {};
   func.code_start = program->code_store.current_location().actual_location;
 
-  stack_top = ceil_to_8(stack_top);
-  if (calls) {
-    stack_top += call_space_used;
-    stack_top = ceil_to_n<u32>(stack_top, 16);
+  const u8* const non_volatile_registers = convention->all_regs_unordered + convention->num_volatile_registers;
+  u32 num_registers_to_save = 0;
+  {
+    for (u32 i = 0; i < convention->num_non_volatile_registers; ++i) {
+      if ((used_registers & (1llu << non_volatile_registers[i])) > 0) {
+        num_registers_to_save += 1;
+      }
+    }
+  }
+
+  const bool needs_stack = (num_registers_to_save > 0) || ir->variables.size > 0 || calls;
+
+  u32 stack_top = 0;
+  if (needs_stack) {
+    //will remove this from the actual count, here for alignment reasons
+    stack_top += 8 * num_registers_to_save;
+
+    FOR(ir->variables, var) {
+      stack_top = ceil_to_n(stack_top, var->type.structure->alignment);
+      stack_top += var->type.size();
+      variables_memory_location.insert(stack_top);
+    }
+
+    stack_top = ceil_to_8(stack_top);
+    if (calls) {
+      stack_top += call_space_used;
+      stack_top = ceil_to_n<u32>(stack_top, 16);//align to call alignment
+    }
+
+    //remove this from the actual count
+    stack_top -= 8 * num_registers_to_save;
   }
 
   Selector* selector_i = selectors.mut_begin();
@@ -3974,7 +4003,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
     if (blocks < blocks_end) {
       if (blocks->start == e->bytecode_start) {
         u32 relative = relative_offset(func.code_start, program->code_store.total_size);
-        local_label_real_offsets.insert(relative);
+        local_label_real_offsets.data[blocks->label.label - 1] = relative;
         blocks += 1;
         while (blocks < blocks_end && blocks->size == 0) {
           blocks += 1;
@@ -4169,9 +4198,18 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             IR::Types::StartFunc start_func;
             bc = IR::Read::StartFunc(bc, bc_end, start_func);
 
-            if (stack_top > 0) {
+            if (needs_stack) {
               X64::R rbp = X64::R{ convention->base_pointer_reg };
               X64::R rsp = X64::R{ convention->stack_pointer_reg };
+
+              for (u32 i = 0; i < convention->num_non_volatile_registers; ++i) {
+                u8 reg = non_volatile_registers[i];
+                if ((used_registers & (1llu << reg)) > 0) {
+                  X64::Instruction save = {};
+                  X64::push(save, X64::R{reg});
+                  X64::append_instruction(program, save);
+                }
+              }
 
               X64::Instruction save = {};
               X64::push(save, rbp);
@@ -4454,9 +4492,9 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
   {
     u32 relative = relative_offset(func.code_start, program->code_store.total_size);
-    local_label_real_offsets.insert(relative);
+    local_label_real_offsets.data[ret_label.label - 1] = relative;
 
-    if (stack_top > 0) {
+    if (needs_stack) {
       X64::R rbp = X64::R{ convention->base_pointer_reg };
       X64::R rsp = X64::R{ convention->stack_pointer_reg };
 
@@ -4467,6 +4505,15 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
       X64::append_instruction(program, save);
       X64::append_instruction(program, load);
+
+      for (u32 i = 0; i < convention->num_non_volatile_registers; ++i) {
+        u8 reg = non_volatile_registers[convention->num_non_volatile_registers - (i + 1)];//reverse order
+        if ((used_registers & (1llu << reg)) > 0) {
+          X64::Instruction save = {};
+          X64::pop(save, X64::R{reg});
+          X64::append_instruction(program, save);
+        }
+      }
     }
 
     X64::Instruction r = {};
@@ -4478,11 +4525,11 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
   func.code_size = program->code_store.total_size - func.code_start;
 
   if (program->functions.size <= ir->global_label.label) {
-    usize to_append = ir->global_label.label + 1 - program->functions.size;
+    usize to_append = ir->global_label.label - program->functions.size;
     program->functions.insert_uninit(to_append);
   }
 
-  program->functions.data[ir->global_label.label] = func;
+  program->functions.data[ir->global_label.label - 1] = func;
 
 
   //Do the local relocations (global relocations come later)
@@ -4498,7 +4545,9 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
       code_itr.jump_to(immediate_location);
 
-      u32 label_offset = local_label_real_offsets.data[it->jump_to.label];
+      ASSERT(it->jump_to.label <= local_label_real_offsets.size);
+
+      u32 label_offset = local_label_real_offsets.data[it->jump_to.label - 1];
       u32 jump_from = it->offset_to_immediate + 4;
 
 
@@ -5457,9 +5506,9 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
 
             return;
           }
-      }
-    }
   }
 }
+    }
+  }
 
 #endif

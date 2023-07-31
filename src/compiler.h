@@ -54,7 +54,7 @@ struct DynamicInitData {
   size_t alignment = 0;
   size_t data_index = 0;
 
-  IR::GlobalLabel init_expr_label = { 0 };
+  IR::GlobalLabel init_expr_label = IR::NULL_GLOBAL_LABEL;
 };
 
 struct Global {
@@ -302,7 +302,7 @@ struct CompilerGlobals : CompilerConstants {
 
   Services services;
 
-  IR::GlobalLabel entry_point_label = { 0 };
+  IR::GlobalLabel entry_point_label = IR::NULL_GLOBAL_LABEL;
   AtomicQueue<const IR::Builder*> finished_irs;
 
   CompPipes pipelines;

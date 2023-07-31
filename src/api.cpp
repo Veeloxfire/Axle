@@ -140,7 +140,7 @@ int compile_and_write(const APIOptions& options) {
     try {
 #endif
       if (compiler.build_options.is_library) {
-        ASSERT(program_in->entry_point.label == 0);
+        ASSERT(program_in->entry_point == IR::NULL_GLOBAL_LABEL);
         if (program_in->dyn_exports.size == 0) {
           IO::print("Warning: Dynamic Library had 0 exports\n");
         }
@@ -149,7 +149,7 @@ int compile_and_write(const APIOptions& options) {
                                                                     compiler.build_options.output_name, compiler.build_options.output_folder);
       }
       else {
-        ASSERT(program_in->entry_point.label != 0);
+        ASSERT(program_in->entry_point != IR::NULL_GLOBAL_LABEL);
         options.executable_format_interface->output_executable(&compiler_thread, program_in,
                                                                compiler.build_options.output_name, compiler.build_options.output_folder);
       }

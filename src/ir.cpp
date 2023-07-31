@@ -39,28 +39,30 @@ namespace IR {
   }
 
   LocalLabel Builder::new_control_block() {
-    usize i = control_blocks.size;
     control_blocks.insert(ControlBlock{});
 
-    ASSERT(i <= 0xffffffff);
+    block_counter.label += 1;
 
-    return LocalLabel{ (u32)i };
+    return block_counter;
   }
 
   void Builder::start_control_block(LocalLabel label) {
-    ASSERT(control_blocks.size > label.label);
+    ASSERT(control_blocks.size <= 0xffffffff);
+    u32 i = (u32)control_blocks.size;
 
-    ControlBlock* block = control_blocks.data + label.label;
+    control_blocks.insert_uninit(1);
+    ControlBlock* block = control_blocks.data + i;
+    block->label = label;
     block->start = ir_bytecode.size;
     block->size = 0;
 
-    current_block = label;
+    current_block = i;
   }
 
   void Builder::end_control_block() {
-    ASSERT(control_blocks.size > current_block.label);
+    ASSERT(control_blocks.size > current_block);
 
-    ControlBlock* block = control_blocks.data + current_block.label;
+    ControlBlock* block = control_blocks.data + current_block;
     ASSERT(block->size == 0);
     block->size = ir_bytecode.size - block->start;
   }
