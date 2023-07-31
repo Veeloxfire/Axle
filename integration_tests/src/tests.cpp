@@ -67,6 +67,10 @@ constexpr auto fib_recurse_main() -> uint64_t {
   return constexpr_fibonacci(5);
 }
 
+constexpr auto fib_loop_main() -> uint64_t {
+  return constexpr_fibonacci(5);
+}
+
 constexpr auto arrays_main() -> uint64_t {
   uint64_t a[4] = { 3, 2, 0, 1 };
 
@@ -126,10 +130,11 @@ static constexpr char EXE_DIR[] = "out/";
 
 //Add tests here to make a new test
 static constexpr Test tests[] = {
-  Test{"Fibonnaci Recursive", "fib_recurse", fib_recurse_main()},
   Test{"Operators Unsigned", "operators_unsigned", operations_unsigned_cpp()},
   Test{"Operators Signed", "operators_signed", operations_signed_cpp()},
   Test{"Operators Comptime", "operators_comptime", operations_optim()},
+  Test{"Fibonnaci Recursive", "fib_recurse", fib_recurse_main()},
+  Test{"Fibonnaci Loop", "fib_loop", fib_loop_main()},
   Test{"Arrays", "arrays", arrays_main()},
   Test{"Pointers", "pointers", 3},
   Test{"FNV1 Hash", "fnv1_hash", fnv1_hash("hello", 5)},

@@ -17,5 +17,5 @@ hash :: (ptr: *u8, len: u64) -> u64 {
 main :: () -> u64 {
   arr :=  "hello";
 
-  SubmitTest(hash(cast(*u8, cast(*ascii, arr)), 5));
+  SubmitTest(hash(cast(*u8, arr.ptr), 5));
 }

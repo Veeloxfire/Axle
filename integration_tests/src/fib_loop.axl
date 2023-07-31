@@ -1,0 +1,23 @@
+fib :: (c: u64) -> u64 {
+  a := 0u64;
+  b := 1u64;
+
+  i := 0u64;
+
+  while(i < c) {
+    save := b;
+    b = b + a;
+    a = save;
+
+    i = i + 1;
+  }
+
+  return b;
+}
+
+#import "tester.axl";
+
+main :: ()-> u64 {
+  SubmitTest(fib(5));
+}
+
