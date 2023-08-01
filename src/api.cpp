@@ -62,9 +62,9 @@ int compile_and_write(const APIOptions& options) {
   Backend::GenericProgram* program_in = options.program;
 
   //Setup
+  StringInterner strings = {};//strings created first -> strings deleted last
   FileLoader file_loader = {};
   Structures structures = {};
-  StringInterner strings = {};
   NameManager names = {};
   Compilation compilation = {};
 
@@ -119,8 +119,10 @@ int compile_and_write(const APIOptions& options) {
 
     compiler.build_file_namespace = compiler.new_namespace();
 
-
-    compiler.services.file_loader.get()->unparsed_files.insert(FileImport{ loc, compiler.build_file_namespace, Span{} });//use null span
+    {
+      auto files = compiler.services.file_loader.get();
+      files->unparsed_files.insert(FileImport{ loc, compiler.build_file_namespace, Span{} });//use null span
+    }
 
     //Compilation
     compile_all(&compiler, &compiler_thread);

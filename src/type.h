@@ -232,7 +232,7 @@ struct TupleElement {
 };
 
 struct TupleStructure : public Structure {
-  Array<TupleElement> elements ={};
+  OwnedArr<TupleElement> elements ={};
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::TUPLE;
 };
@@ -246,7 +246,7 @@ struct StructElement {
 struct CompositeStructure : public Structure {
   const ASTStructBody* declaration = nullptr;
 
-  Array<StructElement> elements ={};
+  OwnedArr<StructElement> elements ={};
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::COMPOSITE;
 };
@@ -254,7 +254,7 @@ struct CompositeStructure : public Structure {
 struct SignatureStructure : public Structure {
   const CallingConvention* calling_convention = nullptr;
 
-  Array<Type> parameter_types ={};
+  OwnedArr<Type> parameter_types ={};
   Type return_type ={};
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::LAMBDA;

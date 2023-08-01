@@ -28,7 +28,7 @@ struct Errors {
   Array<ErrorMessage> error_messages ={};
 
   template<typename ... T>
-  void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) noexcept {
+  void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) {
     panic = true;
 
     ASSERT(f_message != nullptr);

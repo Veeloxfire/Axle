@@ -629,13 +629,15 @@ struct Array {
   }
 
   void shrink() noexcept {
-    if (size == 0) {
-      free();
-    }
-    else {
-      size_t old_cap = capacity;
-      capacity = size;
-      data = reallocate_default<T>(data, old_cap, capacity);
+    if (size < capacity) {
+      if (size == 0) {
+        this->free();
+      }
+      else {
+        size_t old_cap = capacity;
+        capacity = size;
+        data = reallocate_default<T>(data, old_cap, capacity);
+      }
     }
   }
 
@@ -1191,46 +1193,36 @@ struct BumpAllocator {
 
 template<typename T>
 struct FreelistBlockAllocator {
-  struct Element;
-
-  struct Header {
-    Element* next = nullptr;
-  };
-
   struct Element {
     union {
-      Header header = {};
+      Element* next = nullptr;
       T el;
     };
-
-    Element() : header() {}
     ~Element() {}
   };
 
   struct BLOCK {
     constexpr static size_t BLOCK_SIZE = 32;
 
-
     //size_t filled = 0;
     BLOCK* prev = nullptr;
     Element data[BLOCK_SIZE] = {};
   };
 
-  BLOCK* top;
-  Element* alloc_list;
+  BLOCK* top = nullptr;
+  Element* alloc_list = nullptr;
 
-  FreelistBlockAllocator()
-    : top(::allocate_default<BLOCK>()) {
-    alloc_list = top->data;
+  FreelistBlockAllocator() = default;
+  FreelistBlockAllocator(const FreelistBlockAllocator&) = delete;
+  FreelistBlockAllocator(FreelistBlockAllocator&&) = delete;
 
-    for (auto i = 0; i < BLOCK::BLOCK_SIZE - 1; i++) {
-      top->data[i].header.next = top->data + i + 1;
-    }
+  ~FreelistBlockAllocator()
+#ifdef ASSERT_EXCEPTIONS
+    noexcept(false) 
+#endif
+  {
+    ASSERT(_debug_all_are_free());
 
-    top->data[BLOCK::BLOCK_SIZE - 1].header.next = nullptr;
-  }
-
-  ~FreelistBlockAllocator() {
     while (top != nullptr) {
       BLOCK* next = top->prev;
       free_destruct_single<BLOCK>(top);
@@ -1247,13 +1239,16 @@ struct FreelistBlockAllocator {
     new_b->prev = top;
     top = new_b;
 
+    top->data[0].next = top->data + 1;
 
-    for (auto i = 0; i < BLOCK::BLOCK_SIZE - 1; i++) {
-      new_b->data[i].header.next = new_b->data + i + 1;
+    for (usize i = 1; i < BLOCK::BLOCK_SIZE - 1; i++) {
+      Element& e = top->data[i];
+      e.next = top->data + i + 1;
     }
 
-    new_b->data[BLOCK::BLOCK_SIZE - 1].header.next = alloc_list;
-    alloc_list = new_b->data;
+    top->data[BLOCK::BLOCK_SIZE - 1].next = alloc_list;
+
+    alloc_list = top->data;
   }
 
   T* allocate() {
@@ -1261,64 +1256,53 @@ struct FreelistBlockAllocator {
       new_block();
     }
 
-    T* const new_t = (T*)alloc_list;
-    alloc_list = alloc_list->header.next;
+    Element* e = alloc_list;
+    alloc_list = e->next;
 
+    T* const new_t = &e->el;
     new(new_t) T();
 
     return new_t;
   }
 
   bool _debug_valid_free_ptr(const T* const t) const {
-    BLOCK* check = top;
-
-    const uint8_t* const as_ptr = (const uint8_t*)t;
-
-    while (check != nullptr) {
-      const uint8_t* const block_ptr = (const uint8_t*)check->data;
-      if (as_ptr >= block_ptr && as_ptr < (block_ptr + (sizeof(Element) * BLOCK::BLOCK_SIZE))) {
-        //is it part of this block
-
-        const size_t diff = as_ptr - block_ptr;
-        if (diff % sizeof(Element) == 0) {
-          //Is aligned properly
-          return true;
-        }
-        else {
-          return false;
-        }
-
-      }
-
-      //Not in this one try next
-      check = check->prev;
+    const Element* e = alloc_list;
+    while (e != nullptr) {
+      if (&e->el == t) return false;
+      e = e->next;
     }
 
-    //Not in any
+    const BLOCK* b = top;
+    while (b != nullptr) {
+      const u8* block_base = reinterpret_cast<const u8*>(b->data);
+      const u8* block_top = reinterpret_cast<const u8*>(b->data + BLOCK::BLOCK_SIZE);
+
+      const u8* t_base = reinterpret_cast<const u8*>(t);
+      const u8* t_top = reinterpret_cast<const u8*>(t + 1);
+      if (block_base <= t_base && t_top <= block_top) return true;
+
+      b = b->prev;
+    }
+
     return false;
   }
 
-  bool _debug_all_free() const {
-    size_t alloc_list_length = 0;
-    {
-      const Element* next_alloc = alloc_list;
-
-      while (next_alloc != nullptr) {
-        alloc_list_length++;
-        next_alloc = next_alloc->header.next;
-      }
+  bool _debug_all_are_free() const {
+    usize actual = 0;
+    const Element* e = alloc_list;
+    while (e != nullptr) {
+      actual += 1;
+      e = e->next;
     }
 
-    size_t expected_length = 0;
-    {
-      const BLOCK* block = top;
-      while (block != nullptr) {
-        expected_length += BLOCK::BLOCK_SIZE;
-        block = block->prev;
-      }
+    usize expected = 0;
+    const BLOCK* b = top;
+    while (b != nullptr) {
+      expected += BLOCK::BLOCK_SIZE;
+      b = b->prev;
     }
 
-    return alloc_list_length == expected_length;
+    return actual == expected;
   }
 
 
@@ -1327,9 +1311,8 @@ struct FreelistBlockAllocator {
 
     destruct_single(t);
 
-    Element* new_e = (Element*)t;
-    new_e->el.~T();
-    new_e->header.next = alloc_list;
+    Element* new_e = const_cast<Element*>(reinterpret_cast<const Element*>(t));
+    new_e->next = alloc_list;
 
     alloc_list = new_e;
   }
@@ -1672,6 +1655,9 @@ struct OwnedArr {
     size(std::exchange(arr.size, 0))
   {}
 
+  OwnedArr(const OwnedArr& arr) = delete;
+  OwnedArr& operator=(const OwnedArr& arr) = delete;
+
   ~OwnedArr() noexcept {
     free_destruct_n(data, size);
   }
@@ -1715,6 +1701,26 @@ OwnedArr<const T> bake_const_arr(Array<T>&& arr) {
   arr.capacity = 0;
 
   return OwnedArr(d, s);
+}
+
+template<typename T>
+struct ViewArr {
+  T* data = nullptr;
+  usize size = 0;
+
+  const T* begin() const { return data; }
+  const T* end() const { return data + size; }
+  T* mut_begin() { return data; }
+  T* mut_end() { return data + size; }
+};
+
+template<typename T>
+ViewArr<T> view_arr(const OwnedArr<T>& arr, usize start, usize count) {
+  ASSERT(arr.size >= start + count);
+  return {
+    arr.data + start,
+    count,
+  };
 }
 
 template<typename T, size_t size>

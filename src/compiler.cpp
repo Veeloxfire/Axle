@@ -3169,11 +3169,14 @@ bool type_check_single_node(CompilerGlobals* const comp,
           uint32_t current_size = 0;
           uint32_t current_alignment = 0;
 
+          Array<StructElement> elements = {};
+          elements.reserve_total(body->elements.count);
+
           FOR_AST(body->elements, it) {
             ASTTypedName* tn = (ASTTypedName*)it;
 
-            cmp_s->elements.insert_uninit(1);
-            auto* b = cmp_s->elements.back();
+            elements.insert_uninit(1);
+            auto* b = elements.back();
 
             b->type = get_type_value(comp_thread, tn->type);
             if (comp_thread->is_panic()) {
@@ -3190,6 +3193,7 @@ bool type_check_single_node(CompilerGlobals* const comp,
             current_alignment = larger(this_align, current_alignment);
           }
 
+          cmp_s->elements = bake_arr(std::move(elements));
           cmp_s->declaration = body;
           cmp_s->size = current_size;
           cmp_s->alignment = current_alignment;
@@ -3350,7 +3354,7 @@ static T to_ir_V_C(const IR::RuntimeReference& to, const IR::RuntimeReference& f
   vc.to = to.base;
   vc.t_offset = to.offset;
   vc.t_size = to.type.size();
-  vc.data = static_cast<u8*>(from.constant) + from.offset;
+  vc.data = from.constant + from.offset;
   vc.d_size = from.type.size();
   return vc;
 }
@@ -3609,9 +3613,11 @@ static IR::RuntimeReference compile_bytecode(CompilerGlobals* const comp,
         ASTTupleLitExpr* lit = (ASTTupleLitExpr*)expr;
 
         IR::RuntimeReference tup_lit = {};
+        u8* tup_constant = nullptr;
 
         if (expr->can_be_constant) {
-          tup_lit = IR::HELPERS::as_constant(comp->constants_single_threaded.alloc_no_construct(cpst->size),
+          tup_constant = comp->new_constant(cpst->size);
+          tup_lit = IR::HELPERS::as_constant(tup_constant,
                                              expr->node_type);
         }
         else {
@@ -3629,7 +3635,7 @@ static IR::RuntimeReference compile_bytecode(CompilerGlobals* const comp,
           if (tup_lit.is_constant) {
             ASSERT(v.is_constant);
             ASSERT(v.type == i_t->type);
-            memcpy_s(tup_lit.constant + i_t->offset, i_t->type.size(), v.constant, v.type.size());
+            memcpy_s(tup_constant + i_t->offset, i_t->type.size(), v.constant, v.type.size());
           }
           else {
             IR::RuntimeReference member = IR::HELPERS::sub_object(tup_lit, i_t->offset, i_t->type);
@@ -3651,10 +3657,12 @@ static IR::RuntimeReference compile_bytecode(CompilerGlobals* const comp,
         ASTArrayExpr* arr_expr = (ASTArrayExpr*)expr;
 
         IR::RuntimeReference arr = {};
+        u8* arr_constant = nullptr;
+
 
         if (expr->can_be_constant) {
-          arr = IR::HELPERS::as_constant(comp->constants_single_threaded.alloc_no_construct(arr_type->size),
-                                         expr->node_type);
+          arr_constant = comp->new_constant(arr_type->size);
+          arr = IR::HELPERS::as_constant(arr_constant, expr->node_type);
         }
         else {
           arr = builder->new_temporary(expr->node_type);
@@ -3674,7 +3682,7 @@ static IR::RuntimeReference compile_bytecode(CompilerGlobals* const comp,
           if (arr.is_constant) {
             ASSERT(el.is_constant);
             ASSERT(el.type == arr_type->base);
-            memcpy_s(arr.constant + offset, base_type.size(), el.constant, base_type.size());
+            memcpy_s(arr_constant + offset, base_type.size(), el.constant, base_type.size());
           }
           else {
             IR::RuntimeReference element_ref = IR::HELPERS::sub_object(arr, offset, base_type);
@@ -4112,24 +4120,34 @@ static void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOC
   }
 
   expr_builder.end_expression();
+  expr_builder.end_control_block();
 
   ASSERT(ref.type == root->node_type);
 
-  if (ref.is_constant) {
-    eval->data = ref.constant;
-    if (!eval->type.is_valid()) {
-      eval->type = ref.type;
-    }
-    else {
-      ASSERT(eval->type == ref.type);
-    }
+  if (!eval->type.is_valid()) {
+    eval->type = ref.type;
   }
   else {
-    comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, root->node_span, "Currently don't support full compile time evaluation");
-    return;
-#if 0
-    vm_run(&comp_thread->errors, &expr_builder);
-#endif
+    ASSERT(eval->type == ref.type);
+  }
+
+  if (ref.is_constant) {
+    eval->data = ref.constant;
+  }
+  else {
+    VM::StackFrame vm = VM::new_stack_frame(&expr_builder);
+    VM::exec(&comp_thread->errors, &vm);
+    if (comp_thread->is_panic()) {
+      return;
+    }
+
+    const Type& type = ref.type;
+
+    const u8* data = vm.get_value(ref.base, ref.offset);
+    u8* result = comp->new_constant(type.size());
+    memcpy_ts(result, type.size(), data, type.size());
+
+    eval->data = data;
   }
 }
 
@@ -4344,7 +4362,6 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
     return;
   }
 
-
   const char* path = nullptr;
 
   if (p.type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
@@ -4466,27 +4483,14 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
   ASSERT(global->decl.type.is_valid());
 
   if (TEST_MASK(global->decl.meta_flags, META_FLAG::COMPTIME)) {
-    IR::Builder temporary = {};
-    temporary.comptime_compilation = true;
-    temporary.signature = (const SignatureStructure*)comp->builtin_types->t_void_call.structure;
-
-    start_ir(&temporary, AST_ARR{});
-
-
-    temporary.start_expression();
-    IR::RuntimeReference init_expr = compile_bytecode(comp, comp_thread, &temporary, decl->expr);
+    EvalPromise p = {};
+    eval_ast(comp, comp_thread, decl, &p);
     if (comp_thread->is_panic()) {
       return;
     }
-    ASSERT(init_expr.type == global->decl.type);
 
-    if (!init_expr.is_constant) {
-      comp_thread->report_error(ERROR_CODE::CONST_ERROR, global->decl.span, "Cannot initialize a compile time global with a runtime value (compile time execution is currently minimal)");
-      return;
-    }
-
-    ASSERT(init_expr.type == global->decl.type);
-    global->constant_value = init_expr.constant;
+    ASSERT(p.type == global->decl.type);
+    global->constant_value = p.data;
     global->is_constant = true;
 
     if (global->decl.name == comp->build_options.entry_point) {
@@ -4870,7 +4874,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         thead_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
-          format_print("Work | Parsing {} Fils \n", file_loader->unparsed_files.size);
+          format_print("Work | Parsing {} Files \n", file_loader->unparsed_files.size);
         }
 
         compile_current_unparsed_files(comp, comp_thread, file_loader);
@@ -5163,7 +5167,10 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
   TRACING_FUNCTION();
 
-  comp_thread->doing_work = true;
+  {//force reset
+    comp_thread->doing_work = false;
+    thead_doing_work(comp, comp_thread);
+  }
 
   while (!comp->is_global_panic() && (comp_thread->doing_work || comp->work_counter > 0)) {
 #ifdef ASSERT_EXCEPTIONS
@@ -5206,7 +5213,6 @@ void compiler_loop_thread_proc(const ThreadHandle* handle, void* data) {
 }
 
 void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
-  comp->work_counter = comp->active_threads;
   const usize extra_threads = (usize)comp->active_threads - 1;
 
   copy_compiler_constants(comp, comp_thread);//copy to this thread every time
@@ -5252,6 +5258,46 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
   }
   }
 
+static void free_remaining_compilation_units(Compilation* compilation) {
+  for (CompilationUnit* unit : compilation->store.active_units) {
+    auto dep = unit->dependency_list;
+    while (dep != nullptr) {
+      auto next = dep->next;
+      compilation->dependencies.dependency_list_entry.free(dep);
+      dep = next;
+    }
+
+    switch (unit->emit) {
+      case COMPILATION_EMIT_TYPE::STRUCTURE: {
+          compilation->struct_compilation.free((const StructCompilation*)unit->detail);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::LAMBDA_BODY: {
+          compilation->lambda_body_compilation.free((const LambdaBodyCompilation*)unit->detail);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::LAMBDA_SIG: {
+          compilation->lambda_sig_compilation.free((const LambdaSigCompilation*)unit->detail);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::GLOBAL: {
+          compilation->global_compilation.free((const GlobalCompilation*)unit->detail);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::IMPORT: {
+          compilation->import_compilation.free((const ImportCompilation*)unit->detail);
+          break;
+        }
+      case COMPILATION_EMIT_TYPE::EXPORT: {
+          compilation->export_compilation.free((const ExportCompilation*)unit->detail);
+          break;
+        }
+    }
+
+    compilation->store.compilation_units.free(unit);
+  }
+}
+
 void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
   TRACING_FUNCTION();
 
@@ -5259,6 +5305,8 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
 
   compiler_loop_threaded(comp, comp_thread);
   if (comp->is_global_panic()) {
+    auto compilation = comp->services.compilation.get();
+    free_remaining_compilation_units(compilation._ptr);
     return;
   }
 
@@ -5327,6 +5375,8 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       comp->global_errors_mutex.acquire();
       comp->global_errors.concat(std::move(comp_thread->errors.error_messages));
       comp->global_errors_mutex.release();
+
+      free_remaining_compilation_units(compilation._ptr);
       return;
     }
   }
@@ -5350,11 +5400,14 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       names.clear();
 
       comp->global_panic.set();
+
+      free_remaining_compilation_units(compilation._ptr);
       return;
     }
   }
 
   ASSERT(comp->services.compilation.get()->dependencies.in_flight_units == 0);
+  ASSERT(comp->services.compilation.get()->store.active_units.size == 0);
 
   {
     TRACING_SCOPE("Load Imports");

@@ -1,8 +1,25 @@
-#import "kernel32.axl";
+hash :: (ptr: *u8, len: u64) -> u64 {
+  hash_v : u64 = 0xcbf29ce484222325;
+
+  while(len > 0) {
+    hash_v = hash_v * 0x100000001b3;
+    hash_v = hash_v ^ cast(u64, *ptr);
+
+    ptr = ptr + 1;
+    len = len - 1;
+  }
+
+  return hash_v;
+}
+
+#import "io.axl";
 
 main :: () -> u64 {
-  h := GetStdHandle(-11i32);
-  message := 0x0000006f6c6c6568;
+  arr :=  "hello";
 
-  return WriteConsoleA(h, cast(*void, &message), 5u32, cast(*u32, nullptr));
+  h := hash(cast(*u8, arr.ptr), 5);
+
+  HelloHash :: "hello hash: ";
+  print(HelloHash.ptr, HelloHash.len);
+  print_u64(h);
 }

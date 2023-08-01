@@ -1,34 +1,6 @@
 #include "ir.h"
 #include "type.h"
-#include "windows_specifics.h"
 #include "trace.h"
-
-static constexpr usize VM_STACK_SIZE = 8 * 256;
-
-struct VM {
-  u8* stack;
-  u8* stack_end;
-
-  u8* SP;
-  u8* BP;
-  const u8* IP_BASE;
-  const u8* IP;
-  const u8* IP_END;
-
-  u32* variable_offsets;
-  u32 num_variables;
-  u32 num_temporaries;
-
-  Errors* errors;
-
-  ~VM() {
-    delete[] variable_offsets;
-  }
-
-  void allocate_stack(u64 bytes);
-  void push(X64_UNION val);
-  X64_UNION pop();
-};
 
 constexpr auto load_types_info() {
   struct FormatData {
@@ -70,67 +42,32 @@ static IndirectionInfo get_indirection(const IR::Builder* ir, IR::ValueIndex v) 
 
     return info;
   }
-
-  return { IR::Indirection::None };
+  else {
+    return { IR::Indirection::None };
+  }
 }
 
+u8* VM::StackFrame::get_value(IR::ValueIndex index, u32 offset) {
+  const u32 i = index.index();
+  auto& val_info = variables.data[i + (index.is_variable() ? 0 : num_variables)];
 
-u8* value_location(const VM* vm, const IR::Builder* ir,
-                   IR::ValueIndex index, u32 offset) {
-  u32 i = index.index();
-  u32 v_offset = vm->variable_offsets[i + (index.is_variable() ? 0 : vm->num_variables)] + offset;
-
-  u8* val = vm->stack + v_offset;
+  u8* const val = bytes.data + (val_info.data_offset + offset);
 
   IndirectionInfo indirection = get_indirection(ir, index);
   switch (indirection.ind) {
     case IR::Indirection::None: break;
     case IR::Indirection::Reference: {
-        u8* ref = value_location(vm, ir, indirection.indirect_to, indirection.indirect_to_offset);
+        u8* ref = get_value(indirection.indirect_to, indirection.indirect_to_offset);
         x64_to_bytes(ref, val);
         break;
       }
     case IR::Indirection::Dereference: {
-        u8* deref = value_location(vm, ir, indirection.indirect_to, indirection.indirect_to_offset);
+        u8* deref = get_value(indirection.indirect_to, indirection.indirect_to_offset);
         x64_to_bytes(x64_from_bytes(deref), val);
         break;
       }
   }
 
-  return val;
-}
-
-void VM::allocate_stack(u64 bytes) {
-  SP -= bytes;
-
-  if (SP <= stack) {
-    errors->report_error(ERROR_CODE::VM_ERROR, Span{},
-                         "VM Stack overflow during allocation");
-    return;
-  }
-}
-
-void VM::push(X64_UNION val) {
-  SP -= 8;
-
-  if (SP <= stack) {
-    errors->report_error(ERROR_CODE::VM_ERROR, Span{},
-                         "VM Stack overflow during 'push' operation");
-    return;
-  }
-
-  x64_to_bytes(val, SP);
-}
-
-X64_UNION VM::pop() {
-  if (SP + 8 >= stack_end) {
-    errors->report_error(ERROR_CODE::VM_ERROR, Span{},
-                         "VM Stack underflow during 'pop' operation");
-    return { (uint64_t)0 };
-  }
-
-  X64_UNION val = x64_from_bytes(SP);
-  SP += 8;
   return val;
 }
 
@@ -150,48 +87,45 @@ X64_UNION VM::pop() {
 //  vm->registers[0].b64.reg = call_native_x64(func_ptr, param_registers, vm->SP, stack_required);
 //}
 
-VM init_vm(Errors* errors, const IR::Builder* builder, u8* stack_holder, u32 stack_size) {
-  const u8* bytecode_start = builder->ir_bytecode.data;
+VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
+  u32 size_needed = 0;
+  OwnedArr variables = new_arr<VM::Value>(builder->variables.size + builder->temporaries.size);
 
-  VM vm = {};
-  vm.stack = stack_holder;
-  vm.stack_end = vm.stack + stack_size;
-  vm.BP = vm.stack;
-  vm.SP = vm.stack;
-  vm.IP_BASE = bytecode_start;
-  vm.IP = bytecode_start;
-  vm.IP_END = bytecode_start + builder->ir_bytecode.size;
+  for (usize i = 0; i < builder->variables.size; ++i) {
+    const auto& var = builder->variables.data[i];
+    auto& vm_var = variables.data[i];
 
+    size_needed = ceil_to_n(size_needed, var.type.structure->alignment);
 
+    vm_var.data_offset = size_needed;
+    size_needed += var.type.structure->size;
+  }
+
+  const u32 size_base = size_needed;
+
+  FOR(builder->expression_frames, it) {
+    u32 temp_size_needed = size_base;
+    for (usize i = 0; i < it->temporary_count; ++i) {
+      const auto& temp = builder->temporaries.data[i];
+      auto& vm_var = variables.data[builder->variables.size + i];
+
+      temp_size_needed = ceil_to_n(temp_size_needed, temp.type.structure->alignment);
+      vm_var.data_offset = temp_size_needed;
+      temp_size_needed += temp.type.structure->size;
+    }
+
+    if (temp_size_needed > size_needed) size_needed = temp_size_needed;
+  }
+
+  VM::StackFrame vm = {};
+  vm.bytes = new_arr<u8>(size_needed);
+  vm.variables = std::move(variables);
   vm.num_variables = (u32)builder->variables.size;
   vm.num_temporaries = (u32)builder->temporaries.size;
-  vm.variable_offsets = new u32[vm.num_variables + vm.num_temporaries];
-
-  u32 running_offset = 0;
-
-  {
-    u32* variables = vm.variable_offsets;
-    FOR(builder->variables, it) {
-      running_offset = ceil_to_n(running_offset, it->type.structure->alignment);
-
-      *variables = running_offset;
-      variables += 1;
-
-      running_offset += it->type.structure->size;
-    }
-  }
-
-  {
-    u32* variables = vm.variable_offsets + vm.num_variables;
-    FOR(builder->temporaries, it) {
-      running_offset = ceil_to_n(running_offset, it->type.structure->alignment);
-
-      *variables = running_offset;
-      variables += 1;
-
-      running_offset += it->type.structure->size;
-    }
-  }
+  vm.ir = builder;
+  vm.IP_BASE = builder->ir_bytecode.begin();
+  vm.IP = vm.IP_BASE;
+  vm.IP_END = builder->ir_bytecode.end();
 
   return vm;
 }
@@ -201,7 +135,7 @@ static void copy_values(u8* to, IR::Format t_format,
   ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
 
   switch (f_format) {
-      case IR::Format::uint8: {
+    case IR::Format::uint8: {
         switch (t_format) {
           case IR::Format::uint8:
           case IR::Format::sint8:
@@ -371,25 +305,18 @@ static void copy_values(u8* to, IR::Format t_format,
   }
 }
 
-void vm_run(Errors* errors, const IR::Builder* builder) noexcept {
-  TRACING_SCOPE("vm exec");
-
-  u8 stack_holder[VM_STACK_SIZE] = {};
-
-  VM vm = init_vm(errors, builder, stack_holder, VM_STACK_SIZE);
-
-  //Pre entry function - if we ever return to nullptr then we finish execution
-  vm.push((uint8_t*)nullptr);
+void VM::exec(Errors* errors, VM::StackFrame* stack_frame) {
+  TRACING_FUNCTION();
 
   while (true) {
-    const auto opcode = static_cast<IR::OpCode>(vm.IP[0]);
+    const auto opcode = static_cast<IR::OpCode>(stack_frame->IP[0]);
 
     switch (opcode) {
       case IR::OpCode::Set: {
           IR::Types::Set set;
-          vm.IP = IR::Read::Set(vm.IP, vm.IP_END, set);
+          stack_frame->IP = IR::Read::Set(stack_frame->IP, stack_frame->IP_END, set);
 
-          u8* to = value_location(&vm, builder, set.to, set.t_offset);
+          u8* to = stack_frame->get_value(set.to, set.t_offset);
 
           //maybe have some issues here with different platforms sizing things differently
           ASSERT(set.d_size == vm_types_info.get_size(set.t_format));
@@ -401,10 +328,10 @@ void vm_run(Errors* errors, const IR::Builder* builder) noexcept {
 
       case IR::OpCode::CopyCast: {
           IR::Types::CopyCast copy;
-          vm.IP = IR::Read::CopyCast(vm.IP, vm.IP_END, copy);
+          stack_frame->IP = IR::Read::CopyCast(stack_frame->IP, stack_frame->IP_END, copy);
 
-          u8* from = value_location(&vm, builder, copy.from, copy.f_offset);
-          u8* to = value_location(&vm, builder, copy.to, copy.t_offset);
+          u8* from = stack_frame->get_value(copy.from, copy.f_offset);
+          u8* to = stack_frame->get_value(copy.to, copy.t_offset);
 
           copy_values(to, copy.t_format, from, copy.f_format);
           break;
@@ -413,10 +340,10 @@ void vm_run(Errors* errors, const IR::Builder* builder) noexcept {
 #define BIN_OP_CASE(name, op_symbol) \
       case IR::OpCode:: name: { \
           IR::Types:: name op; \
-          vm.IP = IR::Read:: name(vm.IP, vm.IP_END, op); \
-          u8* to = value_location(&vm, builder, op.to, op.t_offset); \
-          u8* left = value_location(&vm, builder, op.left, op.l_offset); \
-          u8* right = value_location(&vm, builder, op.right, op.r_offset); \
+          stack_frame->IP = IR::Read:: name(stack_frame->IP, stack_frame->IP_END, op); \
+          u8* to = stack_frame->get_value(op.to, op.t_offset); \
+          u8* left = stack_frame->get_value(op.left, op.l_offset); \
+          u8* right = stack_frame->get_value(op.right, op.r_offset); \
           ASSERT(op.r_format == op.l_format); \
           ASSERT(op.t_format == op.l_format); \
           switch (op.r_format) \
@@ -494,9 +421,9 @@ void vm_run(Errors* errors, const IR::Builder* builder) noexcept {
 
       case IR::OpCode::Neg: {
           IR::Types::Neg op;
-          vm.IP = IR::Read::Neg(vm.IP, vm.IP_END, op);
-          u8* to = value_location(&vm, builder, op.to, op.t_offset);
-          u8* from = value_location(&vm, builder, op.from, op.f_offset);
+          stack_frame->IP = IR::Read::Neg(stack_frame->IP, stack_frame->IP_END, op);
+          u8* to = stack_frame->get_value( op.to, op.t_offset);
+          u8* from = stack_frame->get_value(op.from, op.f_offset);
           ASSERT(op.t_format == op.f_format);
           switch (op.f_format)
           {
@@ -525,9 +452,9 @@ void vm_run(Errors* errors, const IR::Builder* builder) noexcept {
 
       case IR::OpCode::Not: {
           IR::Types::Not op;
-          vm.IP = IR::Read::Not(vm.IP, vm.IP_END, op);
-          u8* to = value_location(&vm, builder, op.to, op.t_offset);
-          u8* from = value_location(&vm, builder, op.from, op.f_offset);
+          stack_frame->IP = IR::Read::Not(stack_frame->IP, stack_frame->IP_END, op);
+          u8* to = stack_frame->get_value(op.to, op.t_offset);
+          u8* from = stack_frame->get_value(op.from, op.f_offset);
           if (op.t_format == IR::Format::uint8) {
             *to = static_cast<u8>(!static_cast<bool>(*from));
           }
@@ -538,27 +465,28 @@ void vm_run(Errors* errors, const IR::Builder* builder) noexcept {
 
       case IR::OpCode::IfSplit: {
           IR::Types::IfSplit is;
-          vm.IP = IR::Read::IfSplit(vm.IP, vm.IP_END, is);
+          stack_frame->IP = IR::Read::IfSplit(stack_frame->IP, stack_frame->IP_END, is);
 
           ASSERT(is.format == IR::Format::uint8);
-          u8* val = value_location(&vm, builder, is.val, is.offset);
+          u8* val = stack_frame->get_value(is.val, is.offset);
+          const IR::Builder* ir = stack_frame->ir;
           if (*val != 0) {
-            vm.IP = vm.IP_BASE + builder->control_blocks.data[is.label_if.label].start;
+            stack_frame->IP = stack_frame->IP_BASE + ir->control_blocks.data[is.label_if.label].start;
           }
           else {
-            vm.IP = vm.IP_BASE + builder->control_blocks.data[is.label_else.label].start;
+            stack_frame->IP = stack_frame->IP_BASE + ir->control_blocks.data[is.label_else.label].start;
           }
 
         } break;
 
       case IR::OpCode::Jump: {
           IR::Types::Jump jump;
-          vm.IP = IR::Read::Jump(vm.IP, vm.IP_END, jump);
+          stack_frame->IP = IR::Read::Jump(stack_frame->IP, stack_frame->IP_END, jump);
+          const IR::Builder* ir = stack_frame->ir;
 
-          vm.IP = vm.IP_BASE + builder->control_blocks.data[jump.local_label.label].start;
+          stack_frame->IP = stack_frame->IP_BASE + ir->control_blocks.data[jump.local_label.label].start;
           break;
         }
-
       default: {
           errors->report_error(ERROR_CODE::VM_ERROR, Span{},
                                "Encountered invalid/unsupported instruction during ir execution\n"

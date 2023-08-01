@@ -58,7 +58,7 @@ namespace IR {
 
     union {
       ValueIndex base = {};
-      u8* constant;
+      const u8* constant;
     };
   };
 
@@ -114,7 +114,7 @@ namespace IR {
   namespace HELPERS {
     RuntimeReference no_value();
     RuntimeReference as_reference(ValueIndex val, const Type& type);
-    RuntimeReference as_constant(void* constant, const Type& type);
+    RuntimeReference as_constant(const void* constant, const Type& type);
     RuntimeReference sub_object(const RuntimeReference& val, usize offset, const Type& type);
 
     RuntimeReference copy_constant(Builder* ir, const void* constant, const Type& type);
@@ -140,7 +140,7 @@ namespace IR {
     const ASTLambda* declaration = nullptr;
 
     FunctionSignature signature = {};
-    UnitID sig_unit_id= 0;
+    UnitID sig_unit_id = 0;
   };
 
 #define OPCODES_MOD \
@@ -400,4 +400,29 @@ namespace CASTS {
                                     const IR::RuntimeReference& val);
 }
 
-void vm_run(Errors* errors, const IR::Builder* builder) noexcept;
+namespace VM {
+  struct Value {
+    u32 data_offset;
+    Type type;
+  };
+
+  struct StackFrame {
+    OwnedArr<u8> bytes;
+    OwnedArr<Value> variables = {};
+
+    u32 num_variables;
+    u32 num_temporaries;
+
+    const IR::Builder* ir;
+
+    const u8* IP;
+    const u8* IP_BASE;
+    const u8* IP_END;
+
+    u8* get_value(IR::ValueIndex index, u32 offset);
+  };
+
+  StackFrame new_stack_frame(const IR::Builder* ir);
+
+  void exec(Errors* errors, StackFrame* stack_frame);
+}

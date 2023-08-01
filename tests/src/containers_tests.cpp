@@ -121,6 +121,21 @@ TEST_FUNCTION(sort) {
   TEST_ARR_EQ(SORTED_RANDOM_ARR, RANDOM_ARR_SIZE, ints.data, ints.size);
 }
 
+struct CheckDelete {
+  int* i;
+
+  CheckDelete() = default;
+  CheckDelete(int* o) : i(o) {}
+  CheckDelete(CheckDelete&& o) noexcept : i(std::exchange(o.i, nullptr)) {}
+
+  ~CheckDelete() {
+    if (i != nullptr) {
+      *i += 1;
+    }
+  }
+};
+
+
 TEST_FUNCTION(owned_array) {
   {
     Array<int> ints = {};
@@ -147,21 +162,6 @@ TEST_FUNCTION(owned_array) {
     TEST_EQ((usize)0, ints.size);
     TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr.data, ints_arr.size);
   }
-
-
-  struct CheckDelete {
-    int* i;
-
-    CheckDelete() = default;
-    CheckDelete(int* o) : i(o) {}
-    CheckDelete(CheckDelete&& o) noexcept : i(std::exchange(o.i, nullptr)) {}
-
-    ~CheckDelete() {
-      if (i != nullptr) {
-        *i += 1;
-      }
-    }
-  };
 
   {
     int i = 0;
@@ -192,5 +192,112 @@ TEST_FUNCTION(owned_array) {
     }
 
     TEST_EQ(COUNTER * 2, i);
+  }
+}
+
+TEST_FUNCTION(freelist_block_allocator) {
+
+  {
+    FreelistBlockAllocator<int> alloc = {};
+    TEST_EQ(true, alloc._debug_all_are_free());
+
+    int* i1 = alloc.allocate();
+    TEST_EQ(false, alloc._debug_all_are_free());
+    *i1 = 1;
+    int* i2 = alloc.allocate();
+    TEST_EQ(false, alloc._debug_all_are_free());
+    *i2 = 2;
+    int* i3 = alloc.allocate();
+    TEST_EQ(false, alloc._debug_all_are_free());
+    *i3 = 3;
+    int* i4 = alloc.allocate();
+    TEST_EQ(false, alloc._debug_all_are_free());
+    *i4 = 4;
+    int* i5 = alloc.allocate();
+    TEST_EQ(false, alloc._debug_all_are_free());
+    *i5 = 5;
+
+
+    TEST_EQ(1, *i1);
+    TEST_EQ(2, *i2);
+    TEST_EQ(3, *i3);
+    TEST_EQ(4, *i4);
+    TEST_EQ(5, *i5);
+
+    alloc.free(i2);
+    TEST_EQ(false, alloc._debug_all_are_free());
+
+    TEST_EQ(1, *i1);
+    TEST_EQ(3, *i3);
+    TEST_EQ(4, *i4);
+    TEST_EQ(5, *i5);
+
+    int* i6 = alloc.allocate();
+    *i6 = 6;
+
+    TEST_EQ(1, *i1);
+    TEST_EQ(3, *i3);
+    TEST_EQ(4, *i4);
+    TEST_EQ(5, *i5);
+    TEST_EQ(6, *i6);
+
+    alloc.free(i1);
+    TEST_EQ(false, alloc._debug_all_are_free());
+    alloc.free(i6);
+    TEST_EQ(false, alloc._debug_all_are_free());
+    alloc.free(i4);
+    TEST_EQ(false, alloc._debug_all_are_free());
+    alloc.free(i5);
+    TEST_EQ(false, alloc._debug_all_are_free());
+
+    TEST_EQ(3, *i3);
+
+
+    alloc.free(i3);
+
+    TEST_EQ(true, alloc._debug_all_are_free());
+  }
+
+  {
+    int counter = 0;
+
+    {
+      FreelistBlockAllocator<CheckDelete> alloc = {};
+
+      CheckDelete* i1 = alloc.allocate();
+      i1->i = &counter;
+      CheckDelete* i2 = alloc.allocate();
+      i2->i = &counter;
+      CheckDelete* i3 = alloc.allocate();
+      i3->i = &counter;
+      CheckDelete* i4 = alloc.allocate();
+      i4->i = &counter;
+      CheckDelete* i5 = alloc.allocate();
+      i5->i = &counter;
+
+      TEST_EQ(0, counter);
+
+      alloc.free(i2);
+
+      TEST_EQ(1, counter);
+
+      CheckDelete* i6 = alloc.allocate();
+      i6->i = &counter;
+
+      alloc.free(i1);
+      TEST_EQ(2, counter);
+      alloc.free(i6);
+      TEST_EQ(3, counter);
+      alloc.free(i4);
+      TEST_EQ(4, counter);
+      alloc.free(i5);
+      TEST_EQ(5, counter);
+      alloc.free(i3);
+      TEST_EQ(6, counter);
+
+      TEST_EQ(true, alloc._debug_all_are_free());
+    }
+
+    TEST_EQ(6, counter);
   }
 }

@@ -61,9 +61,9 @@ int main(int argc, const char** args) {
   options.print.finished_ir = false;
   options.print.run_headers = false;
   options.print.register_select = false;
-  options.print.file_loads = true;
-  options.print.comp_units = true;
-  options.print.work = true;
+  options.print.file_loads = false;
+  options.print.comp_units = false;
+  options.print.work = false;
 
   //options.optimize.non_stack_locals = true;
   

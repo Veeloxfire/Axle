@@ -44,7 +44,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
 
   //Load the name
   {
-    type->elements.reserve_total(types.size);
+    type->elements = new_arr<TupleElement>(types.size);
 
     uint32_t current_size = 0;
     uint32_t current_align = 0;
@@ -53,10 +53,11 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
 
     auto i = types.begin();
     const auto end = types.end();
+    auto tup_el = type->elements.mut_begin();
+    auto tup_el_end = type->elements.mut_end();
 
     if (i < end) {
-      type->elements.insert_uninit(1);
-      TupleElement* tup_el = type->elements.back();
+      ASSERT(tup_el < tup_el_end);
 
       format_to_array(name, "({}", i->name);
 
@@ -69,10 +70,10 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
       current_align = larger(i->structure->alignment, current_align);
 
       i++;
+      tup_el++;
 
-      for (; i < end; i++) {
-        type->elements.insert_uninit(1);
-        tup_el = type->elements.back();
+      for (; i < end; (i++, tup_el++)) {
+        ASSERT(tup_el < tup_el_end);
         format_to_array(name, ", {}", i->name);
 
         tup_el->type = *i;
@@ -109,7 +110,7 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
   SignatureStructure* type = structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
   type->ir_format = IR::Format::opaque;
-  type->parameter_types = std::move(params);
+  type->parameter_types = bake_arr(std::move(params));
   type->return_type = ret_type;
   type->calling_convention = conv;
   type->size = (u32)ptr_size;
@@ -269,7 +270,6 @@ OwnedArr<char> ArrayStructure::gen_name(const Type& base, size_t length) {
 OwnedArr<char> EnumStructure::gen_name(const Type& base) {
   return format("anoymous-enum({})", base.name);
 }
-
 
 Structures::~Structures() {
   {

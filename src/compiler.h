@@ -63,7 +63,7 @@ struct Global {
   bool is_constant = false;
   union {
     u32 dynamic_init_index = 0;
-    void* constant_value;
+    const void* constant_value;
   };
 };
 
@@ -294,7 +294,7 @@ constexpr void copy_compiler_constants(const CompilerConstants* from, CompilerCo
 
 //Things that may be modified by multiple threads
 struct CompilerGlobals : CompilerConstants {
-  std::atomic_uint32_t work_counter;
+  std::atomic_uint32_t work_counter = 0;
 
   Signal global_panic;
   SpinLockMutex global_errors_mutex;

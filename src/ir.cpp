@@ -417,10 +417,10 @@ IR::RuntimeReference IR::HELPERS::as_reference(IR::ValueIndex val, const Type& t
   return r;
 }
 
-IR::RuntimeReference IR::HELPERS::as_constant(void* constant, const Type& type) {
+IR::RuntimeReference IR::HELPERS::as_constant(const void* constant, const Type& type) {
   IR::RuntimeReference r = {};
   r.is_constant = true;
-  r.constant = static_cast<u8*>(constant);
+  r.constant = static_cast<const u8*>(constant);
   r.offset = 0;
   r.type = type;
 

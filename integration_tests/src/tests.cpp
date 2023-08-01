@@ -321,7 +321,7 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
     options.print.register_select = false;
     options.print.file_loads = false;
     options.print.comp_units = false;
-    options.print.work = false;
+    options.print.work = true;
 
     std::cout << "\nStarting Test: " << test.test_name << "\n";
 

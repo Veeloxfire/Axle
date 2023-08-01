@@ -12,7 +12,7 @@ _TestAdder::_TestAdder(const char* test_name, TEST_FN fn) {
 
 struct FailedTest {
   Errors errors;
-  const char* test_name;
+  const char* test_name = nullptr;
 };
 
 int main() {
@@ -25,12 +25,16 @@ int main() {
 
     Errors errors = {};
 
+#ifdef ASSERT_EXCEPTIONS
     try {
+#endif
       t.test_func(&errors);
+#ifdef ASSERT_EXCEPTIONS
     }
-    catch (std::exception& e) {
+    catch (const std::exception& e) {
       errors.report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test failed with exception: {}", e.what());
     }
+#endif
     
     if (errors.is_panic()) {
       IO::print("\t - failed\n");
