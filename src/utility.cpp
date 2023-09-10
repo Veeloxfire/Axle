@@ -384,8 +384,21 @@ size_t SquareBitMatrix::new_value() {
   return side_length++;
 }
 
-BitArray::BitArray(size_t length_) : data(new u8[length_]), length(length_) {}
+BitArray::BitArray(size_t length_) : data(new u8[ceil_div(length_, 8)]), length(length_), highest_set(0) {}
 BitArray::~BitArray() { delete[] data; }
+
+BitArray::BitArray(BitArray&& b) noexcept
+  : data(std::exchange(b.data, nullptr)),
+    length(std::exchange(b.length, 0)), highest_set(std::exchange(b.highest_set, 0)) {}
+
+BitArray& BitArray::operator=(BitArray&& b) noexcept {
+  data = std::exchange(b.data, nullptr);
+  length = std::exchange(b.length, 0);
+  highest_set = std::exchange(b.highest_set, 0);
+
+
+  return *this;
+}
 
 void BitArray::set(size_t a) {
   ASSERT(a < length);
@@ -394,6 +407,8 @@ void BitArray::set(size_t a) {
   size_t offset = a % 8;
 
   data[index] |= 1 << offset;
+
+  if (index > highest_set) highest_set = index;
 }
 
 bool BitArray::test(size_t a) const {
@@ -403,7 +418,42 @@ bool BitArray::test(size_t a) const {
   size_t offset = a % 8;
 
   return (data[index] & (1 << offset)) > 0;
+
 }
+
+bool BitArray::intersect(const BitArray& other) const {
+  ASSERT(length == other.length);
+
+  size_t blocks = ceil_div(length, 8);
+  for (size_t i = 0; i < blocks; ++i) {
+    if ((data[i] & other.data[i]) != 0) return false;
+  }
+
+  return true;
+}
+
+bool BitArray::test_all() const {
+  if (length == 0) return true;
+  if (highest_set != length - 1) return false;
+
+  size_t full_blocks = length / 8;
+  for (size_t i = 0; i < full_blocks; ++i) {
+    if (data[i] != 0xff) return false;//wasn't filled
+  }
+
+  size_t final_size = length % 8;
+
+  const u8 final_block = bit_fill_lower<u8>(final_size);
+
+  return data[full_blocks] == final_block;
+}
+
+void BitArray::clear() {
+  for (size_t i = 0; i < highest_set; ++i) {
+    data[i] = 0;
+  }
+}
+
 
 void print_as_bytes(const uint8_t* bytes, size_t length) {
   for (size_t i = 0; i < length; i++) {

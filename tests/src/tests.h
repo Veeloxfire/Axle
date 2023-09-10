@@ -15,7 +15,7 @@ struct _TestAdder {
   _TestAdder(const char* test_name, TEST_FN fn);
 };
 
-#define TEST_FUNCTION(name) static void name (Errors*); _TestAdder JOIN(_test_adder_, __LINE__) = {#name, name }; static void name(Errors* test_errors)
+#define TEST_FUNCTION(name) static void name (Errors*); static _TestAdder JOIN(_test_adder_, __LINE__) = {#name, name }; static void name(Errors* test_errors)
 
 template<typename T>
 struct TestPrintTypeGetter {

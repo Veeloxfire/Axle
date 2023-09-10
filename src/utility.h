@@ -41,7 +41,6 @@ constexpr u64 lowest_common_multiple(u64 v1, u64 v2) {
   return (v1 * v2) / gcd;
 }
 
-
 constexpr inline u64 FNV1_HASH_BASE = 0xcbf29ce484222325;
 constexpr inline u64 FNV1_HASH_PRIME = 0x100000001b3;
 
@@ -139,32 +138,18 @@ constexpr u64 fnv1a_hash_u64(u64 start, u64 u) {
 }
 
 template<typename T, typename B>
-constexpr T bit_fill_upper(B bits) {
-  const auto n_bits = static_cast<uint64_t>(bits) & 0b111111llu;
-  const auto has_bits = static_cast<uint64_t>(n_bits == 0);
-  const auto has_max_bits = static_cast<uint64_t>(n_bits > (sizeof(T) * 8llu));
-  //Negative signed integers fill their top bits when shifting down
-  // to preserve the negativity
+constexpr T bit_fill_lower(B bits) {
+  if (bits == 0) return 0;
 
-  //Initially needs to just have the top bit filled
-  //Only needs to be filled if we actually have bits to fill
-  int64_t fill = static_cast<int64_t>(has_bits << 63);
+  if (bits > sizeof(T) * 8) bits = sizeof(T) * 8;
+  constexpr uint64_t MAX_SHIFT = 64;
 
-  //Now the problem is that if n_bits = 0 then n_bits - 1 = -1
-  //Shifting by a negative is not allowed(?)
-  //To avoid this we shift too far and then shift back 1 (if there are bits)
-  //Now the problem is that if n_bits = MAX_SHIFT then we always leave the bottom
-  // bit unfilled
-  //To avoid this we only do the second re-shift if 
-
-  fill >>= (n_bits - 1llu + has_bits);
-
-  return static_cast<T>(static_cast<uint64_t>(fill) << (has_bits + has_max_bits));
+  return static_cast<uint64_t>(-1) >> (MAX_SHIFT - bits);
 }
 
 template<typename T, typename B>
-constexpr T bit_fill_lower(B bits) {
-  return ~bit_fill_upper<T, B>((64 - bits) & 0xff);
+constexpr T bit_fill_upper(B bits) {
+  return ~bit_fill_lower<T, B>((sizeof(T) * 8) - bits);
 }
 
 template<typename T, size_t i>
@@ -182,12 +167,17 @@ constexpr inline uint64_t log_2(uint64_t v) {
     INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
-  uint64_t max = 63;
+  uint64_t max = 64;
   uint64_t min = 0;
 
-  while (max >= min + 1) {
-    uint64_t mid = (max + min) / 2;
-    if (v > ((uint64_t)1 << mid)) {
+  while (max > min + 1) {
+    uint64_t mid = min + ((max - min) / 2);
+    uint64_t guess = 1llu << mid;
+
+    if (guess == v) {
+      return mid;
+    }
+    else if (guess < v) {
       min = mid;
     }
     else {
@@ -195,11 +185,12 @@ constexpr inline uint64_t log_2(uint64_t v) {
     }
   }
 
-  return max;
+
+  return min;
 }
 
 constexpr inline uint64_t pow_16(uint64_t v) {
-  return 1ull << (8ull * v);
+  return (1ull << (4ull * v));
 }
 
 constexpr inline uint64_t pow_10(uint64_t v) {
@@ -242,14 +233,17 @@ constexpr inline uint64_t log_10_floor(uint64_t v) {
   //Max uint64_t = 18446744073709551615
   //Max pow 10   = 10000000000000000000ull
 
-  auto max = 19;
-  auto min = 0;
+  uint64_t max = 20;
+  uint64_t min = 0;
 
-  if (v >= pow_10(max)) { return max; }
+  while (max > min + 1) {
+    uint64_t mid = min + ((max - min) / 2);
+    uint64_t guess = pow_10(mid);
 
-  while (max >= min + 1) {
-    auto mid = (max + min) / 2;
-    if (v > pow_10(mid)) {
+    if (guess == v) {
+      return mid;
+    }
+    else if (guess < v) {
       min = mid;
     }
     else {
@@ -257,7 +251,7 @@ constexpr inline uint64_t log_10_floor(uint64_t v) {
     }
   }
 
-  return max;
+  return min;
 }
 
 //Log 2 optimised for small numbers
@@ -267,13 +261,13 @@ constexpr inline uint64_t small_log_2_floor(uint64_t v) {
     INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
-  uint64_t min = 0;
-
-  while (v > (uint64_t)1 << min) {
-    min++;
+  uint64_t counter = 0;
+  while (v > 1) {
+    v >>= 1;
+    counter += 1;
   }
 
-  return min;
+  return counter;
 }
 
 constexpr inline uint64_t small_log_2_ceil(uint64_t v) {
@@ -281,41 +275,38 @@ constexpr inline uint64_t small_log_2_ceil(uint64_t v) {
     INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
 
-  uint8_t found1 = 0;//max value of 1
-  uint64_t min = 0;
+  int found1 = 0;//max value of 1
 
-  while (v > (uint64_t)1 << min) {
-    found1 |= (v >> min) & 0b1;//tests if it is a 1 
-    min++;
+  uint64_t counter = 0;
+  while (v > 1) {
+    found1 |= (v & 0b1);
+    v >>= 1;
+    counter += 1;
   }
 
-  return min + found1;
+  return counter + found1;
 }
 
 template<typename T>
 constexpr T ceil_to_n(T val, T n) {
-  T mod_n = val % n;
+  const T raised = val + (n - 1);
+  return raised - (raised % n);
+}
 
-  if (mod_n == 0) {
-    return val;
-  }
-  else {
-    return val + n - mod_n;
-  }
+template<typename T, usize N>
+constexpr T ceil_to_N(T val) {
+  const T raised = val + (N - 1);
+  return raised - (raised % N);
 }
 
 template<typename T>
 constexpr T ceil_to_8(T val) {
-  const T is_zero = val == 0;
-  const T val2 = val - 1 + is_zero;
-  const T cond8 = is_zero << 3;
-
-  return val2 + 8 - (val2 % 8) - cond8;
+  return ceil_to_N<T, 8>(val);
 }
 
-constexpr inline uint8_t absolute(int8_t i) {
+constexpr uint8_t absolute(int8_t i) {
   if (i == INT8_MIN) {
-    return static_cast<uint16_t>(INT8_MAX) + 1u;
+    return static_cast<uint8_t>(INT8_MAX) + 1u;
   }
   else if (i < 0) {
     return static_cast<uint8_t>(-i);
@@ -325,7 +316,7 @@ constexpr inline uint8_t absolute(int8_t i) {
   }
 }
 
-constexpr inline uint16_t absolute(int16_t i) {
+constexpr uint16_t absolute(int16_t i) {
   if (i == INT16_MIN) {
     return static_cast<uint16_t>(INT16_MAX) + 1u;
   }
@@ -337,7 +328,7 @@ constexpr inline uint16_t absolute(int16_t i) {
   }
 }
 
-constexpr inline uint32_t absolute(int32_t i) {
+constexpr uint32_t absolute(int32_t i) {
   if (i == INT32_MIN) {
     return static_cast<uint32_t>(INT32_MAX) + 1u;
   }
@@ -349,7 +340,7 @@ constexpr inline uint32_t absolute(int32_t i) {
   }
 }
 
-constexpr inline uint64_t absolute(int64_t i) {
+constexpr uint64_t absolute(int64_t i) {
   if (i == INT64_MIN) {
     return 0x8000000000000000ull;
   }
@@ -656,8 +647,16 @@ struct Array {
   }
 
   void pop() noexcept {
+    ASSERT(size > 0);
     size--;
     (data + size)->~T();
+  }
+
+  void pop_n(usize n) noexcept {
+    ASSERT(n <= size);
+    for (usize i = 0; i < n; ++i) {
+      pop();
+    }
   }
 
   T take() noexcept {
@@ -1331,7 +1330,13 @@ struct SquareBitMatrix {
 
   void free();
 
+  constexpr SquareBitMatrix() = default;
   ~SquareBitMatrix();
+
+
+  //TEMP
+  SquareBitMatrix(SquareBitMatrix&&) = delete;
+  SquareBitMatrix(const SquareBitMatrix&) = delete;
 
   constexpr static size_t bytes_per_val_per_side(size_t side_length) {
     return side_length == 0 ? 0
@@ -1348,12 +1353,25 @@ struct SquareBitMatrix {
 struct BitArray {
   uint8_t* data;
   size_t length;
+  size_t highest_set;
 
+  constexpr BitArray() : data(nullptr), length(0), highest_set(0) {}
   BitArray(size_t length);
+  BitArray(BitArray&&) noexcept;
+  BitArray& operator=(BitArray&&) noexcept;
+
+  BitArray(const BitArray&) = delete;
+  BitArray& operator=(const BitArray&) = delete;
   ~BitArray();
+
 
   void set(size_t a);
   bool test(size_t a) const;
+
+  bool intersect(const BitArray& b) const;
+  bool test_all() const;
+
+  void clear();
 };
 
 template<typename T>
@@ -1443,13 +1461,22 @@ struct Queue {
     return val;
   }
 
-  void push_back(T t) {
+  template<typename U>
+  void _internal_push_back(U&& u) {
     if (size == capacity) {
       extend();
     }
 
-    new(holder + _ptr_index(size)) T(std::move(t));
+    new(holder + _ptr_index(size)) T(std::forward<U>(u));
     size++;
+  }
+
+  void push_back(const T& t) {
+    _internal_push_back(t);
+  }
+
+  void push_back(T&& t) {
+    _internal_push_back(std::move(t));
   }
 
   T pop_back() {
@@ -1506,6 +1533,20 @@ struct Queue {
     capacity = new_cap;
 
     start = 0;
+  }
+
+  void clear() {
+    if (start + size > capacity) {
+      usize temp = capacity - start;
+      destruct_arr<T>(holder + start, temp);
+      destruct_arr<T>(holder + start, size - temp);
+    }
+    else {
+      destruct_arr<T>(holder + start, size);
+    }
+
+    start = 0;
+    size = 0;
   }
 };
 
@@ -1708,10 +1749,8 @@ struct ViewArr {
   T* data = nullptr;
   usize size = 0;
 
-  const T* begin() const { return data; }
-  const T* end() const { return data + size; }
-  T* mut_begin() { return data; }
-  T* mut_end() { return data + size; }
+  T* begin() const { return data; }
+  T* end() const { return data + size; }
 };
 
 template<typename T>
@@ -1720,6 +1759,65 @@ ViewArr<T> view_arr(const OwnedArr<T>& arr, usize start, usize count) {
   return {
     arr.data + start,
     count,
+  };
+}
+
+template<typename T>
+ViewArr<T> view_arr(const Array<T>& arr, usize start, usize count) {
+  ASSERT(arr.size >= start + count);
+  return {
+    arr.data + start,
+    count,
+  };
+}
+
+template<typename T>
+ViewArr<T> view_arr(const ViewArr<T>& arr, usize start, usize count) {
+  ASSERT(arr.size >= start + count);
+  return {
+    arr.data + start,
+    count,
+  };
+}
+
+template<typename T>
+ViewArr<const T> const_view_arr(const Array<T>& arr, usize start, usize count) {
+  ASSERT(arr.size >= start + count);
+  return {
+    arr.data + start,
+    count,
+  };
+}
+
+template<typename T>
+ViewArr<T> view_arr(const OwnedArr<T>& arr) {
+  return {
+    arr.data,
+    arr.size,
+  };
+}
+
+template<typename T>
+ViewArr<T> view_arr(const Array<T>& arr) {
+  return {
+    arr.data,
+    arr.size,
+  };
+}
+
+template<typename T>
+ViewArr<const T> const_view_arr(const Array<T>& arr) {
+  return {
+    arr.data,
+    arr.size,
+  };
+}
+
+template<typename T, usize N>
+ViewArr<T> view_arr(T (&arr)[N]) {
+  return {
+    arr,
+    N,
   };
 }
 
@@ -1822,9 +1920,20 @@ namespace BIT_MASKS {
   };
 }
 
-#define SET_MASK(val, mask) (val |= mask)
-#define RESET_MASK(val, mask) (val &= ~mask)
-#define TEST_MASK(val, mask) ((val & mask) != 0)
+template<typename T>
+constexpr void set_mask(T& t, const T mask) {
+  t |= mask;
+}
+
+template<typename T>
+constexpr void unset_mask(T& t, const T mask) {
+  t &= ~mask;
+}
+
+template<typename T>
+constexpr bool test_mask(const T t, const T mask) {
+  return (t & mask) == mask;
+}
 
 template<typename T>
 constexpr T combine_flag(const T full, const T mask, const bool set) {
@@ -1833,8 +1942,6 @@ constexpr T combine_flag(const T full, const T mask, const bool set) {
 
 #define COMBINE_FLAG(full, mask, set) (combine_flag(full, mask, set))
 #define SET_FLAG(full, mask, set) (full = COMBINE_FLAG(full, mask, set))
-
-
 
 union X64_UNION {
   uint64_t val = 0;

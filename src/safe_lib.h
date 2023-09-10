@@ -22,18 +22,16 @@ void throw_testing_assertion(const char* message);
 #define ASSERT(expr) do { if(!(expr))\
 throw_testing_assertion("Assertion failed in at line " STR_REPLACE(__LINE__) ", file " __FILE__ ":\n" #expr); } while(false)
 
-#define INVALID_CODE_PATH(reason) throw std::exception("Invalid Code path \"" reason "\"")
-
-#define INVALID_CODE_PATH_ABORT(reason) IO::err_print("Invalid Code path \"" reason "\"");\
-abort()
+#define INVALID_CODE_PATH(reason) throw_testing_assertion("Invalid Code path \"" reason "\"")
 #else
 #define ASSERT(expr) assert(expr)
 
-#define INVALID_CODE_PATH(reason) assert(false);
-
-#define INVALID_CODE_PATH_ABORT(reason) assert(false);\
-IO::err_print("Invalid Code path \"" reason "\"");\
+#ifdef NDEBUG
+#define INVALID_CODE_PATH(reason) IO::err_print("Invalid Code path \"" reason "\"");\
 abort()
+#else
+#define INVALID_CODE_PATH(reason) assert(((reason), false));
+#endif
 #endif
 
 //#define COUNT_ALLOC
