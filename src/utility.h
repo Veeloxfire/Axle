@@ -1368,7 +1368,7 @@ struct BitArray {
   void set(size_t a);
   bool test(size_t a) const;
 
-  bool intersect(const BitArray& b) const;
+  bool intersects(const BitArray& b) const;
   bool test_all() const;
 
   void clear();

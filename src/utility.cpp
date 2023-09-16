@@ -384,7 +384,7 @@ size_t SquareBitMatrix::new_value() {
   return side_length++;
 }
 
-BitArray::BitArray(size_t length_) : data(new u8[ceil_div(length_, 8)]), length(length_), highest_set(0) {}
+BitArray::BitArray(size_t length_) : data(new u8[ceil_div(length_, 8)]{ 0 }), length(length_), highest_set(0) {}
 BitArray::~BitArray() { delete[] data; }
 
 BitArray::BitArray(BitArray&& b) noexcept
@@ -408,7 +408,7 @@ void BitArray::set(size_t a) {
 
   data[index] |= 1 << offset;
 
-  if (index > highest_set) highest_set = index;
+  if (a > highest_set) highest_set = a;
 }
 
 bool BitArray::test(size_t a) const {
@@ -418,18 +418,17 @@ bool BitArray::test(size_t a) const {
   size_t offset = a % 8;
 
   return (data[index] & (1 << offset)) > 0;
-
 }
 
-bool BitArray::intersect(const BitArray& other) const {
+bool BitArray::intersects(const BitArray& other) const {
   ASSERT(length == other.length);
 
   size_t blocks = ceil_div(length, 8);
   for (size_t i = 0; i < blocks; ++i) {
-    if ((data[i] & other.data[i]) != 0) return false;
+    if ((data[i] & other.data[i]) != 0) return true;
   }
 
-  return true;
+  return false;
 }
 
 bool BitArray::test_all() const {
@@ -449,9 +448,13 @@ bool BitArray::test_all() const {
 }
 
 void BitArray::clear() {
-  for (size_t i = 0; i < highest_set; ++i) {
+  size_t highest_block = highest_set / 8;
+
+  for (size_t i = 0; i < (highest_block + 1); ++i) {
     data[i] = 0;
   }
+
+  highest_set = 0;
 }
 
 
