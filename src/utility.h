@@ -729,6 +729,13 @@ void copy_array(const Array<T>& from, Array<T>& to) noexcept {
 }
 
 template<typename T>
+Array<T> copy_array(const Array<T>& from) noexcept {
+  Array<T> to = {};
+  copy_array(from, to);
+  return to;
+}
+
+template<typename T>
 void combine_unique(const Array<T>& from, Array<T>& to) noexcept {
   auto i = from.begin();
   const auto end = from.end();
@@ -1725,6 +1732,16 @@ OwnedArr<T> new_arr(usize size) {
 }
 
 template<typename T>
+OwnedArr<T> copy_arr(const OwnedArr<T>& in_arr) {
+  T* arr = allocate_default<T>(in_arr.size);
+
+  for (usize i = 0; i < in_arr.size; ++i) {
+    arr[i] = in_arr.data[i];
+  }
+  return OwnedArr(arr, in_arr.size);
+}
+
+template<typename T>
 OwnedArr<T> bake_arr(Array<T>&& arr) {
   arr.shrink();
   T* d = std::exchange(arr.data, nullptr);
@@ -1781,6 +1798,16 @@ ViewArr<T> view_arr(const ViewArr<T>& arr, usize start, usize count) {
 }
 
 template<typename T>
+ViewArr<const T> const_view_arr(const OwnedArr<T>& arr, usize start, usize count) {
+  ASSERT(arr.size >= start + count);
+  return {
+    arr.data + start,
+    count,
+  };
+}
+
+
+template<typename T>
 ViewArr<const T> const_view_arr(const Array<T>& arr, usize start, usize count) {
   ASSERT(arr.size >= start + count);
   return {
@@ -1799,6 +1826,14 @@ ViewArr<T> view_arr(const OwnedArr<T>& arr) {
 
 template<typename T>
 ViewArr<T> view_arr(const Array<T>& arr) {
+  return {
+    arr.data,
+    arr.size,
+  };
+}
+
+template<typename T>
+ViewArr<const T> const_view_arr(const OwnedArr<T>& arr) {
   return {
     arr.data,
     arr.size,
