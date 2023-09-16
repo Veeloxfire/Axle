@@ -23,7 +23,8 @@ int main() {
     IO::print("Starting test: ");
     IO::print(t.test_name);
 
-    Errors errors = {};
+    TestErrors errors = {};
+    errors.test_name = t.test_name;
 
 #ifdef ASSERT_EXCEPTIONS
     try {
