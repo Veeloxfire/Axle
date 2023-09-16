@@ -1,6 +1,6 @@
 #include "tests.h"
 
-TEST_FUNCTION(Util_Array_Insert_Remove) {
+TEST_FUNCTION(Util_Array, Insert_Remove) {
   Array<usize> a = {};
 
   for (usize i = 0; i < 1000; i++) {
@@ -66,7 +66,7 @@ TEST_FUNCTION(Util_Array_Insert_Remove) {
   TEST_EQ((usize)0, a.size);
 }
 
-TEST_FUNCTION(Util_Queue_Insert_Remove) {
+TEST_FUNCTION(Util_Queue, Insert_Remove) {
   Queue<usize> a = {};
 
   for (usize i = 0; i < 100; i++) {
@@ -109,7 +109,7 @@ constexpr int SORTED_RANDOM_ARR[] = {
 
 constexpr usize RANDOM_ARR_SIZE = array_size(RANDOM_ARR);
 
-TEST_FUNCTION(sort) {
+TEST_FUNCTION(Util, sort) {
   Array<int> ints = {};
 
   for (int i : RANDOM_ARR) {
@@ -136,7 +136,7 @@ struct CheckDelete {
 };
 
 
-TEST_FUNCTION(owned_array) {
+TEST_FUNCTION(Util_OwnedArr, bake) {
   {
     Array<int> ints = {};
 
@@ -195,7 +195,7 @@ TEST_FUNCTION(owned_array) {
   }
 }
 
-TEST_FUNCTION(freelist_block_allocator) {
+TEST_FUNCTION(Util, freelist_block_allocator) {
 
   {
     FreelistBlockAllocator<int> alloc = {};
@@ -300,4 +300,80 @@ TEST_FUNCTION(freelist_block_allocator) {
 
     TEST_EQ(6, counter);
   }
+}
+    for (usize i = 58; i < 134; ++i) {
+      TEST_EQ(false, arr.test(i));
+    }
+  }
+
+  TEST_EQ(false, arr.test_all());
+  arr.clear();
+  TEST_EQ(static_cast<usize>(0), arr.highest_set);
+
+  for (usize i = 0; i < 134; ++i) {
+    TEST_EQ(false, arr.test(i));
+  }
+}
+
+TEST_FUNCTION(BIT_ARRAY, intersects) {
+
+  BitArray arr = BitArray(134);
+  TEST_EQ(static_cast<usize>(134), arr.length);
+  TEST_EQ(static_cast<usize>(0), arr.highest_set);
+
+  arr.set(57);
+  TEST_EQ(true, arr.test(57));
+  TEST_EQ(static_cast<usize>(57), arr.highest_set);
+
+  {
+    for (usize i = 0; i < 57; ++i) {
+      TEST_EQ(false, arr.test(i));
+    }
+
+    for (usize i = 58; i < 134; ++i) {
+      TEST_EQ(false, arr.test(i));
+    }
+  }
+
+  BitArray arr2 = BitArray(134);
+  TEST_EQ(static_cast<usize>(134), arr2.length);
+  TEST_EQ(static_cast<usize>(0), arr2.highest_set);
+
+  arr2.set(12);
+
+  TEST_EQ(true, arr2.test(12));
+  TEST_EQ(static_cast<usize>(12), arr2.highest_set);
+
+  {
+    for (usize i = 0; i < 12; ++i) {
+      TEST_EQ(false, arr2.test(i));
+    }
+
+    for (usize i = 13; i < 134; ++i) {
+      TEST_EQ(false, arr2.test(i));
+    }
+  }
+
+  TEST_EQ(false, arr2.intersects(arr));
+
+  arr2.set(57);
+  TEST_EQ(true, arr2.test(12));
+  TEST_EQ(true, arr2.test(57));
+  TEST_EQ(static_cast<usize>(57), arr2.highest_set);
+
+  {
+    for (usize i = 0; i < 12; ++i) {
+      TEST_EQ(false, arr.test(i));
+    }
+
+    for (usize i = 13; i < 57; ++i) {
+      TEST_EQ(false, arr.test(i));
+    }
+
+    for (usize i = 58; i < 134; ++i) {
+      TEST_EQ(false, arr.test(i));
+    }
+  }
+
+  TEST_EQ(true, arr2.intersects(arr));
 }

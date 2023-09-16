@@ -1,7 +1,7 @@
 #include "tests.h"
 #include "files.h"
 
-TEST_FUNCTION(FILES_normalise_paths) {
+TEST_FUNCTION(Files, normalise_paths) {
 
   {
     constexpr char ARR[] = ".\\hello\\thing2";

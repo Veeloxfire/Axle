@@ -1,7 +1,7 @@
 #include "tests.h"
 #include "utility.h"
 
-TEST_FUNCTION(CEIL_TO_N) {
+TEST_FUNCTION(Math, CEIL_TO_N) {
   TEST_EQ(1234, ceil_to_n(1233, 1234));
   TEST_EQ(1234, ceil_to_n(1234, 1234));
   TEST_EQ(2468, ceil_to_n(1235, 1234));
@@ -20,7 +20,7 @@ TEST_FUNCTION(CEIL_TO_N) {
   TEST_EQ(16, ceil_to_8(9));
 }
 
-TEST_FUNCTION(bit_fills) {
+TEST_FUNCTION(Math, bit_fills) {
   TEST_EQ(static_cast<u64>(0), bit_fill_lower<u64>(0));
   TEST_EQ(static_cast<u64>(1), bit_fill_lower<u64>(1));
   TEST_EQ(static_cast<u64>(0x7fffffffffffffff), bit_fill_lower<u64>(63));
@@ -40,7 +40,7 @@ TEST_FUNCTION(bit_fills) {
   TEST_EQ(static_cast<u8>(0b1111'1111), bit_fill_upper<u8>(8));
 }
 
-TEST_FUNCTION(pows_and_logs) {
+TEST_FUNCTION(Math, pows_and_logs) {
   TEST_EQ(0llu, log_2(1llu));
 
   for (u64 i = 1; i < 63; ++i) {
@@ -97,7 +97,7 @@ TEST_FUNCTION(pows_and_logs) {
   TEST_EQ(16llu * 16llu * 16llu * 16llu, pow_16(4));
 }
 
-TEST_FUNCTION(absolute) {
+TEST_FUNCTION(Math, absolutes) {
   TEST_EQ(static_cast<u8>(23), absolute(static_cast<i8>(-23)));
   TEST_EQ(static_cast<u16>(23), absolute(static_cast<i16>(-23)));
   TEST_EQ(static_cast<u32>(23), absolute(static_cast<i32>(-23)));
@@ -124,7 +124,7 @@ TEST_FUNCTION(absolute) {
   TEST_EQ(static_cast<u64>(max_i64 + 1), absolute(static_cast<i64>(INT64_MIN)));
 }
 
-TEST_FUNCTION(gcd) {
+TEST_FUNCTION(Math, gcd) {
   TEST_EQ(3ull, greatest_common_divisor(12, 9));
   TEST_EQ(1ull, greatest_common_divisor(42341, 9823));
   TEST_EQ(564ull, greatest_common_divisor(6768, 80652));
