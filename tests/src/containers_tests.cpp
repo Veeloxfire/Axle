@@ -301,6 +301,75 @@ TEST_FUNCTION(Util, freelist_block_allocator) {
     TEST_EQ(6, counter);
   }
 }
+
+TEST_FUNCTION(BIT_ARRAY, insert) {
+
+
+  BitArray arr = BitArray(3);
+
+  TEST_EQ(static_cast<usize>(3), arr.length);
+  TEST_EQ(static_cast<usize>(0), arr.highest_set);
+
+  arr.set(1);
+  {
+    TEST_EQ(static_cast<usize>(3), arr.length);
+    TEST_EQ(static_cast<usize>(1), arr.highest_set);
+    TEST_EQ(true, arr.test(1));
+
+    TEST_EQ(false, arr.test(0));
+    TEST_EQ(false, arr.test(2));
+    TEST_EQ(false, arr.test_all());
+  }
+
+  arr.set(2);
+  {
+    TEST_EQ(static_cast<usize>(3), arr.length);
+    TEST_EQ(static_cast<usize>(2), arr.highest_set);
+    TEST_EQ(true, arr.test(1));
+    TEST_EQ(true, arr.test(2));
+
+    TEST_EQ(false, arr.test(0));
+    TEST_EQ(false, arr.test_all());
+  }
+
+  arr.set(0);
+  {
+    TEST_EQ(static_cast<usize>(3), arr.length);
+    TEST_EQ(static_cast<usize>(2), arr.highest_set);
+
+    TEST_EQ(true, arr.test(0));
+    TEST_EQ(true, arr.test(1));
+    TEST_EQ(true, arr.test(2));
+
+    TEST_EQ(true, arr.test_all());
+  }
+
+  arr.clear();
+  {
+    TEST_EQ(static_cast<usize>(3), arr.length);
+    TEST_EQ(static_cast<usize>(0), arr.highest_set);
+
+    TEST_EQ(false, arr.test(0));
+    TEST_EQ(false, arr.test(1));
+    TEST_EQ(false, arr.test(2));
+  }
+}
+
+TEST_FUNCTION(BIT_ARRAY, big_insert) {
+
+  BitArray arr = BitArray(134);
+  TEST_EQ(static_cast<usize>(134), arr.length);
+  TEST_EQ(static_cast<usize>(0), arr.highest_set);
+
+  arr.set(57);
+  TEST_EQ(true, arr.test(57));
+  TEST_EQ(static_cast<usize>(57), arr.highest_set);
+
+  {
+    for (usize i = 0; i < 57; ++i) {
+      TEST_EQ(false, arr.test(i));
+    }
+
     for (usize i = 58; i < 134; ++i) {
       TEST_EQ(false, arr.test(i));
     }
