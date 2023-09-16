@@ -306,7 +306,7 @@ Structures::~Structures() {
         case STRUCTURE_TYPE::LAMBDA:
           lambda_structures.free((const SignatureStructure*)s);
           break;
-        default: INVALID_CODE_PATH_ABORT("All structures should be covered");
+        default: INVALID_CODE_PATH("All structures should be covered");
       }
     }
   }

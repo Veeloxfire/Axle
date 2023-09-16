@@ -8,6 +8,11 @@ void throw_testing_assertion(const char* message) {
   }
 }
 
+void abort_assertion(const char* message) {
+  IO::err_print(message);
+  abort();
+}
+
 void load_to_bytes(Array<uint8_t>& bytes,
                    const size_t offset,
                    const uint8_t* in_bytes,
