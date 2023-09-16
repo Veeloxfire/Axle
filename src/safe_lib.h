@@ -17,6 +17,7 @@
 #define JOIN(a, b) JOI2(a, b)
 
 void throw_testing_assertion(const char* message);
+void abort_assertion(const char* message);
 
 #ifdef ASSERT_EXCEPTIONS
 #define ASSERT(expr) do { if(!(expr))\
@@ -27,8 +28,7 @@ throw_testing_assertion("Assertion failed in at line " STR_REPLACE(__LINE__) ", 
 #define ASSERT(expr) assert(expr)
 
 #ifdef NDEBUG
-#define INVALID_CODE_PATH(reason) IO::err_print("Invalid Code path \"" reason "\"");\
-abort()
+#define INVALID_CODE_PATH(reason) abort_assertion("Invalid Code path \"" reason "\"")
 #else
 #define INVALID_CODE_PATH(reason) assert(((reason), false));
 #endif
