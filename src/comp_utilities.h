@@ -166,6 +166,47 @@ namespace IR {
   };
 
   inline constexpr GlobalLabel NULL_GLOBAL_LABEL = {};
+
+  struct ValueRequirements {
+#define FLAGS_DECL(num) (1 << num)
+    constexpr static u8 Address = FLAGS_DECL(0);
+#undef FLAGS_DECL
+
+    constexpr ValueRequirements() = default;
+    constexpr ValueRequirements(u8 f) : flags(f) {}
+
+    u8 flags = 0;
+
+    constexpr bool has_address() const { return (flags & Address) == Address; }
+    constexpr void add_address() { flags |= Address; }
+    constexpr void clear() { flags = 0; }
+
+    constexpr ValueRequirements& operator|=(const ValueRequirements& vr) {
+      flags |= vr.flags;
+      return *this;
+    }
+  };
+
+  static constexpr ValueRequirements operator|(ValueRequirements left, ValueRequirements right) {
+    return left.flags | right.flags;
+  }
+
+  static constexpr ValueRequirements operator|(u8 left, ValueRequirements right) {
+    return left | right.flags;
+  }
+
+  static constexpr ValueRequirements operator|(ValueRequirements left, u8 right) {
+    return left.flags | right;
+  }
+
+  static constexpr ValueRequirements operator&(ValueRequirements left, ValueRequirements right) {
+    return left.flags | right.flags;
+  }
+
+  static constexpr ValueRequirements operator~(ValueRequirements prim) {
+    return ~prim.flags;
+  }
+
 }
 
 enum struct System : u8 {

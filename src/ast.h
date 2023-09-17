@@ -112,9 +112,11 @@ constexpr bool valid_type_node(AST_TYPE t) {
 #endif
 
 struct AST {
-  META_FLAGS meta_flags = 0;
-
   AST_TYPE ast_type;
+
+  META_FLAGS meta_flags = 0;
+  IR::ValueRequirements val_requirements = {};
+
   Type node_type = {};
   Span node_span = {};
 };

@@ -74,7 +74,7 @@ RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
 //}
 
 VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
-  ASSERT(builder->control_blocks.size == 0);
+  ASSERT(builder->control_blocks.size > 0);
 
   u32 size_needed = 0;
   OwnedArr variables = new_arr<VM::Value>(builder->variables.size);

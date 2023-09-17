@@ -3667,11 +3667,18 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
   // Select the internal registers from the graph
 
-  if (comp_thread->print_options.register_select) {
-    IO_Single::lock();
-  }
-
   {
+    if (comp_thread->print_options.register_select) {
+      IO_Single::lock();
+    }
+
+    DEFER(&) {
+      //Always needs to be done
+      if (comp_thread->print_options.register_select) {
+        IO_Single::unlock();
+      }
+    };
+
     const LifetimeEdge* edge_i = edges.begin();
     const LifetimeEdge* edge_end = edges.end();
 
@@ -3681,7 +3688,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
       u32 used_regs = 0;
 
-      ASSERT(edge_i == edge_end || edge_i->a == i);
+      ASSERT(edge_i == edge_end || edge_i->a >= i);
 
       while (edge_i < edge_end && edge_i->a == i) {
         u32 b = edge_i->b;
@@ -3739,11 +3746,6 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
       v.reg = reg_id;
     }
   }
-
-  if (comp_thread->print_options.register_select) {
-    IO_Single::unlock();
-  }
-
 
   //Save which registers intersect with the external values
   //TODO: pack these tighter, instead of interleaving all of them
@@ -4320,7 +4322,7 @@ VariableMappings resolve_variables(const VariableResolver& resolver) {
     const LifetimeEdge* edge_i = edges.begin();
     const LifetimeEdge* edge_end = edges.end();
 
-    for (u32 i = 0; i < version_intersects.size; ++i) {
+    for (u32 i = 0; i < variable_mappings.size; ++i) {
       auto& v = variable_mappings.data[i];
 
       u32 used_regs = v.reg_bitmask;

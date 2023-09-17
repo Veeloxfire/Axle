@@ -10,41 +10,6 @@ namespace IR {
 
   void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, EvalPromise* eval);
 
-  struct ValueRequirements {
-#define FLAGS_DECL(num) (1 << num)
-    constexpr static u8 Address = FLAGS_DECL(0);
-#undef FLAGS_DECL
-
-    constexpr ValueRequirements() = default;
-    constexpr ValueRequirements(u8 f) : flags(f) {}
-
-    u8 flags = 0;
-
-    constexpr bool has_address() const { return (flags & Address) == Address; }
-    constexpr void add_address() { flags |= Address; }
-    constexpr void clear() { flags = 0; }
-  };
-
-  static constexpr ValueRequirements operator|(ValueRequirements left, ValueRequirements right) {
-    return left.flags | right.flags;
-  }
-
-  static constexpr ValueRequirements operator|(u8 left, ValueRequirements right) {
-    return left | right.flags;
-  }
-
-  static constexpr ValueRequirements operator|(ValueRequirements left, u8 right) {
-    return left.flags | right;
-  }
-
-  static constexpr ValueRequirements operator&(ValueRequirements left, ValueRequirements right) {
-    return left.flags | right.flags;
-  }
-
-  static constexpr ValueRequirements operator~(ValueRequirements prim) {
-    return ~prim.flags;
-  }
-
   struct SSATemp {
     ValueRequirements requirements;
     Type type = {};
@@ -178,8 +143,8 @@ namespace IR {
     
     Array<ControlBlock> control_blocks = {};
 
-    u32 new_variable(const Type& t);
-    ValueIndex new_temporary(const Type& t);
+    u32 new_variable(const Type& t, ValueRequirements requirements);
+    ValueIndex new_temporary(const Type& t, ValueRequirements requirements);
 
     u32 new_global_reference(const IR::GlobalReference& ref);
 
@@ -519,6 +484,7 @@ namespace Eval {
     inline Array<u8>& current_bytecode() const { return ir->current_bytecode(); }
   };
 
+  void end_builder(IrBuilder* builder);
 
   enum struct MergeRules {
     New, UseFirst,

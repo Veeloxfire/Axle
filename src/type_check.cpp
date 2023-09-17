@@ -8,6 +8,23 @@ struct Typer;
 struct TypeCheckNode;
 struct CheckResult;
 
+constexpr void pass_flags_up(AST_LOCAL low, AST_LOCAL high) {
+  constexpr META_FLAGS pass_flags = 0
+    | META_FLAG::CALL_LEAF;
+
+  high->meta_flags |= low->meta_flags & pass_flags;
+  high->val_requirements |= low->val_requirements;
+}
+
+constexpr void pass_flags_down(AST_LOCAL low, AST_LOCAL high) {
+  balance_flags(&low->meta_flags, &high->meta_flags);
+
+  constexpr META_FLAGS pass_flags = 0
+    | META_FLAG::MAKES_CALL;
+
+  low->meta_flags |= high->meta_flags & pass_flags;
+}
+
 static CheckResult empty_stage(CompilerGlobals*, CompilerThread*, Typer*, const TypeCheckNode*);
 
 using TypeCheckStageFn = decltype(&empty_stage);
@@ -39,7 +56,6 @@ struct Typer {
   void push_node_eval(AST_LOCAL loc, Type infer);
 };
 
-
 static constexpr CheckResult next_stage(TypeCheckStageFn stage) {
   return {
     false, stage,
@@ -51,7 +67,6 @@ constexpr static CheckResult FINISHED = { true, nullptr };
 static CheckResult empty_stage(CompilerGlobals*, CompilerThread*, Typer*, const TypeCheckNode*) { return FINISHED; }
 
 constexpr static CheckResult WAIT_FOR_CHILDREN = { false, empty_stage };
-
 
 //Gets the underlying type of a type-node e.g. if its an array type node it gets the cached array type
 //Errors if it was not a type
@@ -123,8 +138,8 @@ TC_STAGE(ARRAY_TYPE, 2) {
   ASSERT(at->base->node_type.is_valid());
   ASSERT(at->expr->node_type.is_valid());
 
-  pass_meta_flags_down(&at->meta_flags, &at->base->meta_flags);
-  pass_meta_flags_down(&at->meta_flags, &at->expr->meta_flags);
+  pass_flags_up(at, at->base);
+  pass_flags_up(at, at->expr);
 
   Type base_type = get_type_value(comp_thread, at->base);
   if (comp_thread->is_panic()) {
@@ -165,10 +180,10 @@ TC_STAGE(ARRAY_TYPE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);
 
-  pass_meta_flags_up(&at->meta_flags, &at->base->meta_flags);
+  pass_flags_up(at, at->base);
   typer->push_node(at->base, comp_thread->builtin_types->t_type);
 
-  pass_meta_flags_up(&at->meta_flags, &at->expr->meta_flags);
+  pass_flags_up(at, at->expr);
   typer->push_node_eval(at->expr, comp_thread->builtin_types->t_u64);
 
   return next_stage(ARRAY_TYPE_stage_2);
@@ -183,7 +198,7 @@ TC_STAGE(PTR_TYPE, 2) {
     return FINISHED;
   }
 
-  pass_meta_flags_down(&ptr->meta_flags, &ptr->base->meta_flags);
+  pass_flags_down(ptr, ptr->base);
 
   const Structure* s;
   {
@@ -205,7 +220,7 @@ TC_STAGE(PTR_TYPE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTPtrType, ptr);
 
-  pass_meta_flags_up(&ptr->meta_flags, &ptr->base->meta_flags);
+  pass_flags_up(ptr, ptr->base);
   typer->push_node(ptr->base, comp_thread->builtin_types->t_type);
 
   return next_stage(PTR_TYPE_stage_2);
@@ -223,7 +238,7 @@ TC_STAGE(LAMBDA_TYPE, 2) {
     }
 
     args.insert(i_type);
-    pass_meta_flags_down(&lt->meta_flags, &i->meta_flags);
+    pass_flags_down(lt, i);
   }
 
   Type ret = get_type_value(comp_thread, lt->ret);
@@ -231,7 +246,7 @@ TC_STAGE(LAMBDA_TYPE, 2) {
     return FINISHED;
   }
 
-  pass_meta_flags_down(&lt->meta_flags, &lt->ret->meta_flags);
+  pass_flags_down(lt, lt->ret);
 
   const SignatureStructure* s;
   {
@@ -255,11 +270,11 @@ TC_STAGE(LAMBDA_TYPE, 1) {
   EXPAND_THIS(ASTLambdaType, lt);
 
   FOR_AST(lt->args, ty) {
-    pass_meta_flags_up(&lt->meta_flags, &ty->meta_flags);
+    pass_flags_up(lt, ty);
     typer->push_node(ty, comp_thread->builtin_types->t_type);
   }
 
-  pass_meta_flags_up(&lt->meta_flags, &lt->ret->meta_flags);
+  pass_flags_up(lt, lt->ret);
   typer->push_node(lt->ret, comp_thread->builtin_types->t_type);
 
   return next_stage(LAMBDA_TYPE_stage_2);
@@ -277,7 +292,7 @@ TC_STAGE(TUPLE_TYPE, 2) {
     }
 
     args.insert(i_type);
-    pass_meta_flags_down(&tt->meta_flags, &i->meta_flags);
+    pass_flags_down(tt, i);
   }
 
   const Structure* s;
@@ -301,7 +316,7 @@ TC_STAGE(TUPLE_TYPE, 1) {
   EXPAND_THIS(ASTTupleType, tt);
 
   FOR_AST(tt->types, ty) {
-    pass_meta_flags_up(&tt->meta_flags, &ty->meta_flags);
+    pass_flags_up(tt, ty);
     typer->push_node(ty, comp_thread->builtin_types->t_type);
   }
 
@@ -410,7 +425,7 @@ TC_STAGE(MEMBER_ACCESS, 2) {
 
   AST_LOCAL base = member->expr;
   ASSERT(base->node_type.is_valid());
-  pass_meta_flags_down(&member->meta_flags, &base->meta_flags);
+  pass_flags_down(member, base);
 
   STRUCTURE_TYPE struct_type = base->node_type.struct_type();
 
@@ -486,7 +501,7 @@ TC_STAGE(MEMBER_ACCESS, 1) {
   EXPAND_THIS(ASTMemberAccessExpr, member);
   AST_LOCAL base = member->expr;
 
-  pass_meta_flags_up(&member->meta_flags, &base->meta_flags);
+  pass_flags_up(member, base);
   typer->push_node(base, {});
 
   return next_stage(MEMBER_ACCESS_stage_2);
@@ -499,8 +514,8 @@ TC_STAGE(INDEX_EXPR, 2) {
   AST_LOCAL base = index_expr->expr;
   AST_LOCAL index = index_expr->index;
 
-  pass_meta_flags_down(&index_expr->meta_flags, &base->meta_flags);
-  pass_meta_flags_down(&index_expr->meta_flags, &index->meta_flags);
+  pass_flags_down(index_expr, base);
+  pass_flags_down(index_expr, index);
 
   if (!TYPE_TESTS::can_index(base->node_type)) {
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
@@ -523,10 +538,10 @@ TC_STAGE(INDEX_EXPR, 1) {
   AST_LOCAL base = index_expr->expr;
   AST_LOCAL index = index_expr->index;
 
-  pass_meta_flags_up(&index_expr->meta_flags, &base->meta_flags);
+  pass_flags_up(index_expr, base);
   typer->push_node(base, {});
 
-  pass_meta_flags_up(&index_expr->meta_flags, &index->meta_flags);
+  pass_flags_up(index_expr, index);
   typer->push_node(index, comp_thread->builtin_types->t_u64);
 
   return next_stage(INDEX_EXPR_stage_2);
@@ -537,7 +552,7 @@ TC_STAGE(TUPLE_LIT, known_type) {
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   FOR_AST(tup->elements, it) {
-    pass_meta_flags_down(&tup->meta_flags, &it->meta_flags);
+    pass_flags_down(tup, it);
   }
   return FINISHED;
 }
@@ -548,7 +563,7 @@ TC_STAGE(TUPLE_LIT, new_type) {
   Array<Type> element_types = {};
 
   FOR_AST(tup->elements, it) {
-    pass_meta_flags_down(&tup->meta_flags, &it->meta_flags);
+    pass_flags_down(tup, it);
     element_types.insert(it->node_type);
   }
 
@@ -661,7 +676,7 @@ TC_STAGE(TUPLE_LIT, 2) {
   }
   else {
     FOR_AST(tup->elements, it) {
-      pass_meta_flags_up(&tup->meta_flags, &it->meta_flags);
+      pass_flags_up(tup, it);
       typer->push_node(it, {});
     }
 
@@ -697,12 +712,12 @@ TC_STAGE(ARRAY_EXPR, infer_2) {
   const Type base = first->node_type;
   ASSERT(base.is_valid());
 
-  pass_meta_flags_down(&arr_expr->meta_flags, &first->meta_flags);
+  pass_flags_down(arr_expr, first);
 
   for (; l; l = l->next) {
     AST_LOCAL it = l->curr;
 
-    pass_meta_flags_down(&arr_expr->meta_flags, &it->meta_flags);
+    pass_flags_down(arr_expr, it);
   }
 
   const Structure* arr_s;
@@ -737,7 +752,7 @@ TC_STAGE(ARRAY_EXPR, infer_1) {
   for (; l; l = l->next) {
     AST_LOCAL it = l->curr;
 
-    pass_meta_flags_up(&arr_expr->meta_flags, &it->meta_flags);
+    pass_flags_up(arr_expr, it);
     typer->push_node(it, base);
   }
 
@@ -754,7 +769,7 @@ TC_STAGE(ARRAY_EXPR, known) {
   ASSERT(this_infer->infer.is_valid());
 
   FOR_AST(arr_expr->elements, it) {
-    pass_meta_flags_down(&arr_expr->meta_flags, &it->meta_flags);
+    pass_flags_down(arr_expr, it);
   }
 
   arr_expr->node_type = this_infer->infer;
@@ -787,7 +802,7 @@ TC_STAGE(ARRAY_EXPR, 1) {
     Type base = as->base;
 
     FOR_AST(arr_expr->elements, it) {
-      pass_meta_flags_up(&arr_expr->meta_flags, &it->meta_flags);
+      pass_flags_up(arr_expr, it);
       typer->push_node(it, base);
     }
 
@@ -805,7 +820,7 @@ TC_STAGE(ARRAY_EXPR, 1) {
     if (l) {
       AST_LOCAL base_test = l->curr;
 
-      pass_meta_flags_up(&arr_expr->meta_flags, &base_test->meta_flags);
+      pass_flags_up(arr_expr, base_test);
       typer->push_node(base_test, {});
 
       return next_stage(ARRAY_EXPR_stage_infer_1);
@@ -999,14 +1014,16 @@ TC_STAGE(IDENTIFIER_EXPR, 1) {
     ASSERT(local != nullptr);
     ASSERT(local->decl.type.is_valid());
 
+    local->requirements |= ident->val_requirements;
+
     ident->node_type = local->decl.type;
-    pass_meta_flags_down(&ident->meta_flags, &local->decl.meta_flags);
+    ident->meta_flags = local->decl.meta_flags;
   }
   else if (ident->id_type == ASTIdentifier::GLOBAL) {
     Global* glob = ident->global;
 
     ident->node_type = glob->decl.type;
-    pass_meta_flags_down(&ident->meta_flags, &glob->decl.meta_flags);
+    ident->meta_flags |= glob->decl.meta_flags;
   }
   else {
     comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, ident->node_span,
@@ -1022,7 +1039,7 @@ TC_STAGE(CAST, 3) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
-  pass_meta_flags_down(&cast->meta_flags, &expr->meta_flags);
+  pass_flags_down(cast, expr);
 
   const Type cast_to = get_type_value(comp_thread, cast->type);
   if (comp_thread->is_panic()) {
@@ -1154,7 +1171,7 @@ TC_STAGE(CAST, 2) {
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
 
-  pass_meta_flags_up(&cast->meta_flags, &expr->meta_flags);
+  pass_flags_up(cast, expr);
   typer->push_node(expr, {});
 
   return next_stage(CAST_stage_3);
@@ -1177,7 +1194,7 @@ TC_STAGE(UNARY_OPERATOR, neg_2) {
 
   AST_LOCAL prim = expr->expr;
 
-  pass_meta_flags_down(&expr->meta_flags, &prim->meta_flags);
+  pass_flags_down(expr, prim);
   Type ty = prim->node_type;
 
   if (ty.struct_type() != STRUCTURE_TYPE::INTEGER) {
@@ -1208,7 +1225,7 @@ TC_STAGE(UNARY_OPERATOR, addr_2) {
 
   AST_LOCAL prim = expr->expr;
 
-  pass_meta_flags_down(&expr->meta_flags, &prim->meta_flags);
+  pass_flags_down(expr, prim);
 
   const Structure* ptr;
   {
@@ -1234,7 +1251,7 @@ TC_STAGE(UNARY_OPERATOR, deref_2) {
   ASSERT(expr->op == UNARY_OPERATOR::DEREF);
 
   AST_LOCAL prim = expr->expr;
-  pass_meta_flags_down(&expr->meta_flags, &prim->meta_flags);
+  pass_flags_down(expr, prim);
 
   if (prim->node_type.struct_type() == STRUCTURE_TYPE::POINTER) {
     const auto* ptr = prim->node_type.unchecked_base<PointerStructure>();
@@ -1264,7 +1281,7 @@ TC_STAGE(UNARY_OPERATOR, 1) {
 
   switch (expr->op) {
     case UNARY_OPERATOR::NEG: {
-        pass_meta_flags_up(&expr->meta_flags, &prim->meta_flags);
+        pass_flags_up(expr, prim);
 
         if (infer_type.is_valid()) {
           if (infer_type.struct_type() == STRUCTURE_TYPE::INTEGER) {
@@ -1287,14 +1304,17 @@ TC_STAGE(UNARY_OPERATOR, 1) {
         }
       }
     case UNARY_OPERATOR::ADDRESS: {
+        expr->val_requirements.add_address();
+        pass_flags_up(expr, prim);
+
         //TODO: can we infer anything here??
-        pass_meta_flags_up(&expr->meta_flags, &prim->meta_flags);
         typer->push_node(prim, {});
         return next_stage(UNARY_OPERATOR_stage_addr_2);
       }
     case UNARY_OPERATOR::DEREF: {
+        pass_flags_up(expr, prim);
+
         //TODO: can we infer anything here
-        pass_meta_flags_up(&expr->meta_flags, &prim->meta_flags);
         typer->push_node(prim, {});
 
         return next_stage(UNARY_OPERATOR_stage_deref_2);
@@ -1908,8 +1928,8 @@ TC_STAGE(BINARY_OPERATOR, 2) {
   AST_LOCAL left = bin_op->left;
   AST_LOCAL right = bin_op->right;;
 
-  pass_meta_flags_down(&bin_op->meta_flags, &left->meta_flags);
-  pass_meta_flags_down(&bin_op->meta_flags, &right->meta_flags);
+  pass_flags_down(bin_op, left);
+  pass_flags_down(bin_op, right);
 
   //TODO: constant folding
   //TODO: inference
@@ -1925,10 +1945,10 @@ TC_STAGE(BINARY_OPERATOR, 1) {
 
   //TODO: Can we do type inference?
 
-  pass_meta_flags_up(&bin_op->meta_flags, &left->meta_flags);
+  pass_flags_up(bin_op, left);
   typer->push_node(left, {});
 
-  pass_meta_flags_up(&bin_op->meta_flags, &right->meta_flags);
+  pass_flags_up(bin_op, right);
   typer->push_node(right, {});
 
   return next_stage(BINARY_OPERATOR_stage_2);
@@ -1975,7 +1995,7 @@ TC_STAGE(IMPORT, 1) {
   EXPAND_THIS(ASTImport, imp);
   AST_LOCAL expr = imp->expr_location;
 
-  pass_meta_flags_up(&imp->meta_flags, &expr->meta_flags);
+  pass_flags_up(imp, expr);
   typer->push_node(expr, {});
 
   return next_stage(IMPORT_stage_2);
@@ -2045,7 +2065,7 @@ TC_STAGE(FUNCTION_CALL, 3) {
   call->sig = func_type.unchecked_base<SignatureStructure>();
 
   FOR_AST(call->arguments, it) {
-    pass_meta_flags_down(&call->meta_flags, &it->meta_flags);
+    pass_flags_down(call, it);
   }
 
   check_call_arguments(comp, comp_thread, typer, call);
@@ -2091,7 +2111,7 @@ TC_STAGE(FUNCTION_CALL, 2) {
   }
 
   FOR_AST(call->arguments, it) {
-    pass_meta_flags_up(&call->meta_flags, &it->meta_flags);
+    pass_flags_up(call, it);
     it->meta_flags |= META_FLAG::CALL_LEAF;
 
     //TODO: try to infer arguments

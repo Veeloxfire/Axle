@@ -16,7 +16,7 @@ static Eval::RuntimeValue bin_op_impl(Eval::IrBuilder* const builder ,
   IR::V_ARG right = Eval::load_v_arg(builder, right_in);
 
   IR::Builder* ir = builder->ir;
-  IR::ValueIndex to = ir->new_temporary(dest_type);
+  IR::ValueIndex to = ir->new_temporary(dest_type, {});
 
   BIN_OP_TYPE bin_op = {};
   bin_op.to = IR::v_arg(to, 0, dest_type);
@@ -44,7 +44,7 @@ static Eval::RuntimeValue un_op_impl(CompilerGlobals* comp,
   IR::V_ARG from = Eval::load_v_arg(builder, from_in);
 
   IR::Builder* ir = builder->ir;
-  IR::ValueIndex to = ir->new_temporary(dest_type);
+  IR::ValueIndex to = ir->new_temporary(dest_type, {});
 
   UN_OP_TYPE un_op = {};
   un_op.to = IR::v_arg(to, 0, dest_type);

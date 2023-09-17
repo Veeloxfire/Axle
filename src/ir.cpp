@@ -2,7 +2,7 @@
 #include "compiler.h"
 
 namespace IR {
-  IR::ValueIndex Builder::new_temporary(const Type& t) {
+  IR::ValueIndex Builder::new_temporary(const Type& t, ValueRequirements requirements) {
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -10,15 +10,17 @@ namespace IR {
     cb->temporaries.insert_uninit(1);
     SSATemp* temp = cb->temporaries.back();
     temp->type = t;
+    temp->requirements = requirements;
     
     return { static_cast<u32>(i) };
   }
 
-  u32 Builder::new_variable(const Type& t) {
+  u32 Builder::new_variable(const Type& t, ValueRequirements requirements) {
     usize i = variables.size;
     variables.insert_uninit(1);
     IR::SSAVar* var = variables.back();
     var->type = t;
+    var->requirements = requirements;
     var->origin = current_block;
     var->versions = 0;
 
@@ -518,6 +520,17 @@ Eval::RuntimeValue Eval::as_constant(const u8* constant, const Type& type) {
   return r;
 }
 
+void Eval::end_builder(Eval::IrBuilder* builder) {
+  IR::Builder* ir = builder->ir;
+  
+  if (ir->current_block != IR::NULL_LOCAL_LABEL) {
+    ASSERT(builder->parent != IR::NULL_LOCAL_LABEL);
+    ir->set_current_cf(IR::CFEnd{
+      builder->parent,
+    });
+  }
+}
+
 void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const Eval::RuntimeValue& from) {
   ASSERT(to.rvt != RVT::Constant);
 
@@ -594,7 +607,7 @@ void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const 
 
 Eval::RuntimeValue Eval::IrBuilder::new_variable(u32 id) {
   ASSERT(id < ir->variables.size);
-  const Type& t = ir->variables.data[id].type;
+  const IR::SSAVar& sv = ir->variables.data[id];
 
 #ifndef NDEBUG
   FOR_MUT(variables_state, it) {
@@ -607,7 +620,7 @@ Eval::RuntimeValue Eval::IrBuilder::new_variable(u32 id) {
 
   ir->variables.data[id].versions += 1;//There is 1 vesion
 
-  IR::ValueIndex v = ir->new_temporary(t);
+  IR::ValueIndex v = ir->new_temporary(sv.type, sv.requirements);
 
   Eval::VariableState var = {};
   var.id = id;
@@ -618,26 +631,33 @@ Eval::RuntimeValue Eval::IrBuilder::new_variable(u32 id) {
 
   variables_state.insert(var);
 
-  return Eval::as_direct(v, t);
+  return Eval::as_direct(v, sv.type);
 }
 
 Eval::RuntimeValue Eval::IrBuilder::import_variable(u32 id) {
   ASSERT(id < ir->variables.size);
-  const Type& t = ir->variables.data[id].type;
+  const IR::SSAVar& sv = ir->variables.data[id];
   
   FOR_MUT(variables_state, it) {
     if (it->id == id) {
 
       if (it->imported) {
         ASSERT(it->current_temp.index < ir->current_control_block()->temporaries.size);
-        return Eval::as_direct(it->current_temp, t);
+        return Eval::as_direct(it->current_temp, sv.type);
       }
 
-      IR::ValueIndex v = ir->new_temporary(t);
+      IR::ValueIndex v = ir->new_temporary(sv.type, sv.requirements);
       it->imported = true;
       it->current_temp = v;
 
-      return Eval::as_direct(v, t);
+      auto imp = IR::BlockImport{
+         it->id,
+         it->version,
+         v
+      };
+      ir->current_control_block()->imports.insert(std::move(imp));
+
+      return Eval::as_direct(v, sv.type);
       
     }
   }
@@ -677,7 +697,7 @@ void Eval::IrBuilder::export_variables() {
     auto& var = variables_state.data[i];
     if (var.modified) {
       auto e = IR::BlockExport{
-        (u32)i,
+        var.id,
         var.version,
         var.current_temp,
       };
@@ -747,7 +767,7 @@ IR::V_ARG Eval::load_v_arg(Eval::IrBuilder* builder, const Eval::RuntimeValue& r
   switch (rv.rvt) {
     case RVT::Constant: {
         auto* ir = builder->ir;
-        IR::ValueIndex v = ir->new_temporary(rv.type);
+        IR::ValueIndex v = ir->new_temporary(rv.type, {});
 
         IR::Types::Set set = {};
         set.to = IR::v_arg(v, 0, rv.type);
@@ -763,7 +783,7 @@ IR::V_ARG Eval::load_v_arg(Eval::IrBuilder* builder, const Eval::RuntimeValue& r
       }
     case RVT::Indirect: {
         auto* ir = builder->ir;
-        IR::ValueIndex v = ir->new_temporary(rv.type);
+        IR::ValueIndex v = ir->new_temporary(rv.type, {});
 
         IR::Types::CopyLoad cpy = {};
         cpy.to = IR::v_arg(v, 0, rv.type);
@@ -795,10 +815,10 @@ Eval::RuntimeValue Eval::addrof(Eval::IrBuilder* const builder, const Eval::Runt
         {
           const auto* cb = ir->current_control_block();
           ASSERT(cb->temporaries.size > val.value.index.index);
-          cb->temporaries.data[val.value.index.index].requirements.add_address();
+          ASSERT(cb->temporaries.data[val.value.index.index].requirements.has_address());
         }
 
-        IR::ValueIndex v = ir->new_temporary(ptr_type);
+        IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         IR::Types::AddrOf addr = {};
         addr.from = IR::v_arg(val.value.index, val.value.offset, val.type);
@@ -843,10 +863,10 @@ Eval::RuntimeValue Eval::arr_to_ptr(Eval::IrBuilder* const builder,
         {
           const auto* cb = ir->current_control_block();
           ASSERT(cb->temporaries.size > val.value.index.index);
-          cb->temporaries.data[val.value.index.index].requirements.add_address();
+          ASSERT(cb->temporaries.data[val.value.index.index].requirements.has_address());
         }
 
-        IR::ValueIndex v = ir->new_temporary(ptr_type);
+        IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         IR::Types::AddrOf addr = {};
         addr.from = IR::v_arg(val.value.index, val.value.offset, val.type);
@@ -903,7 +923,7 @@ Eval::RuntimeValue Eval::deref(Eval::IrBuilder* const builder,
 
         auto* ir = builder->ir;
 
-        IR::ValueIndex v = ir->new_temporary(ptr_type);
+        IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         IR::Types::AddrOfLoad addr = {};
         addr.from = IR::v_arg(val.value.index, val.value.offset, val.type);
@@ -959,11 +979,11 @@ Eval::RuntimeValue Eval::sub_object(Eval::IrBuilder* const builder,
         return Eval::no_value();
       }
     case RVT::Direct: {
-        IR::ValueIndex v = ir->new_temporary(ptr_type);
+        IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         ptr_arg = IR::v_arg(v, 0, ptr_type);
 
-        ir->current_control_block()->temporaries.data[val.value.index.index].requirements.add_address();
+        ASSERT(ir->current_control_block()->temporaries.data[val.value.index.index].requirements.has_address());
 
         IR::Types::AddrOf addrof = {};
         addrof.from = IR::v_arg(val.value.index, val.value.offset, val.type);
@@ -982,7 +1002,7 @@ Eval::RuntimeValue Eval::sub_object(Eval::IrBuilder* const builder,
       }
   }
 
-  IR::ValueIndex v = ir->new_temporary(ptr_type);
+  IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
   IR::V_ARG offset_arg = Eval::load_v_arg(builder, offset);
 

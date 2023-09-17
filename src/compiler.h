@@ -326,7 +326,7 @@ struct CompilerGlobals : CompilerConstants {
   IR::GlobalLabel next_function_label(const SignatureStructure* s);
   const SignatureStructure* get_label_signature(IR::GlobalLabel label);
 
-  IR::Builder* new_ir(IR::GlobalLabel label);
+  IR::Builder* new_ir(IR::GlobalLabel label, const SignatureStructure* sig);
   IR::Function* new_function();
   Local* new_local();
   Global* new_global();

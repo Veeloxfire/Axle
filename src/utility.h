@@ -2154,15 +2154,15 @@ namespace IO {
   template<typename ... T>
   void print(const T& ... t) {
     IO_Single::lock();
+    DEFER() { IO_Single::unlock(); };
     IO_Single::print(t...);
-    IO_Single::unlock();
   }
 
   template<typename ... T>
   void err_print(const T& ... t) {
     IO_Single::lock();
+    DEFER() { IO_Single::unlock(); };
     IO_Single::err_print(t...);
-    IO_Single::unlock();
   }
 }
 

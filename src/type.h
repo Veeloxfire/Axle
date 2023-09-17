@@ -82,25 +82,6 @@ constexpr void balance_flags(META_FLAGS* a, META_FLAGS* b) {
   *b = (*b & ~balanced_flags) | balanced;
 }
 
-constexpr void pass_meta_flags_up(META_FLAGS* low, META_FLAGS* high) {
-  //balance_flags(low, high);
-
-  constexpr META_FLAGS pass_flags = 0
-    | META_FLAG::CALL_LEAF;
-
-  *high |= *low & pass_flags;
-}
-
-constexpr void pass_meta_flags_down(META_FLAGS* low, META_FLAGS* high) {
-  balance_flags(low, high);
-
-  constexpr META_FLAGS pass_flags = 0
-    | META_FLAG::MAKES_CALL;
-
-
-  *low |= *high & pass_flags;
-}
-
 enum struct STRUCTURE_TYPE : u8 {
   VOID = 0,
   TYPE,
