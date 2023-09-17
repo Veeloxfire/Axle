@@ -2,6 +2,8 @@
 #include "type.h"
 #include "trace.h"
 
+#include "compiler.h"
+
 constexpr auto load_types_info() {
   struct FormatData {
     usize sizes[9];
@@ -26,49 +28,33 @@ constexpr auto load_types_info() {
 
 static constexpr auto vm_types_info = load_types_info();
 
-struct IndirectionInfo {
-  IR::Indirection ind;
-  IR::ValueIndex indirect_to;
-  u32 indirect_to_offset;
-};
+using RealValue = VM::StackFrame::RealValue;
 
-static IndirectionInfo get_indirection(const IR::Builder* ir, IR::ValueIndex v) {
-  if (v.is_temporary()) {
-    IR::Temporary& t = ir->temporaries.data[v.index()];
-    IndirectionInfo info = {};
-    info.ind = t.indirection;
-    info.indirect_to = t.refers_to;
-    info.indirect_to_offset = t.refers_to_offset;
+RealValue VM::StackFrame::get_value(const IR::V_ARG& arg) {
+  const u32 i = arg.val.index;
+  const auto& val_info = temporaries.data[i];
 
-    return info;
-  }
-  else {
-    return { IR::Indirection::None };
-  }
+  return {
+    bytes.data + val_info.data_offset,
+    val_info.type,
+  };
 }
 
-u8* VM::StackFrame::get_value(IR::ValueIndex index, u32 offset) {
-  const u32 i = index.index();
-  auto& val_info = variables.data[i + (index.is_variable() ? 0 : num_variables)];
+RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
+  const u32 i = arg.val.index;
+  const auto& val_info = temporaries.data[i];
 
-  u8* const val = bytes.data + (val_info.data_offset + offset);
+  ASSERT(val_info.type.struct_type() == STRUCTURE_TYPE::POINTER);
+  const auto* pt = val_info.type.unchecked_base<PointerStructure>();
 
-  IndirectionInfo indirection = get_indirection(ir, index);
-  switch (indirection.ind) {
-    case IR::Indirection::None: break;
-    case IR::Indirection::Reference: {
-        u8* ref = get_value(indirection.indirect_to, indirection.indirect_to_offset);
-        x64_to_bytes(ref, val);
-        break;
-      }
-    case IR::Indirection::Dereference: {
-        u8* deref = get_value(indirection.indirect_to, indirection.indirect_to_offset);
-        x64_to_bytes(x64_from_bytes(deref), val);
-        break;
-      }
-  }
+  const u8* src = bytes.data + val_info.data_offset;
+  const u8* ptr = nullptr;
+  memcpy_s(&ptr, sizeof(ptr), src, sizeof(ptr));
 
-  return val;
+  return {
+    bytes.data + val_info.data_offset,
+    pt->base,
+  };
 }
 
 //TODO: this can work we just need to do it correctly with the new system
@@ -88,8 +74,17 @@ u8* VM::StackFrame::get_value(IR::ValueIndex index, u32 offset) {
 //}
 
 VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
+  ASSERT(builder->control_blocks.size == 0);
+
   u32 size_needed = 0;
-  OwnedArr variables = new_arr<VM::Value>(builder->variables.size + builder->temporaries.size);
+  OwnedArr variables = new_arr<VM::Value>(builder->variables.size);
+
+  u64 total_temporaries = 0;
+  FOR(builder->control_blocks, b) {
+    total_temporaries += b->temporaries.size;
+  }
+
+  OwnedArr temporaries = new_arr<VM::Value>(total_temporaries);
 
   for (usize i = 0; i < builder->variables.size; ++i) {
     const auto& var = builder->variables.data[i];
@@ -98,19 +93,32 @@ VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
     size_needed = ceil_to_n(size_needed, var.type.structure->alignment);
 
     vm_var.data_offset = size_needed;
+    vm_var.type = var.type;
     size_needed += var.type.structure->size;
   }
 
   const u32 size_base = size_needed;
+  u64 temporaries_counter = 0;
 
-  FOR(builder->expression_frames, it) {
+  FOR(builder->control_blocks, it) {
+    FOR(it->imports, v_imp) {
+      temporaries.data[v_imp->in_temp.index + temporaries_counter] = variables.data[v_imp->variable];
+    }
+
+    FOR(it->exports, v_exp) {
+      temporaries.data[v_exp->out_temp.index + temporaries_counter] = variables.data[v_exp->variable];
+    }
+
     u32 temp_size_needed = size_base;
-    for (usize i = 0; i < it->temporary_count; ++i) {
-      const auto& temp = builder->temporaries.data[i];
-      auto& vm_var = variables.data[builder->variables.size + i];
+    const usize num_temps = it->temporaries.size;
+    for (usize i = 0; i < num_temps; ++i) {
+      auto& temp = it->temporaries.data[i];
+      auto& vm_temp = temporaries.data[i + num_temps];
+      if (vm_temp.type.is_valid()) continue;
 
       temp_size_needed = ceil_to_n(temp_size_needed, temp.type.structure->alignment);
-      vm_var.data_offset = temp_size_needed;
+      vm_temp.data_offset = temp_size_needed;
+      vm_temp.type = temp.type;
       temp_size_needed += temp.type.structure->size;
     }
 
@@ -120,12 +128,11 @@ VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
   VM::StackFrame vm = {};
   vm.bytes = new_arr<u8>(size_needed);
   vm.variables = std::move(variables);
-  vm.num_variables = (u32)builder->variables.size;
-  vm.num_temporaries = (u32)builder->temporaries.size;
+  vm.temporaries = std::move(temporaries);
   vm.ir = builder;
-  vm.IP_BASE = builder->ir_bytecode.begin();
-  vm.IP = vm.IP_BASE;
-  vm.IP_END = builder->ir_bytecode.end();
+  vm.current_block = builder->control_blocks.data;
+  vm.IP = vm.current_block->bytecode.begin();
+  vm.IP_END = vm.current_block->bytecode.end();
 
   return vm;
 }
@@ -305,195 +312,274 @@ static void copy_values(u8* to, IR::Format t_format,
   }
 }
 
-void VM::exec(Errors* errors, VM::StackFrame* stack_frame) {
+void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
   TRACING_FUNCTION();
 
   while (true) {
-    const auto opcode = static_cast<IR::OpCode>(stack_frame->IP[0]);
+    while (stack_frame->IP < stack_frame->IP_END) {
+      const auto opcode = static_cast<IR::OpCode>(stack_frame->IP[0]);
 
-    switch (opcode) {
-      case IR::OpCode::Set: {
-          IR::Types::Set set;
-          stack_frame->IP = IR::Read::Set(stack_frame->IP, stack_frame->IP_END, set);
+      switch (opcode) {
+        case IR::OpCode::Set: {
+            IR::Types::Set set;
+            stack_frame->IP = IR::Read::Set(stack_frame->IP, stack_frame->IP_END, set);
 
-          u8* to = stack_frame->get_value(set.to, set.t_offset);
+            auto to = stack_frame->get_value(set.to);
 
-          //maybe have some issues here with different platforms sizing things differently
-          ASSERT(set.d_size == vm_types_info.get_size(set.t_format));
+            //maybe have some issues here with different platforms sizing things differently
+            const IR::Format f = to.t.struct_format();
+            ASSERT(set.data.size == vm_types_info.get_size(f));
 
+            copy_values(to.ptr, f, set.data.val, f);
+            break;
+          }
+        case IR::OpCode::SetStore: {
+            IR::Types::Set set;
+            stack_frame->IP = IR::Read::Set(stack_frame->IP, stack_frame->IP_END, set);
 
-          copy_values(to, set.t_format, set.data, set.t_format);
-          break;
-        }
+            auto to = stack_frame->get_indirect_value(set.to);
 
-      case IR::OpCode::CopyCast: {
-          IR::Types::CopyCast copy;
-          stack_frame->IP = IR::Read::CopyCast(stack_frame->IP, stack_frame->IP_END, copy);
+            //maybe have some issues here with different platforms sizing things differently
+            const IR::Format f = to.t.struct_format();
+            ASSERT(set.data.size == vm_types_info.get_size(f));
 
-          u8* from = stack_frame->get_value(copy.from, copy.f_offset);
-          u8* to = stack_frame->get_value(copy.to, copy.t_offset);
+            copy_values(to.ptr, f, set.data.val, f);
+            break;
+          }
 
-          copy_values(to, copy.t_format, from, copy.f_format);
-          break;
-        }
+        case IR::OpCode::Copy: {
+            IR::Types::Copy copy;
+            stack_frame->IP = IR::Read::Copy(stack_frame->IP, stack_frame->IP_END, copy);
+
+            auto from = stack_frame->get_value(copy.from);
+            auto to = stack_frame->get_value(copy.to);
+            const IR::Format t_format = to.t.struct_format();
+            const IR::Format f_format = from.t.struct_format();
+
+            copy_values(to.ptr, t_format, from.ptr, f_format);
+            break;
+          }
+        case IR::OpCode::CopyLoad: {
+            IR::Types::CopyLoad copy;
+            stack_frame->IP = IR::Read::CopyLoad(stack_frame->IP, stack_frame->IP_END, copy);
+
+            auto from = stack_frame->get_indirect_value(copy.from);
+            auto to = stack_frame->get_value(copy.to);
+            const IR::Format t_format = to.t.struct_format();
+            const IR::Format f_format = from.t.struct_format();
+
+            copy_values(to.ptr, t_format, from.ptr, f_format);
+            break;
+          }
+        case IR::OpCode::CopyStore: {
+            IR::Types::CopyStore copy;
+            stack_frame->IP = IR::Read::CopyStore(stack_frame->IP, stack_frame->IP_END, copy);
+
+            auto from = stack_frame->get_value(copy.from);
+            auto to = stack_frame->get_indirect_value(copy.to);
+            const IR::Format t_format = to.t.struct_format();
+            const IR::Format f_format = from.t.struct_format();
+
+            copy_values(to.ptr, t_format, from.ptr, f_format);
+            break;
+          }
+        case IR::OpCode::CopyLoadStore: {
+            IR::Types::CopyStore copy;
+            stack_frame->IP = IR::Read::CopyStore(stack_frame->IP, stack_frame->IP_END, copy);
+
+            auto from = stack_frame->get_indirect_value(copy.from);
+            auto to = stack_frame->get_indirect_value(copy.to);
+            const IR::Format t_format = to.t.struct_format();
+            const IR::Format f_format = from.t.struct_format();
+
+            copy_values(to.ptr, t_format, from.ptr, f_format);
+            break;
+          }
 
 #define BIN_OP_CASE(name, op_symbol) \
       case IR::OpCode:: name: { \
           IR::Types:: name op; \
           stack_frame->IP = IR::Read:: name(stack_frame->IP, stack_frame->IP_END, op); \
-          u8* to = stack_frame->get_value(op.to, op.t_offset); \
-          u8* left = stack_frame->get_value(op.left, op.l_offset); \
-          u8* right = stack_frame->get_value(op.right, op.r_offset); \
-          ASSERT(op.r_format == op.l_format); \
-          ASSERT(op.t_format == op.l_format); \
-          switch (op.r_format) \
+          auto to = stack_frame->get_value(op.to); \
+          auto left = stack_frame->get_value(op.left); \
+          auto right = stack_frame->get_value(op.right); \
+          const IR::Format t_format = to.t.struct_format(); \
+          const IR::Format l_format = left.t.struct_format(); \
+          const IR::Format r_format = right.t.struct_format(); \
+          ASSERT(r_format == t_format); \
+          ASSERT(l_format == t_format); \
+          switch (t_format) \
           { \
             case IR::Format::uint8: { \
-                u8 l = *left; \
-                u8 r = *right; \
-                *to = static_cast<u8>(l op_symbol r); \
+                u8 l = *left.ptr; \
+                u8 r = *right.ptr; \
+                *to.ptr = static_cast<u8>(l op_symbol r); \
                 break; \
               } \
             case IR::Format::sint8: { \
-                i8 l = *left; \
-                i8 r = *right; \
-                *to = static_cast<i8>(l op_symbol r); \
+                i8 l = *left.ptr; \
+                i8 r = *right.ptr; \
+                *to.ptr = static_cast<i8>(l op_symbol r); \
                 break; \
               } \
             case IR::Format::uint16: { \
-                u16 l = x16_from_bytes(left); \
-                u16 r = x16_from_bytes(right); \
-                x16_to_bytes(static_cast<u16>(l op_symbol r), to); \
+                u16 l = x16_from_bytes(left.ptr); \
+                u16 r = x16_from_bytes(right.ptr); \
+                x16_to_bytes(static_cast<u16>(l op_symbol r), to.ptr); \
                 break; \
               } \
             case IR::Format::sint16: { \
-                i16 l = x16_from_bytes(left); \
-                i16 r = x16_from_bytes(right); \
-                x16_to_bytes(static_cast<i16>(l op_symbol r), to); \
+                i16 l = x16_from_bytes(left.ptr); \
+                i16 r = x16_from_bytes(right.ptr); \
+                x16_to_bytes(static_cast<i16>(l op_symbol r), to.ptr); \
                 break; \
               } \
             case IR::Format::uint32: { \
-                u32 l = x32_from_bytes(left); \
-                u32 r = x32_from_bytes(right); \
-                x32_to_bytes(static_cast<u32>(l op_symbol r), to); \
+                u32 l = x32_from_bytes(left.ptr); \
+                u32 r = x32_from_bytes(right.ptr); \
+                x32_to_bytes(static_cast<u32>(l op_symbol r), to.ptr); \
                 break; \
               } \
             case IR::Format::sint32: { \
-                i32 l = x32_from_bytes(left); \
-                i32 r = x32_from_bytes(right); \
-                x32_to_bytes(static_cast<i32>(l op_symbol r), to); \
+                i32 l = x32_from_bytes(left.ptr); \
+                i32 r = x32_from_bytes(right.ptr); \
+                x32_to_bytes(static_cast<i32>(l op_symbol r), to.ptr); \
                 break; \
               } \
             case IR::Format::uint64: { \
-                u64 l = x64_from_bytes(left); \
-                u64 r = x64_from_bytes(right); \
-                x64_to_bytes(static_cast<u64>(l op_symbol r), to); \
+                u64 l = x64_from_bytes(left.ptr); \
+                u64 r = x64_from_bytes(right.ptr); \
+                x64_to_bytes(static_cast<u64>(l op_symbol r), to.ptr); \
                 break; \
               } \
             case IR::Format::sint64: { \
-                i64 l = x64_from_bytes(left); \
-                i64 r = x64_from_bytes(right); \
-                x64_to_bytes(static_cast<i64>(l op_symbol r), to); \
+                i64 l = x64_from_bytes(left.ptr); \
+                i64 r = x64_from_bytes(right.ptr); \
+                x64_to_bytes(static_cast<i64>(l op_symbol r), to.ptr); \
                 break; \
               } \
             default: { \
-            errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
+            comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
                 return; \
               } \
           } \
         } break
 
-                               //Binary Operators
-                               BIN_OP_CASE(Add, +);
-                               BIN_OP_CASE(Sub, -);
-                               BIN_OP_CASE(Mul, *);
-                               BIN_OP_CASE(Div, / );
-                               BIN_OP_CASE(Mod, / );
-                               BIN_OP_CASE(Eq, == );
-                               BIN_OP_CASE(Neq, != );
-                               BIN_OP_CASE(Less, < );
-                               BIN_OP_CASE(Great, > );
-                               BIN_OP_CASE(And, &);
-                               BIN_OP_CASE(Or, | );
-                               BIN_OP_CASE(Xor, ^);
+                                      //Binary Operators
+                                      BIN_OP_CASE(Add, +);
+                                      BIN_OP_CASE(Sub, -);
+                                      BIN_OP_CASE(Mul, *);
+                                      BIN_OP_CASE(Div, / );
+                                      BIN_OP_CASE(Mod, / );
+                                      BIN_OP_CASE(Eq, == );
+                                      BIN_OP_CASE(Neq, != );
+                                      BIN_OP_CASE(Less, < );
+                                      BIN_OP_CASE(Great, > );
+                                      BIN_OP_CASE(And, &);
+                                      BIN_OP_CASE(Or, | );
+                                      BIN_OP_CASE(Xor, ^);
 
 #undef BIN_OP_CASE
 
-      case IR::OpCode::Neg: {
-          IR::Types::Neg op;
-          stack_frame->IP = IR::Read::Neg(stack_frame->IP, stack_frame->IP_END, op);
-          u8* to = stack_frame->get_value( op.to, op.t_offset);
-          u8* from = stack_frame->get_value(op.from, op.f_offset);
-          ASSERT(op.t_format == op.f_format);
-          switch (op.f_format)
-          {
-            case IR::Format::sint8: {
-                *to = -static_cast<i8>(*from);
-                break;
-              }
-            case IR::Format::sint16: {
-                x16_to_bytes(-static_cast<i16>(x16_from_bytes(from)), to);
-                break;
-              }
-            case IR::Format::sint32: {
-                x32_to_bytes(-static_cast<i32>(x32_from_bytes(from)), to);
-                break;
-              }
-            case IR::Format::sint64: {
-                x64_to_bytes(static_cast<u64>(-static_cast<i64>(static_cast<u64>(x64_from_bytes(from)))), to);
-                break;
-              }
-            default: {
-                errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary negate (maybe we an unsigned integer)");
-                return;
-              }
+        case IR::OpCode::Neg: {
+            IR::Types::Neg op;
+            stack_frame->IP = IR::Read::Neg(stack_frame->IP, stack_frame->IP_END, op);
+            auto to = stack_frame->get_value(op.to);
+            auto from = stack_frame->get_value(op.from);
+            const IR::Format t_format = to.t.struct_format();
+            const IR::Format f_format = from.t.struct_format();
+            ASSERT(t_format == f_format);
+            switch (f_format)
+            {
+              case IR::Format::sint8: {
+                  *to.ptr = -static_cast<i8>(*from.ptr);
+                  break;
+                }
+              case IR::Format::sint16: {
+                  x16_to_bytes(-static_cast<i16>(x16_from_bytes(from.ptr)), to.ptr);
+                  break;
+                }
+              case IR::Format::sint32: {
+                  x32_to_bytes(-static_cast<i32>(x32_from_bytes(from.ptr)), to.ptr);
+                  break;
+                }
+              case IR::Format::sint64: {
+                  x64_to_bytes(static_cast<u64>(-static_cast<i64>(static_cast<u64>(x64_from_bytes(from.ptr)))), to.ptr);
+                  break;
+                }
+              default: {
+                  comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary negate (maybe we an unsigned integer)");
+                  return;
+                }
+            }
+          } break;
+
+        case IR::OpCode::Not: {
+            IR::Types::Not op;
+            stack_frame->IP = IR::Read::Not(stack_frame->IP, stack_frame->IP_END, op);
+            auto to = stack_frame->get_value(op.to);
+            auto from = stack_frame->get_value(op.from);
+            const IR::Format t_format = to.t.struct_format();
+            const IR::Format f_format = from.t.struct_format();
+            if (t_format == IR::Format::uint8) {
+              *to.ptr = static_cast<u8>(!static_cast<bool>(*from.ptr));
+            }
+            else {
+              comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary logical not (only supported format is uint8)");
+            }
+          } break;
+        default: {
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                                      "Encountered invalid/unsupported instruction during ir execution\n"
+                                      "Code: {}\nName: '{}'",
+                                      (u8)opcode, IR::opcode_string(opcode));
+            return;
           }
-        } break;
+      }
+    }
 
-      case IR::OpCode::Not: {
-          IR::Types::Not op;
-          stack_frame->IP = IR::Read::Not(stack_frame->IP, stack_frame->IP_END, op);
-          u8* to = stack_frame->get_value(op.to, op.t_offset);
-          u8* from = stack_frame->get_value(op.from, op.f_offset);
-          if (op.t_format == IR::Format::uint8) {
-            *to = static_cast<u8>(!static_cast<bool>(*from));
-          }
-          else {
-            errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary logical not (only supported format is uint8)");
-          }
-        } break;
+    const auto goto_block = [&](IR::LocalLabel l) {
+      ASSERT(l != IR::NULL_LOCAL_LABEL);
+      const IR::Builder* ir = stack_frame->ir;
+      const IR::ControlBlock* next = ir->control_blocks.data + (l.label - 1);
 
-      case IR::OpCode::IfSplit: {
-          IR::Types::IfSplit is;
-          stack_frame->IP = IR::Read::IfSplit(stack_frame->IP, stack_frame->IP_END, is);
+      stack_frame->current_block = next;
+      stack_frame->IP = next->bytecode.begin();
+      stack_frame->IP_END = next->bytecode.end();
+    };
 
-          ASSERT(is.format == IR::Format::uint8);
-          u8* val = stack_frame->get_value(is.val, is.offset);
-          const IR::Builder* ir = stack_frame->ir;
-          if (*val != 0) {
-            stack_frame->IP = stack_frame->IP_BASE + ir->control_blocks.data[is.label_if.label].start;
-          }
-          else {
-            stack_frame->IP = stack_frame->IP_BASE + ir->control_blocks.data[is.label_else.label].start;
-          }
-
-        } break;
-
-      case IR::OpCode::Jump: {
-          IR::Types::Jump jump;
-          stack_frame->IP = IR::Read::Jump(stack_frame->IP, stack_frame->IP_END, jump);
-          const IR::Builder* ir = stack_frame->ir;
-
-          stack_frame->IP = stack_frame->IP_BASE + ir->control_blocks.data[jump.local_label.label].start;
+    switch (stack_frame->current_block->cf_type) {
+      case IR::ControlFlowType::Start: {
+          goto_block(stack_frame->current_block->cf_start.child);
           break;
         }
-      default: {
-          errors->report_error(ERROR_CODE::VM_ERROR, Span{},
-                               "Encountered invalid/unsupported instruction during ir execution\n"
-                               "Code: {}\nName: '{}'",
-                               (u8)opcode, IR::opcode_string(opcode));
+      case IR::ControlFlowType::End:
+      case IR::ControlFlowType::Return: {
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Currently don't support call control flow inside the vm");
           return;
         }
+
+      case IR::ControlFlowType::Inline: {
+          goto_block(stack_frame->current_block->cf_inline.child);
+          break;
+        }
+      case IR::ControlFlowType::Split: {
+          auto val = stack_frame->get_value(
+            IR::v_arg(stack_frame->current_block->cf_split.condition,
+                      0,
+                      comp_thread->builtin_types->t_bool)
+          );
+
+          ASSERT(val.t.struct_format() == IR::Format::uint8);
+
+          if (*val.ptr) {
+            goto_block(stack_frame->current_block->cf_split.true_branch);
+          }
+          else {
+            goto_block(stack_frame->current_block->cf_split.false_branch);
+          }
+        }
+      case IR::ControlFlowType::Merge: break;
     }
   }
 }

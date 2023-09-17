@@ -40,6 +40,7 @@ struct APIPrintOptions {
   bool comptime_res    = false;
   bool comptime_exec   = false;
   bool finished_ir     = false;
+  bool finished_mc     = false;
   bool run_headers     = false;
   bool register_select = false;
   bool file_loads      = false;

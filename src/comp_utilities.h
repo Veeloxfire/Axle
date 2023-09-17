@@ -140,12 +140,12 @@ namespace IR {
   enum struct Format : u8 {
     opaque = 0,
     uint8,
-    sint8,
     uint16,
-    sint16,
     uint32,
-    sint32,
     uint64,
+    sint8,
+    sint16,
+    sint32,
     sint64,
   };
 

@@ -1,71 +1,157 @@
 #pragma once
 #include "utility.h"
-#include "comp_utilities.h"
 #include "type.h"
 
 namespace IR {
+  struct EvalPromise {
+    const u8* data;
+    Type type;
+  };
+
+  void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, EvalPromise* eval);
+
+  struct ValueRequirements {
+#define FLAGS_DECL(num) (1 << num)
+    constexpr static u8 Address = FLAGS_DECL(0);
+#undef FLAGS_DECL
+
+    constexpr ValueRequirements() = default;
+    constexpr ValueRequirements(u8 f) : flags(f) {}
+
+    u8 flags = 0;
+
+    constexpr bool has_address() const { return (flags & Address) == Address; }
+    constexpr void add_address() { flags |= Address; }
+    constexpr void clear() { flags = 0; }
+  };
+
+  static constexpr ValueRequirements operator|(ValueRequirements left, ValueRequirements right) {
+    return left.flags | right.flags;
+  }
+
+  static constexpr ValueRequirements operator|(u8 left, ValueRequirements right) {
+    return left | right.flags;
+  }
+
+  static constexpr ValueRequirements operator|(ValueRequirements left, u8 right) {
+    return left.flags | right;
+  }
+
+  static constexpr ValueRequirements operator&(ValueRequirements left, ValueRequirements right) {
+    return left.flags | right.flags;
+  }
+
+  static constexpr ValueRequirements operator~(ValueRequirements prim) {
+    return ~prim.flags;
+  }
+
+  struct SSATemp {
+    ValueRequirements requirements;
+    Type type = {};
+  };
+
+  struct SSAVar {
+    ValueRequirements requirements;
+    Type type = {};
+    u32 versions = 0;
+    LocalLabel origin = {0};
+  };
+
   struct ValueIndex {
-    static constexpr u32 TEMP_MASK = 0b1 << 31;
-
-    static constexpr u32 INDEX_MASK = ~TEMP_MASK;
-
-    u32 encoding;
-
-    constexpr bool is_variable() const {
-      return (encoding & TEMP_MASK) == 0;
-    }
-
-    constexpr bool is_temporary() const {
-      return (encoding & TEMP_MASK) == TEMP_MASK;
-    }
-
-    constexpr u32 index() const {
-      return (encoding & INDEX_MASK);
-    }
+    u32 index;
   };
 
   constexpr bool operator==(const ValueIndex& a, const ValueIndex& b) {
-    return a.encoding == b.encoding;
+    return a.index == b.index;
   }
 
-  struct Variable {
-    Type type = {};
+  struct BlockImport {
+    u32 variable;
+    u32 version;
+    IR::ValueIndex in_temp;
+  };
+  
+  struct BlockExport {
+    u32 variable;
+    u32 version;
+    IR::ValueIndex out_temp;
   };
 
-  enum struct Indirection {
-    None, Reference, Dereference
+  struct BlockMerge {
+    u32 variable;
+
+    u32 in_versions[2];//relate to the labels inside merge
+    u32 out_version;
   };
 
-  struct Temporary {
-    Indirection indirection = Indirection::None;
-    ValueIndex refers_to = {};//only used if some form of indirection
-    u32 refers_to_offset = 0;
-    Type type = {};
+  enum struct ControlFlowType {
+    Start = 0,
+    End,
+    Return,
+    Inline,
+    Split,
+    Merge,
   };
 
-  struct ExpressionFrame {
-    u32 temporary_start = 0;
-    u32 temporary_count = 0;
-
-    u32 bytecode_start = 0;
-    u32 bytecode_count = 0;
+  struct CFStart {
+    static constexpr ControlFlowType CF_TYPE = ControlFlowType::Start;
+    LocalLabel child = IR::NULL_LOCAL_LABEL;
   };
 
-  struct RuntimeReference {
-    bool is_constant = false;
-    u32 offset = 0;
-    Type type = {};
+  struct CFEnd {
+    static constexpr ControlFlowType CF_TYPE = ControlFlowType::End;
+    LocalLabel parent = IR::NULL_LOCAL_LABEL;
+  };
 
-    union {
-      ValueIndex base = {};
-      const u8* constant;
-    };
+  struct CFReturn {
+    static constexpr ControlFlowType CF_TYPE = ControlFlowType::Return;
+    LocalLabel parent = IR::NULL_LOCAL_LABEL;
+    ValueIndex val;
+  };
+
+  struct CFInline {
+    static constexpr ControlFlowType CF_TYPE = ControlFlowType::Inline;
+    LocalLabel parent = IR::NULL_LOCAL_LABEL;
+    LocalLabel child = IR::NULL_LOCAL_LABEL;
+  };
+
+  struct CFSplt {
+    static constexpr ControlFlowType CF_TYPE = ControlFlowType::Split;
+    LocalLabel parent;
+
+    ValueIndex condition;
+    LocalLabel true_branch;
+    LocalLabel false_branch;
+  };
+
+  struct CFMerge {
+    static constexpr ControlFlowType CF_TYPE = ControlFlowType::Merge;
+    LocalLabel parents[2];
+    
+    LocalLabel child;
   };
 
   struct ControlBlock {
     LocalLabel label = NULL_LOCAL_LABEL;
-    usize start = 0;
-    usize size = 0;
+    bool calls = false;
+
+    ControlFlowType cf_type = ControlFlowType::Start;
+    union {
+      CFStart cf_start = {};
+      CFEnd cf_end;
+      CFReturn cf_return;
+      CFInline cf_inline;
+      CFSplt cf_split;
+      CFMerge cf_merge;
+    };
+
+    Array<u8> bytecode = {};
+
+    Array<SSATemp> temporaries = {};
+
+    Array<BlockImport> imports = {};
+    Array<BlockExport> exports = {};
+    Array<BlockMerge> enter_merge = {};
   };
 
   struct GlobalReference {
@@ -80,52 +166,38 @@ namespace IR {
   };
 
   struct Builder {
-    bool comptime_compilation = false;
-    bool require_variable_intermediates = false;
-
-    IR::GlobalLabel global_label = NULL_GLOBAL_LABEL;
-
-    Array<Temporary> temporaries = {};
-    Array<Variable> variables = {};
-    Array<GlobalReference> globals_used = {};
-
-    LocalLabel block_counter = NULL_LOCAL_LABEL;
-    u32 current_block = 0;
-
-    Array<ControlBlock> control_blocks = {};
-    Array<ExpressionFrame> expression_frames = {};
-    Array<u8> ir_bytecode = {};
-
     const SignatureStructure* signature = nullptr;
 
-    RuntimeReference new_temporary(const Type& t);
-    ValueIndex new_variable(const Type& t);
+    GlobalLabel global_label = NULL_GLOBAL_LABEL;
+    LocalLabel current_block = NULL_LOCAL_LABEL;
+
+    Array<SSAVar> variables = {};
+
+    Array<GlobalReference> globals_used = {};
+    Array<LocalLabel> control_flow_labels = {};
+    
+    Array<ControlBlock> control_blocks = {};
+
+    u32 new_variable(const Type& t);
+    ValueIndex new_temporary(const Type& t);
 
     u32 new_global_reference(const IR::GlobalReference& ref);
+
     LocalLabel new_control_block();
+    ControlBlock* current_control_block();
 
     void start_control_block(LocalLabel label);
     void end_control_block();
 
-    void start_expression();
-    void end_expression();
+    Array<u8>& current_bytecode();
+
+    void set_current_cf(const CFStart&);
+    void set_current_cf(const CFEnd&);
+    void set_current_cf(const CFReturn&);
+    void set_current_cf(const CFInline&);
+    void set_current_cf(const CFSplt&);
+    void set_current_cf(const CFMerge&);
   };
-
-  namespace HELPERS {
-    RuntimeReference no_value();
-    RuntimeReference as_reference(ValueIndex val, const Type& type);
-    RuntimeReference as_constant(const void* constant, const Type& type);
-    RuntimeReference sub_object(const RuntimeReference& val, usize offset, const Type& type);
-
-    RuntimeReference copy_constant(Builder* ir, const void* constant, const Type& type);
-    void copycast_value(IR::Builder* ir,
-                        const IR::RuntimeReference& to, IR::RuntimeReference from);
-
-    RuntimeReference take_address(Builder* const ir, const RuntimeReference& val, Type ptr_type);
-    RuntimeReference dereference(Builder* const ir, const RuntimeReference& val, Type deref_type);
-
-    RuntimeReference arr_to_ptr(Builder* const ir, const RuntimeReference& val, Type ptr_type);
-  }
 
   struct FunctionSignature {
     const ASTFuncSig* declaration = nullptr;
@@ -144,14 +216,18 @@ namespace IR {
   };
 
 #define OPCODES_MOD \
+MOD(BreakPoint, CODE_EMPTY)\
 MOD(Set, CODE_V_C)\
-MOD(CopyCast, CODE_V_V)\
-MOD(GlobalAddress, CODE_V_IM32)\
-MOD(StartFunc, CODE_EMPTY)\
+MOD(SetStore, CODE_V_C)\
+MOD(Copy, CODE_V_V)\
+MOD(CopyLoad, CODE_V_V)\
+MOD(CopyStore, CODE_V_V)\
+MOD(CopyLoadStore, CODE_V_V)\
+MOD(AddrOf, CODE_V_V)\
+MOD(AddrOfLoad, CODE_V_V)\
+MOD(AddrOfGlobal, CODE_V_IM32)\
+MOD(StartFunc, CODE_NV)\
 MOD(Call, CODE_GL_NV)\
-MOD(Return, CODE_V)\
-MOD(IfSplit, CODE_V_LL)\
-MOD(Jump, CODE_L)\
 MOD(Add, CODE_V_V_V)\
 MOD(Sub, CODE_V_V_V)\
 MOD(Mul, CODE_V_V_V)\
@@ -183,122 +259,129 @@ MOD(Not, CODE_V_V)
     return nullptr;
   }
 
-  struct CODE_IM32 {
-    u32 im32;
+  struct V_ARG {
+    ValueIndex val;
+    u32 offset;
+    u32 size;
 
     static constexpr usize serialize_size() {
-      return sizeof(im32);
+      return sizeof(val) + sizeof(offset) + sizeof(size);
     }
   };
 
+  constexpr V_ARG v_arg(ValueIndex index, u32 offset, const Type& type) {
+    return V_ARG{
+      index, offset, type.size(),
+    };
+  }
+
+  struct C_ARG {
+    u32 size;
+    const u8* val;
+
+    static constexpr usize static_serialize_size() {
+      return sizeof(size);
+    }
+  };
+
+  constexpr C_ARG c_arg(const u8* data, const Type& type) {
+    return C_ARG{
+      type.size(), data,
+    };
+  }
 
   struct CODE_V {
-    ValueIndex val;
-    u32 offset;
-    Format format;
+    V_ARG val;
 
     static constexpr usize serialize_size() {
-      return sizeof(val) + sizeof(offset) + sizeof(format);
+      return decltype(val)::serialize_size();
     }
   };
 
   struct CODE_V_IM32 {
-    ValueIndex val;
-    u32 offset;
-    Format format;
+    V_ARG val;
     u32 im32;
 
     static constexpr usize serialize_size() {
-      return sizeof(val) + sizeof(offset) + sizeof(format) + sizeof(im32);
+      return decltype(val)::serialize_size() + sizeof(im32);
     }
   };
 
-  //Op value constant
+  //Op val val
   struct CODE_V_C {
-    ValueIndex to;
-    u32 t_offset;
-    Format t_format;
-    u32 d_size;
-    const u8* data;
+    V_ARG to;
+    C_ARG data;
 
     static constexpr usize static_serialize_size() {
-      return sizeof(to) + sizeof(t_offset) + sizeof(t_format) + sizeof(d_size);
+      return decltype(to)::serialize_size() + C_ARG::static_serialize_size();
     }
 
     constexpr usize serialize_size() const {
-      return static_serialize_size() + d_size;
+      return static_serialize_size() + data.size;
     }
   };
 
-  //Op value value
+
+  //Op val val
   struct CODE_V_V {
-    ValueIndex to;
-    u32 t_offset;
-    Format t_format;
-    ValueIndex from;
-    u32 f_offset;
-    Format f_format;
+    V_ARG to;
+    V_ARG from;
 
     static constexpr usize serialize_size() {
-      return sizeof(to) + sizeof(t_offset) + sizeof(t_format)
-        + sizeof(from) + sizeof(f_offset) + sizeof(f_format);
+      return decltype(to)::serialize_size() + decltype(from)::serialize_size();
     }
   };
 
-  //Op value value value
+  //Op val val val
   struct CODE_V_V_V {
-    ValueIndex to;
-    u32 t_offset;
-    Format t_format;
-    ValueIndex left;
-    u32 l_offset;
-    Format l_format;
-    ValueIndex right;
-    u32 r_offset;
-    Format r_format;
+    V_ARG to;
+    V_ARG left;
+    V_ARG right;
 
     static constexpr usize serialize_size() {
-      return sizeof(to) + sizeof(t_offset) + sizeof(t_format)
-        + sizeof(left) + sizeof(l_offset) + sizeof(l_format)
-        + sizeof(right) + sizeof(l_offset) + sizeof(r_format);
+      return decltype(to)::serialize_size() 
+        + decltype(left)::serialize_size() 
+        + decltype(right)::serialize_size();
     }
   };
 
-  struct SingleVal {
-    ValueIndex v;
-    u32 v_offset;
-    Format v_format;
+  //Op n * values
+  struct CODE_NV {
+    u32 n_values;
+    const V_ARG* values;
 
-    static constexpr usize serialize_size() {
-      return sizeof(v) + sizeof(v_offset) + sizeof(v_format);
+    static constexpr usize static_serialize_size() {
+      return sizeof(n_values);
+    }
+
+    constexpr usize serialize_size() const {
+      return static_serialize_size() + (usize)n_values * V_ARG::serialize_size();
     }
   };
+
 
   //Op global_label n*values
   struct CODE_GL_NV {
     IR::GlobalLabel label;
     u32 n_values;
-    const u8* values;
+    const V_ARG* values;
 
     static constexpr usize static_serialize_size() {
       return sizeof(label) + sizeof(n_values);
     }
 
     constexpr usize serialize_size() const {
-      return static_serialize_size() + (usize)n_values * SingleVal::serialize_size();
+      return static_serialize_size() + (usize)n_values * V_ARG::serialize_size();
     }
   };
 
   struct CODE_V_LL {
-    ValueIndex val;
-    u32 offset;
-    Format format;
+    V_ARG val;
     LocalLabel label_if;
     LocalLabel label_else;
 
     static constexpr usize serialize_size() {
-      return sizeof(val) + sizeof(offset) + sizeof(format)
-        + sizeof(label_if) + sizeof(label_else);
+      return V_ARG::serialize_size() + sizeof(label_if) + sizeof(label_else);
     }
   };
 
@@ -315,18 +398,17 @@ MOD(Not, CODE_V_V)
   };
 
   constexpr usize serialize(const u8*, usize, const CODE_EMPTY&) { return 0; }
-  usize serialize(u8* data, usize remaining_size, const CODE_IM32& i);
   usize serialize(u8* data, usize remaining_size, const CODE_V& i);
   usize serialize(u8* data, usize remaining_size, const CODE_V_IM32& i);
   usize serialize(u8* data, usize remaining_size, const CODE_V_C& i);
   usize serialize(u8* data, usize remaining_size, const CODE_V_V& i);
   usize serialize(u8* data, usize remaining_size, const CODE_V_V_V& i);
   usize serialize(u8* data, usize remaining_size, const CODE_GL_NV& i);
+  usize serialize(u8* data, usize remaining_size, const CODE_NV& i);
   usize serialize(u8* data, usize remaining_size, const CODE_V_LL& i);
   usize serialize(u8* data, usize remaining_size, const CODE_L& i);
 
   constexpr usize deserialize(const u8*, usize, CODE_EMPTY&) { return 0; }
-  usize deserialize(const u8* data, usize remaining_size, CODE_IM32& i);
   usize deserialize(const u8* data, usize remaining_size, CODE_V& i);
   usize deserialize(const u8* data, usize remaining_size, CODE_V_IM32& i);
   usize deserialize(const u8* data, usize remaining_size, CODE_V_C& i);
@@ -334,9 +416,10 @@ MOD(Not, CODE_V_V)
   usize deserialize(const u8* data, usize remaining_size, CODE_V_V_V& i);
   usize deserialize(const u8* data, usize remaining_size, CODE_V_LL& i);
   usize deserialize(const u8* data, usize remaining_size, CODE_L& i);
+  usize deserialize(const u8* data, usize remaining_size, V_ARG& i);
 
   usize deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i);
-  usize deserialize(const u8* data, usize remaining_size, SingleVal& v);
+  usize deserialize(const u8* data, usize remaining_size, CODE_NV& i);
 
   void print_ir(const IR::Builder* builder);
 
@@ -382,47 +465,137 @@ MOD(Not, CODE_V_V)
 #undef OPCODES_MOD
 }
 
+namespace Eval {
+  struct VariableState {
+    u32 id;
+    u32 version;
+
+    bool imported;
+    bool modified;
+    IR::ValueIndex current_temp;
+  };
+
+  enum struct RVT {
+    Constant, Direct, Indirect
+  };
+
+  struct RuntimeValue {
+    RVT rvt;
+    Type type;
+
+    union {
+      const u8* constant;
+      struct {
+        IR::ValueIndex index;
+        u32 offset;
+      } value;
+    };
+  };
+
+  enum struct Time {
+    Runtime, CompileTime,
+  };
+
+  struct IrBuilder {
+    IR::Builder* ir;
+    Time eval_time;
+
+    IR::LocalLabel parent = IR::NULL_LOCAL_LABEL;
+
+    Array<VariableState> variables_state;
+
+    RuntimeValue new_variable(u32 id);
+    RuntimeValue import_variable(u32 id);
+    void set_variable(u32 id, IR::ValueIndex index);
+
+    void switch_control_block(IR::LocalLabel index, IR::LocalLabel parent);
+
+    //Add exports to the ir corresponding to the current variables
+    void export_variables();
+
+    //Releases the variables that are no longer in scope
+    void rescope_variables(usize new_size);
+
+    inline Array<u8>& current_bytecode() const { return ir->current_bytecode(); }
+  };
+
+
+  enum struct MergeRules {
+    New, UseFirst,
+  };
+
+  void merge_variables(Eval::IrBuilder* builder, MergeRules rule,
+                       IR::LocalLabel l0, Array<VariableState>&& v0,
+                       IR::LocalLabel l1, Array<VariableState>&& v1);
+
+  RuntimeValue sub_object(Eval::IrBuilder* const builder,
+                          const RuntimeValue& val,
+                          const RuntimeValue& offset,
+                          const Type& ptr_type);
+
+
+  RuntimeValue addrof(Eval::IrBuilder* const builder, const RuntimeValue& val, const Type& ptr_type);
+  RuntimeValue deref(Eval::IrBuilder* const builder, const RuntimeValue& val, const Type& ptr_type);
+
+  RuntimeValue no_value();
+  RuntimeValue as_direct(IR::ValueIndex val, const Type& type);
+  RuntimeValue as_indirect(IR::ValueIndex val, const Type& ptr_type);
+  RuntimeValue as_constant(const u8* constant, const Type& type);
+
+  IR::V_ARG load_v_arg(Eval::IrBuilder* builder, const RuntimeValue& rv);
+
+  void assign(Eval::IrBuilder* builder, const RuntimeValue& to, const RuntimeValue& from);
+
+
+  RuntimeValue arr_to_ptr(Eval::IrBuilder* const builder, const RuntimeValue& val, const Type& ptr_type);
+}
+
 namespace CASTS {
-  using CAST_FUNCTION = IR::RuntimeReference(*) (IR::Builder* const builder,
-                                                 const Type& from, const Type& to,
-                                                 const IR::RuntimeReference& val);
+  using CAST_FUNCTION = Eval::RuntimeValue(*) (Eval::IrBuilder* const builder,
+                                            const Type& to,
+                                            const Eval::RuntimeValue& val);
 
-  IR::RuntimeReference int_to_int(IR::Builder* const builder,
-                                  const Type& from, const Type& to,
-                                  const IR::RuntimeReference& val);
+  Eval::RuntimeValue int_to_int(Eval::IrBuilder* const builder,
+                                const Type& to,
+                                const Eval::RuntimeValue& val);
 
-  IR::RuntimeReference no_op(IR::Builder* const builder,
-                             const Type& from, const Type& to,
-                             const IR::RuntimeReference& val);
+  Eval::RuntimeValue no_op(Eval::IrBuilder* const builder,
+                           const Type& to,
+                           const Eval::RuntimeValue& val);
 
-  IR::RuntimeReference take_address(IR::Builder* const builder,
-                                    const Type& from, const Type& to,
-                                    const IR::RuntimeReference& val);
+  Eval::RuntimeValue take_address(Eval::IrBuilder* const builder,
+                                  const Type& to,
+                                  const Eval::RuntimeValue& val);
 }
 
 namespace VM {
   struct Value {
-    u32 data_offset;
-    Type type;
+    u32 data_offset = 0;
+    Type type = {};
   };
 
   struct StackFrame {
     OwnedArr<u8> bytes;
     OwnedArr<Value> variables = {};
-
-    u32 num_variables;
-    u32 num_temporaries;
+    OwnedArr<Value> temporaries = {};
 
     const IR::Builder* ir;
 
+    const IR::ControlBlock* current_block;
     const u8* IP;
-    const u8* IP_BASE;
     const u8* IP_END;
 
-    u8* get_value(IR::ValueIndex index, u32 offset);
+
+    struct RealValue {
+      u8* ptr;
+      Type t;
+    };
+
+    RealValue get_value(const IR::V_ARG& arg);
+    RealValue get_indirect_value(const IR::V_ARG& arg);
   };
 
   StackFrame new_stack_frame(const IR::Builder* ir);
 
-  void exec(Errors* errors, StackFrame* stack_frame);
+  void exec(CompilerThread* comp_thread, StackFrame* stack_frame);
 }

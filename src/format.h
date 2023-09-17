@@ -16,6 +16,10 @@ struct DisplayChar {
   char c;
 };
 
+struct PrintHexByte {
+  u8 c;
+};
+
 struct PrintFuncSignature {
   const IR::Function* func;
 };
@@ -61,6 +65,7 @@ void load_string(Array<char>& res, PrintPtr ptr);
 void load_string(Array<char>& res, const ByteArray& byte_array);
 
 void load_string(Array<char>& res, DisplayChar c);
+void load_string(Array<char>& res, PrintHexByte c);
 void load_string(Array<char>& res, MagicNumber mn);
 void load_string(Array<char>& res, const char* str);
 void load_string(Array<char>& res, const OwnedArr<char>& str);

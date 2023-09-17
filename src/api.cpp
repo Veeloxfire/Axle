@@ -70,7 +70,6 @@ int compile_and_write(const APIOptions& options) {
 
   BuiltinTypes builtin_types = {};
 
-  CompilerThread compiler_thread = {};
   CompilerGlobals compiler = {};
 
   compiler.services.file_loader.set(&file_loader);
@@ -92,6 +91,8 @@ int compile_and_write(const APIOptions& options) {
   compilation.dependencies.depend_check_pipe = &compiler.pipelines.depend_check;
 
   compiler.active_threads = options.build.extra_threads + 1;
+
+  CompilerThread compiler_thread = {};
 
   //Load the builtin types
   init_compiler(options, &compiler, &compiler_thread);

@@ -1808,22 +1808,20 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
 
   SPAN_END;
 
-  ASTDecl* d;
-  if (global) {
-    ASTGlobalDecl* gd = ast_alloc<ASTGlobalDecl>(parser);
-    gd->ast_type = AST_TYPE::GLOBAL_DECL;
-    gd->global_ptr = nullptr;
-    d = gd;
-  }
-  else {
-    ASTLocalDecl* ld = ast_alloc<ASTLocalDecl>(parser);
-    ld->ast_type = AST_TYPE::LOCAL_DECL;
-    ld->local_ptr = nullptr;
-    d = ld;
-  }
-
+  ASTDecl* d = ast_alloc<ASTDecl>(parser);
+  d->ast_type = AST_TYPE::DECL;
   d->node_span = span;
   d->name = name;
+
+  if (global) {
+    d->decl_type = ASTDecl::TYPE::GLOBAL;
+    d->global_ptr = nullptr;
+  }
+  else {
+    d->decl_type = ASTDecl::TYPE::LOCAL;
+    d->local_ptr = nullptr;
+  }
+
   d->compile_time_const = constant;
   d->type_ast = ty;
   d->expr = expr;
@@ -2405,14 +2403,14 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
     else if (parser->current.type == AxleTokenType::Identifier
              && parser->next.type == AxleTokenType::Colon) {
       //Decl
-      ASTGlobalDecl* glob_decl = (ASTGlobalDecl*)parse_decl(comp, comp_thread, parser, true);
+      ASTDecl* decl = (ASTDecl*)parse_decl(comp, comp_thread, parser, true);
       if (comp_thread->is_panic()) {
         return;
       }
 
-      linked->curr = glob_decl;
+      linked->curr = decl;
 
-      add_comp_unit_for_global(comp, comp_thread, parser->current_namespace, glob_decl);
+      add_comp_unit_for_global(comp, comp_thread, parser->current_namespace, decl);
       if (comp_thread->is_panic()) {
         return;
       }
@@ -2659,35 +2657,11 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         IO_Single::print('}');
         return;
       }
-    case AST_TYPE::LOCAL_DECL: {
-        ASTLocalDecl* d = (ASTLocalDecl*)a;
+    case AST_TYPE::DECL: {
+        ASTDecl* d = (ASTDecl*)a;
 
         if (d->type_ast == 0) {
           IO_Single::print(d->name->string, " :");
-
-        }
-        else {
-          IO_Single::print(d->name->string, ": ");
-          print_ast(printer, d->type_ast);
-          IO_Single::print(" ");
-        }
-
-        if (d->compile_time_const) {
-          IO_Single::print(": ");
-        }
-        else {
-          IO_Single::print("= ");
-        }
-
-        print_ast(printer, d->expr);
-        return;
-      }
-    case AST_TYPE::GLOBAL_DECL: {
-        ASTGlobalDecl* d = (ASTGlobalDecl*)a;
-
-        if (d->type_ast == 0) {
-          IO_Single::print(d->name->string, " :");
-
         }
         else {
           IO_Single::print(d->name->string, ": ");

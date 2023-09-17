@@ -24,11 +24,12 @@ struct Decl {
 struct Local {
   Decl decl = {};
 
+  IR::ValueRequirements requirements;
+
   bool is_constant = false;
-  union {
-    IR::ValueIndex val;
-    void* constant = nullptr;
-  };
+  const u8* constant = nullptr;
+
+  u32 variable_id = 0;
 };
 
 struct Pipe : AtomicQueue<CompilationUnit*> {
@@ -43,8 +44,9 @@ struct ComptimeExec {
 
 struct DependencyChecker {
   Namespace* available_names;
+  u32 num_locals;
   Array<Local*> locals;
-  
+
   Local* get_local(const InternString* name);
 };
 
@@ -63,7 +65,7 @@ struct Global {
   bool is_constant = false;
   union {
     u32 dynamic_init_index = 0;
-    const void* constant_value;
+    const u8* constant_value;
   };
 };
 
@@ -136,17 +138,6 @@ struct ImportCompilation {
 };
 
 struct ExportCompilation {};
-
-struct EvalPromise {
-  const u8* data;
-  Type type;
-};
-
-struct InProgressNode {
-  bool eval;
-  AST_LOCAL node;
-  Type infer;
-};
 
 struct CallSignature {
   Array<Type> arguments = {};
@@ -325,7 +316,7 @@ struct CompilerGlobals : CompilerConstants {
 
   SpinLockMutex ir_mutex;
   BucketArray<IR::Builder> ir_builders_single_threaded = {};
-  
+
   SpinLockMutex label_mutex;
   Array<const SignatureStructure*> label_signature_table = {};
 
@@ -371,6 +362,7 @@ struct CompilerGlobals : CompilerConstants {
 //Things that cannot be modified by other threads
 struct CompilerThread : CompilerConstants {
   bool doing_work = true;
+  u32 thread_id;
 
   Array<Token> current_stream = {};
   Errors errors = {};
@@ -424,7 +416,7 @@ void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExp
 
 void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTLambda* lambda) noexcept;
 
-void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTGlobalDecl* global) noexcept;
+void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTDecl* global) noexcept;
 
 void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;
 

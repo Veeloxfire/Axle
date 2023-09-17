@@ -1,7 +1,6 @@
 #pragma once
 #include "utility.h"
 #include "comp_utilities.h"
-#include "type.h"
 #include "ir.h"
 
 enum struct MainSide : uint8_t {
@@ -10,8 +9,8 @@ enum struct MainSide : uint8_t {
 
 struct BinOpArgs;
 struct UnOpArgs;
-using BINARY_OPERATOR_FUNCTION = MEMBER<BinOpArgs>::FUNCTION_PTR<IR::RuntimeReference>;
-using UNARY_OPERATOR_FUNCTION = MEMBER<UnOpArgs>::FUNCTION_PTR<IR::RuntimeReference>;
+using BINARY_OPERATOR_FUNCTION = MEMBER<BinOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
+using UNARY_OPERATOR_FUNCTION = MEMBER<UnOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
 
 struct BinOpEmitInfo {
   MainSide main_side;
@@ -22,35 +21,35 @@ struct BinOpEmitInfo {
 struct BinOpArgs {
   const BinOpEmitInfo* info;
   CompilerGlobals* comp;
-  IR::Builder* ir;
+  Eval::IrBuilder* builder;
 
-  const IR::RuntimeReference& left;
-  const IR::RuntimeReference& right;
+  const Eval::RuntimeValue& left;
+  const Eval::RuntimeValue& right;
 
-  inline IR::RuntimeReference emit() {
+  inline Eval::RuntimeValue emit() {
     return (this->*(info->func))();
   }
 
   //Emits
-  IR::RuntimeReference emit_add_ints();
-  IR::RuntimeReference emit_add_int_to_ptr();
-  IR::RuntimeReference emit_sub_ints();
-  IR::RuntimeReference emit_sub_ptrs();
-  IR::RuntimeReference emit_mul_ints();
-  IR::RuntimeReference emit_div_ints();
-  IR::RuntimeReference emit_mod_ints();
-  IR::RuntimeReference emit_eq_ints();
-  IR::RuntimeReference emit_neq_ints();
-  IR::RuntimeReference emit_lesser_ints();
-  IR::RuntimeReference emit_greater_ints();
-  IR::RuntimeReference emit_or_ints();
-  IR::RuntimeReference emit_or_enums();
-  IR::RuntimeReference emit_xor_ints();
-  IR::RuntimeReference emit_and_ints();
+  Eval::RuntimeValue emit_add_ints();
+  Eval::RuntimeValue emit_add_int_to_ptr();
+  Eval::RuntimeValue emit_sub_ints();
+  Eval::RuntimeValue emit_sub_ptrs();
+  Eval::RuntimeValue emit_mul_ints();
+  Eval::RuntimeValue emit_div_ints();
+  Eval::RuntimeValue emit_mod_ints();
+  Eval::RuntimeValue emit_eq_ints();
+  Eval::RuntimeValue emit_neq_ints();
+  Eval::RuntimeValue emit_lesser_ints();
+  Eval::RuntimeValue emit_greater_ints();
+  Eval::RuntimeValue emit_or_ints();
+  Eval::RuntimeValue emit_or_enums();
+  Eval::RuntimeValue emit_xor_ints();
+  Eval::RuntimeValue emit_and_ints();
 #if 0
-  IR::RuntimeReference emit_shift_l_64_by_8();
-  IR::RuntimeReference emit_shift_r_u64_by_8();
-  IR::RuntimeReference emit_shift_r_i64_by_8();
+  Eval::RuntimeValue emit_shift_l_64_by_8();
+  Eval::RuntimeValue emit_shift_r_u64_by_8();
+  Eval::RuntimeValue emit_shift_r_i64_by_8();
 #endif
 };
 
@@ -65,15 +64,15 @@ struct UnOpArgs {
 #if 0
   CompilerThread* comp_thread;
 #endif
-  IR::Builder* ir;
-  const IR::RuntimeReference& prim;
+  Eval::IrBuilder* builder;
+  const Eval::RuntimeValue& prim;
 
-  inline IR::RuntimeReference emit() {
+  inline Eval::RuntimeValue emit() {
     return (this->*(info->func))();
   }
 
   //Emits
-  IR::RuntimeReference emit_neg_int();
-  IR::RuntimeReference emit_address();
-  IR::RuntimeReference emit_deref_ptr();
+  Eval::RuntimeValue emit_neg_int();
+  Eval::RuntimeValue emit_address();
+  Eval::RuntimeValue emit_deref_ptr();
 };

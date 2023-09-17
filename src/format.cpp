@@ -215,6 +215,37 @@ void load_string(Array<char>& res, int8_t i8) {
   load_unsigned(res, (uint64_t)absolute(i8));
 }
 
+void load_string(Array<char>& res, PrintHexByte hb) {
+  char str[3] = "00";
+  {
+    u8 digit = hb.c & 0xF;
+    hb.c >>= 4;
+
+    if (digit >= 10) {
+      ASSERT(digit < 16);
+      str[1] = ('A' + (digit - 10));
+    }
+    else {
+      str[1] = ('0' + digit);
+    }
+  }
+
+  {
+    u8 digit = hb.c & 0xF;
+    hb.c >>= 4;
+
+    if (digit >= 10) {
+      ASSERT(digit < 16);
+      str[0] = ('A' + (digit - 10));
+    }
+    else {
+      str[0] = ('0' + digit);
+    }
+  }
+
+  load_string(res, str);
+}
+
 void load_string(Array<char>& res, uint8_t u8) {
   load_unsigned(res, (uint64_t)u8);
 }

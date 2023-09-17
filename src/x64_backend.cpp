@@ -23,6 +23,10 @@ namespace X64 {
 
   struct R {
     uint8_t r;
+
+    bool operator==(const R& o) {
+      return o.r == r;
+    }
   };
 
   struct R8 : R {
@@ -204,11 +208,11 @@ namespace X64 {
   };
 
   enum REX_CODES : uint8_t {
-    REX = 0b01000000,
+    REX = 0b0100'0000,
     REX_W = REX | 0b1000,
-    REX_R = 0b00000100,
-    REX_X = 0b00000010,
-    REX_B = 0b00000001,
+    REX_R = 0b000'00100,
+    REX_X = 0b000'00010,
+    REX_B = 0b000'00001,
 
     REX_R_SHIFT = 1,
     REX_B_SHIFT = 3,
@@ -1513,15 +1517,6 @@ struct MemoryView {
 enum struct ValueType : u8 {
   Register,
   Memory,
-  Address,
-};
-
-struct LazyValue {
-  ValueType value_type;
-  union {
-    MemoryView mem = {};
-    X64::R reg;
-  };
 };
 
 namespace Helpers {
@@ -1565,6 +1560,7 @@ namespace Helpers {
           switch (t_format) {
             case IR::Format::uint8:
             case IR::Format::sint8:
+              if (from == to) break;
               X64::mov(inst, X64::R8{ from }, X64::R8{ to });
               break;
             case IR::Format::uint16:
@@ -1587,6 +1583,7 @@ namespace Helpers {
           switch (t_format) {
             case IR::Format::uint8:
             case IR::Format::sint8:
+              if (from == to) break;
               X64::mov(inst, X64::R8{ from }, X64::R8{ to });
               break;
             case IR::Format::uint16:
@@ -1613,6 +1610,7 @@ namespace Helpers {
               break;
             case IR::Format::uint16:
             case IR::Format::sint16:
+              if (from == to) break;
               X64::mov(inst, X64::R16{ from }, X64::R16{ to });
               break;
             case IR::Format::uint32:
@@ -1635,6 +1633,7 @@ namespace Helpers {
               break;
             case IR::Format::uint16:
             case IR::Format::sint16:
+              if (from == to) break;
               X64::mov(inst, X64::R16{ from }, X64::R16{ to });
               break;
             case IR::Format::uint32:
@@ -1661,6 +1660,7 @@ namespace Helpers {
               break;
             case IR::Format::uint32:
             case IR::Format::sint32:
+              if (from == to) break;
               X64::mov(inst, X64::R32{ from }, X64::R32{ to });
               break;
             case IR::Format::uint64:
@@ -1683,6 +1683,7 @@ namespace Helpers {
               break;
             case IR::Format::uint32:
             case IR::Format::sint32:
+              if (from == to) break;
               X64::mov(inst, X64::R32{ from }, X64::R32{ to });
               break;
             case IR::Format::uint64:
@@ -1710,6 +1711,7 @@ namespace Helpers {
               break;
             case IR::Format::uint64:
             case IR::Format::sint64:
+              if (from == to) break;
               X64::mov(inst, X64::R64{ from }, X64::R64{ to });
 
               break;
@@ -2168,30 +2170,30 @@ namespace Helpers {
     }
   }
 
-  static void load_const_to_reg(X64::Program* program, X64::R reg, const u8* data, IR::Format format) {
-    ASSERT(format != IR::Format::opaque);
+  static void load_const_to_reg(X64::Program* program, IR::Format f, X64::R reg, const IR::C_ARG& const_arg) {
+    ASSERT(f != IR::Format::opaque);
 
     X64::Instruction i = {};
 
-    switch (format) {
+    switch (f) {
       case IR::Format::uint8:
       case IR::Format::sint8: {
-          X64::mov(i, X64::R8{ reg }, X64::IMM8{ data[0] });
+          X64::mov(i, X64::R8{ reg }, X64::IMM8{ const_arg.val[0] });
           break;
         }
       case IR::Format::uint16:
       case IR::Format::sint16: {
-          X64::mov(i, X64::R16{reg}, X64::IMM16{ x16_from_bytes(data) });
+          X64::mov(i, X64::R16{reg}, X64::IMM16{ x16_from_bytes(const_arg.val) });
           break;
         }
       case IR::Format::uint32:
       case IR::Format::sint32: {
-          X64::mov(i, X64::R32{reg}, X64::IMM32{ x32_from_bytes(data) });
+          X64::mov(i, X64::R32{reg}, X64::IMM32{ x32_from_bytes(const_arg.val) });
           break;
         }
       case IR::Format::uint64:
       case IR::Format::sint64: {
-          X64::mov(i, X64::R64{reg}, X64::IMM64{ x64_from_bytes(data) });
+          X64::mov(i, X64::R64{reg}, X64::IMM64{ x64_from_bytes(const_arg.val) });
           break;
         }
       default:
@@ -2201,35 +2203,37 @@ namespace Helpers {
     X64::append_instruction(program, i);
   }
 
-  static void load_const_to_mem(X64::Program* program, MemoryView view, const u8* data, IR::Format format) {
-    ASSERT(format != IR::Format::opaque);
-    ASSERT(x64_types_info.get_size(format) == view.size);
+  static void load_const_to_mem(X64::Program* program, IR::Format f, MemoryView view, const IR::C_ARG& const_arg) {
+    ASSERT(f != IR::Format::opaque);
 
-    switch (format) {
+    ASSERT(const_arg.size == view.size);
+    ASSERT(x64_types_info.get_size(f) == view.size);
+
+    switch (f) {
       case IR::Format::uint8:
       case IR::Format::sint8: {
           X64::Instruction i = {};
-          X64::mov(i, X64::RM8{ view.rm }, X64::IMM8{ data[0] });
+          X64::mov(i, X64::RM8{ view.rm }, X64::IMM8{ const_arg.val[0] });
           X64::append_instruction(program, i);
           break;
         }
       case IR::Format::uint16:
       case IR::Format::sint16: {
           X64::Instruction i = {};
-          X64::mov(i, X64::RM16{ view.rm }, X64::IMM16{ x16_from_bytes(data) });
+          X64::mov(i, X64::RM16{ view.rm }, X64::IMM16{ x16_from_bytes(const_arg.val) });
           X64::append_instruction(program, i);
           break;
         }
       case IR::Format::uint32:
       case IR::Format::sint32: {
           X64::Instruction i = {};
-          X64::mov(i, X64::RM32{ view.rm }, X64::IMM32{ x32_from_bytes(data) });
+          X64::mov(i, X64::RM32{ view.rm }, X64::IMM32{ x32_from_bytes(const_arg.val) });
           X64::append_instruction(program, i);
           break;
         }
       case IR::Format::uint64:
       case IR::Format::sint64: {
-          u64 val = x64_from_bytes(data);
+          u64 val = x64_from_bytes(const_arg.val);
 
           if (X64::can_signed_compress(val)) {
             X64::Instruction first = {};
@@ -2261,6 +2265,7 @@ namespace Helpers {
   }
 
   static void load_const_to_mem_opaque(X64::Program* program, MemoryView view, const u8* data) {
+    ASSERT(false);//THis implementation is bad, will fix later
     using PTR = const u8*;
 
     constexpr static auto COPY8 = [](X64::Program* program, MemoryView& view, PTR& data) {
@@ -3001,34 +3006,49 @@ namespace Helpers {
   }
 }
 
-struct Edge {
+struct LifetimeEdge {
   u32 a = 0;
   u32 b = 0;
 };
 
-struct OrderedValue {
-  bool visited;
-  bool crosses_call;
-  bool chosen_id;
-  bool needs_register;
+struct ValueLifetime {
+  bool visited = false;
+  u32 first_use = 0;
+  u32 last_use = 0;
+};
 
-  u32 first_use;
-  u32 last_use;
+enum struct MapType {
+  Internal = 0,
+  External,
+  InternalNoMap,
+  ExternalNoMap,
+};
 
-  u8 register_id;
+struct RegisterMapping {
+  MapType map_type = MapType::Internal;
+  bool crosses_call = false;
+  bool known_reg = false;
+  u8 reg = 0;
+  union {
+    u32 expr_id;//Inside Block
+    u32 reg_bitmask;//Crossing Blocks
+  };
 };
 
 struct RegisterResolver {
   const SignatureStructure* sig_struct;
   const CallingConvention* this_convention;
 
+  const IR::ControlBlock* current_block;
 
-  const IR::GlobalReference* all_globals_used;
-  const IR::Variable* all_variables;
+  ViewArr<const IR::GlobalReference> globals_used;
+  ViewArr<const IR::BlockImport> imports;
+  ViewArr<const IR::BlockExport> exports;
+  ViewArr<const IR::BlockMerge> merges;
 
-  const IR::Temporary* temporaries;
-  u32 temporaries_offset;
-  u32 num_temporaries;
+  ViewArr<RegisterMapping> to_map;
+
+  ViewArr<const IR::SSATemp> local_temporaries;
 
   const u8* bytecode_start;
   const u8* bytecode_end;
@@ -3036,159 +3056,333 @@ struct RegisterResolver {
   bool has_called = false;
   u32 last_call = 0;
 
-  u32 call_space_needed = 0;
-  u64 used_registers = 0;
+  u32 local_temp_id(IR::ValueIndex val_index) const {
+    //TODO: maybe remove this - it now does nothing, but it might do something in the future
+    ASSERT(val_index.index < local_temporaries.size);
+
+    return val_index.index;
+  }
 };
 
-static ValueType visit_ordered_value(Array<OrderedValue>& values, const RegisterResolver* resolver,
-                                     IR::ValueIndex index, u32 expr_id) {
-  if (index.is_temporary()) {
-    usize relative = index.index() - (usize)resolver->temporaries_offset;
 
-    const IR::Temporary& t = resolver->temporaries[relative];
-    bool first_visit = false;
-    {
-      OrderedValue& v = values.data[relative];
-      first_visit = !v.visited;
-      if (first_visit) {
-        v.visited = true;
+enum struct NeedIntermediate : u8 {
+  Yes,
+  No,
+};
 
-        v.first_use = expr_id;
-        v.last_use = expr_id;
+struct VisitRes {
+  NeedIntermediate ni;
+  Type t;
+};
 
-        v.needs_register = t.indirection == IR::Indirection::None;
-      }
-      else {
-        v.last_use = expr_id;
-      }
+static VisitRes visit_ordered_value(const ViewArr<RegisterMapping>& mappings,
+                                    const OwnedArr<ValueLifetime>& lifetimes,
+                                    const RegisterResolver* resolver,
+                                    const IR::V_ARG& v_arg, u32 expr_id) {
+  ASSERT(lifetimes.size == mappings.size);
+  const u32 t_index = resolver->local_temp_id(v_arg.val);
+  const IR::SSATemp& t = resolver->local_temporaries.data[t_index];
 
-      if (resolver->has_called && v.first_use <= resolver->last_call && resolver->last_call < v.last_use) {
-        v.crosses_call = true;
-      }
+  const MapType map_type = mappings.data[t_index].map_type;
+  if (map_type == MapType::InternalNoMap 
+      || map_type == MapType::ExternalNoMap) return { NeedIntermediate::Yes, t.type };//ignored- assumed its a memory location
+
+  ValueLifetime& ov = lifetimes.data[t_index];
+  ASSERT(v_arg.offset == 0);//For now we don't worry about this
+
+  if (ov.visited) {
+    ov.last_use = expr_id;
+
+    if (resolver->has_called && expr_id <= resolver->last_call && resolver->last_call < expr_id) {
+      mappings.data[t_index].crosses_call = true;
     }
-
-    switch (t.indirection) {
-      case IR::Indirection::Reference: {
-          ValueType vt = visit_ordered_value(values, resolver, t.refers_to, expr_id);
-
-          switch (vt) {
-            case ValueType::Memory:
-            case ValueType::Register: {
-                break;
-              }
-            case ValueType::Address: {
-                OrderedValue& v = values.data[relative];
-                v.needs_register = true;
-                break;
-              }
-          }
-          return ValueType::Address;
-        }
-      case IR::Indirection::Dereference: {
-          ValueType vt = visit_ordered_value(values, resolver, t.refers_to, expr_id);
-
-          switch (vt) {
-            case ValueType::Address:
-            case ValueType::Register: {
-                break;
-              }
-            case ValueType::Memory: {
-                OrderedValue& v = values.data[relative];
-                v.needs_register = true;
-                break;
-              }
-          }
-          return ValueType::Memory;
-        }
-
-      case IR::Indirection::None: return ValueType::Register;
-    }
-
-    return ValueType::Register;
   }
   else {
-    return ValueType::Memory;
+    ov.visited = true;
+    ov.first_use = expr_id;
+    ov.last_use = expr_id;
+  }
+
+  if (t.requirements.has_address() || t.type.size() > 8) {
+    return { NeedIntermediate::Yes, t.type };
+  }
+
+  if (map_type == MapType::Internal) {
+    return { NeedIntermediate::No, t.type };
+  }
+  else {
+    ASSERT(map_type == MapType::External);
+    return { NeedIntermediate::Yes, t.type };
   }
 }
 
-void new_intermediate(Array<OrderedValue>& values, u32 expr_id) {
-  values.insert_uninit(1);
-  auto* v = values.back();
-  v->visited = true;
-  v->needs_register = true;
-  v->first_use = expr_id;
-  v->last_use = expr_id;
+void new_intermediate(Array<RegisterMapping>& intermediates, u32 expr_id) {
+  intermediates.insert_uninit(1);
+  auto* v = intermediates.back();
+  v->known_reg = false;
+  v->reg = 0;
+  v->expr_id = expr_id;
 }
 
-void new_fixed_intermediate(Array<OrderedValue>& values, u32 expr_id, u8 reg) {
-  values.insert_uninit(1);
-  auto* v = values.back();
-  v->visited = true;
-  v->needs_register = true;
-  v->first_use = expr_id;
-  v->last_use = expr_id;
-
-  v->chosen_id = true;
-  v->register_id = reg;
+void new_fixed_intermediate(Array<RegisterMapping>& intermediates, u32 expr_id, u8 reg) {
+  intermediates.insert_uninit(1);
+  auto* v = intermediates.back();
+  v->known_reg = true;
+  v->reg = reg;
+  v->expr_id = expr_id;
 }
 
-Array<OrderedValue> resolve_values(CompilerGlobals* comp,
-                                   CompilerThread* comp_thread,
-                                   RegisterResolver* resolver,
-                                   const CallingConvention* convention) {
+struct ResolvedMappings {
+  u32 call_space_needed = 0;
+  u64 used_registers = 0;
+
+  OwnedArr<RegisterMapping> intermediates;
+};
+
+OwnedArr<LifetimeEdge> determine_edges(const ViewArr<ValueLifetime>& lifetimes,
+                                       const ViewArr<const ViewArr<RegisterMapping>>& other_mappings) {
+  Array<LifetimeEdge> edges = {};
+
+  for (usize a = 0; a < lifetimes.size; ++a) {
+    const ValueLifetime& va = lifetimes.data[a];
+    if (!va.visited) continue;
+
+    for (usize b = 0; b < lifetimes.size; ++b) {
+      if (a == b) continue;
+
+      const ValueLifetime& vb = lifetimes.data[b];
+      if (!va.visited) continue;
+
+      const bool overlap_range = (vb.first_use <= va.last_use && va.first_use <= vb.first_use)
+        || (va.first_use <= vb.last_use && vb.first_use <= va.first_use);
+
+      if (overlap_range) {
+        edges.insert({ static_cast<u32>(a), static_cast<u32>(b) });
+      }
+    }
+
+    usize acc = lifetimes.size;
+    for (usize m = 0; m < other_mappings.size; ++m) {
+      const ViewArr<RegisterMapping>& mapping = other_mappings.data[m];
+
+      for (usize i = 0; i < mapping.size; ++i) {
+        const RegisterMapping& in = mapping.data[i];
+        ASSERT(in.map_type != MapType::InternalNoMap);
+        ASSERT(in.map_type != MapType::ExternalNoMap);
+        ASSERT(in.known_reg);
+
+        if (va.first_use <= in.expr_id && in.expr_id <= va.last_use) {
+          edges.insert({ static_cast<u32>(a), static_cast<u32>(i + acc) });
+        }
+      }
+
+      acc += mapping.size;
+    }
+  }
+
+  return bake_arr(std::move(edges));
+}
+
+ResolvedMappings resolve_values(CompilerGlobals* comp,
+                                CompilerThread* comp_thread,
+                                RegisterResolver* resolver,
+                                const CallingConvention* convention) {
   TRACING_FUNCTION();
   const u8* const bc_start = resolver->bytecode_start;
   const u8* const bc_end = resolver->bytecode_end;
 
   const u8* bc = bc_start;
 
-  Array<OrderedValue> values = {};
-  values.insert_uninit(resolver->num_temporaries);
+  ASSERT(resolver->to_map.size == resolver->local_temporaries.size);
+  const ViewArr<RegisterMapping>& values = resolver->to_map;
+  OwnedArr<ValueLifetime> lifetimes = new_arr<ValueLifetime>(resolver->local_temporaries.size);
 
-  struct RegisterMangle {
-    const X64::REGISTER_CONSTANT* reg;
-    u32 expr_id;
-  };
+  //Is a value too big to fit in a register - don't worry about it
+  for (u32 i = 0; i < resolver->local_temporaries.size; ++i) {
+    const IR::SSATemp& temp = resolver->local_temporaries.data[i];
+    if (temp.type.size() > x64_types_info.get_size(IR::Format::uint64) || temp.requirements.has_address()) {
+      values.data[i].map_type = MapType::InternalNoMap;
+    }
+  }
 
-  Array<RegisterMangle> mangled_registers = {};
+  u32 expr_id = 0;
 
-  resolver->call_space_needed = 0;
+  //Need to know which registers these intersect with, but thats it
+  FOR(resolver->imports, it) {
+    const u32 i_index = resolver->local_temp_id(it->in_temp);
+    if (values.data[i_index].map_type == MapType::InternalNoMap) {
+      values.data[i_index].map_type = MapType::ExternalNoMap;
+      continue;
+    }
 
-  //Create the nodes in the value graph with their usages
+    values.data[i_index].map_type = MapType::External;
+
+    const IR::SSATemp& t = resolver->local_temporaries.data[i_index];
+    //Is used now
+    IR::V_ARG artificial = {};
+    artificial.offset = 0;
+    artificial.size = t.type.size();
+    artificial.val = it->in_temp;
+
+    [[maybe_unused]] auto _im = visit_ordered_value(values, lifetimes, resolver, artificial, expr_id);
+  }
+
+  FOR(resolver->exports, it) {
+    const u32 i_index = resolver->local_temp_id(it->out_temp);
+    if (values.data[i_index].map_type == MapType::InternalNoMap) {
+      values.data[i_index].map_type = MapType::ExternalNoMap;
+    }
+    else {
+      values.data[i_index].map_type = MapType::External;
+    }
+  }
+
+
+  //Now visit all the values
+  Array<RegisterMapping> mangled_registers = {};
+  Array<RegisterMapping> intermediates = {};
+
+  u32 call_space_needed = 0;
+  u64 used_registers = 0;
 
   //Need to loop through the bytecode to check if we need any intermediate values
   while (bc < bc_end) {
-    u8 op_byte = *bc;
-    IR::OpCode op = static_cast<IR::OpCode>(op_byte);
+    const u8 op_byte = *bc;
+    const IR::OpCode op = static_cast<IR::OpCode>(op_byte);
+    expr_id += 1;
 
     switch (op) {
+      case IR::OpCode::BreakPoint: {
+          IR::Types::BreakPoint bp;
+          bc = IR::Read::BreakPoint(bc, bc_end, bp);
+
+          //TODO: do breakpoints
+
+          break;
+        }
+
       case IR::OpCode::Set: {
           IR::Types::Set set;
           bc = IR::Read::Set(bc, bc_end, set);
 
-          [[maybe_unused]] ValueType vt = visit_ordered_value(values, resolver, set.to, (u32)(bc - bc_start));
+          [[maybe_unused]] auto vr = visit_ordered_value(values, lifetimes, resolver, set.to, expr_id);
+
           break;
         }
-      case IR::OpCode::CopyCast: {
-          IR::Types::CopyCast copy;
-          bc = IR::Read::CopyCast(bc, bc_end, copy);
+      case IR::OpCode::SetStore: {
+          IR::Types::SetStore set;
+          bc = IR::Read::SetStore(bc, bc_end, set);
 
-          ValueType from_vt = visit_ordered_value(values, resolver, copy.from, (u32)(bc - bc_start));
-          ValueType to_vt = visit_ordered_value(values, resolver, copy.to, (u32)(bc - bc_start));
-
-          if (from_vt != ValueType::Register && to_vt != ValueType::Register) {
-            new_intermediate(values, (u32)(bc - bc_start));
+          VisitRes vr = visit_ordered_value(values, lifetimes, resolver, set.to, expr_id);
+          if (vr.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
           }
 
           break;
         }
-      case IR::OpCode::Return: {
-          IR::Types::Return ret;
-          bc = IR::Read::Return(bc, bc_end, ret);
+      case IR::OpCode::Copy: {
+          IR::Types::Copy copy;
+          bc = IR::Read::Copy(bc, bc_end, copy);
 
-          [[maybe_unused]] ValueType vt = visit_ordered_value(values, resolver, ret.val, (u32)(bc - bc_start));
+          VisitRes from = visit_ordered_value(values, lifetimes, resolver, copy.from, expr_id);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, copy.to, expr_id);
 
-          new_fixed_intermediate(values, (u32)(bc - bc_start), convention->return_register);
+          if (from.ni == NeedIntermediate::Yes && to.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+
+          break;
+        }
+      case IR::OpCode::CopyLoad: {
+          IR::Types::Copy copy;
+          bc = IR::Read::Copy(bc, bc_end, copy);
+
+          VisitRes from = visit_ordered_value(values, lifetimes, resolver, copy.from, expr_id);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, copy.to, expr_id);
+
+          if (from.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+          if (to.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+
+          break;
+        }
+      case IR::OpCode::CopyStore: {
+          IR::Types::Copy copy;
+          bc = IR::Read::Copy(bc, bc_end, copy);
+
+          VisitRes from = visit_ordered_value(values, lifetimes, resolver, copy.from, expr_id);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, copy.to, expr_id);
+
+          if (from.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+          if (to.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+
+          break;
+        }
+      case IR::OpCode::CopyLoadStore: {
+          IR::Types::Copy copy;
+          bc = IR::Read::Copy(bc, bc_end, copy);
+
+          VisitRes from = visit_ordered_value(values, lifetimes, resolver, copy.from, expr_id);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, copy.to, expr_id);
+
+          new_intermediate(intermediates, expr_id);
+          if (from.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+          if (to.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+
+          break;
+        }
+      case IR::OpCode::AddrOf: {
+          IR::Types::AddrOf addr;
+          bc = IR::Read::AddrOf(bc, bc_end, addr);
+
+          VisitRes from = visit_ordered_value(values, lifetimes, resolver, addr.from, expr_id);
+          ASSERT(from.ni == NeedIntermediate::Yes);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, addr.to, expr_id);
+
+          if (to.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+
+          break;
+        }
+      case IR::OpCode::AddrOfLoad: {
+          IR::Types::AddrOf addr;
+          bc = IR::Read::AddrOf(bc, bc_end, addr);
+
+          VisitRes from = visit_ordered_value(values, lifetimes, resolver, addr.from, expr_id);
+          ASSERT(from.ni == NeedIntermediate::Yes);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, addr.to, expr_id);
+
+          if (to.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+
+          break;
+        }
+
+      case IR::OpCode::AddrOfGlobal: {
+          IR::Types::AddrOfGlobal addr;
+          bc = IR::Read::AddrOfGlobal(bc, bc_end, addr);
+          ASSERT(resolver->globals_used.size > addr.im32);
+          const IR::GlobalReference& g = resolver->globals_used.data[addr.im32];
+
+          VisitRes im = visit_ordered_value(values, lifetimes, resolver, addr.val, expr_id);
+
+          if (im.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+
           break;
         }
       case IR::OpCode::StartFunc: {
@@ -3196,10 +3390,17 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
           IR::Types::StartFunc start_func;
           bc = IR::Read::StartFunc(bc, bc_end, start_func);
 
-          for (usize i = 0; i < sig->parameter_types.size; ++i) {
-            ASSERT(i < convention->num_parameter_registers);
+          ASSERT(start_func.n_values == sig->parameter_types.size);
 
-            new_fixed_intermediate(values, (u32)(bc - bc_start), convention->parameter_registers[i]);
+          for (usize i = 0; i < sig->parameter_types.size; ++i) {
+            ASSERT(i < convention->num_parameter_registers);//TEMP
+
+            new_fixed_intermediate(intermediates, expr_id, convention->parameter_registers[i]);
+
+            IR::V_ARG arg;
+            bc += IR::deserialize(bc, bc_end - bc, arg);
+
+            [[maybe_unused]] VisitRes im = visit_ordered_value(values, lifetimes, resolver, arg, expr_id);
           }
 
           break;
@@ -3207,12 +3408,10 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
       case IR::OpCode::Call: {
           IR::Types::Call call;
           bc = IR::Read::Call(bc, bc_end, call);
+          ASSERT(call.values == nullptr);
 
           resolver->has_called = true;
-          resolver->last_call = (u32)(bc - bc_start);
-
-          const u8* values_i = call.values;
-          const u8* values_end = call.values + (IR::SingleVal::serialize_size() * call.n_values);
+          resolver->last_call = expr_id;
 
           const SignatureStructure* sig_struct = comp->get_label_signature(call.label);
           ASSERT(sig_struct != nullptr);
@@ -3222,81 +3421,34 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
           u32 call_space = convention->shadow_space_size;
 
           for (usize i = 0; i < ((usize)call.n_values - has_return); ++i) {
-            IR::SingleVal arg;
-            values_i += IR::deserialize(values_i, values_end - values_i, arg);
+            IR::V_ARG arg;
+            bc += IR::deserialize(bc, bc_end - bc, arg);
 
-            ValueType vt = visit_ordered_value(values, resolver, arg.v, (u32)(bc - bc_start));
+            VisitRes im = visit_ordered_value(values, lifetimes, resolver, arg, expr_id);
 
             if (i < convention->num_parameter_registers) {
-              new_fixed_intermediate(values, (u32)(bc - bc_start), convention->parameter_registers[i]);
+              new_fixed_intermediate(intermediates, expr_id, convention->parameter_registers[i]);
             }
             else {
               call_space += 8;
-              if (vt == ValueType::Memory) {
-                new_intermediate(values, (u32)(bc - bc_start));
+              if (im.ni == NeedIntermediate::Yes) {
+                new_intermediate(intermediates, expr_id);
               }
             }
           }
 
-          if (resolver->call_space_needed < call_space) {
-            resolver->call_space_needed = call_space;
+          if (call_space_needed < call_space) {
+            call_space_needed = call_space;
           }
 
           if (has_return) {
-            IR::SingleVal ret;
-            values_i += IR::deserialize(values_i, values_end - values_i, ret);
-            [[maybe_unused]] ValueType vt = visit_ordered_value(values, resolver, ret.v, (u32)(bc - bc_start));
+            IR::V_ARG ret;
+            bc += IR::deserialize(bc, bc_end - bc, ret);
+            [[maybe_unused]] VisitRes im = visit_ordered_value(values, lifetimes, resolver, ret, expr_id);
 
-            new_fixed_intermediate(values, (u32)(bc - bc_start), convention->return_register);
+            new_fixed_intermediate(intermediates, expr_id, convention->return_register);
           }
 
-
-          break;
-        }
-      case IR::OpCode::IfSplit: {
-          IR::Types::IfSplit ifsplit;
-          bc = IR::Read::IfSplit(bc, bc_end, ifsplit);
-
-          [[maybe_unused]] ValueType vt = visit_ordered_value(values, resolver, ifsplit.val, (u32)(bc - bc_start));
-          break;
-        }
-      case IR::OpCode::Jump: {
-          IR::Types::Jump jump;
-          bc = IR::Read::Jump(bc, bc_end, jump);
-          break;
-        }
-
-      case IR::OpCode::GlobalAddress: {
-          IR::Types::GlobalAddress addr;
-          bc = IR::Read::GlobalAddress(bc, bc_end, addr);
-
-          const IR::GlobalReference& g = resolver->all_globals_used[addr.im32];
-
-          ASSERT(addr.val.is_temporary());
-          {
-            usize relative = addr.val.index() - (usize)resolver->temporaries_offset;
-
-            OrderedValue& ov = values.data[relative];
-            const IR::Temporary& t = resolver->temporaries[relative];
-
-            ASSERT(t.indirection == IR::Indirection::None);
-
-            u32 expr_id = (u32)(bc - bc_start);
-
-            if (!ov.visited) {
-              ov.visited = true;
-              ov.first_use = expr_id;
-              ov.last_use = expr_id;
-              ov.needs_register = true;
-            }
-            else {
-              ov.last_use = expr_id;
-            }
-
-            if (resolver->has_called && ov.first_use <= resolver->last_call && resolver->last_call < ov.last_use) {
-              ov.crosses_call = true;
-            }
-          }
 
           break;
         }
@@ -3305,73 +3457,70 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
       case IR::OpCode:: name: {\
           IR::Types:: name bin_op;\
           bc = IR::Read:: name (bc, bc_end, bin_op);\
-          ValueType left_vt = visit_ordered_value(values, resolver, bin_op.left, (u32)(bc - bc_start));\
-          ValueType right_vt = visit_ordered_value(values, resolver, bin_op.right, (u32)(bc - bc_start));\
-          ValueType to_vt = visit_ordered_value(values, resolver, bin_op.to, (u32)(bc - bc_start));\
-          ASSERT(to_vt != ValueType::Address);\
-          /*always a left register needed*/\
-          new_intermediate(values, (u32)(bc - bc_start)); \
-          if(right_vt != ValueType::Register) {\
-            new_intermediate(values, (u32)(bc - bc_start)); \
+          VisitRes left = visit_ordered_value(values, lifetimes, resolver, bin_op.left, expr_id);\
+          VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);\
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id);\
+          /*temp: these register allocations can be simplified*/\
+          new_intermediate(intermediates, expr_id);\
+          if (right.ni == NeedIntermediate::Yes) {\
+            new_intermediate(intermediates, (u32)(bc - bc_start));\
           }\
           break;\
         }
 
-                                    VISIT_BIN_OP(Add);
-                                    VISIT_BIN_OP(Sub);
-                                    VISIT_BIN_OP(Eq);
-                                    VISIT_BIN_OP(Neq);
-                                    VISIT_BIN_OP(Less);
-                                    VISIT_BIN_OP(Great);
-                                    VISIT_BIN_OP(And);
-                                    VISIT_BIN_OP(Or);
-                                    VISIT_BIN_OP(Xor);
+                           VISIT_BIN_OP(Add);
+                           VISIT_BIN_OP(Sub);
+                           VISIT_BIN_OP(Eq);
+                           VISIT_BIN_OP(Neq);
+                           VISIT_BIN_OP(Less);
+                           VISIT_BIN_OP(Great);
+                           VISIT_BIN_OP(And);
+                           VISIT_BIN_OP(Or);
+                           VISIT_BIN_OP(Xor);
 #undef VISIT_BIN_OP
 
       case IR::OpCode::Mul: {
           IR::Types::Mul bin_op;
           bc = IR::Read::Mul(bc, bc_end, bin_op);
-          ValueType left_vt = visit_ordered_value(values, resolver, bin_op.left, (u32)(bc - bc_start));
-          ValueType right_vt = visit_ordered_value(values, resolver, bin_op.right, (u32)(bc - bc_start));
-          ValueType to_vt = visit_ordered_value(values, resolver, bin_op.to, (u32)(bc - bc_start));
-          ASSERT(to_vt != ValueType::Address);
+          VisitRes left = visit_ordered_value(values, lifetimes, resolver, bin_op.left, expr_id);
+          VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id);
           /*always a left register needed*/
-          switch (bin_op.l_format) {
+          switch (left.t.struct_format()) {
             case IR::Format::uint8:
             case IR::Format::sint8: {
-                new_fixed_intermediate(values, (u32)(bc - bc_start), X64::rax.REG);
+                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
                 break;
               }
             case IR::Format::uint16:
             case IR::Format::uint32:
             case IR::Format::uint64: {
-                new_fixed_intermediate(values, (u32)(bc - bc_start), X64::rax.REG);
-                mangled_registers.insert({ &X64::rdx, (u32)(bc - bc_start) });
+                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+                new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
                 break;
               }
             default: {
-                new_intermediate(values, (u32)(bc - bc_start));
+                new_intermediate(intermediates, expr_id);
                 break;
               }
           }
 
-          if (right_vt != ValueType::Register) {
-            new_intermediate(values, (u32)(bc - bc_start));
+          if (right.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, (u32)(bc - bc_start));
           }
           break;
         }
       case IR::OpCode::Div: {
           IR::Types::Div bin_op;
           bc = IR::Read::Div(bc, bc_end, bin_op);
-          ValueType left_vt = visit_ordered_value(values, resolver, bin_op.left, (u32)(bc - bc_start));
-          ValueType right_vt = visit_ordered_value(values, resolver, bin_op.right, (u32)(bc - bc_start));
-          ValueType to_vt = visit_ordered_value(values, resolver, bin_op.to, (u32)(bc - bc_start));
-          ASSERT(to_vt != ValueType::Address);
+          VisitRes left = visit_ordered_value(values, lifetimes, resolver, bin_op.left, expr_id);
+          VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id);
           /*always a left register needed*/
-          switch (bin_op.l_format) {
+          switch (left.t.struct_format()) {
             case IR::Format::uint8:
             case IR::Format::sint8: {
-                new_fixed_intermediate(values, (u32)(bc - bc_start), X64::rax.REG);
+                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
                 break;
               }
             case IR::Format::sint16:
@@ -3380,18 +3529,18 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
             case IR::Format::uint32:
             case IR::Format::sint64:
             case IR::Format::uint64: {
-                new_fixed_intermediate(values, (u32)(bc - bc_start), X64::rax.REG);
-                mangled_registers.insert({ &X64::rdx, (u32)(bc - bc_start) });
+                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+                new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
                 break;
               }
             default: {
-                new_intermediate(values, (u32)(bc - bc_start));
+                new_intermediate(intermediates, expr_id);
                 break;
               }
           }
 
-          if (right_vt != ValueType::Register) {
-            new_intermediate(values, (u32)(bc - bc_start));
+          if (right.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
           }
           break;
         }
@@ -3406,7 +3555,8 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
             return {};
           }
           else {
-            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Unsupported instruction encountered during ir compilation: \"{}\"",
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                                      "Unsupported instruction encountered during ir compilation: \"{}\"",
                                       opcode_name);
             return {};
           }
@@ -3414,290 +3564,303 @@ Array<OrderedValue> resolve_values(CompilerGlobals* comp,
     }
   }
 
-  // Create then colour the graph
-  Array<Edge> edges = {};
+  expr_id += 1;
 
-  for (usize a = 0; a < values.size; ++a) {
-    const OrderedValue& va = values.data[a];
-    if (!va.needs_register || va.chosen_id) continue;
+  //Any control flow checks we need
+  {
+    const IR::ControlBlock* current_block = resolver->current_block;
+    switch (current_block->cf_type) {
+      case IR::ControlFlowType::Start: break;
+      case IR::ControlFlowType::End: break;
+      case IR::ControlFlowType::Inline: break;
+      case IR::ControlFlowType::Merge: break;
 
-    for (usize b = 0; b < values.size; ++b) {
-      if (a == b) continue;
+      case IR::ControlFlowType::Return: {
+          ASSERT(resolver->sig_struct->return_type.size() <= 8);//TEMP
 
-      const OrderedValue& vb = values.data[b];
-      if (!vb.needs_register) continue;
+          IR::V_ARG v = { current_block->cf_return.val, 0, resolver->sig_struct->return_type.size() };
 
-      if (vb.first_use <= va.last_use) {
-        edges.insert({ static_cast<u32>(a), static_cast<u32>(b) });
-      }
+          [[maybe_unused]] auto vr = visit_ordered_value(values, lifetimes, resolver, v, expr_id);
+          new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+          break;
+        }
+
+      case IR::ControlFlowType::Split: {
+          IR::V_ARG v = { current_block->cf_split.condition, 0, comp_thread->builtin_types->t_bool.size() };
+
+          auto vr = visit_ordered_value(values, lifetimes, resolver, v, expr_id);
+          if (vr.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+          break;
+        }
     }
   }
 
-  // Select from the graph
+  expr_id += 1;
 
-  const Edge* edge_i = edges.begin();
-  const Edge* edge_end = edges.end();
+  //Use the final temporaries
+  FOR(resolver->exports, it) {
+    const u32 i_index = resolver->local_temp_id(it->out_temp);
 
-  const RegisterMangle* mang_i = mangled_registers.begin();
-  const RegisterMangle* mang_end = mangled_registers.end();
+    const IR::SSATemp& t = resolver->local_temporaries.data[i_index];
+    //Is used now
+    IR::V_ARG artificial = {};
+    artificial.offset = 0;
+    artificial.size = t.type.size();
+    artificial.val = it->out_temp;
+
+    [[maybe_unused]] auto _im = visit_ordered_value(values, lifetimes, resolver, artificial, expr_id);
+  }
+
+
+  // Create then colour the graph
 
   const usize number_of_registers = (usize)convention->num_volatile_registers
     + (usize)convention->num_non_volatile_registers;
+
+  {
+    // Start off doing intermediates since we can do those easily
+
+    RegisterMapping* const i_start = intermediates.mut_begin();
+    const RegisterMapping* const i_end = intermediates.end();
+
+    for (RegisterMapping* i = i_start; i < i_end; ++i) {
+      if (i->known_reg) {
+        continue;
+      }
+
+      u64 used_regs = 0;
+
+      for (const RegisterMapping* j = i_start; j < i_end; ++j) {
+        if (j->known_reg) {
+          used_regs |= 1llu << (usize)j->reg;
+        }
+      }
+
+      u32 reg_index = 0;
+
+      for (; reg_index < number_of_registers; ++reg_index) {
+        u8 r = convention->all_regs_unordered[reg_index];
+        if ((used_regs & (1llu << (usize)r)) == 0) {
+          break;
+        }
+      }
+
+      ASSERT(reg_index < number_of_registers);
+
+      auto reg_id = convention->all_regs_unordered[reg_index];
+
+      i->reg = reg_id;
+      i->known_reg = true;
+
+      used_registers |= (1llu << reg_id);
+    }
+  }
+
+  const ViewArr<RegisterMapping> mappings[] = {
+    view_arr(intermediates),
+    view_arr(mangled_registers),
+  };
+
+  const OwnedArr<LifetimeEdge> edges = determine_edges(view_arr(lifetimes), view_arr(mappings));
+
+  // Select the internal registers from the graph
 
   if (comp_thread->print_options.register_select) {
     IO_Single::lock();
   }
 
-  for (u32 i = 0; i < static_cast<u32>(values.size); ++i) {
-    OrderedValue& v = values.data[i];
-    if (!v.needs_register) continue;
+  {
+    const LifetimeEdge* edge_i = edges.begin();
+    const LifetimeEdge* edge_end = edges.end();
 
-    u64 used_regs = 0;
+    for (u32 i = 0; i < static_cast<u32>(values.size); ++i) {
+      RegisterMapping& v = values.data[i];
+      if (v.map_type != MapType::Internal) continue;//Only map internal values
 
-    if (mang_i < mang_end) {
-      const RegisterMangle* mang_loc = mang_i;
-      do {
-        if (!(v.first_use <= mang_loc->expr_id && mang_loc->expr_id <= v.last_use)) break;
-        used_regs |= 1llu << mang_loc->reg->REG;
-        mang_loc += 1;
-      } while (mang_loc < mang_end);
-    }
+      u32 used_regs = 0;
 
-    if (v.chosen_id) {
-      if ((used_regs & (1llu << v.register_id)) > 0) {
-        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
-                                  "Assumed a register was free which was not: {}", X64::all_x64_regs[v.register_id].name);
-        return {};
+      ASSERT(edge_i == edge_end || edge_i->a == i);
+
+      while (edge_i < edge_end && edge_i->a == i) {
+        u32 b = edge_i->b;
+
+        if (b >= values.size + intermediates.size) {
+          u32 i = static_cast<u32>(b - (values.size + intermediates.size));
+          ASSERT(mangled_registers.data[i].known_reg);
+          auto r = mangled_registers.data[i].reg;
+          ASSERT(r < 32);
+          used_regs |= 1u << (u32)r;
+        }
+        else if (b >= values.size) {
+          u32 i = static_cast<u32>(b - values.size);
+          ASSERT(intermediates.data[i].known_reg);
+          auto r = intermediates.data[i].reg;
+          ASSERT(r < 32);
+          used_regs |= 1u << (u32)r;
+        }
+        else {
+          RegisterMapping& other = values.data[edge_i->b];
+          if (other.known_reg) {
+            ASSERT(other.reg < 32);
+            used_regs |= 1u << (u32)other.reg;
+          }
+        }
+
+        edge_i += 1;
       }
-      continue;
-    }
 
-
-    ASSERT(edge_i == edge_end || edge_i->a == i);
-
-    while (edge_i < edge_end && edge_i->a == i) {
-      OrderedValue& other = values.data[edge_i->b];
-      if (other.needs_register && other.chosen_id) {
-        used_regs |= 1llu << other.register_id;
+      u32 reg_index = 0;
+      if (v.crosses_call) {
+        reg_index = convention->num_volatile_registers;
       }
 
-      edge_i += 1;
-    }
-
-
-    u32 reg_index = 0;
-    if (v.crosses_call) {
-      reg_index = convention->num_volatile_registers;
-    }
-
-    for (; reg_index < number_of_registers; ++reg_index) {
-      u8 r = convention->all_regs_unordered[reg_index];
-      if ((used_regs & (1llu << r)) == 0) {
-        break;
+      for (; reg_index < number_of_registers; ++reg_index) {
+        u8 r = convention->all_regs_unordered[reg_index];
+        ASSERT(r < 32);
+        if ((used_regs & (1u << r)) == 0) {
+          break;
+        }
       }
-    }
 
-    //TODO: spill registers
-    ASSERT(reg_index < number_of_registers);
+      //TODO: spill registers
+      ASSERT(reg_index < number_of_registers);
 
-    auto reg_id = convention->all_regs_unordered[reg_index];
+      auto reg_id = convention->all_regs_unordered[reg_index];
 
-    if (comp_thread->print_options.register_select) {
-      if (i < resolver->num_temporaries) {
-        format_print_ST("Temporary {} -> Register {}\n", resolver->temporaries_offset + i, X64::all_x64_regs[reg_id].name);
+      used_registers |= (1llu << reg_id);
+
+      if (comp_thread->print_options.register_select) {
+        format_print_ST("T{} = {}\n", i, X64::all_x64_regs[reg_id].name);
       }
-      else {
-        format_print_ST("Extra {} -> Register {}\n", i - resolver->num_temporaries, X64::all_x64_regs[reg_id].name);
-      }
+
+      v.known_reg = true;
+      v.reg = reg_id;
     }
-
-    resolver->used_registers |= (1llu << reg_id);
-
-    v.chosen_id = true;
-    v.register_id = reg_id;
   }
 
   if (comp_thread->print_options.register_select) {
     IO_Single::unlock();
   }
 
-  return values;
-}
 
-struct Selector {
-  usize temporary_start = 0;
+  //Save which registers intersect with the external values
+  //TODO: pack these tighter, instead of interleaving all of them
+  {
+    const LifetimeEdge* edge_i = edges.begin();
+    const LifetimeEdge* edge_end = edges.end();
 
-  const IR::Temporary* temporaries = nullptr;
-  const IR::Variable* variables = nullptr;
+    for (u32 i = 0; i < static_cast<u32>(values.size); ++i) {
+      RegisterMapping& v = values.data[i];
+      if (v.map_type != MapType::External) continue;//Only mapping external
 
-  OwnedArr<const OrderedValue> ordered_values = {};
-  u32 ordered_intermediates_start = 0;
+      u32 used_regs = 0;
 
-  const i32* variable_memory_locations = nullptr;
+      ASSERT(edge_i == edge_end || edge_i->a == i);
 
-  const CallingConvention* convention = nullptr;
+      while (edge_i < edge_end && edge_i->a == i) {
+        u32 b = edge_i->b;
 
-  X64::R get_next_intermediate_reg() {
-    ASSERT(ordered_intermediates_start < ordered_values.size);
-    X64::R r = { ordered_values.data[ordered_intermediates_start].register_id };
-    ordered_intermediates_start += 1;
-    return r;
+        if (b >= values.size + intermediates.size) {
+          u32 i = static_cast<u32>(b - (values.size + intermediates.size));
+          ASSERT(mangled_registers.data[i].known_reg);
+          auto r = mangled_registers.data[i].reg;
+          ASSERT(r < 32);
+          used_regs |= 1u << (u32)r;
+        }
+        else if (b >= values.size) {
+          u32 i = static_cast<u32>(b - values.size);
+          ASSERT(intermediates.data[i].known_reg);
+          used_regs |= 1u << (u32)intermediates.data[i].reg;
+        }
+        else {
+          RegisterMapping& other = values.data[edge_i->b];
+          if (other.known_reg) {
+            ASSERT(other.reg < 32);
+            used_regs |= 1u << (u32)other.reg;
+          }
+        }
+
+        edge_i += 1;
+      }
+
+      v.reg_bitmask = used_regs;
+    }
   }
 
-  LazyValue get_lazy_val(X64::Program* program, IR::ValueIndex i, u32 offset) {
-    LazyValue val;
+  return ResolvedMappings{
+    call_space_needed,
+    used_registers,
 
-    usize index = i.index();
-    if (i.is_temporary()) {
-      const IR::Temporary& temp = temporaries[index];
+    bake_arr(std::move(intermediates)),
+  };
+}
 
-      usize relative = index - temporary_start;
-      const OrderedValue& ov = ordered_values.data[relative];
+struct ActualTemporary {
+  bool is_register;
+  union {
+    X64::R reg_id;
+    u32 stack_offset;
+  };
+};
 
-      ASSERT(temp.type.size() <= 8);//temp
+struct X64Value {
+  ValueType value_type;
+  Type t;
+  union {
+    MemoryView mem = {};
+    X64::R reg;
+  };
+};
 
-      switch (temp.indirection) {
-        case IR::Indirection::None: {
-            ASSERT(offset == 0);
-            ASSERT(ov.chosen_id);
-            val.value_type = ValueType::Register;
-            val.reg = X64::R{ ov.register_id };
+struct Selector {
+  ViewArr<const ActualTemporary> local_actual_values;
+  ViewArr<const X64::R> intermediates;
 
-            return val;
-          }
-        case IR::Indirection::Reference: {
-            val.value_type = ValueType::Address;
-            ASSERT(temp.type.struct_format() == IR::Format::uint64);
+  u32 intermediates_counter = 0;
 
-            ASSERT(offset == 0);
+  u8 base_ptr_reg;
 
-            LazyValue refers_to = get_lazy_val(program, temp.refers_to, temp.refers_to_offset);
+  ViewArr<const IR::SSATemp> local_temporaries;
 
+  X64::R get_next_intermediate_reg() {
+    ASSERT(intermediates_counter < intermediates.size);
+    return intermediates.data[intermediates_counter++];
+  }
 
-            switch (refers_to.value_type) {
-              case ValueType::Register: {
-                  INVALID_CODE_PATH("Cannot refer to a register");//maybe temp
-                  break;
-                }
-              case ValueType::Memory: {
-                  ASSERT(!ov.needs_register);
+  X64Value get_val(const IR::V_ARG& v) const {
+    const u32 u = v.val.index;
 
-                  MemoryView& view = val.mem;
-                  view = refers_to.mem;
+    ASSERT(u < local_temporaries.size);
+    const IR::SSATemp& temp = local_temporaries.data[u];
 
-                  break;
-                }
-              case ValueType::Address: {
-                  ASSERT(ov.needs_register);
-                  ASSERT(ov.chosen_id);
-                  u8 reg = ov.register_id;
+    const ActualTemporary& a_temp = local_actual_values.data[u];
 
-                  Helpers::copy_address_to_reg(program, refers_to.mem, X64::R{reg});
+    if (a_temp.is_register) {
+      ASSERT(v.offset == 0);
+      ASSERT(temp.type.size() <= 8);
+      ASSERT(!temp.requirements.has_address());
 
-                  MemoryView& view = val.mem;
-                  //Trust!
-                  view.known_alignment = temp.type.structure->alignment;
-                  view.rm = X64::memory_rm(reg, static_cast<i32>(offset));
-                  view.size = temp.type.size();
-
-                  break;
-                }
-            }
-
-            return val;
-          }
-        case IR::Indirection::Dereference: {
-            val.value_type = ValueType::Memory;
-
-            LazyValue refers_to = get_lazy_val(program, temp.refers_to, temp.refers_to_offset);
-
-
-            switch (refers_to.value_type) {
-              case ValueType::Register: {
-                  ASSERT(!ov.needs_register);
-
-                  MemoryView& view = val.mem;
-                  //Trust!
-                  view.known_alignment = temp.type.structure->alignment;
-                  view.rm = X64::memory_rm(refers_to.reg.r, static_cast<i32>(offset));
-                  view.size = temp.type.size();
-                  break;
-                }
-              case ValueType::Memory: {
-                  ASSERT(ov.needs_register);
-                  ASSERT(ov.chosen_id);
-
-                  u8 reg = ov.register_id;
-                  Helpers::copy_mem_to_reg(program, refers_to.mem, IR::Format::uint64, X64::R{reg}, IR::Format::uint64);
-
-                  MemoryView& view = val.mem;
-                  //Trust!
-                  view.known_alignment = temp.type.structure->alignment;
-                  view.rm = X64::memory_rm(reg, static_cast<i32>(offset));
-                  view.size = temp.type.size();
-
-                  break;
-                }
-              case ValueType::Address: {
-                  ASSERT(!ov.needs_register);
-
-                  val.mem = refers_to.mem;
-                  break;
-                }
-            }
-
-
-
-            return val;
-          }
-      }
+      X64Value val = {};
+      val.value_type = ValueType::Register;
+      val.t = temp.type;
+      val.reg = a_temp.reg_id;
+      return val;
     }
     else {
-      const IR::Variable& var = variables[index];
+      MemoryView view = {};
+      view.rm = X64::memory_rm(base_ptr_reg, (-static_cast<i32>(a_temp.stack_offset)) + static_cast<i32>(v.offset));
+      view.size = temp.type.size();
+      view.known_alignment = temp.type.structure->alignment;
 
-      u32 memory_offset = variable_memory_locations[index];
-
+      X64Value val = {};
       val.value_type = ValueType::Memory;
-      MemoryView& view = val.mem;
-      view.known_alignment = var.type.structure->alignment;
-      view.rm = X64::memory_rm(convention->base_pointer_reg, -static_cast<i32>(memory_offset));
-      view.size = var.type.size();
+      val.t = temp.type;
+      val.mem = view;
 
       return val;
     }
-
-    INVALID_CODE_PATH("Didnt handle a lazy val case");
-    return val;
-  }
-
-  MemoryView get_variable_mem(usize index) {
-    const IR::Variable& var = variables[index];
-    i32 memory_offset = variable_memory_locations[index];
-
-    ASSERT(memory_offset % var.type.structure->alignment == 0);
-
-    MemoryView view;
-    view.known_alignment = var.type.structure->alignment;
-    view.rm = X64::memory_rm(convention->base_pointer_reg, -memory_offset);
-    view.size = var.type.size();
-
-    return view;
-  }
-
-  MemoryView get_variable_mem(IR::ValueIndex i, u32 offset, IR::Format format) {
-    ASSERT(i.is_variable());
-
-    usize index = i.index();
-
-    const IR::Variable& var = variables[index];
-    i32 memory_offset = variable_memory_locations[index];
-
-    MemoryView view;
-    view.known_alignment = (memory_offset + offset) % 8;
-    view.rm = X64::memory_rm(convention->base_pointer_reg, -memory_offset);
-    view.size = (u32)x64_types_info.get_size(format);
-
-    return view;
   }
 };
 
@@ -3873,7 +4036,378 @@ void x64_emit_start(CompilerGlobals* comp,
   }
 
   program->start_code.code_size = program->code_store.total_size - program->start_code.code_start;
+}
 
+struct VariableResolver {
+  ViewArr<const IR::ControlBlock> blocks;
+  ViewArr<const IR::SSAVar> variables;
+
+  const CallingConvention* this_convention;
+
+  ViewArr<RegisterMapping> temporary_mappings;
+};
+
+bool set_parent_intersects(const VariableResolver& resolver, u32 known, BitArray& intersects, const Array<IR::LocalLabel>& current_visit_stack) {
+  bool crosses_call = false;
+
+  usize l = known;
+  for (; l < current_visit_stack.size - 1; ++l) {
+    const auto label = current_visit_stack.data[l];
+    ASSERT(label != IR::NULL_LOCAL_LABEL);
+    ASSERT(label.label - 1 < intersects.length);
+
+    crosses_call = crosses_call || resolver.blocks.data[label.label - 1].calls;
+
+    intersects.set(label.label - 1);
+  }
+
+  return crosses_call;
+}
+
+struct CaptureVisitBranch {
+  IR::LocalLabel next;
+  u32 stack_height;
+};
+
+struct VarVerPair {
+  u32 var;
+  u32 version;
+};
+
+struct VersionMapping {
+  bool crosses_call = false;
+  bool known_reg = false;
+  u8 reg = 0;
+  union {
+    u32 expr_id;//Inside Block
+    u32 reg_bitmask;//Crossing Blocks
+  };
+};
+
+
+static VersionMapping trace_version(const VariableResolver& resolver,
+                                     const VarVerPair& val,
+                                     Array<CaptureVisitBranch>& visit_branches,
+                                     Array<IR::LocalLabel>& current_visit_stack,
+                                     BitArray& visited,
+                                     BitArray& intersects) {
+  u32 know_visited = 0;
+
+  VersionMapping mapping = {};
+  mapping.crosses_call = false;
+  mapping.known_reg = false;
+  mapping.reg = 0;
+  mapping.reg_bitmask = 0;
+
+
+  while (current_visit_stack.size > 0) {
+    const IR::LocalLabel bl = *current_visit_stack.back();
+    ASSERT(bl != IR::NULL_LOCAL_LABEL);
+    ASSERT(bl.label - 1 < resolver.blocks.size);
+    const u32 b = bl.label - 1;
+
+    if (visited.test(b)) {
+      goto BRANCH_END;
+    }
+
+    visited.set(b);
+
+    {
+      const IR::ControlBlock& block = resolver.blocks.data[b];
+
+      {
+        FOR(block.enter_merge, it) {
+          if (it->variable == val.var && (it->in_versions[0] == val.version || it->in_versions[1] == val.version)) {
+            intersects.set(b);
+            goto BRANCH_END;
+          }
+        }
+      }
+
+      {
+        FOR(block.exports, it) {
+          if (it->variable == val.var && it->version != val.version) {
+            const auto& map = resolver.temporary_mappings.data[it->out_temp.index];
+            ASSERT(!map.known_reg);
+            mapping.reg_bitmask |= map.reg_bitmask;
+            mapping.crosses_call = mapping.crosses_call || map.crosses_call;
+
+            intersects.set(b);
+            goto BRANCH_END;
+          }
+        }
+      }
+
+      {
+        FOR(block.imports, it) {
+          if (it->variable == val.var && it->version == val.version) {
+            const auto& map = resolver.temporary_mappings.data[it->in_temp.index];
+            ASSERT(!map.known_reg);
+            mapping.reg_bitmask |= map.reg_bitmask;
+            mapping.crosses_call = mapping.crosses_call || map.crosses_call;
+
+            intersects.set(b);
+            bool stack_crossed_call = set_parent_intersects(resolver, know_visited, intersects, current_visit_stack);
+            mapping.crosses_call = mapping.crosses_call || stack_crossed_call;
+
+            know_visited = (u32)current_visit_stack.size;
+          }
+        }
+      }
+
+      switch (block.cf_type) {
+        case IR::ControlFlowType::Start: {
+            current_visit_stack.insert(block.cf_start.child);
+            continue;
+          }
+
+        case IR::ControlFlowType::Return:
+        case IR::ControlFlowType::End: {
+            break;
+          }
+
+        case IR::ControlFlowType::Inline: {
+            current_visit_stack.insert(block.cf_inline.child);
+            continue;
+          }
+        case IR::ControlFlowType::Merge: {
+            current_visit_stack.insert(block.cf_inline.child);
+            continue;
+          }
+
+        case IR::ControlFlowType::Split: {
+            visit_branches.insert(CaptureVisitBranch{ block.cf_split.false_branch, (u32)current_visit_stack.size });
+            current_visit_stack.insert(block.cf_split.true_branch);
+            continue;
+          }
+      }
+    }
+
+  BRANCH_END:
+    //Already been down this path
+    if (intersects.test(b)) {
+      //and the value is used in all of these
+      bool stack_crossed_call = set_parent_intersects(resolver, know_visited, intersects, current_visit_stack);
+      mapping.crosses_call = mapping.crosses_call || stack_crossed_call;
+      know_visited = (u32)current_visit_stack.size;
+    }
+
+    if (visit_branches.size == 0) break;//we are done
+
+    const auto& branch = *visit_branches.back();
+    ASSERT(branch.stack_height <= current_visit_stack.size);
+
+    if (know_visited > branch.stack_height) know_visited = branch.stack_height;
+
+    current_visit_stack.pop_n(current_visit_stack.size - branch.stack_height);
+    current_visit_stack.insert(branch.next);
+
+    visit_branches.pop();
+  }
+
+  return mapping;
+}
+
+struct VariableVersionMap {
+  bool memory;
+  u32 versions_start;
+  u32 num_versions;
+};
+
+struct VariableMappings {
+  OwnedArr<VariableVersionMap> variable_versions;
+  OwnedArr<VersionMapping> version_reg_map;
+};
+
+VariableMappings resolve_variables(const VariableResolver& resolver) {
+  OwnedArr<VariableVersionMap> variables = new_arr<VariableVersionMap>(resolver.variables.size);
+
+  struct VariableVersionInt {
+    BitArray intersects = {};
+  };
+
+  u32 total_versions = 0;
+  for (u32 i = 0; i < variables.size; ++i) {
+    const IR::SSAVar& v = resolver.variables.data[i];
+    ASSERT(v.versions > 0);
+    
+    if (v.requirements.has_address() || v.type.size() > 8) {
+      variables.data[i].memory = true;
+      continue;
+    }
+
+    VariableVersionMap& v_map = variables.data[i];
+    v_map.versions_start = total_versions;
+    v_map.num_versions = v.versions;
+
+    total_versions += v.versions;
+  }
+
+  OwnedArr version_intersects = new_arr<VariableVersionInt>(resolver.variables.size);
+  OwnedArr variable_mappings = new_arr<VersionMapping>(total_versions);
+
+  const u32 num_blocks = (u32)resolver.blocks.size;
+
+  {
+    Array<CaptureVisitBranch> visit_branches;
+    Array<IR::LocalLabel> current_visit_stack;
+    BitArray visited = BitArray(num_blocks);
+    //DFS since we need to save how we got there
+
+    for (u32 a = 0; a < num_blocks; ++a) {
+
+      current_visit_stack.insert(IR::LocalLabel{ a + 1 });//reaches self
+
+      const IR::ControlBlock& root = resolver.blocks.data[a];
+
+      FOR(root.exports, exps) {
+        ASSERT(exps->variable < variables.size);
+        const VariableVersionMap& map = variables.data[exps->variable];
+
+        if (map.memory) continue;//no need to worry about these ones
+
+        ASSERT(exps->version < map.num_versions);
+        ASSERT(map.versions_start + exps->version < version_intersects.size);
+
+        u32 version_index = map.versions_start + exps->version;
+        VariableVersionInt& intersects = version_intersects.data[version_index];
+
+        ASSERT(intersects.intersects.data == nullptr);
+        intersects.intersects = BitArray(num_blocks);
+        BitArray& i_bitmask = intersects.intersects;
+
+        VarVerPair find = {};
+        find.var = exps->variable;
+        find.version = exps->version;
+
+        visited.clear();
+        visit_branches.clear();
+        current_visit_stack.clear();
+
+        current_visit_stack.insert(root.label);
+
+        variable_mappings.data[version_index] = trace_version(resolver, find, visit_branches, current_visit_stack, visited, i_bitmask);
+      }
+    }
+  }
+
+  Array<LifetimeEdge> edges;
+
+  for (u32 a = 0; a < version_intersects.size; ++a) {
+    const auto& a_range = version_intersects.data[a].intersects;
+    if (a_range.data == nullptr) continue;
+
+    for (u32 b = 0; b < version_intersects.size; ++b) {
+      if (a == b) continue;
+      const auto& b_range = version_intersects.data[b].intersects;
+      if (b_range.data == nullptr) continue;
+
+
+      if (a_range.intersects(b_range)) {
+        edges.insert({ a, b });
+      }
+    }
+  }
+
+  u32 used_registers = 0;
+
+  {
+    const CallingConvention* convention = resolver.this_convention;
+
+    const usize number_of_registers = (usize)convention->num_volatile_registers
+      + (usize)convention->num_non_volatile_registers;
+
+    const LifetimeEdge* edge_i = edges.begin();
+    const LifetimeEdge* edge_end = edges.end();
+
+    for (u32 i = 0; i < version_intersects.size; ++i) {
+      auto& v = variable_mappings.data[i];
+
+      u32 used_regs = v.reg_bitmask;
+
+      ASSERT(edge_i == edge_end || edge_i->a == i);
+
+      while (edge_i < edge_end && edge_i->a == i) {
+        ASSERT(edge_i->b < variable_mappings.size);
+        const auto& b = variable_mappings.data[edge_i->b];
+
+        if (b.known_reg) {
+          ASSERT(b.reg < 32);
+          used_regs |= 1u << (u32)b.reg;
+        }
+
+        edge_i += 1;
+      }
+
+      u32 reg_index = 0;
+      if (v.crosses_call) {
+        reg_index = convention->num_volatile_registers;
+      }
+
+      for (; reg_index < number_of_registers; ++reg_index) {
+        u8 r = convention->all_regs_unordered[reg_index];
+        ASSERT(r < 32);
+        if ((used_regs & (1u << r)) == 0) {
+          break;
+        }
+      }
+
+      //TODO: spill registers to variables
+      ASSERT(reg_index < number_of_registers);
+
+      auto reg_id = convention->all_regs_unordered[reg_index];
+
+      used_registers |= (1llu << reg_id);
+
+      v.known_reg = true;
+      v.reg = reg_id;
+    }
+  }
+
+  return VariableMappings{
+    std::move(variables),
+    std::move(variable_mappings)
+  };
+}
+
+void emit_merges(X64::Program* program, const VariableMappings& var_mappings,
+                 const ViewArr<const IR::SSAVar>& ir_variables,
+                 u32 from_index, const ViewArr<const IR::BlockMerge>& merges) {
+  ASSERT(from_index < 2);
+
+  FOR(merges, it) {
+    ASSERT(it->variable < var_mappings.variable_versions.size);
+    const auto& var_versions = var_mappings.variable_versions.data[it->variable];
+
+    if (var_versions.memory) continue;
+
+    ASSERT(it->variable < ir_variables.size);
+    const auto& var = ir_variables.data[it->variable];
+
+    const u32 from_version = it->in_versions[from_index];
+    const auto from_index = var_versions.versions_start + from_version;
+    ASSERT(from_index < var_mappings.version_reg_map.size);
+    const auto to_index = var_versions.versions_start + it->out_version;
+    ASSERT(to_index < var_mappings.version_reg_map.size);
+
+    const auto& v0 = var_mappings.version_reg_map.data[from_index];
+    const auto& v1 = var_mappings.version_reg_map.data[to_index];
+
+    ASSERT(v0.known_reg);
+    ASSERT(v1.known_reg);
+
+    const IR::Format format = var.type.struct_format();
+    Helpers::copy_reg_to_reg(program, X64::R{v0.reg}, format, X64::R{v1.reg}, format);
+  }
+}
+
+static MemoryView pointer_view(X64::R pointer, const Type& base) {
+  MemoryView view = {};
+  view.rm = X64::memory_rm(pointer.r, 0);
+  view.known_alignment = base.structure->alignment;
+  view.size = base.size();
+
+  return view;
 }
 
 void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const IR::Builder* ir, const CallingConvention* convention,
@@ -3881,7 +4415,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
   TRACING_FUNCTION();
 
   ASSERT(ir->global_label != IR::NULL_GLOBAL_LABEL);
-  ASSERT(ir->block_counter != IR::NULL_LOCAL_LABEL);//means we did nothing
+  ASSERT(ir->control_blocks.size > 0);//means we did nothing
 
   X64::Program* program = static_cast<X64::Program*>(program_in);
 
@@ -3890,56 +4424,87 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
   Array<X64::JumpRelocation> jump_relocations = {};
 
-  IR::LocalLabel ret_label = { ir->block_counter.label + 1 };
+  IR::LocalLabel ret_label = { static_cast<u32>(ir->control_blocks.size) + 1 };
 
   OwnedArr local_label_real_offsets = new_arr<u32>(ret_label.label);
+
+  u64 total_temporaries = 0;
+  FOR(ir->control_blocks, b) {
+    total_temporaries += b->temporaries.size;
+  }
 
   bool calls = false;
   u32 call_space_used = 0;
   u64 used_registers = 0;
 
-  Array<Selector> selectors = {};
-  FOR(ir->expression_frames, e) {
-    const u8* const bc_start = ir->ir_bytecode.begin() + e->bytecode_start;
-    const u8* const bc_end = bc_start + e->bytecode_count;
+  Array<X64::R> intermediates = {};
+  OwnedArr<RegisterMapping> temporary_mappings = new_arr<RegisterMapping>(total_temporaries);
 
-    RegisterResolver resolver = {};
-    resolver.sig_struct = ir->signature;
-    resolver.this_convention = convention;
-    resolver.bytecode_start = bc_start;
-    resolver.bytecode_end = bc_end;
+  //Resolve the temporaries first
+  {
+    u64 temporaries_counter = 0;
 
-    resolver.temporaries = ir->temporaries.begin() + e->temporary_start;
-    resolver.temporaries_offset = e->temporary_start;
-    resolver.num_temporaries = e->temporary_count;
+    for (u32 i = 0; i < ir->control_blocks.size; ++i) {
+      const IR::ControlBlock* b = ir->control_blocks.data + i;
 
-    Array<OrderedValue> ordered_values = resolve_values(comp, comp_thread, &resolver, convention);
-    if (comp_thread->is_panic()) {
-      return;
+      const u8* const bc_start = b->bytecode.begin();
+      const u8* const bc_end = b->bytecode.end();
+
+      RegisterResolver resolver = {};
+      resolver.current_block = b;
+      resolver.sig_struct = ir->signature;
+      resolver.this_convention = convention;
+      resolver.bytecode_start = bc_start;
+      resolver.bytecode_end = bc_end;
+
+      resolver.local_temporaries = const_view_arr(b->temporaries);
+      resolver.imports = const_view_arr(b->imports);
+      resolver.exports = const_view_arr(b->exports);
+      resolver.merges = const_view_arr(b->enter_merge);
+      resolver.globals_used = const_view_arr(ir->globals_used);
+
+      resolver.to_map = view_arr(temporary_mappings, temporaries_counter, b->temporaries.size);
+
+      auto mappings = resolve_values(comp, comp_thread, &resolver, convention);
+      if (comp_thread->is_panic()) {
+        return;
+      }
+
+      temporaries_counter += b->temporaries.size;
+
+      if (resolver.has_called) {
+        calls = resolver.has_called;
+      }
+
+      if (call_space_used < mappings.call_space_needed) {
+        call_space_used = mappings.call_space_needed;
+      }
+
+      used_registers |= mappings.used_registers;
+
+      intermediates.reserve_extra(mappings.intermediates.size);
+      for (usize in = 0; in < mappings.intermediates.size; ++in) {
+        const auto& v = mappings.intermediates.data[in];
+        ASSERT(v.known_reg);
+        intermediates.insert(X64::R{v.reg});
+      }
     }
 
-    if (resolver.has_called) {
-      calls = resolver.has_called;
-    }
-
-    if (call_space_used < resolver.call_space_needed) {
-      call_space_used = resolver.call_space_needed;
-    }
-
-    used_registers |= resolver.used_registers;
-
-    selectors.insert_uninit(1);
-    Selector* selector = selectors.back();
-    selector->variables = ir->variables.data;
-    selector->temporaries = ir->temporaries.data;
-    selector->temporary_start = e->temporary_start;
-    selector->ordered_values = bake_const_arr(std::move(ordered_values));
-    selector->variable_memory_locations = variables_memory_location.data;
-    selector->convention = convention;
-
-    selector->ordered_intermediates_start = e->temporary_count;
+    ASSERT(temporaries_counter == total_temporaries);
   }
 
+  //Then resolve the variables
+
+  VariableResolver var_resolver = {};
+  var_resolver.blocks = const_view_arr(ir->control_blocks);
+  var_resolver.variables = const_view_arr(ir->variables);
+  var_resolver.this_convention = convention;
+
+  var_resolver.temporary_mappings = view_arr(temporary_mappings);
+
+  const auto var_mappings = resolve_variables(var_resolver);
+
+  //Then start emitting code
   Backend::FunctionMetadata func = {};
   func.code_start = program->code_store.current_location().actual_location;
 
@@ -3954,316 +4519,559 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
   }
 
 
-  const SignatureStructure* sig = ir->signature;
-  const bool needs_stack = (num_registers_to_save > 0) || ir->variables.size > 0 || calls;
+  const u32 register_save_space = 8 * num_registers_to_save;
+  u32 stack_top = register_save_space;//will remove this size from the actual count, here for alignment reasons
 
-  u32 stack_top = 0;
-  if (needs_stack) {
-    //will remove this from the actual count, here for alignment reasons
-    stack_top += 8 * num_registers_to_save;
+  OwnedArr<ActualTemporary> values = new_arr<ActualTemporary>(temporary_mappings.size);
 
-    usize v = 0;
-    {
-      const i32 params_offset = -16 - static_cast<i32>(8 * num_registers_to_save);
-      u32 param_top = 0;
-      for (; v < sig->parameter_types.size; ++v) {
-        const IR::Variable& var = ir->variables.data[v];
-        if (v < convention->num_parameter_registers) {
-          const u32 new_top = ceil_to_n(param_top, var.type.structure->alignment);
+  {
+    OwnedArr<u32> variables_offsets = new_arr<u32>(ir->variables.size);
 
-          if (convention->shadow_space_size >= new_top + var.type.size()) {
-            //can store this in the shadow space
-            param_top = new_top;
-            variables_memory_location.data[v] = params_offset - static_cast<i32>(param_top);
-            param_top += var.type.size();
-            ASSERT(param_top <= convention->shadow_space_size);
-          }
-          else {
-            //cannot - do normal store
-            stack_top = ceil_to_n(stack_top, var.type.structure->alignment);
-            stack_top += var.type.size();
-            variables_memory_location.data[v] = static_cast<i32>(stack_top);
-          }
-        }
-        else {
-          param_top = ceil_to_n(param_top, var.type.structure->alignment);
-          ASSERT(param_top >= convention->shadow_space_size);
-          variables_memory_location.data[v] = params_offset - static_cast<i32>(param_top);
-          param_top += var.type.size();
-        }
+    for(u32 i = 0; i < ir->variables.size; ++i) {
+      const auto& v = ir->variables.data[i];
+      if (v.type.size() > 8 || v.requirements.has_address()) {
+        ASSERT(var_mappings.variable_versions.data[i].memory);
+        stack_top = ceil_to_n(stack_top, v.type.structure->alignment);
+        stack_top += v.type.size();
+        variables_offsets.data[i] = stack_top;
+      }
+      else {
+        ASSERT(!var_mappings.variable_versions.data[i].memory);
       }
     }
 
-    for (; v < ir->variables.size; ++v) {
-      const IR::Variable& var = ir->variables.data[v];
-      stack_top = ceil_to_n(stack_top, var.type.structure->alignment);
-      stack_top += var.type.size();
-      variables_memory_location.data[v] = static_cast<i32>(stack_top);
+    const u32 basic_stack_size = stack_top;
+    u64 temporary_counter = 0;
+
+    FOR(ir->control_blocks, blck) {
+      u32 block_stack = basic_stack_size;
+
+      for (u32 i = 0; i < blck->temporaries.size; ++i) {
+        const auto& mapping = temporary_mappings.data[i + temporary_counter];
+        auto& actual = values.data[i + temporary_counter];
+
+        if (mapping.map_type == MapType::Internal) {
+          ASSERT(mapping.known_reg);
+          actual.is_register = true;
+          actual.reg_id = X64::R{ mapping.reg };
+        }
+        else if(mapping.map_type == MapType::InternalNoMap) {
+          actual.is_register = false;
+          const IR::SSATemp& t = blck->temporaries.data[i];
+
+          block_stack = ceil_to_n(stack_top, t.type.structure->alignment);
+          block_stack += t.type.size();
+          actual.stack_offset = block_stack;
+        }
+      }
+
+      //Map all the imports
+      FOR(blck->imports, i) {
+        const VariableVersionMap& map = var_mappings.variable_versions.data[i->variable];
+        auto& actual = values.data[i->in_temp.index + temporary_counter];
+
+        if (map.memory) {
+          actual.is_register = false;
+          actual.stack_offset = variables_offsets.data[i->variable];
+          continue;
+        }
+
+        ASSERT(i->version < map.num_versions);
+        ASSERT(map.versions_start + i->version < var_mappings.version_reg_map.size);
+
+        u32 version_index = map.versions_start + i->version;
+
+        ASSERT(i->in_temp.index + temporary_counter < temporary_mappings.size);
+
+        ASSERT(var_mappings.version_reg_map.data[version_index].known_reg);
+        u8 reg = var_mappings.version_reg_map.data[version_index].reg;
+
+        actual.is_register = true;
+        actual.reg_id = X64::R{ reg };
+      }
+
+      //Map all the exports
+      FOR(blck->exports, e) {
+        const VariableVersionMap& map = var_mappings.variable_versions.data[e->variable];
+        auto& actual = values.data[e->out_temp.index + temporary_counter];
+
+        if (map.memory) {
+          actual.is_register = false;
+          actual.stack_offset = variables_offsets.data[e->variable];
+          continue;
+        }
+
+        ASSERT(e->version < map.num_versions);
+        ASSERT(map.versions_start + e->version < var_mappings.version_reg_map.size);
+
+        u32 version_index = map.versions_start + e->version;
+
+        ASSERT(e->out_temp.index + temporary_counter < temporary_mappings.size);
+
+        ASSERT(var_mappings.version_reg_map.data[version_index].known_reg);
+        u8 reg = var_mappings.version_reg_map.data[version_index].reg;
+
+        actual.is_register = true;
+        actual.reg_id = X64::R{ reg };
+      }
+
+      if (block_stack > stack_top) stack_top = block_stack;
+
+      temporary_counter += blck->temporaries.size;
     }
 
+    ASSERT(temporary_counter == total_temporaries);
 
     stack_top = ceil_to_8(stack_top);
     if (calls) {
       stack_top += call_space_used;
       stack_top = ceil_to_n<u32>(stack_top, 16);//align to call alignment
     }
-
-    //remove this from the actual count
-    stack_top -= 8 * num_registers_to_save;
   }
 
-  Selector* selector_i = selectors.mut_begin();
-  Selector* selector = nullptr;
+  stack_top -= register_save_space;
 
-  /*FOR(ir->expression_frames, e) {
-    Selector& selector = *selector_i;
-    selector_i += 1;
+  Selector selector = {};
+  selector.intermediates = const_view_arr(intermediates);
+  selector.intermediates_counter = 0;
+  selector.base_ptr_reg = convention->base_pointer_reg;
 
-    const u8* const bc_start = ir->ir_bytecode.begin() + e->bytecode_start;
-    const u8* const bc_end = bc_start + e->bytecode_count;
+  u64 temporaries_counter = 0;
 
-    if (blocks < blocks_end) {
-      if (blocks->start == e->bytecode_start) {
-        u32 relative = relative_offset(func.code_start, program->code_store.total_size);
-        local_label_real_offsets.data[blocks->label.label - 1] = relative;
-        blocks += 1;
-        while (blocks < blocks_end && blocks->size == 0) {
-          blocks += 1;
-        }
+  FOR(ir->control_blocks, blck) {
+    ASSERT(blck->bytecode.size > 0);
 
-      }
-      else {
-        ASSERT(e->bytecode_start < blocks->start);
-      }
-    }*/
+    selector.local_actual_values = const_view_arr(values, temporaries_counter, blck->temporaries.size);
+    temporaries_counter += blck->temporaries.size;
 
-  const IR::ControlBlock* blocks = ir->control_blocks.begin();
-  const IR::ControlBlock* blocks_end = ir->control_blocks.end();
-  while (blocks < blocks_end && blocks->size == 0) {
-    blocks += 1;
-  }
+    selector.local_temporaries = const_view_arr(blck->temporaries);
 
-  const IR::ExpressionFrame* expressions_i = ir->expression_frames.begin();
-  const IR::ExpressionFrame* expressions_end = ir->expression_frames.end();
+    const u8* bc = blck->bytecode.begin();
+    const u8* const bc_end = blck->bytecode.end();
 
-  const u8* bc_start = ir->ir_bytecode.begin();
-  const u8* bc = bc_start;
-  const u8* bc_end = ir->ir_bytecode.end();
-
-  while (bc < bc_end) {
-    const usize expression_id = bc - bc_start;
-
-    if (blocks < blocks_end) {
-      if (blocks->start == expression_id) {
-        u32 relative = relative_offset(func.code_start, program->code_store.total_size);
-        local_label_real_offsets.data[blocks->label.label - 1] = relative;
-        do {
-          blocks += 1;
-        } while (blocks < blocks_end && blocks->size == 0);
-      }
+    {
+      u32 relative = relative_offset(func.code_start, program->code_store.total_size);
+      local_label_real_offsets.data[blck->label.label - 1] = relative;
     }
 
-    if (expressions_i < expressions_end) {
-      if (expressions_i->bytecode_start == expression_id) {
-        selector = selector_i;
-        selector_i += 1;
-      }
-    }
+    while (bc < bc_end) {
+      u8 op_byte = *bc;
+      IR::OpCode op = static_cast<IR::OpCode>(op_byte);
 
-    u8 op_byte = *bc;
-    IR::OpCode op = static_cast<IR::OpCode>(op_byte);
+      switch (op) {
+        case IR::OpCode::BreakPoint: {
+            IR::Types::BreakPoint bp;
+            bc = IR::Read::BreakPoint(bc, bc_end, bp);
 
-    switch (op) {
-      case IR::OpCode::Set: {
-          ASSERT(selector != nullptr);
+            //TODO: do breakpoints
 
-          IR::Types::Set set;
-          bc = IR::Read::Set(bc, bc_end, set);
-
-          LazyValue to = selector->get_lazy_val(program, set.to, set.t_offset);
-
-          switch (to.value_type) {
-            case ValueType::Register: {
-                Helpers::load_const_to_reg(program, to.reg, set.data, set.t_format);
-                break;
-              }
-            case ValueType::Memory: {
-                if (set.t_format == IR::Format::opaque) {
-                  Helpers::load_const_to_mem_opaque(program, to.mem, set.data);
-                }
-                else {
-                  Helpers::load_const_to_mem(program, to.mem, set.data, set.t_format);
-                }
-                break;
-              }
-            case ValueType::Address: {
-                comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Cannot assign to an reference value type");
-                return;
-              }
+            break;
           }
+        case IR::OpCode::Set: {
+            IR::Types::Set set;
+            bc = IR::Read::Set(bc, bc_end, set);
 
-          break;
-        }
-      case IR::OpCode::CopyCast: {
-          ASSERT(selector != nullptr);
+            X64Value to = selector.get_val(set.to);
+            ASSERT(to.t.size() == set.data.size);
 
-          IR::Types::CopyCast copy;
-          bc = IR::Read::CopyCast(bc, bc_end, copy);
+            ASSERT(to.t.struct_format() != IR::Format::opaque);
 
-          LazyValue from = selector->get_lazy_val(program, copy.from, copy.f_offset);
-          LazyValue to = selector->get_lazy_val(program, copy.to, copy.t_offset);
-
-          switch (to.value_type) {
-            case ValueType::Address: {
-                comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Cannot assign to an reference value type");
-                return;
-              }
-            case ValueType::Register: {
-                switch (from.value_type) {
-                  case ValueType::Register: {
-                      Helpers::copy_reg_to_reg(program,
-                                               from.reg, copy.f_format,
-                                               to.reg, copy.t_format);
-                      break;
-                    }
-                  case ValueType::Address: {
-                      ASSERT(copy.f_format == IR::Format::uint64);
-                      ASSERT(copy.t_format == IR::Format::uint64);
-
-                      Helpers::copy_address_to_reg(program, from.mem, to.reg);
-                      break;
-                    }
-                  case ValueType::Memory: {
-                      Helpers::copy_mem_to_reg(program,
-                                               from.mem, copy.f_format,
-                                               to.reg, copy.t_format);
-                      break;
-                    }
+            switch (to.value_type) {
+              case ValueType::Register: {
+                  Helpers::load_const_to_reg(program, to.t.struct_format(), to.reg, set.data);
+                  break;
                 }
-                break;
-              }
-            case ValueType::Memory: {
-                switch (from.value_type) {
-                  case ValueType::Register: {
-                      Helpers::copy_reg_to_mem(program,
-                                               from.reg, copy.f_format,
-                                               to.mem, copy.t_format);
-                      break;
-                    }
-                  case ValueType::Address: {
-                      ASSERT(copy.f_format == IR::Format::uint64);
-                      ASSERT(copy.t_format == IR::Format::uint64);
-                      X64::R temp = selector->get_next_intermediate_reg();
-
-                      Helpers::copy_address_to_reg(program, from.mem, temp);
-                      Helpers::copy_reg_to_mem(program, temp, copy.f_format, to.mem, copy.t_format);
-                      break;
-                    }
-                  case ValueType::Memory: {
-                      X64::R temp = selector->get_next_intermediate_reg();
-
-                      Helpers::copy_mem_to_mem_small(program,
-                                                     from.mem, copy.f_format,
-                                                     to.mem, copy.t_format,
-                                                     temp);
-                      break;
-                    }
+              case ValueType::Memory: {
+                  Helpers::load_const_to_mem(program, to.t.struct_format(), to.mem, set.data);
+                  break;
                 }
-                break;
-              }
-          }
-
-          break;
-        }
-      case IR::OpCode::GlobalAddress: {
-          ASSERT(selector != nullptr);
-
-          IR::Types::GlobalAddress addr;
-          bc = IR::Read::GlobalAddress(bc, bc_end, addr);
-
-          IR::GlobalReference global_r = ir->globals_used.data[addr.im32];
-
-          INVALID_CODE_PATH("Temporarily unavailable");
-
-#if 0
-          ASSERT(addr.val.is_temporary());
-          {
-            usize relative = addr.val.index() - (usize)selector.temporary_start;
-
-            const OrderedValue& ov = selector.ordered_values[relative];
-            const IR::Temporary& t = selector.temporaries[relative];
-
-            ASSERT(ov.chosen_id);
-
-            //Temporary always has a register
-            X64::R r = { ov.register_id };
-
-
-            {
-              X64::Instruction move = {};
-              //Move the memory location to r
-              X64::mov(move, X64::R64{r}, X64::IMM64{global_r.data_member});
-
-              Backend::GlobalReloc global_reloc = {};
-              global_reloc.location = program->code_store.total_size + X64::MOV_IM64_OFFSET;
-
-              program->global_relocs.insert(std::move(global_reloc));
-
-              X64::append_instruction(program, move);
             }
+
+            break;
           }
+        case IR::OpCode::SetStore: {
+            IR::Types::Set set;
+            bc = IR::Read::Set(bc, bc_end, set);
+
+            X64Value to = selector.get_val(set.to);
+
+            ASSERT(to.t.struct_type() == STRUCTURE_TYPE::POINTER);
+            const auto* pt = to.t.unchecked_base<PointerStructure>();
+            ASSERT(pt->base.size() == set.data.size);
+
+            switch (to.value_type) {
+              case ValueType::Register: {
+                  MemoryView view = pointer_view(to.reg, pt->base);
+
+                  Helpers::load_const_to_mem(program, pt->base.struct_format(), view, set.data);
+                  break;
+                }
+              case ValueType::Memory: {
+                  X64::R temp = selector.get_next_intermediate_reg();
+                  const auto ptr_format = to.t.struct_format();
+                  Helpers::copy_mem_to_reg(program, to.mem, ptr_format, temp, ptr_format);
+
+                  MemoryView view = pointer_view(temp, pt->base);
+
+                  Helpers::load_const_to_mem(program, pt->base.struct_format(), view, set.data);
+                  break;
+                }
+            }
+
+            break;
+          }
+        case IR::OpCode::Copy: {
+            IR::Types::Copy copy;
+            bc = IR::Read::Copy(bc, bc_end, copy);
+
+            X64Value from = selector.get_val(copy.from);
+            X64Value to = selector.get_val(copy.to);
+
+            switch (to.value_type) {
+              case ValueType::Register: {
+                  switch (from.value_type) {
+                    case ValueType::Register: {
+                        Helpers::copy_reg_to_reg(program,
+                                                 from.reg, from.t.struct_format(),
+                                                 to.reg, to.t.struct_format());
+                        break;
+                      }
+                    case ValueType::Memory: {
+                        Helpers::copy_mem_to_reg(program,
+                                                 from.mem, from.t.struct_format(),
+                                                 to.reg, to.t.struct_format());
+                        break;
+                      }
+                  }
+                  break;
+                }
+              case ValueType::Memory: {
+                  switch (from.value_type) {
+                    case ValueType::Register: {
+                        Helpers::copy_reg_to_mem(program,
+                                                 from.reg, from.t.struct_format(),
+                                                 to.mem, to.t.struct_format());
+                        break;
+                      }
+                    case ValueType::Memory: {
+                        X64::R temp = selector.get_next_intermediate_reg();
+
+                        Helpers::copy_mem_to_mem_small(program,
+                                                       from.mem, from.t.struct_format(),
+                                                       to.mem, to.t.struct_format(),
+                                                       temp);
+                        break;
+                      }
+                  }
+                  break;
+                }
+            }
+
+            break;
+          }
+        case IR::OpCode::CopyLoad: {
+            IR::Types::CopyLoad copy;
+            bc = IR::Read::CopyLoad(bc, bc_end, copy);
+
+            X64Value from = selector.get_val(copy.from);
+            ASSERT(from.t.struct_type() == STRUCTURE_TYPE::POINTER);
+            const auto* pt = from.t.unchecked_base<PointerStructure>();
+            const IR::Format from_ptr_format = from.t.struct_format();
+            const IR::Format from_format = pt->base.struct_format();
+
+            X64Value to = selector.get_val(copy.to);
+            const IR::Format to_format = to.t.struct_format();
+
+            switch (to.value_type) {
+              case ValueType::Register: {
+                  switch (from.value_type) {
+                    case ValueType::Register: {
+                        MemoryView view = pointer_view(from.reg, pt->base);
+
+                        Helpers::copy_mem_to_reg(program,
+                                                 view, from_format,
+                                                 to.reg, to_format);
+                        break;
+                      }
+                    case ValueType::Memory: {
+                        X64::R temp = selector.get_next_intermediate_reg();
+
+                        Helpers::copy_mem_to_reg(program, from.mem, from_ptr_format, temp, from_ptr_format);
+
+                        MemoryView view = pointer_view(temp, pt->base);
+
+                        Helpers::copy_mem_to_reg(program,
+                                                 view, from_format,
+                                                 to.reg, to_format);
+                        break;
+                      }
+                  }
+                  break;
+                }
+              case ValueType::Memory: {
+                  switch (from.value_type) {
+                    case ValueType::Register: {
+                        X64::R temp = selector.get_next_intermediate_reg();
+
+                        MemoryView view = pointer_view(from.reg, pt->base);
+
+                        Helpers::copy_mem_to_mem_small(program,
+                                                       view, from_format,
+                                                       to.mem, to_format,
+                                                       temp);
+                        break;
+                      }
+                    case ValueType::Memory: {
+                        X64::R temp_ptr = selector.get_next_intermediate_reg();
+
+                        Helpers::copy_mem_to_reg(program, from.mem, from_ptr_format, temp_ptr, from_ptr_format);
+                        MemoryView view = pointer_view(temp_ptr, pt->base);
+
+
+                        X64::R temp = selector.get_next_intermediate_reg();
+
+                        Helpers::copy_mem_to_mem_small(program,
+                                                       view, from_format,
+                                                       to.mem, to_format,
+                                                       temp);
+                        break;
+                      }
+                  }
+                  break;
+                }
+            }
+
+            break;
+          }
+        case IR::OpCode::CopyStore: {
+            IR::Types::CopyStore copy;
+            bc = IR::Read::CopyStore(bc, bc_end, copy);
+
+            X64Value from = selector.get_val(copy.from);
+            const IR::Format from_format = from.t.struct_format();
+
+            X64Value to = selector.get_val(copy.to);
+            ASSERT(to.t.struct_type() == STRUCTURE_TYPE::POINTER);
+            const auto* pt = to.t.unchecked_base<PointerStructure>();
+            const IR::Format to_ptr_format = to.t.struct_format();
+            const IR::Format to_format = pt->base.struct_format();
+
+            switch (to.value_type) {
+              case ValueType::Register: {
+                  switch (from.value_type) {
+                    case ValueType::Register: {
+                        MemoryView view = pointer_view(to.reg, pt->base);
+
+                        Helpers::copy_reg_to_mem(program,
+                                                 from.reg, from_format,
+                                                 view, to_format);
+                        break;
+                      }
+                    case ValueType::Memory: {
+                        MemoryView view = pointer_view(to.reg, pt->base);
+
+                        X64::R temp = selector.get_next_intermediate_reg();
+
+                        Helpers::copy_mem_to_mem_small(program,
+                                                       from.mem, from_format,
+                                                       view, to_format, temp);
+                        break;
+                      }
+                  }
+                  break;
+                }
+              case ValueType::Memory: {
+                  switch (from.value_type) {
+                    case ValueType::Register: {
+                        X64::R temp_ptr = selector.get_next_intermediate_reg();
+                        Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, temp_ptr, to_ptr_format);
+                        MemoryView view = pointer_view(temp_ptr, pt->base);
+
+                        Helpers::copy_reg_to_mem(program,
+                                                 from.reg, from_format,
+                                                 view, to_format);
+                        break;
+                      }
+                    case ValueType::Memory: {
+                        X64::R temp_ptr = selector.get_next_intermediate_reg();
+                        Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, temp_ptr, to_ptr_format);
+                        MemoryView view = pointer_view(temp_ptr, pt->base);
+
+                        X64::R temp = selector.get_next_intermediate_reg();
+
+                        Helpers::copy_mem_to_mem_small(program,
+                                                       from.mem, from_format,
+                                                       view, to_format,
+                                                       temp);
+                        break;
+                      }
+                  }
+                  break;
+                }
+            }
+
+            break;
+          }
+        case IR::OpCode::CopyLoadStore: {
+            IR::Types::CopyStore copy;
+            bc = IR::Read::CopyStore(bc, bc_end, copy);
+
+            X64Value from = selector.get_val(copy.from);
+            ASSERT(from.t.struct_type() == STRUCTURE_TYPE::POINTER);
+            const auto* pt_f = from.t.unchecked_base<PointerStructure>();
+            const IR::Format from_ptr_format = from.t.struct_format();
+            const IR::Format from_format = pt_f->base.struct_format();
+
+            X64Value to = selector.get_val(copy.to);
+            ASSERT(to.t.struct_type() == STRUCTURE_TYPE::POINTER);
+            const auto* pt_t = to.t.unchecked_base<PointerStructure>();
+            const IR::Format to_ptr_format = to.t.struct_format();
+            const IR::Format to_format = pt_t->base.struct_format();
+
+            X64::R temp = selector.get_next_intermediate_reg();
+
+            MemoryView from_mem = {};
+            switch (from.value_type) {
+              case ValueType::Register: {
+                  from_mem = pointer_view(from.reg, pt_f->base);
+                  break;
+                }
+              case ValueType::Memory: {
+                  X64::R temp = selector.get_next_intermediate_reg();
+                  Helpers::copy_mem_to_reg(program, from.mem, from_ptr_format, temp, from_ptr_format);
+                  from_mem = pointer_view(temp, pt_f->base);
+                  break;
+                }
+            }
+
+            MemoryView to_mem = {};
+            switch (to.value_type) {
+              case ValueType::Register: {
+                  to_mem = pointer_view(to.reg, pt_t->base);
+                  break;
+                }
+              case ValueType::Memory: {
+                  X64::R temp = selector.get_next_intermediate_reg();
+                  Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, temp, to_ptr_format);
+                  to_mem = pointer_view(temp, pt_t->base);
+                  break;
+                }
+            }
+
+            Helpers::copy_mem_to_mem_small(program,
+                                           from_mem, from_format,
+                                           to_mem, to_format, temp);
+            break;
+          }
+        case IR::OpCode::AddrOf: {
+            IR::Types::AddrOf addr;
+            bc = IR::Read::AddrOf(bc, bc_end, addr);
+
+            X64Value f = selector.get_val(addr.from);
+            X64Value t = selector.get_val(addr.to);
+            ASSERT(t.t.struct_format() == IR::Format::uint64);
+
+            ASSERT(f.value_type == ValueType::Memory);
+
+            switch (t.value_type) {
+              case ValueType::Register: {
+                  Helpers::copy_address_to_reg(program, f.mem, t.reg);
+                } break;
+              case ValueType::Memory: {
+                  X64::R temp = selector.get_next_intermediate_reg();
+                  Helpers::copy_address_to_reg(program, f.mem, temp);
+                  Helpers::copy_reg_to_mem(program, temp, IR::Format::uint64, t.mem, IR::Format::uint64);
+                } break;
+            }
+
+            break;
+          }
+        case IR::OpCode::AddrOfLoad: {
+            IR::Types::AddrOfLoad addr;
+            bc = IR::Read::AddrOfLoad(bc, bc_end, addr);
+
+            X64Value f = selector.get_val(addr.from);
+            ASSERT(f.t.struct_type() == STRUCTURE_TYPE::POINTER);
+            const auto* pt_f = f.t.unchecked_base<PointerStructure>();
+            const IR::Format from_ptr_format = f.t.struct_format();
+            const IR::Format from_format = pt_f->base.struct_format();
+
+            X64Value t = selector.get_val(addr.to);
+            ASSERT(t.t.struct_format() == IR::Format::uint64);
+
+            MemoryView from_mem = {};
+            switch (f.value_type) {
+              case ValueType::Register: {
+                  from_mem = pointer_view(f.reg, pt_f->base);
+                  break;
+                }
+              case ValueType::Memory: {
+                  X64::R temp = selector.get_next_intermediate_reg();
+                  Helpers::copy_mem_to_reg(program, f.mem, from_ptr_format, temp, from_ptr_format);
+                  from_mem = pointer_view(temp, pt_f->base);
+                  break;
+                }
+            }
+
+            switch (t.value_type) {
+              case ValueType::Register: {
+                  Helpers::copy_address_to_reg(program, f.mem, t.reg);
+                } break;
+              case ValueType::Memory: {
+                  X64::R temp = selector.get_next_intermediate_reg();
+                  Helpers::copy_address_to_reg(program, f.mem, temp);
+                  Helpers::copy_reg_to_mem(program, temp, IR::Format::uint64, t.mem, IR::Format::uint64);
+                } break;
+            }
+
+            break;
+          }
+        case IR::OpCode::AddrOfGlobal: {
+            IR::Types::AddrOfGlobal addr;
+            bc = IR::Read::AddrOfGlobal(bc, bc_end, addr);
+
+            IR::GlobalReference global_r = ir->globals_used.data[addr.im32];
+
+            X64Value g = selector.get_val(addr.val);
+            ASSERT(g.t.struct_format() == IR::Format::uint64);
+
+            INVALID_CODE_PATH("Temporarily unavailable");
+#if 0
+            ASSERT(addr.val.is_temporary());
+            {
+              usize relative = addr.val.index() - (usize)selector.temporary_start;
+
+              const OrderedValue& ov = selector.ordered_values[relative];
+              const IR::Temporary& t = selector.temporaries[relative];
+
+              ASSERT(ov.chosen_id);
+
+              //Temporary always has a register
+              X64::R r = { ov.register_id };
+
+
+              {
+                X64::Instruction move = {};
+                //Move the memory location to r
+                X64::mov(move, X64::R64{r}, X64::IMM64{global_r.data_member});
+
+                Backend::GlobalReloc global_reloc = {};
+                global_reloc.location = program->code_store.total_size + X64::MOV_IM64_OFFSET;
+
+                program->global_relocs.insert(std::move(global_reloc));
+
+                X64::append_instruction(program, move);
+              }
+            }
 #endif
 
-          break;
-        }
-      case IR::OpCode::Return: {
-          ASSERT(selector != nullptr);
-
-          IR::Types::Return ret;
-          bc = IR::Read::Return(bc, bc_end, ret);
-
-          ASSERT(ret.format != IR::Format::opaque);//temp
-          LazyValue from = selector->get_lazy_val(program, ret.val, ret.offset);
-
-          X64::R ret_reg = selector->get_next_intermediate_reg();
-          ASSERT(ret_reg.r == convention->return_register);
-
-          switch (from.value_type) {
-            case ValueType::Register: {
-                Helpers::copy_reg_to_reg(program, from.reg, ret.format, ret_reg, ret.format);
-                break;
-              }
-            case ValueType::Address: {
-                ASSERT(ret.format == IR::Format::uint64);
-                Helpers::copy_address_to_reg(program, from.mem, ret_reg);
-                break;
-              }
-            case ValueType::Memory: {
-                Helpers::copy_mem_to_reg(program, from.mem, ret.format, ret_reg, ret.format);
-                break;
-              }
+            break;
           }
+        case IR::OpCode::StartFunc: {
+            IR::Types::StartFunc start_func;
+            bc = IR::Read::StartFunc(bc, bc_end, start_func);
+            ASSERT(start_func.values == nullptr);
 
-          {
-            jump_relocations.insert(X64::JumpRelocation{
-              relative_offset(func.code_start, program->code_store.total_size + X64::JUMP_NEAR_OFFSET),
-                ret_label,
-            });
-
-            //TODO: remove unnecessary jumps
-            X64::Instruction j = {};
-            X64::jump_near(j, 0);
-            X64::append_instruction(program, j);
-          }
-          break;
-          }
-      case IR::OpCode::StartFunc: {
-          ASSERT(selector != nullptr);
-
-          IR::Types::StartFunc start_func;
-          bc = IR::Read::StartFunc(bc, bc_end, start_func);
-
-          if (needs_stack) {
             for (u32 i = 0; i < convention->num_non_volatile_registers; ++i) {
               u8 reg = non_volatile_registers[i];
               if ((used_registers & (1llu << reg)) > 0) {
@@ -4273,153 +5081,318 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               }
             }
 
-            X64::R rbp = X64::R{ convention->base_pointer_reg };
-            X64::R rsp = X64::R{ convention->stack_pointer_reg };
+            if (stack_top > 0) {
 
-            X64::Instruction save = {};
-            X64::push(save, rbp);
-            X64::Instruction copy = {};
-            X64::mov(copy, X64::R64{rsp}, X64::R64{rbp});
+              X64::R rbp = X64::R{ convention->base_pointer_reg };
+              X64::R rsp = X64::R{ convention->stack_pointer_reg };
 
-            X64::append_instruction(program, save);
-            X64::append_instruction(program, copy);
+              X64::Instruction save = {};
+              X64::push(save, rbp);
+              X64::Instruction copy = {};
+              X64::mov(copy, X64::R64{rsp}, X64::R64{rbp});
 
-            X64::Instruction move = {};
-            X64::sub(move, X64::R64{rsp}, X64::IMM32{stack_top});
-            X64::append_instruction(program, move);
-          }
-          else {
-            ASSERT(call_space_used == 0);
-          }
+              X64::append_instruction(program, save);
+              X64::append_instruction(program, copy);
 
-          for (usize i = 0; i < sig->parameter_types.size; ++i) {
-            MemoryView p = selector->get_variable_mem(i);
-            X64::R r = selector->get_next_intermediate_reg();
-
-            IR::Format f = sig->parameter_types.data[i].struct_format();
-
-            Helpers::copy_reg_to_mem(program, r, f, p, f);
-          }
-
-          break;
-        }
-      case IR::OpCode::Call: {
-          ASSERT(selector != nullptr);
-
-          IR::Types::Call call;
-          bc = IR::Read::Call(bc, bc_end, call);
-
-          const u8* values_i = call.values;
-          const u8* values_end = call.values + (IR::SingleVal::serialize_size() * call.n_values);
-
-          const SignatureStructure* sig_struct = comp->get_label_signature(call.label);
-
-          const bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
-
-          u32 call_needed = convention->shadow_space_size;
-
-          for (usize i = 0; i < ((usize)call.n_values - has_return); ++i) {
-            IR::SingleVal arg;
-            values_i += IR::deserialize(values_i, values_end - values_i, arg);
-
-            LazyValue arg_v = selector->get_lazy_val(program, arg.v, arg.v_offset);
-
-            IR::Format f = arg.v_format;
-
-            if (i < convention->num_parameter_registers) {
-              X64::R arg_reg = selector->get_next_intermediate_reg();
-
-              switch (arg_v.value_type) {
-                case ValueType::Register: {
-                    Helpers::copy_reg_to_reg(program, arg_v.reg, f, arg_reg, f);
-                    break;
-                  }
-                case ValueType::Address: {
-                    ASSERT(f == IR::Format::uint64);
-                    Helpers::copy_address_to_reg(program, arg_v.mem, arg_reg);
-                    break;
-                  }
-                case ValueType::Memory: {
-                    Helpers::copy_mem_to_reg(program, arg_v.mem, f, arg_reg, f);
-                    break;
-                  }
-              }
+              X64::Instruction move = {};
+              X64::sub(move, X64::R64{rsp}, X64::IMM32{stack_top});
+              X64::append_instruction(program, move);
             }
             else {
-              MemoryView arg_mem = {};
+              ASSERT(call_space_used == 0);
+            }
 
-              const Type& t = sig_struct->parameter_types.data[i];
-              arg_mem.known_alignment = t.structure->alignment;
-              arg_mem.size = t.size();
-              arg_mem.rm = X64::memory_rm(convention->base_pointer_reg, -static_cast<i32>(stack_top - (i * 8)));
+            ASSERT(ir->signature->parameter_types.size == start_func.n_values);
 
-              switch (arg_v.value_type) {
+            for (usize i = 0; i < start_func.n_values; ++i) {
+              IR::V_ARG arg;
+              bc += IR::deserialize(bc, bc_end - bc, arg);
+
+              const Type& param = ir->signature->parameter_types.data[i];
+              ASSERT(arg.size <= 8);//TODO: parameters of different types
+              ASSERT(arg.size == param.size());
+              ASSERT(arg.offset == 0);//temp - need to fix this
+
+
+              X64::R r = selector.get_next_intermediate_reg();
+
+              X64Value to = selector.get_val(arg);
+              IR::Format arg_format = to.t.struct_format();
+              ASSERT(param == to.t);
+
+              switch (to.value_type) {
                 case ValueType::Register: {
-                    Helpers::copy_reg_to_mem(program, arg_v.reg, f, arg_mem, f);
-                    break;
-                  }
-                case ValueType::Address: {
-                    INVALID_CODE_PATH("Cannot assign to an address");
+                    Helpers::copy_reg_to_reg(program, r, arg_format, to.reg, arg_format);
                     break;
                   }
                 case ValueType::Memory: {
-                    X64::R temp = selector->get_next_intermediate_reg();
-
-                    Helpers::copy_mem_to_mem_small(program, arg_v.mem, f, arg_mem, f, temp);
+                    Helpers::copy_reg_to_mem(program, r, arg_format, to.mem, arg_format);
                     break;
                   }
               }
             }
+
+            break;
+          }
+        case IR::OpCode::Call: {
+            IR::Types::Call call;
+            bc = IR::Read::Call(bc, bc_end, call);
+            ASSERT(call.values == nullptr);
+
+            const SignatureStructure* sig_struct = comp->get_label_signature(call.label);
+
+            const bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
+
+            u32 call_needed = convention->shadow_space_size;
+
+            for (usize i = 0; i < ((usize)call.n_values - has_return); ++i) {
+              IR::V_ARG arg;
+              bc += IR::deserialize(bc, bc_end - bc, arg);
+
+              X64Value arg_v = selector.get_val(arg);
+
+              IR::Format f = arg_v.t.struct_format();
+
+              if (i < convention->num_parameter_registers) {
+                X64::R arg_reg = selector.get_next_intermediate_reg();
+
+                switch (arg_v.value_type) {
+                  case ValueType::Register: {
+                      Helpers::copy_reg_to_reg(program, arg_v.reg, f, arg_reg, f);
+                      break;
+                    }
+                  case ValueType::Memory: {
+                      Helpers::copy_mem_to_reg(program, arg_v.mem, f, arg_reg, f);
+                      break;
+                    }
+                }
+              }
+              else {
+                MemoryView arg_mem = {};
+
+                const Type& t = sig_struct->parameter_types.data[i];
+                arg_mem.known_alignment = t.structure->alignment;
+                arg_mem.size = t.size();
+                arg_mem.rm = X64::memory_rm(convention->base_pointer_reg, -static_cast<i32>(stack_top - (i * 8)));
+
+                switch (arg_v.value_type) {
+                  case ValueType::Register: {
+                      Helpers::copy_reg_to_mem(program, arg_v.reg, f, arg_mem, f);
+                      break;
+                    }
+                  case ValueType::Memory: {
+                      X64::R temp = selector.get_next_intermediate_reg();
+
+                      Helpers::copy_mem_to_mem_small(program, arg_v.mem, f, arg_mem, f, temp);
+                      break;
+                    }
+                }
+              }
+            }
+
+            {
+              X64::Instruction call_i = {};
+
+              Backend::Relocation reloc = {};
+              reloc.type = Backend::RelocationType::Label;
+              reloc.label = call.label;
+              reloc.location = program->code_store.total_size + X64::CALL_NEAR_OFFSET;
+
+              program->relocations.insert(reloc);
+
+              X64::call_near(call_i, 0);
+              X64::append_instruction(program, call_i);
+            }
+
+            if (has_return) {
+              IR::V_ARG ret;
+              bc += IR::deserialize(bc, bc_end - bc, ret);
+
+              X64::R ret_reg = selector.get_next_intermediate_reg();
+              X64Value ret_v = selector.get_val(ret);
+
+              IR::Format ret_format = ret_v.t.struct_format();
+
+              switch (ret_v.value_type) {
+                case ValueType::Register: {
+                    Helpers::copy_reg_to_reg(program, ret_reg, ret_format, ret_v.reg, ret_format);
+                    break;
+                  }
+                case ValueType::Memory: {
+                    Helpers::copy_reg_to_mem(program, ret_reg, ret_format, ret_v.mem, ret_format);
+                    break;
+                  }
+              }
+            }
+            break;
           }
 
-          {
-            X64::Instruction call_i = {};
+#define EMIT_BIN_OP(name, helper)\
+        case IR::OpCode:: name: {\
+            IR::Types:: name bin_op;\
+            bc = IR::Read:: name (bc, bc_end, bin_op);\
+            X64Value left = selector.get_val(bin_op.left);\
+            X64Value right = selector.get_val(bin_op.right);\
+            X64Value to = selector.get_val(bin_op.to);\
+            IR::Format left_format = left.t.struct_format();\
+            IR::Format right_format = right.t.struct_format();\
+            IR::Format to_format = to.t.struct_format();\
+            /*always a left register*/\
+            X64::R left_reg = selector.get_next_intermediate_reg();\
+            switch (left.value_type) {\
+              case ValueType::Memory: Helpers::copy_mem_to_reg(program, left.mem, left_format, left_reg, left_format); break;\
+              case ValueType::Register: Helpers::copy_reg_to_reg(program, left.reg, left_format, left_reg, left_format); break;\
+            }\
+            X64::R right_reg;\
+            switch (right.value_type) {\
+              case ValueType::Memory: {\
+                  right_reg = selector.get_next_intermediate_reg();\
+                  Helpers::copy_mem_to_reg(program, right.mem, right_format, right_reg, right_format); break;\
+                }\
+              case ValueType::Register: {\
+                  right_reg = right.reg; break;\
+                }\
+            }\
+            const IR::Format new_format = helper (program, left_reg, left_format, right_reg, right_format);\
+            switch (to.value_type) {\
+              case ValueType::Register: Helpers::copy_reg_to_reg(program, left_reg, new_format, to.reg, to_format); break;\
+              case ValueType::Memory: Helpers::copy_reg_to_mem(program, left_reg, new_format, to.mem, to_format); break;\
+            }\
+            break;\
+          }\
 
-            Backend::Relocation reloc = {};
-            reloc.type = Backend::RelocationType::Label;
-            reloc.label = call.label;
-            reloc.location = program->code_store.total_size + X64::CALL_NEAR_OFFSET;
+                             EMIT_BIN_OP(Add, Helpers::emit_add);
+                             EMIT_BIN_OP(Sub, Helpers::emit_sub);
+                             EMIT_BIN_OP(Mul, Helpers::emit_mul);
+                             EMIT_BIN_OP(Div, Helpers::emit_div);
+                             EMIT_BIN_OP(And, Helpers::emit_and_);
+                             EMIT_BIN_OP(Or, Helpers::emit_or_);
+                             EMIT_BIN_OP(Xor, Helpers::emit_xor_);
+                             EMIT_BIN_OP(Great, Helpers::emit_great);
+                             EMIT_BIN_OP(Less, Helpers::emit_less);
+                             EMIT_BIN_OP(Eq, Helpers::emit_eq);
+                             EMIT_BIN_OP(Neq, Helpers::emit_neq);
 
-            program->relocations.insert(reloc);
-
-            X64::call_near(call_i, 0);
-            X64::append_instruction(program, call_i);
-          }
-
-          if (has_return) {
-            IR::SingleVal ret;
-            values_i += IR::deserialize(values_i, values_end - values_i, ret);
-
-            X64::R reg_reg = selector->get_next_intermediate_reg();
-
-            LazyValue ret_v = selector->get_lazy_val(program, ret.v, ret.v_offset);
-
-            switch (ret_v.value_type) {
-              case ValueType::Register: {
-                  Helpers::copy_reg_to_reg(program, reg_reg, ret.v_format, ret_v.reg, ret.v_format);
-                  break;
-                }
-              case ValueType::Memory: {
-                  Helpers::copy_reg_to_mem(program, reg_reg, ret.v_format, ret_v.mem, ret.v_format);
-                  break;
-                }
-              case ValueType::Address: {
-                  INVALID_CODE_PATH("Cannot assign to an address");
-                  break;
-                }
+#undef EMIT_BIN_OP
+        default: {
+            const char* opcode_name = IR::opcode_string(op);
+            if (opcode_name == nullptr) {
+              comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                                        "Invalid instruction encountered during ir compilation\n"
+                                        "Id = {} (a name for this opcode could not be found)",
+                                        op_byte);
+              return;
+            }
+            else {
+              comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Unsupported instruction encountered during ir compilation: {}",
+                                        opcode_name);
+              return;
             }
           }
+      }
+    }
+
+    const auto jump_and_merge = [&](IR::LocalLabel l) {
+      ASSERT(l != IR::NULL_LOCAL_LABEL);
+      ASSERT(l.label - 1 < ir->control_blocks.size);
+
+      //May need to merge some variables at this point
+      {
+        const auto& maybe_merge = ir->control_blocks.data[l.label - 1];
+        if (maybe_merge.enter_merge.size > 0) {
+          ASSERT(maybe_merge.cf_type == IR::ControlFlowType::Merge);
+
+
+          u32 index;
+          if (maybe_merge.cf_merge.parents[0] == blck->label) {
+            index = 0;
+          }
+          else if (maybe_merge.cf_merge.parents[1] == blck->label) {
+            index = 1;
+          }
+          else {
+            INVALID_CODE_PATH("Tried to merge from a non-merged block");
+          }
+
+          emit_merges(program, var_mappings, const_view_arr(ir->variables), index, const_view_arr(maybe_merge.enter_merge));
+        }
+      }
+
+      jump_relocations.insert(X64::JumpRelocation{
+        relative_offset(func.code_start, program->code_store.total_size + X64::JUMP_NEAR_OFFSET),
+          l
+      });
+
+      X64::Instruction j = {};
+      X64::jump_near(j, 0);
+
+      X64::append_instruction(program, j);
+    };
+
+    //TODO: remove some jumps
+    switch (blck->cf_type) {
+      case IR::ControlFlowType::Start: {
+          jump_and_merge(blck->cf_start.child);
           break;
         }
-      case IR::OpCode::IfSplit: {
-          ASSERT(selector != nullptr);
 
-          IR::Types::IfSplit ifsplit;
-          bc = IR::Read::IfSplit(bc, bc_end, ifsplit);
+      case IR::ControlFlowType::Return: {
+          X64Value from = selector.get_val(IR::v_arg(blck->cf_return.val, 0, ir->signature->return_type));
+          IR::Format format = from.t.struct_format();
+          ASSERT(format != IR::Format::opaque);//temp
 
-          LazyValue val = selector->get_lazy_val(program, ifsplit.val, ifsplit.offset);
+          X64::R ret_reg = selector.get_next_intermediate_reg();
+          ASSERT(ret_reg.r == convention->return_register);
 
-          ASSERT(ifsplit.format == IR::Format::uint8);
+          switch (from.value_type) {
+            case ValueType::Register: {
+                Helpers::copy_reg_to_reg(program, from.reg, format, ret_reg, format);
+                break;
+              }
+            case ValueType::Memory: {
+                Helpers::copy_mem_to_reg(program, from.mem, format, ret_reg, format);
+                break;
+              }
+          }
+
+          jump_relocations.insert(X64::JumpRelocation{
+            relative_offset(func.code_start, program->code_store.total_size + X64::JUMP_NEAR_OFFSET),
+              ret_label
+          });
+
+          X64::Instruction j = {};
+          X64::jump_near(j, 0);
+
+          X64::append_instruction(program, j);
+          break;
+        }
+      case IR::ControlFlowType::End: {
+          jump_relocations.insert(X64::JumpRelocation{
+            relative_offset(func.code_start, program->code_store.total_size + X64::JUMP_NEAR_OFFSET),
+              ret_label
+          });
+
+          X64::Instruction j = {};
+          X64::jump_near(j, 0);
+
+          X64::append_instruction(program, j);
+          break;
+        }
+
+      case IR::ControlFlowType::Inline: {
+          jump_and_merge(blck->cf_inline.child);
+          break;
+        }
+      case IR::ControlFlowType::Merge: {
+          jump_and_merge(blck->cf_merge.child);
+          break;
+        }
+
+      case IR::ControlFlowType::Split: {
+          X64Value val = selector.get_val(IR::v_arg(blck->cf_split.condition, 0, comp->builtin_types->t_bool));
+
+          ASSERT(val.t.struct_format() == IR::Format::uint8);
+
           {
             X64::Instruction compare = {};
 
@@ -4432,19 +5405,19 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                   X64::cmp(compare, X64::R8{ val.reg }, X64::IMM8{ 0 });
                   break;
                 }
-              case ValueType::Address: {
-                  comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Cannot if based on a pointer");
-                  return;
-                }
             }
 
             X64::append_instruction(program, compare);
           }
 
+          //No merging and splitting, must be separate blocks
+          ASSERT(ir->control_blocks.data[blck->cf_split.false_branch.label - 1].enter_merge.size == 0);
+          ASSERT(ir->control_blocks.data[blck->cf_split.true_branch.label - 1].enter_merge.size == 0);
+
           {
             jump_relocations.insert(X64::JumpRelocation{
               relative_offset(func.code_start, program->code_store.total_size + X64::JUMP_CONDITION_OFFSET),
-                ifsplit.label_else
+                blck->cf_split.false_branch
             });
 
             X64::Instruction j_else = {};
@@ -4456,7 +5429,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
           {
             jump_relocations.insert(X64::JumpRelocation{
               relative_offset(func.code_start, program->code_store.total_size + X64::JUMP_NEAR_OFFSET),
-                ifsplit.label_if
+                blck->cf_split.true_branch
             });
 
             //TODO: remove unnecessary jumps
@@ -4467,111 +5440,15 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
           }
           break;
         }
-      case IR::OpCode::Jump: {
-          ASSERT(selector == nullptr);
-
-          IR::Types::Jump jump;
-          bc = IR::Read::Jump(bc, bc_end, jump);
-
-          jump_relocations.insert(X64::JumpRelocation{
-            relative_offset(func.code_start, program->code_store.total_size + X64::JUMP_NEAR_OFFSET),
-              jump.local_label
-          });
-
-          //TODO: remove unnecessary jumps
-          X64::Instruction j = {};
-          X64::jump_near(j, 0);
-
-          X64::append_instruction(program, j);
-          break;
-        }
-
-#define EMIT_BIN_OP(name, helper)\
-        case IR::OpCode:: name: {\
-            ASSERT(selector != nullptr);\
-            IR::Types:: name bin_op;\
-            bc = IR::Read:: name (bc, bc_end, bin_op);\
-            LazyValue left = selector->get_lazy_val(program, bin_op.left, bin_op.l_offset);\
-            LazyValue right = selector->get_lazy_val(program, bin_op.right, bin_op.r_offset);\
-            LazyValue to = selector->get_lazy_val(program, bin_op.to, bin_op.t_offset);\
-            /*always a left register*/\
-            X64::R left_reg = selector->get_next_intermediate_reg();\
-            switch (left.value_type) {\
-              case ValueType::Address: Helpers::copy_address_to_reg(program, left.mem, left_reg); break;\
-              case ValueType::Memory: Helpers::copy_mem_to_reg(program, left.mem, bin_op.l_format, left_reg, bin_op.l_format); break;\
-              case ValueType::Register: Helpers::copy_reg_to_reg(program, left.reg, bin_op.l_format, left_reg, bin_op.l_format); break;\
-            }\
-            X64::R right_reg;\
-            switch (right.value_type) {\
-              case ValueType::Address: {\
-                  right_reg = selector->get_next_intermediate_reg();\
-                  Helpers::copy_address_to_reg(program, right.mem, right_reg); break;\
-                }\
-              case ValueType::Memory: {\
-                  right_reg = selector->get_next_intermediate_reg();\
-                  Helpers::copy_mem_to_reg(program, right.mem, bin_op.r_format, right_reg, bin_op.r_format); break;\
-                }\
-              case ValueType::Register: {\
-                  right_reg = right.reg; break;\
-                }\
-            }\
-            IR::Format new_format = helper (program, left_reg, bin_op.l_format,right_reg, bin_op.r_format);\
-            switch (to.value_type) {\
-              case ValueType::Register: Helpers::copy_reg_to_reg(program, left_reg, new_format, to.reg, bin_op.t_format); break;\
-              case ValueType::Memory: Helpers::copy_reg_to_mem(program, left_reg, new_format, to.mem, bin_op.t_format); break;\
-              case ValueType::Address: INVALID_CODE_PATH("Cannot assign to an address"); break;\
-            }\
-            break;\
-          }\
-
-                           EMIT_BIN_OP(Add, Helpers::emit_add);
-                           EMIT_BIN_OP(Sub, Helpers::emit_sub);
-                           EMIT_BIN_OP(Mul, Helpers::emit_mul);
-                           EMIT_BIN_OP(Div, Helpers::emit_div);
-                           EMIT_BIN_OP(And, Helpers::emit_and_);
-                           EMIT_BIN_OP(Or, Helpers::emit_or_);
-                           EMIT_BIN_OP(Xor, Helpers::emit_xor_);
-                           EMIT_BIN_OP(Great, Helpers::emit_great);
-                           EMIT_BIN_OP(Less, Helpers::emit_less);
-                           EMIT_BIN_OP(Eq, Helpers::emit_eq);
-                           EMIT_BIN_OP(Neq, Helpers::emit_neq);
-
-#undef EMIT_BIN_OP
-      default: {
-          const char* opcode_name = IR::opcode_string(op);
-          if (opcode_name == nullptr) {
-            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
-                                      "Invalid instruction encountered during ir compilation\n"
-                                      "Id = {} (a name for this opcode could not be found)",
-                                      op_byte);
-            return;
-          }
-          else {
-            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Unsupported instruction encountered during ir compilation: {}",
-                                      opcode_name);
-            return;
-          }
-        }
-        }
-
-    while (expressions_i < expressions_end && expressions_i->bytecode_start + expressions_i->bytecode_count <= (bc - bc_start)) {
-      selector = nullptr;
-      expressions_i += 1;
     }
-    }
-
-  while (blocks < blocks_end && blocks->size == 0) {
-    blocks += 1;
   }
-  //Did we find all of them? - could this be an actual error rather than an assert?
-  ASSERT(blocks == blocks_end);
-  ASSERT(expressions_i == expressions_end);
+
 
   {
     u32 relative = relative_offset(func.code_start, program->code_store.total_size);
     local_label_real_offsets.data[ret_label.label - 1] = relative;
 
-    if (needs_stack) {
+    if (stack_top > 0) {
       X64::R rbp = X64::R{ convention->base_pointer_reg };
       X64::R rsp = X64::R{ convention->stack_pointer_reg };
 
@@ -4582,14 +5459,14 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
       X64::append_instruction(program, copy);
       X64::append_instruction(program, load);
+    }
 
-      for (u32 i = 0; i < convention->num_non_volatile_registers; ++i) {
-        u8 reg = non_volatile_registers[convention->num_non_volatile_registers - (i + 1)];//reverse order
-        if ((used_registers & (1llu << reg)) > 0) {
-          X64::Instruction save = {};
-          X64::pop(save, X64::R{reg});
-          X64::append_instruction(program, save);
-        }
+    for (u32 i = 0; i < convention->num_non_volatile_registers; ++i) {
+      u8 reg = non_volatile_registers[convention->num_non_volatile_registers - (i + 1)];//reverse order
+      if ((used_registers & (1llu << reg)) > 0) {
+        X64::Instruction save = {};
+        X64::pop(save, X64::R{reg});
+        X64::append_instruction(program, save);
       }
     }
 
@@ -4610,49 +5487,52 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
 
   //Do the local relocations (global relocations come later)
-  {
-    auto code_itr = program->code_store.start();
-    code_itr.jump_to(func.code_start);//TODO: save this better so we don't need to jump around so much
 
-    FOR(jump_relocations, it) {
-      usize immediate_location = func.code_start + (usize)it->offset_to_immediate;
+  auto code_itr = program->code_store.start();
+  code_itr.jump_to(func.code_start);//TODO: save this better so we don't need to jump around so much
 
-      ASSERT(code_itr.actual_location < immediate_location);
-      ASSERT(immediate_location + 4 < program->code_store.total_size);
+  auto start_itr = code_itr;//save for later
 
-      code_itr.jump_to(immediate_location);
+  FOR(jump_relocations, it) {
+    usize immediate_location = func.code_start + (usize)it->offset_to_immediate;
 
-      ASSERT(it->jump_to.label <= local_label_real_offsets.size);
+    ASSERT(code_itr.actual_location < immediate_location);
+    ASSERT(immediate_location + 4 < program->code_store.total_size);
 
-      u32 label_offset = local_label_real_offsets.data[it->jump_to.label - 1];
-      u32 jump_from = it->offset_to_immediate + 4;
+    code_itr.jump_to(immediate_location);
 
+    ASSERT(it->jump_to.label <= local_label_real_offsets.size);
 
-      u32 offset;
-      if (label_offset < jump_from) {
-        u32 diff = jump_from - label_offset;
-        ASSERT(diff < INT32_MAX);
-        offset = (u32)-(i32)diff;
-      }
-      else {
-        offset = label_offset - jump_from;
-        ASSERT(offset < INT32_MAX);
-      }
+    u32 label_offset = local_label_real_offsets.data[it->jump_to.label - 1];
+    u32 jump_from = it->offset_to_immediate + 4;
 
-      u8 bytes[4];
-      x32_to_bytes(offset, bytes);
-      code_itr.overwrite_arr(bytes, 4);
+    u32 offset;
+    if (label_offset < jump_from) {
+      u32 diff = jump_from - label_offset;
+      ASSERT(diff < INT32_MAX);
+      offset = (u32)-(i32)diff;
+    }
+    else {
+      offset = label_offset - jump_from;
+      ASSERT(offset < INT32_MAX);
     }
 
-    ASSERT(code_itr.actual_location <= program->code_store.total_size);
-  }
+    u8 bytes[4];
+    x32_to_bytes(offset, bytes);
+    code_itr.overwrite_arr(bytes, 4);
   }
 
-#if 0
+  ASSERT(code_itr.actual_location <= program->code_store.total_size);
+
+  void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIterator end);
+  if (comp_thread->print_options.finished_mc) {
+    print_x86_64(start_itr, program->code_store.current_location());
+  }
+}
 
 struct RegisterNames {
-  OwnedPtr<char> r;
-  OwnedPtr<char> rm;
+  OwnedArr<char> r;
+  OwnedArr<char> rm;
 };
 
 static const char* b8_no_rex_reg_name(uint8_t reg) {
@@ -4739,14 +5619,72 @@ static const char* b32_reg_name(uint8_t reg) {
   return "INVALID REGISTER";
 }
 
+static const char* b64_reg_name(uint8_t reg) {
+  switch (reg) {
+    case 0: return "RAX";
+    case 1: return "RCX";
+    case 2: return "RDX";
+    case 3: return "RBX";
+    case 4: return "RSP";
+    case 5: return "RBP";
+    case 6: return "RSI";
+    case 7: return "RDI";
+    case 8: return "R8";
+    case 9: return "R9";
+    case 10: return "R10";
+    case 11: return "R11";
+    case 12: return "R12";
+    case 13: return "R13";
+    case 14: return "R14";
+    case 15: return "R15";
+  }
+
+  return "INVALID REGISTER";
+}
+
 struct x86PrintOptions {
   FUNCTION_PTR<const char*, uint8_t> r_name = nullptr;
   FUNCTION_PTR<const char*, uint8_t> rm_name = nullptr;
   const char* mem_size = nullptr;
 };
 
-static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
-                                    uint8_t rex, uint8_t modrm, const uint8_t** rest) {
+u16 x16_from_itr(Backend::DataBucketIterator* itr) {
+  u8 bytes[2]{
+    itr->read_byte(),
+    itr->read_byte(),
+  };
+
+  return x16_from_bytes(bytes);
+}
+
+u32 x32_from_itr(Backend::DataBucketIterator* itr) {
+  u8 bytes[4]{
+    itr->read_byte(),
+    itr->read_byte(),
+    itr->read_byte(),
+    itr->read_byte(),
+  };
+
+  return x32_from_bytes(bytes);
+}
+
+u64 x64_from_itr(Backend::DataBucketIterator* itr) {
+  u8 bytes[8]{
+    itr->read_byte(),
+    itr->read_byte(),
+    itr->read_byte(),
+    itr->read_byte(),
+    itr->read_byte(),
+    itr->read_byte(),
+    itr->read_byte(),
+    itr->read_byte(),
+  };
+
+  return x64_from_bytes(bytes);
+}
+
+static OwnedArr<char> rm_reg_string(x86PrintOptions* const p_opts,
+                                    uint8_t rex, uint8_t modrm, Backend::DataBucketIterator* rest) {
   uint8_t address_mode = (modrm & 0b11'000000) >> 6;
   uint8_t rm = modrm & X64::MODRM_RM_MASK;
 
@@ -4760,107 +5698,104 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
   //Memory is always 64 bit addressed
 
   switch (rm) {
-    case RSP.REG: {
+    case X64::rsp.REG: {
         //SIB byte time
-        const uint8_t sib = *(*rest)++;
+        const uint8_t sib = rest->read_byte();
 
         const uint8_t scale = 1 << ((sib & 0b11'000'000) >> 6);
         const uint8_t index = ((rex & X64::REX_X) << 2) | ((sib & X64::SIB_INDEX_MASK) >> 3);
         const uint8_t base = ((rex & X64::REX_B) << 3) | ((sib & X64::SIB_BASE_MASK));
 
-        const bool INDEX_RSP = index == RSP.REG;
+        const bool INDEX_RSP = index == X64::rsp.REG;
         const bool BASE_RBP = (base & 0b111) == 0b101;
 
         switch (address_mode) {
           case 0b00: {
               if (INDEX_RSP && BASE_RBP) {
-                int32_t disp = x32_from_bytes(*rest);
-                *rest += 4;
+                int32_t disp = x32_from_itr(rest);
 
                 return format("{} [{}]", p_opts->mem_size, disp);
               }
               else if (INDEX_RSP) {
-                return format("{} [{}]", p_opts->mem_size, x86_64_reg_name_from_num(base));
+                return format("{} [{}]", p_opts->mem_size, b64_reg_name(base));
               }
               else if (BASE_RBP) {
-                int32_t disp = x32_from_bytes(*rest);
-                *rest += 4;
+                int32_t disp = x32_from_itr(rest);
 
                 char sign = disp >= 0 ? '+' : '-';
                 if (scale == 1) {
-                  return format("{} [{} {} {}]", p_opts->mem_size, x86_64_reg_name_from_num(index), sign, absolute(disp));
+                  return format("{} [{} {} {}]", p_opts->mem_size, b64_reg_name(index), sign, absolute(disp));
                 }
                 else {
-                  return format("{} [({} * {}) {} {}]", p_opts->mem_size, x86_64_reg_name_from_num(index), scale, sign, absolute(disp));
+                  return format("{} [({} * {}) {} {}]", p_opts->mem_size, b64_reg_name(index), scale, sign, absolute(disp));
                 }
               }
               else if (scale == 1) {
                 return format("{} [{} + {}]",
                               p_opts->mem_size,
-                              x86_64_reg_name_from_num(base),
-                              x86_64_reg_name_from_num(index));
+                              b64_reg_name(base),
+                              b64_reg_name(index));
               }
               else {
                 return format("{} [{} + ({} * {})]",
                               p_opts->mem_size,
-                              x86_64_reg_name_from_num(base),
-                              x86_64_reg_name_from_num(index),
+                              b64_reg_name(base),
+                              b64_reg_name(index),
                               scale);
               }
             }
           case 0b01: {
-              const int8_t disp = *(*rest)++;
+              const int8_t disp = rest->read_byte();
 
               char sign = disp >= 0 ? '+' : '-';
 
               if (INDEX_RSP) {
                 return format("{} [{} {} {}]",
                               p_opts->mem_size,
-                              x86_64_reg_name_from_num(base),
+                              b64_reg_name(base),
                               sign, absolute(disp));
               }
               else {
                 if (scale == 1) {
                   return format("{} [{} {} {} + {}]",
                                 p_opts->mem_size,
-                                x86_64_reg_name_from_num(base),
+                                b64_reg_name(base),
                                 sign, absolute(disp),
-                                x86_64_reg_name_from_num(index));
+                                b64_reg_name(index));
                 }
                 else {
                   return format("{} [{} {} {} + ({} * {})]",
                                 p_opts->mem_size,
-                                x86_64_reg_name_from_num(base),
+                                b64_reg_name(base),
                                 sign, absolute(disp),
-                                x86_64_reg_name_from_num(index), scale);
+                                b64_reg_name(index), scale);
                 }
               }
             }
           case 0b10: {
-              int32_t disp = x32_from_bytes(*rest);
-              *rest += 4;
+              int32_t disp = x32_from_itr(rest);
 
               char sign = disp >= 0 ? '+' : '-';
 
               if (INDEX_RSP) {
                 return format("{} [{} {} {}]",
                               p_opts->mem_size,
-                              x86_64_reg_name_from_num(base),
+                              b64_reg_name(base),
                               sign, absolute(disp));
               }
               else {
                 if (scale == 1) {
                   return format("{} [{} + {} {} {}]",
                                 p_opts->mem_size,
-                                x86_64_reg_name_from_num(base),
-                                x86_64_reg_name_from_num(index),
+                                b64_reg_name(base),
+                                b64_reg_name(index),
                                 sign, absolute(disp));
                 }
                 else {
                   return format("{} [{} + ({} * {}) {} {}]",
                                 p_opts->mem_size,
-                                x86_64_reg_name_from_num(base),
-                                x86_64_reg_name_from_num(index), scale,
+                                b64_reg_name(base),
+                                b64_reg_name(index), scale,
                                 sign, absolute(disp));
                 }
               }
@@ -4869,10 +5804,9 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
         INVALID_CODE_PATH("Internal error. Unrecognised assembly code register format");
       }
-    case RBP.REG: {
+    case X64::rbp.REG: {
         if (address_mode == 0b00) {
-          int32_t disp = x32_from_bytes(*rest);
-          *rest += 4;
+          int32_t disp = x32_from_itr(rest);
 
           char sign = disp >= 0 ? '+' : '-';
 
@@ -4887,22 +5821,21 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
         switch (address_mode) {
           case 0b00: {
-              return format("{} [{}]", p_opts->mem_size, x86_64_reg_name_from_num(rm));
+              return format("{} [{}]", p_opts->mem_size, b64_reg_name(rm));
             }
           case 0b01: {
-              int8_t disp = *(*rest)++;
+              int8_t disp = rest->read_byte();
 
               char sign = disp >= 0 ? '+' : '-';
 
-              return format("{} [{} {} {}]", p_opts->mem_size, x86_64_reg_name_from_num(rm), sign, absolute(disp));
+              return format("{} [{} {} {}]", p_opts->mem_size, b64_reg_name(rm), sign, absolute(disp));
             }
           case 0b10: {
-              int32_t disp = x32_from_bytes(*rest);
-              *rest += 4;
+              int32_t disp = x32_from_itr(rest);
 
               char sign = disp >= 0 ? '+' : '-';
 
-              return format("{} [{} {} {}]", p_opts->mem_size, x86_64_reg_name_from_num(rm), sign, absolute(disp));
+              return format("{} [{} {} {}]", p_opts->mem_size, b64_reg_name(rm), sign, absolute(disp));
             }
         }
 
@@ -4911,20 +5844,24 @@ static OwnedPtr<char> rm_reg_string(x86PrintOptions* const p_opts,
   }
 
   INVALID_CODE_PATH("Internal error. Unrecognised assembly code register format");
+  return {};
 }
 
-static OwnedPtr<char> r_reg_string(x86PrintOptions* p_opts,
+static OwnedArr<char> r_reg_string(x86PrintOptions* p_opts,
                                    uint8_t rex, uint8_t modrm) {
   uint8_t r = ((rex & X64::REX_R) << X64::REX_R_SHIFT)
     | ((modrm & X64::MODRM_REG_MASK) >> X64::MODRM_REG_SHIFT);
 
-  return  format("{}", p_opts->r_name(r));
+  return format("{}", p_opts->r_name(r));
 }
 
 
 static RegisterNames register_names(x86PrintOptions* p_opts,
-                                    uint8_t rex, uint8_t modrm, const uint8_t** rest) {
-  return { r_reg_string(p_opts, rex, modrm), rm_reg_string(p_opts, rex, modrm, rest) };
+                                    uint8_t rex, uint8_t modrm, Backend::DataBucketIterator* rest) {
+  return {
+    r_reg_string(p_opts, rex, modrm),
+    rm_reg_string(p_opts, rex, modrm, rest)
+  };
 }
 
 static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_address, bool short_operand) {
@@ -4932,11 +5869,11 @@ static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_addr
     ops->rm_name = b32_reg_name;
   }
   else {
-    ops->rm_name = x86_64_reg_name_from_num;
+    ops->rm_name = b64_reg_name;
   }
 
   if (rex_w) {
-    ops->r_name = x86_64_reg_name_from_num;
+    ops->r_name = b64_reg_name;
     ops->mem_size = "QWORD PTR";
   }
   else {
@@ -4951,96 +5888,254 @@ static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_addr
   }
 }
 
-void print_x86_64(const uint8_t* machine_code, size_t size) {
-  const uint8_t* bytes = machine_code;
-  const uint8_t* const end = machine_code + size;
+void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIterator end) {
+  IO_Single::lock();
+  DEFER() { IO_Single::unlock(); };
+
+  {
+    IO_Single::print("raw = ");
+
+    Backend::DataBucketIterator copy = start;
+    while (copy < end) {
+      format_print_ST("{} ", PrintHexByte{ copy.read_byte() });
+    }
+
+    IO_Single::print("\n");
+  }
 
   x86PrintOptions p_opts = {};
 
-  while (bytes < end) {
-    printf("0x%-4llx: ", bytes - machine_code);
+  usize start_idx = start.actual_location;
 
-    bool short_operand = bytes[0] == 0x66;
+  while (start < end) {
+    printf("0x%-4llx: ", start.actual_location - start_idx);
+
+    u8 op = start.read_byte();
+
+    bool short_operand = op == 0x66;
     if (short_operand) {
-      bytes++;
+      op = start.read_byte();
     }
 
-    bool short_address = bytes[0] == 0x67;
+    bool short_address = op == 0x67;
     if (short_address) {
-      bytes++;
+      op = start.read_byte();
     }
 
     //check again as it might have been second
     if (!short_operand) {
-      short_operand = bytes[0] == 0x66;
+      short_operand = op == 0x66;
       if (short_operand) {
-        bytes++;
+        op = start.read_byte();
       }
     }
 
-    const uint8_t maybe_rex = *bytes++;
-    if ((maybe_rex & 0b1111'1000) == X64::REX_W) {
-      //REX_W instruction
-      const uint8_t op = *bytes++;
+    uint8_t maybe_rex = 0;
+    bool rex = false;
+    if ((op & 0b1111'0000) == X64::REX) {
+      maybe_rex = op;
+      rex = true;
+      op = start.read_byte();
+    }
+
+    bool rex_w = (maybe_rex & X64::REX_W) == X64::REX_W;
+
+    if (op == 0x0F) {
+      //0x0F instructions
+      uint8_t op = start.read_byte();
+      switch (op) {
+        case X64::JE_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("je 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JNE_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("jne 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JB_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("jb 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JNB_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("jnb 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JA_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("ja 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JNA_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("jna 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JL_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("jl 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JNL_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("jnl 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JG_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("jg 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::JNG_NEAR: {
+            int rel32 = x32_from_itr(&start);
+
+            printf("jng 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            break;
+          }
+        case X64::SETE_RM8: {
+            uint8_t modrm = start.read_byte();
+
+            p_opts.rm_name = b8_rex_reg_name;
+            p_opts.mem_size = "BYTE PTR";
+
+            OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
+            printf("sete %s\n", r_string.data);
+            break;
+          }
+        case X64::SETL_RM8: {
+            uint8_t modrm = start.read_byte();
+
+            p_opts.rm_name = b8_rex_reg_name;
+            p_opts.mem_size = "BYTE PTR";
+
+            OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
+            printf("setl %s\n", r_string.data);
+            break;
+          }
+        case X64::SETG_RM8: {
+            uint8_t modrm = start.read_byte();
+
+            p_opts.rm_name = b8_rex_reg_name;
+            p_opts.mem_size = "BYTE PTR";
+
+            OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
+            printf("setg %s\n", r_string.data);
+            break;
+          }
+        case X64::IMUL_RM_TO_R: {
+            uint8_t modrm = start.read_byte();
+
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
+
+            printf("imul %s, %s\n", names.r.data, names.rm.data);
+            break;
+          }
+        case X64::MOV_ZX_RM8_TO_R: {
+            uint8_t modrm = start.read_byte();
+
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
+            //overide
+            p_opts.rm_name = b8_rex_reg_name;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
+
+            printf("movzx %s, %s\n", names.r.data, names.rm.data);
+            break;
+          }
+        case X64::MOV_SX_RM8_TO_R: {
+            uint8_t modrm = start.read_byte();
+
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
+            //overide
+            p_opts.rm_name = b8_rex_reg_name;
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
+
+            printf("movsx %s, %s\n", names.r.data, names.rm.data);
+            break;
+          }
+        default: {
+            printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx\n",
+                   maybe_rex, op);
+
+            return;
+          }
+      }
+    }
+    else {
       switch (op) {
         case X64::ADD_R_TO_RM: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("add %s, %s\n", names.rm.ptr, names.r.ptr);
+            printf("add %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::OR_R_TO_RM: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("or  %s, %s\n", names.rm.ptr, names.r.ptr);
+            printf("or  %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::AND_R_TO_RM: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("and %s, %s\n", names.rm.ptr, names.r.ptr);
+            printf("and %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::SUB_R_TO_RM: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("sub %s, %s\n", names.rm.ptr, names.r.ptr);
+            printf("sub %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::XOR_R_TO_RM: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("xor %s, %s\n", names.rm.ptr, names.r.ptr);
+            printf("xor %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::CMP_R_TO_RM: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("cmp %s, %s\n", names.rm.ptr, names.r.ptr);
+            printf("cmp %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::PUSH_R:
@@ -5052,7 +6147,7 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case (X64::PUSH_R + 6):
         case (X64::PUSH_R + 7): {
             const uint8_t reg = (op - X64::PUSH_R) | ((maybe_rex & 0b00000100) << 1);
-            const char* r_string = x86_64_reg_name_from_num(reg);
+            const char* r_string = b64_reg_name(reg);
 
             printf("push %s\n", r_string);
             break;
@@ -5066,28 +6161,27 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
         case (X64::POP_R + 6):
         case (X64::POP_R + 7): {
             const uint8_t reg = (op - X64::POP_R) | ((maybe_rex & 0b00000100) << 1);
-            const char* r_string = x86_64_reg_name_from_num(reg);
+            const char* r_string = b64_reg_name(reg);
 
             printf("pop %s\n", r_string);
             break;
           }
         case 0x81: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+            OwnedArr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
 
-            int32_t imm32 = x32_from_bytes(bytes);
-            bytes += 4;
+            int32_t imm32 = x32_from_itr(&start);
 
             uint8_t r_val = (modrm & 0b0011'1000) >> 3;
 
             if (r_val == 5) {
-              printf("sub %s, 0x%x\n", rm_string.ptr, imm32);
+              printf("sub %s, 0x%x\n", rm_string.data, imm32);
             }
             else if (r_val == 7) {
-              printf("cmp %s, 0x%x\n", rm_string.ptr, imm32);
+              printf("cmp %s, 0x%x\n", rm_string.data, imm32);
             }
             else {
               printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx.2 0x%.2hhx ...\n",
@@ -5098,98 +6192,83 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             break;
           }
         case X64::MOV_R_TO_RM: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("mov %s, %s\n", names.rm.ptr, names.r.ptr);
+            printf("mov %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::MOV_IMM32_RM: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            OwnedPtr<char> rm = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+            OwnedArr<char> rm = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
 
-            uint32_t val = x32_from_bytes(bytes);
-            bytes += 4;
+            uint32_t val = x32_from_itr(&start);
 
-            printf("mov %s, %u\n", rm.ptr, val);
+            printf("mov %s, %u\n", rm.data, val);
+            break;
+          }
+        case X64::MOV_IMM_TO_R:
+        case (X64::MOV_IMM_TO_R + 1):
+        case (X64::MOV_IMM_TO_R + 2):
+        case (X64::MOV_IMM_TO_R + 3):
+        case (X64::MOV_IMM_TO_R + 4):
+        case (X64::MOV_IMM_TO_R + 5):
+        case (X64::MOV_IMM_TO_R + 6):
+        case (X64::MOV_IMM_TO_R + 7): {
+            uint8_t r = (op - X64::MOV_IMM_TO_R) + ((maybe_rex & X64::REX_B) == X64::REX_B) * 8;
+
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
+
+            const char* name = p_opts.r_name(r);
+
+            if (short_operand) {
+              uint16_t val = x16_from_itr(&start);
+
+              printf("mov %s, %hu\n", name, val);
+            }
+            else if (!rex_w) {
+              uint32_t val = x32_from_itr(&start);
+
+              printf("mov %s, %u\n", name, val);
+            }
+            else {
+              uint64_t val = x64_from_itr(&start);
+
+              printf("mov %s, %llu\n", name, val);
+            }
             break;
           }
         case X64::MOV_RM_TO_R: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("mov %s, %s\n", names.r.ptr, names.rm.ptr);
+            printf("mov %s, %s\n", names.r.data, names.rm.data);
             break;
           }
         case X64::LEA_RM_TO_R: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("lea %s, %s\n", names.r.ptr, names.rm.ptr);
+            printf("lea %s, %s\n", names.r.data, names.rm.data);
             break;
           }
         case X64::CQO: {
             printf("cqo\n");
             break;
           }
-        case 0x0F: {
-            uint8_t op2 = *bytes++;
-            switch (op2) {
-              case X64::IMUL_RM_TO_R: {
-                  uint8_t modrm = *bytes++;
-
-                  load_default_sizes(&p_opts, true, short_address, short_operand);
-
-                  RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
-
-                  printf("imul %s, %s\n", names.r.ptr, names.rm.ptr);
-                  break;
-                }
-              case X64::MOV_ZX_RM8_TO_R: {
-                  uint8_t modrm = *bytes++;
-
-                  load_default_sizes(&p_opts, true, short_address, short_operand);
-                  //overide
-                  p_opts.rm_name = b8_rex_reg_name;
-
-                  RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
-
-                  printf("movzx %s, %s\n", names.r.ptr, names.rm.ptr);
-                  break;
-                }
-              case X64::MOV_SX_RM8_TO_R: {
-                  uint8_t modrm = *bytes++;
-
-                  load_default_sizes(&p_opts, true, short_address, short_operand);
-                  //overide
-                  p_opts.rm_name = b8_rex_reg_name;
-
-                  RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
-
-                  printf("movsx %s, %s\n", names.r.ptr, names.rm.ptr);
-                  break;
-                }
-              default: {
-                  printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
-                         maybe_rex, op, op2);
-
-                  return;
-                }
-            }
-            break;
-          }
+#if 0
         case X64::MOV_64_TO_R:
         case (X64::MOV_64_TO_R + 1):
         case (X64::MOV_64_TO_R + 2):
@@ -5210,25 +6289,26 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             printf("mov %s, 0x%llx\n", r_string, imm64);
             break;
           }
+#endif
         case 0xF7: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
             const uint8_t r = (modrm & 0b0011'1000) >> 3;
-            OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+            OwnedArr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
 
             if (r == 3) {
-              printf("neg %s\n", rm_string.ptr);
+              printf("neg %s\n", rm_string.data);
             }
             else if (r == 4) {
-              printf("mul %s\n", rm_string.ptr);
+              printf("mul %s\n", rm_string.data);
             }
             else if (r == 6) {
-              printf("div %s\n", rm_string.ptr);
+              printf("div %s\n", rm_string.data);
             }
             else if (r == 7) {
-              printf("idiv %s\n", rm_string.ptr);
+              printf("idiv %s\n", rm_string.data);
             }
             else {
               printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
@@ -5239,21 +6319,21 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             break;
           }
         case 0xD3: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
-            load_default_sizes(&p_opts, true, short_address, short_operand);
+            load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
             const uint8_t r = (modrm & 0b0011'1000) >> 3;
-            OwnedPtr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
+            OwnedArr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
 
             if (r == 4) {
-              printf("sal %s, CL\n", rm_string.ptr);
+              printf("sal %s, CL\n", rm_string.data);
             }
             else if (r == 5) {
-              printf("shr %s, CL\n", rm_string.ptr);
+              printf("shr %s, CL\n", rm_string.data);
             }
             else if (r == 7) {
-              printf("sar %s, CL\n", rm_string.ptr);
+              printf("sar %s, CL\n", rm_string.data);
             }
             else {
               printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
@@ -5263,17 +6343,6 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             }
             break;
           }
-        default: {
-            printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx\n",
-                   maybe_rex, op);
-
-            return;
-          }
-      }
-    }
-    else if ((maybe_rex & 0b1111'1000) == X64::REX) {
-      uint8_t op = *bytes++;
-      switch (op) {
         case X64::MOV_8_TO_R8:
         case (X64::MOV_8_TO_R8 + 1):
         case (X64::MOV_8_TO_R8 + 2):
@@ -5285,272 +6354,28 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             const uint8_t reg = (op - X64::MOV_8_TO_R8) | ((maybe_rex & 0b0000'0001) << 3);
             const char* r_string = b8_rex_reg_name(reg);
 
-            uint8_t imm8 = bytes[0];
-            bytes++;
+            uint8_t imm8 = start.read_byte();
 
             printf("mov %s, 0x%hhx\n", r_string, imm8);
             break;
           }
-        case X64::MOV_IMM32_RM: {
-            uint8_t modrm = *bytes++;
-
-            load_default_sizes(&p_opts, false, short_address, short_operand);
-
-            OwnedPtr<char> rm = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
-
-            uint32_t val = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("mov %s, %u\n", rm.ptr, val);
-            break;
-          }
         case X64::MOV_R8_TO_RM8: {
-            uint8_t modrm = *bytes++;
+            uint8_t modrm = start.read_byte();
 
             //Overide
             p_opts.rm_name = b8_rex_reg_name;
             p_opts.r_name = b8_rex_reg_name;
             p_opts.mem_size = "BYTE PTR";
 
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("mov %s, %s\n", names.r.ptr, names.rm.ptr);
-            break;
-          }
-        case 0x0F: {
-            uint8_t op2 = *bytes++;
-            switch (op2) {
-              case X64::SETE_RM8: {
-                  uint8_t modrm = *bytes++;
-
-                  p_opts.rm_name = b8_rex_reg_name;
-                  p_opts.r_name = b8_rex_reg_name;
-                  p_opts.mem_size = "BYTE PTR";
-
-                  OwnedPtr<char> r_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
-                  printf("sete %s\n", r_string.ptr);
-                  break;
-                }
-              case X64::SETG_RM8: {
-                  uint8_t modrm = *bytes++;
-
-                  p_opts.rm_name = b8_rex_reg_name;
-                  p_opts.r_name = b8_rex_reg_name;
-                  p_opts.mem_size = "BYTE PTR";
-
-                  OwnedPtr<char> r_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
-                  printf("setg %s\n", r_string.ptr);
-                  break;
-                }
-              case X64::SETL_RM8: {
-                  uint8_t modrm = *bytes++;
-
-                  p_opts.rm_name = b8_rex_reg_name;
-                  p_opts.r_name = b8_rex_reg_name;
-                  p_opts.mem_size = "BYTE PTR";
-
-                  OwnedPtr<char> r_string = rm_reg_string(&p_opts, maybe_rex, modrm, &bytes);
-                  printf("setl %s\n", r_string.ptr);
-                  break;
-                }
-              default: {
-                  printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
-                         maybe_rex, op, op2);
-
-                  return;
-                }
-            }
-            break;
-          }
-        default: {
-            printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx\n",
-                   maybe_rex, op);
-
-            return;
-          }
-      }
-    }
-    else if (maybe_rex == 0x0F) {
-      //0x0F instructions
-      uint8_t op = *bytes++;
-      switch (op) {
-        case X64::JE_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("je 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JNE_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("jne 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JB_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("jb 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JNB_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("jnb 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JA_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("ja 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JNA_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("jna 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JL_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("jl 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JNL_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("jnl 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JG_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("jg 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::JNG_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("jng 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::SETE_RM8: {
-            uint8_t modrm = *bytes++;
-
-            p_opts.rm_name = b8_rex_reg_name;
-            p_opts.mem_size = "BYTE PTR";
-
-            OwnedPtr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &bytes);
-            printf("sete %s\n", r_string.ptr);
-            break;
-          }
-        case X64::SETL_RM8: {
-            uint8_t modrm = *bytes++;
-
-            p_opts.rm_name = b8_rex_reg_name;
-            p_opts.mem_size = "BYTE PTR";
-
-            OwnedPtr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &bytes);
-            printf("setl %s\n", r_string.ptr);
-            break;
-          }
-        case X64::SETG_RM8: {
-            uint8_t modrm = *bytes++;
-
-            p_opts.rm_name = b8_rex_reg_name;
-            p_opts.mem_size = "BYTE PTR";
-
-            OwnedPtr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &bytes);
-            printf("setg %s\n", r_string.ptr);
-            break;
-          }
-        default: {
-            printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx\n",
-                   maybe_rex, op);
-
-            return;
-          }
-
-      }
-
-    }
-    else {
-      //Non-REX instruction
-      const uint8_t op = maybe_rex;
-
-      switch (op) {
-        case X64::MOV_R8_TO_RM8: {
-            uint8_t modrm = *bytes++;
-
-            p_opts.rm_name = b8_no_rex_reg_name;
-            p_opts.r_name = b8_no_rex_reg_name;
-            p_opts.mem_size = "BYTE PTR";
-
-            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &bytes);
-
-            printf("mov %s, %s\n", names.r.ptr, names.rm.ptr);
-            break;
-          }
-        case X64::MOV_8_TO_R8:
-        case (X64::MOV_8_TO_R8 + 1):
-        case (X64::MOV_8_TO_R8 + 2):
-        case (X64::MOV_8_TO_R8 + 3):
-        case (X64::MOV_8_TO_R8 + 4):
-        case (X64::MOV_8_TO_R8 + 5):
-        case (X64::MOV_8_TO_R8 + 6):
-        case (X64::MOV_8_TO_R8 + 7): {
-            const uint8_t reg = (op - X64::MOV_8_TO_R8);
-            const char* r_string = b8_no_rex_reg_name(reg);
-
-            uint8_t imm8 = bytes[0];
-            bytes++;
-
-            printf("mov %s, 0x%hhx\n", r_string, imm8);
-            break;
-          }
-        case X64::PUSH_R:
-        case (X64::PUSH_R + 1):
-        case (X64::PUSH_R + 2):
-        case (X64::PUSH_R + 3):
-        case (X64::PUSH_R + 4):
-        case (X64::PUSH_R + 5):
-        case (X64::PUSH_R + 6):
-        case (X64::PUSH_R + 7): {
-            //Default to long mode
-            const char* r_string = x86_64_reg_name_from_num(op - X64::PUSH_R);
-
-            printf("push %s\n", r_string);
-            break;
-          }
-        case X64::POP_R:
-        case (X64::POP_R + 1):
-        case (X64::POP_R + 2):
-        case (X64::POP_R + 3):
-        case (X64::POP_R + 4):
-        case (X64::POP_R + 5):
-        case (X64::POP_R + 6):
-        case (X64::POP_R + 7): {
-            //Default to long mode
-            const char* r_string = x86_64_reg_name_from_num(op - X64::POP_R);
-
-            printf("pop %s\n", r_string);
+            printf("mov %s, %s\n", names.r.data, names.rm.data);
             break;
           }
         case X64::JMP_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
+            int rel32 = x32_from_itr(&start);
 
-            printf("jmp 0x%llx\n", bytes - machine_code + rel32);
+            printf("jmp 0x%llx\n", (start.actual_location - start_idx) + rel32);
             break;
           }
         case X64::RET_NEAR: {
@@ -5558,28 +6383,14 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
             break;
           }
         case X64::CALL_NEAR: {
-            int rel32 = x32_from_bytes(bytes);
-            bytes += 4;
+            int rel32 = x32_from_itr(&start);
 
-            printf("call 0x%llx\n", bytes - machine_code + rel32);
-            break;
-          }
-        case X64::MOV_IMM32_RM: {
-            uint8_t modrm = *bytes++;
-
-            load_default_sizes(&p_opts, false, short_address, short_operand);
-
-            OwnedPtr<char> rm = rm_reg_string(&p_opts, 0, modrm, &bytes);
-
-            uint32_t val = x32_from_bytes(bytes);
-            bytes += 4;
-
-            printf("mov %s, %u\n", rm.ptr, val);
+            printf("call 0x%llx ; call will likely be incorrect\n", (start.actual_location - start_idx) + rel32);
             break;
           }
         default: {
             printf("UNKNOWN INSTRUCTION: 0x%.2hhx\n",
-                   maybe_rex);
+                   op);
 
             return;
           }
@@ -5587,5 +6398,3 @@ void print_x86_64(const uint8_t* machine_code, size_t size) {
     }
   }
 }
-
-#endif

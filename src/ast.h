@@ -57,8 +57,7 @@ MOD(CAST) \
 MOD(UNARY_OPERATOR) \
 MOD(BINARY_OPERATOR) \
 MOD(IDENTIFIER_EXPR) \
-MOD(LOCAL_DECL) \
-MOD(GLOBAL_DECL) \
+MOD(DECL) \
 MOD(NUMBER) \
 MOD(FUNCTION_CALL) \
 MOD(TUPLE_LIT) \
@@ -115,19 +114,27 @@ constexpr bool valid_type_node(AST_TYPE t) {
 struct AST {
   META_FLAGS meta_flags = 0;
 
-  bool can_be_constant;
-
   AST_TYPE ast_type;
   Type node_type = {};
   Span node_span = {};
 };
 
+template<typename T>
+constexpr T* downcast_ast(AST* ast) {
+  ASSERT(ast->ast_type == T::EXPECTED_AST_TYPE);
+  return static_cast<T*>(ast);
+}
+
 struct ASTNamedType : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::NAMED_TYPE;
+
   Type actual_type = {};
   const InternString* name = nullptr;
 };
 
 struct ASTArrayType : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::ARRAY_TYPE;
+
   Type actual_type = {};
   u64 array_length = 0;
   AST_LOCAL base = 0;
@@ -135,22 +142,28 @@ struct ASTArrayType : public AST {
 };
 
 struct ASTPtrType : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::PTR_TYPE;
+
   Type actual_type = {};
   AST_LOCAL base = 0;
 };
 
 struct ASTLambdaType : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LAMBDA_TYPE;
+
   Type actual_type = {};
   AST_LOCAL ret = 0;
   AST_ARR args = {};
 };
 
 struct ASTTupleType : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::TUPLE_TYPE;
   Type actual_type = {};
   AST_ARR types = {};
 };
 
 struct ASTBinaryOperatorExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::BINARY_OPERATOR;
   BINARY_OPERATOR op;
 
   AST_LOCAL left = 0;
@@ -160,13 +173,13 @@ struct ASTBinaryOperatorExpr : public AST {
 };
 
 struct ASTTupleLitExpr : public AST {
-  Type tuple_type;
-  
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::TUPLE_LIT;
   AST_LOCAL prefix;
   AST_ARR elements = {};
 };
 
 struct ASTFunctionCallExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::FUNCTION_CALL;
   AST_LOCAL function;
 
   AST_ARR arguments = {};
@@ -176,6 +189,7 @@ struct ASTFunctionCallExpr : public AST {
 };
 
 struct ASTUnaryOperatorExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::UNARY_OPERATOR;
   UNARY_OPERATOR op;
   AST_LOCAL expr = 0;
 
@@ -183,26 +197,31 @@ struct ASTUnaryOperatorExpr : public AST {
 };
 
 struct ASTCastExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::CAST;
   AST_LOCAL type = 0;
   AST_LOCAL expr = 0;
   CASTS::CAST_FUNCTION emit = nullptr;
 };
 
 struct ASTIndexExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::INDEX_EXPR;
   AST_LOCAL expr = 0;
   AST_LOCAL index = 0;
 };
 
 struct ASTNumber : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::NUMBER;
   uint64_t num_value = 0;
   const InternString* suffix = nullptr;
 };
 
 struct ASTArrayExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::ARRAY_EXPR;
   AST_ARR elements = {};
 };
 
 struct ASTIdentifier : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::IDENTIFIER_EXPR;
   enum TYPE {
     LOCAL,
     GLOBAL
@@ -218,6 +237,7 @@ struct ASTIdentifier : public AST {
 };
 
 struct ASTMemberAccessExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::MEMBER_ACCESS;
   AST_LOCAL expr = 0;
 
   uint32_t offset = 0;
@@ -225,18 +245,22 @@ struct ASTMemberAccessExpr : public AST {
 };
 
 struct ASTAsciiString : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::ASCII_STRING;
   const InternString* string;
 };
 
 struct ASTAsciiChar : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::ASCII_CHAR;
   char character;
 };
 
 struct ASTBlock : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::BLOCK;
   AST_ARR block = {};
 };
 
 struct ASTTypedName : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::TYPED_NAME;
   AST_LOCAL type = {};
   const InternString* name = nullptr;
 
@@ -244,23 +268,29 @@ struct ASTTypedName : public AST {
 };
 
 struct ASTDecl : public AST {
-  const InternString* name = nullptr;
-  bool compile_time_const = false;
-  Type type = {};
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::DECL;
+  enum TYPE {
+    LOCAL,
+    GLOBAL,
+  };
 
-  AST_LOCAL type_ast = 0;
-  AST_LOCAL expr = 0;
-};
+  bool compile_time_const;
+  TYPE decl_type;
 
-struct ASTGlobalDecl : public ASTDecl {
-  Global* global_ptr;
-};
+  const InternString* name;
+  Type type;
 
-struct ASTLocalDecl : public ASTDecl {
-  Local* local_ptr;
+  AST_LOCAL type_ast;
+  AST_LOCAL expr;
+
+  union {
+    Global* global_ptr;
+    Local* local_ptr;
+  };
 };
 
 struct ASTFuncSig : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::FUNCTION_SIGNATURE;
   IR::FunctionSignature* sig = nullptr;
   const CallingConvention* convention = nullptr;
 
@@ -269,14 +299,17 @@ struct ASTFuncSig : public AST {
 };
 
 struct ASTLambdaExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LAMBDA_EXPR;
   AST_LOCAL lambda;
 };
 
 struct ASTStructExpr : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::STRUCT_EXPR;
   AST_LOCAL struct_body;
 };
 
 struct ASTLambda : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LAMBDA;
   IR::Function* function = nullptr;
 
   AST_LOCAL sig = {};
@@ -284,36 +317,43 @@ struct ASTLambda : public AST {
 };
 
 struct ASTStructBody : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::STRUCT;
   UnitID unit_id;
   AST_ARR elements = {};
   Type actual_type = {};
 };
 
 struct ASTWhile : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::WHILE;
   AST_LOCAL condition = 0;
   AST_LOCAL statement = 0;
 };
 
 struct ASTIfElse : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::IF_ELSE;
   AST_LOCAL condition = 0;
   AST_LOCAL if_statement = 0;
   AST_LOCAL else_statement = 0;
 };
 
 struct ASTReturn : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::RETURN;
   AST_LOCAL expr = 0;
 };
 
 struct ASTAssign : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::ASSIGN;
   AST_LOCAL assign_to = 0;
   AST_LOCAL value = 0;
 };
 
 struct ASTImport : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::IMPORT;
   AST_LOCAL expr_location = 0;
 };
 
 struct ASTLink : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LINK;
   AST_LOCAL import_type = 0;
 
   bool dynamic = false;
@@ -325,6 +365,7 @@ struct ASTLink : public AST {
 };
 
 struct ASTExportSingle : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::EXPORT_SINGLE;
   const InternString* name = nullptr;
   AST_LOCAL value = 0;
 
@@ -332,6 +373,7 @@ struct ASTExportSingle : public AST {
 };
 
 struct ASTExport : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::EXPORT;
   AST_ARR export_list = {};
 };
 

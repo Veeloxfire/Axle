@@ -316,12 +316,13 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
     options.print.ast = false;
     options.print.comptime_res = false;
     options.print.comptime_exec = false;
-    options.print.finished_ir = false;
+    options.print.finished_ir = true;
+    options.print.finished_mc = true;
     options.print.run_headers = false;
-    options.print.register_select = false;
+    options.print.register_select = true;
     options.print.file_loads = false;
     options.print.comp_units = false;
-    options.print.work = true;
+    options.print.work = false;
 
     std::cout << "\nStarting Test: " << test.test_name << "\n";
 
