@@ -72,6 +72,8 @@ namespace Backend {
     usize bucket_counter;
     usize actual_location;
 
+    u8 read_byte();
+
     void jump_to(usize l);
     void overwrite_arr(const u8* start, const u8* end);
     inline void overwrite_arr(const u8* start, usize count) {

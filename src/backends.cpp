@@ -309,6 +309,18 @@ void build_data_section_for_file(Array<u8>& data, Array<u8>& imports, Compiler* 
 
 #endif
 
+u8 Backend::DataBucketIterator::read_byte() {
+  if (bucket_counter == BUCKET_SIZE) {
+    bucket = bucket->next;
+    bucket_counter = 0;
+  }
+
+  u8 b = bucket->arr[bucket_counter];
+  bucket_counter += 1;
+  actual_location += 1;
+  return b;
+}
+
 void Backend::DataBucketIterator::jump_to(usize l) {
   ASSERT(l >= actual_location);
   while (actual_location < l) {
