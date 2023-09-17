@@ -1654,44 +1654,6 @@ struct AtomicQueue {
 };
 
 template<typename T>
-struct OwnedPtr {
-  T* ptr = nullptr;
-  OwnedPtr(const OwnedPtr&) = delete;
-
-  OwnedPtr() = default;
-
-  OwnedPtr(OwnedPtr&& ptr_in) noexcept : ptr(ptr_in.ptr) {
-    ptr_in.ptr = nullptr;
-  }
-
-  OwnedPtr& operator=(OwnedPtr&& ptr_in) noexcept {
-    free_no_destruct();
-    ptr = ptr_in.ptr;
-    ptr_in.ptr = nullptr;
-    return *this;
-  }
-
-  OwnedPtr(T* ptr_in) : ptr(ptr_in) {}
-
-  ~OwnedPtr() {
-    free_no_destruct();
-  }
-
-  void free_no_destruct() {
-    ::free_no_destruct<T>(ptr);
-    ptr = nullptr;
-  }
-};
-
-template<typename U, typename T>
-OwnedPtr<U> cast_ptr(OwnedPtr<T>&& ptr) {
-  OwnedPtr<U> u = {};
-  u.ptr = (U*)ptr.ptr;
-  ptr.ptr = nullptr;
-  return u;
-}
-
-template<typename T>
 struct OwnedArr {
   T* data = nullptr;
   usize size = 0;
@@ -2165,13 +2127,11 @@ EXECUTE_AT_END(T&& t) -> EXECUTE_AT_END<T>;
 
 namespace IO_Single {
   void print_impl(const char* string);
-  void print_impl(const OwnedPtr<char>& string);
   void print_impl(const OwnedArr<char>& string);
   void print_impl(const OwnedArr<const char>& string);
   void print_impl(const char c);
 
   void err_print_impl(const char* string);
-  void err_print_impl(const OwnedPtr<char>& string);
   void err_print_impl(const OwnedArr<char>& string);
   void err_print_impl(const OwnedArr<const char>& string);
   void err_print_impl(const char c);
