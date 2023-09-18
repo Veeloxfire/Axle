@@ -1214,7 +1214,7 @@ TC_STAGE(UNARY_OPERATOR, neg_2) {
   }
 
   expr->node_type = ty;
-  expr->emit_info = { expr->node_type, &UnOpArgs::emit_neg_int };
+  expr->emit_info = { prim->node_type, expr->node_type, &UnOpArgs::emit_neg_int };
   return FINISHED;
 }
 
@@ -1238,7 +1238,7 @@ TC_STAGE(UNARY_OPERATOR, addr_2) {
   }
 
   expr->node_type = to_type(ptr);
-  expr->emit_info = { expr->node_type, &UnOpArgs::emit_address };
+  expr->emit_info = { prim->node_type, expr->node_type, &UnOpArgs::emit_address };
 
   //Current cant do these at comptime
   expr->meta_flags &= ~META_FLAG::COMPTIME;
@@ -1257,7 +1257,7 @@ TC_STAGE(UNARY_OPERATOR, deref_2) {
     const auto* ptr = prim->node_type.unchecked_base<PointerStructure>();
 
     expr->node_type = ptr->base;
-    expr->emit_info = { expr->node_type, &UnOpArgs::emit_deref_ptr };
+    expr->emit_info = { prim->node_type, expr->node_type, &UnOpArgs::emit_deref_ptr };
     return FINISHED;
   }
   else {

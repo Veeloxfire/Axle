@@ -865,7 +865,7 @@ Eval::RuntimeValue CASTS::int_to_int(Eval::IrBuilder* const builder,
                                      const Type& to,
                                      const Eval::RuntimeValue& val) {
   ASSERT(to.is_valid() && to.struct_type() == STRUCTURE_TYPE::INTEGER);
-  const Type from = val.type;
+  const Type from = val.effective_type();
   ASSERT(from.is_valid() && from.struct_type() == STRUCTURE_TYPE::INTEGER);
 
   if (to == from) {
@@ -885,6 +885,7 @@ Eval::RuntimeValue CASTS::int_to_int(Eval::IrBuilder* const builder,
 Eval::RuntimeValue CASTS::no_op(Eval::IrBuilder* const builder,
                                 const Type& to,
                                 const Eval::RuntimeValue& val) {
+  ASSERT(val.type.is_valid());
   Eval::RuntimeValue res = val;
   res.type = to;
   return res;
@@ -1146,8 +1147,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           if (is_constant) {
             ASSERT(tup_lit.rvt == Eval::RVT::Constant);
             ASSERT(v.rvt == Eval::RVT::Constant);
-            ASSERT(v.type == i_t->type);
-            memcpy_s(tup_constant + i_t->offset, i_t->type.size(), v.constant, v.type.size());
+            const Type v_type = v.effective_type();
+            ASSERT(v_type == i_t->type);
+            memcpy_s(tup_constant + i_t->offset, i_t->type.size(), v.constant, v_type.size());
           }
           else {
             ASSERT(tup_lit.rvt == Eval::RVT::Direct);
@@ -1195,13 +1197,15 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             return Eval::no_value();
           }
 
-          ASSERT(el.type == base_type);
+          const Type el_type = el.effective_type();
+
+          ASSERT(el_type == base_type);
           u64 offset = count * base_type.size();
 
           if (is_constant) {
             ASSERT(el.rvt == Eval::RVT::Constant);
             ASSERT(arr.rvt == Eval::RVT::Constant);
-            ASSERT(el.type == arr_type->base);
+            ASSERT(el_type == arr_type->base);
             memcpy_s(arr_constant + offset, base_type.size(), el.constant, base_type.size());
           }
           else {
@@ -1300,7 +1304,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         }
 
         const auto res = cast->emit(builder, cast->node_type, ref);
-        ASSERT(res.type == cast->node_type);
+        ASSERT(res.effective_type() == cast->node_type);
         return res;
       }
     case AST_TYPE::UNARY_OPERATOR: {
@@ -1475,6 +1479,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           Eval::assign(builder, Eval::as_direct(condition_vi, comp_thread->builtin_types->t_bool), cond);
 
+          builder->export_variables();
           builder->ir->set_current_cf(IR::CFSplt{
             loop_merge_label,
 
@@ -1496,9 +1501,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             return;
           }
         }
-        builder->rescope_variables(parent_variables.size);
-        builder->export_variables();
-
         IR::LocalLabel loop_end = builder->ir->current_block;
 
         if (loop_end == IR::NULL_LOCAL_LABEL) {
@@ -1510,8 +1512,18 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             parent,
               loop_split_label,
           });
+
+          builder->variables_state = std::move(branch_variables);
         }
         else {
+          builder->rescope_variables(parent_variables.size);
+          builder->export_variables();
+
+          builder->ir->set_current_cf(IR::CFInline{
+            builder->parent,
+              loop_merge_label,
+          });
+
           builder->ir->current_block = loop_merge_label;
 
           Eval::merge_variables(builder, Eval::MergeRules::UseFirst,
@@ -1523,9 +1535,9 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
               escape_label,
           });
-        }
 
-        builder->variables_state = std::move(branch_variables);
+          builder->variables_state = std::move(branch_variables);
+        }
 
         builder->switch_control_block(escape_label, loop_split_label);
         return;
@@ -1541,9 +1553,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         const IR::LocalLabel if_label = builder->ir->new_control_block();
         const IR::LocalLabel else_label = builder->ir->new_control_block();
 
-
-        IR::LocalLabel merge_label = IR::NULL_LOCAL_LABEL;
-
         builder->ir->set_current_cf(IR::CFInline{
           builder->parent,
             split_label,
@@ -1558,13 +1567,14 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             return;
           }
 
-          ASSERT(cond.type == comp_thread->builtin_types->t_bool);
+          ASSERT(cond.effective_type() == comp_thread->builtin_types->t_bool);
 
           IR::ValueIndex cond_vi = builder->ir->new_temporary(comp_thread->builtin_types->t_bool, {});
 
 
           Eval::assign(builder, Eval::as_direct(cond_vi, comp_thread->builtin_types->t_bool), cond);
 
+          builder->export_variables();
           builder->ir->set_current_cf(IR::CFSplt{
             parent,
               cond_vi,
@@ -1585,75 +1595,79 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             return;
           }
 
-          builder->rescope_variables(scope_size);
-          builder->export_variables();
 
           if (builder->ir->current_block != IR::NULL_LOCAL_LABEL) {
-            merge_label = builder->ir->new_control_block();
-
-            builder->ir->set_current_cf(IR::CFInline{
-              builder->parent,
-                merge_label,
-            });
+            builder->rescope_variables(scope_size);
+            builder->export_variables();
+          }
+          else {
+            builder->variables_state = {};
           }
         }
 
+        IR::LocalLabel if_end_parent = builder->parent;
         IR::LocalLabel if_end = builder->ir->current_block;
 
         Array if_variables = std::exchange(builder->variables_state, std::move(split_variables));
 
-        IR::LocalLabel else_end = else_label;
+        IR::LocalLabel else_end_parent = IR::NULL_LOCAL_LABEL;
+        IR::LocalLabel else_end = IR::NULL_LOCAL_LABEL;
 
         if (if_else->else_statement != 0) {
-          builder->switch_control_block(if_label, split_label);
+          builder->switch_control_block(else_label, split_label);
 
           compile_bytecode_of_statement(comp, comp_thread, builder, if_else->else_statement);
           if (comp_thread->is_panic()) {
             return;
           }
 
-          builder->rescope_variables(scope_size);
-          builder->export_variables();
-
           if (builder->ir->current_block != IR::NULL_LOCAL_LABEL) {
-            if (merge_label == IR::NULL_LOCAL_LABEL) {
-              merge_label = builder->ir->new_control_block();
-            }
-
-            builder->ir->set_current_cf(IR::CFInline{
-              builder->parent,
-                merge_label,
-            });
+            builder->rescope_variables(scope_size);
+            builder->export_variables();
+          }
+          else {
+            builder->variables_state = {};
           }
 
-          builder->ir->set_current_cf(IR::CFInline{
-            builder->parent,
-              merge_label,
-          });
-
+          else_end_parent = builder->parent;
           else_end = builder->ir->current_block;
         }
 
         builder->ir->end_control_block();
 
         if (if_end == IR::NULL_LOCAL_LABEL && else_end == IR::NULL_LOCAL_LABEL) {
-          //Unreachable code yay
+          //Unreachable code
           builder->ir->current_block = IR::NULL_LOCAL_LABEL;
           builder->parent = IR::NULL_LOCAL_LABEL;
         }
         else if (if_end == IR::NULL_LOCAL_LABEL) {
-          ASSERT(merge_label != IR::NULL_LOCAL_LABEL);
-          builder->switch_control_block(merge_label, if_end);
+          builder->ir->current_block = else_end;
+          builder->parent = else_end_parent;
         }
         else if (else_end == IR::NULL_LOCAL_LABEL) {
-          ASSERT(merge_label != IR::NULL_LOCAL_LABEL);
-          builder->switch_control_block(merge_label, else_end);
+          builder->ir->current_block = if_end;
+          builder->parent = if_end_parent;
         }
         else {
           //Do the merge
-          builder->ir->start_control_block(merge_label);
+          IR::LocalLabel merge_label = builder->ir->new_control_block();
           builder->parent = IR::NULL_LOCAL_LABEL;
 
+          {
+            builder->ir->current_block = if_end;
+            builder->ir->set_current_cf(IR::CFInline{
+              if_end_parent,
+                merge_label
+            });
+
+            builder->ir->current_block = else_end;
+            builder->ir->set_current_cf(IR::CFInline{
+                else_end_parent,
+                merge_label
+            });
+          }
+
+          builder->ir->current_block = merge_label;
           IR::LocalLabel final_label = builder->ir->new_control_block();
 
           builder->ir->set_current_cf(IR::CFMerge{
@@ -1713,6 +1727,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
 void start_ir(Eval::IrBuilder* builder) {
   auto* ir = builder->ir;
+  ASSERT(ir != nullptr);
   ASSERT(ir->signature != nullptr);
   ASSERT(ir->signature->parameter_types.size == 0);
 
@@ -1723,11 +1738,18 @@ void start_ir(Eval::IrBuilder* builder) {
     first,
   });
 
+  IR::Types::StartFunc sf = {};
+  sf.n_values = 0;
+  sf.values = nullptr;
+
+  IR::Emit::StartFunc(ir->current_bytecode(), sf);
+
   builder->switch_control_block(first, startup);
 }
 
 void start_ir(Eval::IrBuilder* builder, AST_ARR params) {
   auto* ir = builder->ir;
+  ASSERT(ir != nullptr);
   ASSERT(ir->signature != nullptr);
 
   IR::LocalLabel startup = ir->new_control_block();
@@ -1795,13 +1817,14 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
 
   Eval::end_builder(&builder);
 
-  ASSERT(ref.type == root->node_type);
+  const Type ref_type = ref.effective_type();
+  ASSERT(ref_type == root->node_type);
 
   if (!eval->type.is_valid()) {
-    eval->type = ref.type;
+    eval->type = ref_type;
   }
   else {
-    ASSERT(eval->type == ref.type);
+    ASSERT(eval->type == ref_type);
   }
 
   if (ref.rvt == Eval::RVT::Constant) {
@@ -1816,7 +1839,7 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
       return;
     }
 
-    const Type& type = ref.type;
+    const Type& type = ref_type;
 
     auto res = vm.get_value(out);
     ASSERT(res.t == type);

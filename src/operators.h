@@ -54,6 +54,7 @@ struct BinOpArgs {
 };
 
 struct UnOpEmitInfo {
+  Type src_type;
   Type dest_type;
   UNARY_OPERATOR_FUNCTION func = nullptr;
 };

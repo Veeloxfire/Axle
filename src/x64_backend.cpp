@@ -3081,20 +3081,20 @@ static VisitRes visit_ordered_value(const ViewArr<RegisterMapping>& mappings,
                                     const IR::V_ARG& v_arg, u32 expr_id) {
   ASSERT(lifetimes.size == mappings.size);
   const u32 t_index = resolver->local_temp_id(v_arg.val);
-  const IR::SSATemp& t = resolver->local_temporaries.data[t_index];
+  const IR::SSATemp& t = resolver->local_temporaries[t_index];
 
-  const MapType map_type = mappings.data[t_index].map_type;
+  const MapType map_type = mappings[t_index].map_type;
   if (map_type == MapType::InternalNoMap 
       || map_type == MapType::ExternalNoMap) return { NeedIntermediate::Yes, t.type };//ignored- assumed its a memory location
 
-  ValueLifetime& ov = lifetimes.data[t_index];
+  ValueLifetime& ov = lifetimes[t_index];
   ASSERT(v_arg.offset == 0);//For now we don't worry about this
 
   if (ov.visited) {
     ov.last_use = expr_id;
 
     if (resolver->has_called && expr_id <= resolver->last_call && resolver->last_call < expr_id) {
-      mappings.data[t_index].crosses_call = true;
+      mappings[t_index].crosses_call = true;
     }
   }
   else {
@@ -3144,13 +3144,13 @@ OwnedArr<LifetimeEdge> determine_edges(const ViewArr<ValueLifetime>& lifetimes,
   Array<LifetimeEdge> edges = {};
 
   for (usize a = 0; a < lifetimes.size; ++a) {
-    const ValueLifetime& va = lifetimes.data[a];
+    const ValueLifetime& va = lifetimes[a];
     if (!va.visited) continue;
 
     for (usize b = 0; b < lifetimes.size; ++b) {
       if (a == b) continue;
 
-      const ValueLifetime& vb = lifetimes.data[b];
+      const ValueLifetime& vb = lifetimes[b];
       if (!va.visited) continue;
 
       const bool overlap_range = (vb.first_use <= va.last_use && va.first_use <= vb.first_use)
@@ -3163,10 +3163,10 @@ OwnedArr<LifetimeEdge> determine_edges(const ViewArr<ValueLifetime>& lifetimes,
 
     usize acc = lifetimes.size;
     for (usize m = 0; m < other_mappings.size; ++m) {
-      const ViewArr<RegisterMapping>& mapping = other_mappings.data[m];
+      const ViewArr<RegisterMapping>& mapping = other_mappings[m];
 
       for (usize i = 0; i < mapping.size; ++i) {
-        const RegisterMapping& in = mapping.data[i];
+        const RegisterMapping& in = mapping[i];
         ASSERT(in.map_type != MapType::InternalNoMap);
         ASSERT(in.map_type != MapType::ExternalNoMap);
         ASSERT(in.known_reg);
@@ -3199,9 +3199,9 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
   //Is a value too big to fit in a register - don't worry about it
   for (u32 i = 0; i < resolver->local_temporaries.size; ++i) {
-    const IR::SSATemp& temp = resolver->local_temporaries.data[i];
+    const IR::SSATemp& temp = resolver->local_temporaries[i];
     if (temp.type.size() > x64_types_info.get_size(IR::Format::uint64) || temp.requirements.has_address()) {
-      values.data[i].map_type = MapType::InternalNoMap;
+      values[i].map_type = MapType::InternalNoMap;
     }
   }
 
@@ -3210,14 +3210,14 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
   //Need to know which registers these intersect with, but thats it
   FOR(resolver->imports, it) {
     const u32 i_index = resolver->local_temp_id(it->in_temp);
-    if (values.data[i_index].map_type == MapType::InternalNoMap) {
-      values.data[i_index].map_type = MapType::ExternalNoMap;
+    if (values[i_index].map_type == MapType::InternalNoMap) {
+      values[i_index].map_type = MapType::ExternalNoMap;
       continue;
     }
 
-    values.data[i_index].map_type = MapType::External;
+    values[i_index].map_type = MapType::External;
 
-    const IR::SSATemp& t = resolver->local_temporaries.data[i_index];
+    const IR::SSATemp& t = resolver->local_temporaries[i_index];
     //Is used now
     IR::V_ARG artificial = {};
     artificial.offset = 0;
@@ -3229,11 +3229,11 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
   FOR(resolver->exports, it) {
     const u32 i_index = resolver->local_temp_id(it->out_temp);
-    if (values.data[i_index].map_type == MapType::InternalNoMap) {
-      values.data[i_index].map_type = MapType::ExternalNoMap;
+    if (values[i_index].map_type == MapType::InternalNoMap) {
+      values[i_index].map_type = MapType::ExternalNoMap;
     }
     else {
-      values.data[i_index].map_type = MapType::External;
+      values[i_index].map_type = MapType::External;
     }
   }
 
@@ -3375,7 +3375,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           IR::Types::AddrOfGlobal addr;
           bc = IR::Read::AddrOfGlobal(bc, bc_end, addr);
           ASSERT(resolver->globals_used.size > addr.im32);
-          const IR::GlobalReference& g = resolver->globals_used.data[addr.im32];
+          const IR::GlobalReference& g = resolver->globals_used[addr.im32];
 
           VisitRes im = visit_ordered_value(values, lifetimes, resolver, addr.val, expr_id);
 
@@ -3603,7 +3603,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
   FOR(resolver->exports, it) {
     const u32 i_index = resolver->local_temp_id(it->out_temp);
 
-    const IR::SSATemp& t = resolver->local_temporaries.data[i_index];
+    const IR::SSATemp& t = resolver->local_temporaries[i_index];
     //Is used now
     IR::V_ARG artificial = {};
     artificial.offset = 0;
@@ -3683,8 +3683,14 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
     const LifetimeEdge* edge_end = edges.end();
 
     for (u32 i = 0; i < static_cast<u32>(values.size); ++i) {
-      RegisterMapping& v = values.data[i];
-      if (v.map_type != MapType::Internal) continue;//Only map internal values
+      RegisterMapping& v = values[i];
+
+      if (v.map_type != MapType::Internal) {
+        while (edge_i < edge_end && edge_i->a == i) {//skip these for now
+          edge_i += 1;
+        }
+        continue;//Only map internal values
+      }
 
       u32 used_regs = 0;
 
@@ -3708,7 +3714,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           used_regs |= 1u << (u32)r;
         }
         else {
-          RegisterMapping& other = values.data[edge_i->b];
+          RegisterMapping& other = values[edge_i->b];
           if (other.known_reg) {
             ASSERT(other.reg < 32);
             used_regs |= 1u << (u32)other.reg;
@@ -3754,12 +3760,17 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
     const LifetimeEdge* edge_end = edges.end();
 
     for (u32 i = 0; i < static_cast<u32>(values.size); ++i) {
-      RegisterMapping& v = values.data[i];
-      if (v.map_type != MapType::External) continue;//Only mapping external
+      RegisterMapping& v = values[i];
+      if (v.map_type != MapType::External) {
+        while (edge_i < edge_end && edge_i->a == i) {//skip these for now
+          edge_i += 1;
+        }
+        continue;//Only mapping external
+      }
 
       u32 used_regs = 0;
 
-      ASSERT(edge_i == edge_end || edge_i->a == i);
+      ASSERT(edge_i == edge_end || edge_i->a >= i);
 
       while (edge_i < edge_end && edge_i->a == i) {
         u32 b = edge_i->b;
@@ -3777,7 +3788,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           used_regs |= 1u << (u32)intermediates.data[i].reg;
         }
         else {
-          RegisterMapping& other = values.data[edge_i->b];
+          RegisterMapping& other = values[edge_i->b];
           if (other.known_reg) {
             ASSERT(other.reg < 32);
             used_regs |= 1u << (u32)other.reg;
@@ -3828,16 +3839,16 @@ struct Selector {
 
   X64::R get_next_intermediate_reg() {
     ASSERT(intermediates_counter < intermediates.size);
-    return intermediates.data[intermediates_counter++];
+    return intermediates[intermediates_counter++];
   }
 
   X64Value get_val(const IR::V_ARG& v) const {
     const u32 u = v.val.index;
 
     ASSERT(u < local_temporaries.size);
-    const IR::SSATemp& temp = local_temporaries.data[u];
+    const IR::SSATemp& temp = local_temporaries[u];
 
-    const ActualTemporary& a_temp = local_actual_values.data[u];
+    const ActualTemporary& a_temp = local_actual_values[u];
 
     if (a_temp.is_register) {
       ASSERT(v.offset == 0);
@@ -4058,7 +4069,7 @@ bool set_parent_intersects(const VariableResolver& resolver, u32 known, BitArray
     ASSERT(label != IR::NULL_LOCAL_LABEL);
     ASSERT(label.label - 1 < intersects.length);
 
-    crosses_call = crosses_call || resolver.blocks.data[label.label - 1].calls;
+    crosses_call = crosses_call || resolver.blocks[label.label - 1].calls;
 
     intersects.set(label.label - 1);
   }
@@ -4115,7 +4126,7 @@ static VersionMapping trace_version(const VariableResolver& resolver,
     visited.set(b);
 
     {
-      const IR::ControlBlock& block = resolver.blocks.data[b];
+      const IR::ControlBlock& block = resolver.blocks[b];
 
       {
         FOR(block.enter_merge, it) {
@@ -4129,7 +4140,7 @@ static VersionMapping trace_version(const VariableResolver& resolver,
       {
         FOR(block.exports, it) {
           if (it->variable == val.var && it->version != val.version) {
-            const auto& map = resolver.temporary_mappings.data[it->out_temp.index];
+            const auto& map = resolver.temporary_mappings[it->out_temp.index];
             ASSERT(!map.known_reg);
             mapping.reg_bitmask |= map.reg_bitmask;
             mapping.crosses_call = mapping.crosses_call || map.crosses_call;
@@ -4143,7 +4154,7 @@ static VersionMapping trace_version(const VariableResolver& resolver,
       {
         FOR(block.imports, it) {
           if (it->variable == val.var && it->version == val.version) {
-            const auto& map = resolver.temporary_mappings.data[it->in_temp.index];
+            const auto& map = resolver.temporary_mappings[it->in_temp.index];
             ASSERT(!map.known_reg);
             mapping.reg_bitmask |= map.reg_bitmask;
             mapping.crosses_call = mapping.crosses_call || map.crosses_call;
@@ -4159,6 +4170,7 @@ static VersionMapping trace_version(const VariableResolver& resolver,
 
       switch (block.cf_type) {
         case IR::ControlFlowType::Start: {
+            ASSERT(block.cf_start.child != IR::NULL_LOCAL_LABEL);//catches blocks with missing cf
             current_visit_stack.insert(block.cf_start.child);
             continue;
           }
@@ -4230,15 +4242,15 @@ VariableMappings resolve_variables(const VariableResolver& resolver) {
 
   u32 total_versions = 0;
   for (u32 i = 0; i < variables.size; ++i) {
-    const IR::SSAVar& v = resolver.variables.data[i];
+    const IR::SSAVar& v = resolver.variables[i];
     ASSERT(v.versions > 0);
     
     if (v.requirements.has_address() || v.type.size() > 8) {
-      variables.data[i].memory = true;
+      variables[i].memory = true;
       continue;
     }
 
-    VariableVersionMap& v_map = variables.data[i];
+    VariableVersionMap& v_map = variables[i];
     v_map.versions_start = total_versions;
     v_map.num_versions = v.versions;
 
@@ -4260,11 +4272,11 @@ VariableMappings resolve_variables(const VariableResolver& resolver) {
 
       current_visit_stack.insert(IR::LocalLabel{ a + 1 });//reaches self
 
-      const IR::ControlBlock& root = resolver.blocks.data[a];
+      const IR::ControlBlock& root = resolver.blocks[a];
 
       FOR(root.exports, exps) {
         ASSERT(exps->variable < variables.size);
-        const VariableVersionMap& map = variables.data[exps->variable];
+        const VariableVersionMap& map = variables[exps->variable];
 
         if (map.memory) continue;//no need to worry about these ones
 
@@ -4272,7 +4284,7 @@ VariableMappings resolve_variables(const VariableResolver& resolver) {
         ASSERT(map.versions_start + exps->version < version_intersects.size);
 
         u32 version_index = map.versions_start + exps->version;
-        VariableVersionInt& intersects = version_intersects.data[version_index];
+        VariableVersionInt& intersects = version_intersects[version_index];
 
         ASSERT(intersects.intersects.data == nullptr);
         intersects.intersects = BitArray(num_blocks);
@@ -4288,7 +4300,7 @@ VariableMappings resolve_variables(const VariableResolver& resolver) {
 
         current_visit_stack.insert(root.label);
 
-        variable_mappings.data[version_index] = trace_version(resolver, find, visit_branches, current_visit_stack, visited, i_bitmask);
+        variable_mappings[version_index] = trace_version(resolver, find, visit_branches, current_visit_stack, visited, i_bitmask);
       }
     }
   }
@@ -4296,12 +4308,12 @@ VariableMappings resolve_variables(const VariableResolver& resolver) {
   Array<LifetimeEdge> edges;
 
   for (u32 a = 0; a < version_intersects.size; ++a) {
-    const auto& a_range = version_intersects.data[a].intersects;
+    const auto& a_range = version_intersects[a].intersects;
     if (a_range.data == nullptr) continue;
 
     for (u32 b = 0; b < version_intersects.size; ++b) {
       if (a == b) continue;
-      const auto& b_range = version_intersects.data[b].intersects;
+      const auto& b_range = version_intersects[b].intersects;
       if (b_range.data == nullptr) continue;
 
 
@@ -4323,15 +4335,15 @@ VariableMappings resolve_variables(const VariableResolver& resolver) {
     const LifetimeEdge* edge_end = edges.end();
 
     for (u32 i = 0; i < variable_mappings.size; ++i) {
-      auto& v = variable_mappings.data[i];
+      auto& v = variable_mappings[i];
 
       u32 used_regs = v.reg_bitmask;
 
-      ASSERT(edge_i == edge_end || edge_i->a == i);
+      ASSERT(edge_i == edge_end || edge_i->a >= i);
 
       while (edge_i < edge_end && edge_i->a == i) {
         ASSERT(edge_i->b < variable_mappings.size);
-        const auto& b = variable_mappings.data[edge_i->b];
+        const auto& b = variable_mappings[edge_i->b];
 
         if (b.known_reg) {
           ASSERT(b.reg < 32);
@@ -4379,12 +4391,12 @@ void emit_merges(X64::Program* program, const VariableMappings& var_mappings,
 
   FOR(merges, it) {
     ASSERT(it->variable < var_mappings.variable_versions.size);
-    const auto& var_versions = var_mappings.variable_versions.data[it->variable];
+    const auto& var_versions = var_mappings.variable_versions[it->variable];
 
     if (var_versions.memory) continue;
 
     ASSERT(it->variable < ir_variables.size);
-    const auto& var = ir_variables.data[it->variable];
+    const auto& var = ir_variables[it->variable];
 
     const u32 from_version = it->in_versions[from_index];
     const auto from_index = var_versions.versions_start + from_version;
@@ -4392,8 +4404,8 @@ void emit_merges(X64::Program* program, const VariableMappings& var_mappings,
     const auto to_index = var_versions.versions_start + it->out_version;
     ASSERT(to_index < var_mappings.version_reg_map.size);
 
-    const auto& v0 = var_mappings.version_reg_map.data[from_index];
-    const auto& v1 = var_mappings.version_reg_map.data[to_index];
+    const auto& v0 = var_mappings.version_reg_map[from_index];
+    const auto& v1 = var_mappings.version_reg_map[to_index];
 
     ASSERT(v0.known_reg);
     ASSERT(v1.known_reg);
@@ -4486,7 +4498,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
       intermediates.reserve_extra(mappings.intermediates.size);
       for (usize in = 0; in < mappings.intermediates.size; ++in) {
-        const auto& v = mappings.intermediates.data[in];
+        const auto& v = mappings.intermediates[in];
         ASSERT(v.known_reg);
         intermediates.insert(X64::R{v.reg});
       }
@@ -4532,13 +4544,13 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
     for(u32 i = 0; i < ir->variables.size; ++i) {
       const auto& v = ir->variables.data[i];
       if (v.type.size() > 8 || v.requirements.has_address()) {
-        ASSERT(var_mappings.variable_versions.data[i].memory);
+        ASSERT(var_mappings.variable_versions[i].memory);
         stack_top = ceil_to_n(stack_top, v.type.structure->alignment);
         stack_top += v.type.size();
-        variables_offsets.data[i] = stack_top;
+        variables_offsets[i] = stack_top;
       }
       else {
-        ASSERT(!var_mappings.variable_versions.data[i].memory);
+        ASSERT(!var_mappings.variable_versions[i].memory);
       }
     }
 
@@ -4549,8 +4561,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
       u32 block_stack = basic_stack_size;
 
       for (u32 i = 0; i < blck->temporaries.size; ++i) {
-        const auto& mapping = temporary_mappings.data[i + temporary_counter];
-        auto& actual = values.data[i + temporary_counter];
+        const auto& mapping = temporary_mappings[i + temporary_counter];
+        auto& actual = values[i + temporary_counter];
 
         if (mapping.map_type == MapType::Internal) {
           ASSERT(mapping.known_reg);
@@ -4569,12 +4581,12 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
       //Map all the imports
       FOR(blck->imports, i) {
-        const VariableVersionMap& map = var_mappings.variable_versions.data[i->variable];
-        auto& actual = values.data[i->in_temp.index + temporary_counter];
+        const VariableVersionMap& map = var_mappings.variable_versions[i->variable];
+        auto& actual = values[i->in_temp.index + temporary_counter];
 
         if (map.memory) {
           actual.is_register = false;
-          actual.stack_offset = variables_offsets.data[i->variable];
+          actual.stack_offset = variables_offsets[i->variable];
           continue;
         }
 
@@ -4585,8 +4597,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
         ASSERT(i->in_temp.index + temporary_counter < temporary_mappings.size);
 
-        ASSERT(var_mappings.version_reg_map.data[version_index].known_reg);
-        u8 reg = var_mappings.version_reg_map.data[version_index].reg;
+        ASSERT(var_mappings.version_reg_map[version_index].known_reg);
+        u8 reg = var_mappings.version_reg_map[version_index].reg;
 
         actual.is_register = true;
         actual.reg_id = X64::R{ reg };
@@ -4594,12 +4606,12 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
       //Map all the exports
       FOR(blck->exports, e) {
-        const VariableVersionMap& map = var_mappings.variable_versions.data[e->variable];
-        auto& actual = values.data[e->out_temp.index + temporary_counter];
+        const VariableVersionMap& map = var_mappings.variable_versions[e->variable];
+        auto& actual = values[e->out_temp.index + temporary_counter];
 
         if (map.memory) {
           actual.is_register = false;
-          actual.stack_offset = variables_offsets.data[e->variable];
+          actual.stack_offset = variables_offsets[e->variable];
           continue;
         }
 
@@ -4610,8 +4622,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
         ASSERT(e->out_temp.index + temporary_counter < temporary_mappings.size);
 
-        ASSERT(var_mappings.version_reg_map.data[version_index].known_reg);
-        u8 reg = var_mappings.version_reg_map.data[version_index].reg;
+        ASSERT(var_mappings.version_reg_map[version_index].known_reg);
+        u8 reg = var_mappings.version_reg_map[version_index].reg;
 
         actual.is_register = true;
         actual.reg_id = X64::R{ reg };
@@ -4641,7 +4653,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
   u64 temporaries_counter = 0;
 
   FOR(ir->control_blocks, blck) {
-    ASSERT(blck->bytecode.size > 0);
+    //ASSERT(blck->bytecode.size > 0);
 
     selector.local_actual_values = const_view_arr(values, temporaries_counter, blck->temporaries.size);
     temporaries_counter += blck->temporaries.size;
@@ -4653,7 +4665,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
     {
       u32 relative = relative_offset(func.code_start, program->code_store.total_size);
-      local_label_real_offsets.data[blck->label.label - 1] = relative;
+      local_label_real_offsets[blck->label.label - 1] = relative;
     }
 
     while (bc < bc_end) {
@@ -5110,7 +5122,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               IR::V_ARG arg;
               bc += IR::deserialize(bc, bc_end - bc, arg);
 
-              const Type& param = ir->signature->parameter_types.data[i];
+              const Type& param = ir->signature->parameter_types[i];
               ASSERT(arg.size <= 8);//TODO: parameters of different types
               ASSERT(arg.size == param.size());
               ASSERT(arg.offset == 0);//temp - need to fix this
@@ -5172,7 +5184,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               else {
                 MemoryView arg_mem = {};
 
-                const Type& t = sig_struct->parameter_types.data[i];
+                const Type& t = sig_struct->parameter_types[i];
                 arg_mem.known_alignment = t.structure->alignment;
                 arg_mem.size = t.size();
                 arg_mem.rm = X64::memory_rm(convention->base_pointer_reg, -static_cast<i32>(stack_top - (i * 8)));
@@ -5448,7 +5460,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
   {
     u32 relative = relative_offset(func.code_start, program->code_store.total_size);
-    local_label_real_offsets.data[ret_label.label - 1] = relative;
+    local_label_real_offsets[ret_label.label - 1] = relative;
 
     if (stack_top > 0) {
       X64::R rbp = X64::R{ convention->base_pointer_reg };
@@ -5505,7 +5517,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
     ASSERT(it->jump_to.label <= local_label_real_offsets.size);
 
-    u32 label_offset = local_label_real_offsets.data[it->jump_to.label - 1];
+    u32 label_offset = local_label_real_offsets[it->jump_to.label - 1];
     u32 jump_from = it->offset_to_immediate + 4;
 
     u32 offset;

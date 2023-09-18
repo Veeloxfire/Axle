@@ -1672,7 +1672,7 @@ struct OwnedArr {
     free_destruct_n(data, size);
   }
 
-  OwnedArr& operator=(OwnedArr&& arr) noexcept {
+  constexpr OwnedArr& operator=(OwnedArr&& arr) noexcept {
     free_destruct_n(data, size);
 
     data = std::exchange(arr.data, nullptr);
@@ -1681,10 +1681,15 @@ struct OwnedArr {
     return *this;
   }
 
-  const T* begin() const { return data; }
-  const T* end() const { return data + size; }
-  T* mut_begin() { return data; }
-  T* mut_end() { return data + size; }
+  constexpr T& operator[](usize i) const {
+    ASSERT(i < size);
+    return data[i];
+  }
+
+  constexpr const T* begin() const { return data; }
+  constexpr const T* end() const { return data + size; }
+  constexpr T* mut_begin() { return data; }
+  constexpr T* mut_end() { return data + size; }
 };
 
 template<typename T>
@@ -1730,6 +1735,11 @@ struct ViewArr {
 
   T* begin() const { return data; }
   T* end() const { return data + size; }
+
+  T& operator[](usize i) const {
+    ASSERT(i < size);
+    return data[i];
+  }
 };
 
 template<typename T>

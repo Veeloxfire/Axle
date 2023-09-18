@@ -32,7 +32,7 @@ using RealValue = VM::StackFrame::RealValue;
 
 RealValue VM::StackFrame::get_value(const IR::V_ARG& arg) {
   const u32 i = arg.val.index;
-  const auto& val_info = temporaries.data[i];
+  const auto& val_info = temporaries[i];
 
   return {
     bytes.data + val_info.data_offset,
@@ -42,7 +42,7 @@ RealValue VM::StackFrame::get_value(const IR::V_ARG& arg) {
 
 RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
   const u32 i = arg.val.index;
-  const auto& val_info = temporaries.data[i];
+  const auto& val_info = temporaries[i];
 
   ASSERT(val_info.type.struct_type() == STRUCTURE_TYPE::POINTER);
   const auto* pt = val_info.type.unchecked_base<PointerStructure>();
@@ -88,7 +88,7 @@ VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
 
   for (usize i = 0; i < builder->variables.size; ++i) {
     const auto& var = builder->variables.data[i];
-    auto& vm_var = variables.data[i];
+    auto& vm_var = variables[i];
 
     size_needed = ceil_to_n(size_needed, var.type.structure->alignment);
 
@@ -102,18 +102,18 @@ VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
 
   FOR(builder->control_blocks, it) {
     FOR(it->imports, v_imp) {
-      temporaries.data[v_imp->in_temp.index + temporaries_counter] = variables.data[v_imp->variable];
+      temporaries[v_imp->in_temp.index + temporaries_counter] = variables[v_imp->variable];
     }
 
     FOR(it->exports, v_exp) {
-      temporaries.data[v_exp->out_temp.index + temporaries_counter] = variables.data[v_exp->variable];
+      temporaries[v_exp->out_temp.index + temporaries_counter] = variables[v_exp->variable];
     }
 
     u32 temp_size_needed = size_base;
     const usize num_temps = it->temporaries.size;
     for (usize i = 0; i < num_temps; ++i) {
       auto& temp = it->temporaries.data[i];
-      auto& vm_temp = temporaries.data[i + num_temps];
+      auto& vm_temp = temporaries[i + temporaries_counter];
       if (vm_temp.type.is_valid()) continue;
 
       temp_size_needed = ceil_to_n(temp_size_needed, temp.type.structure->alignment);
@@ -393,6 +393,17 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
             const IR::Format f_format = from.t.struct_format();
 
             copy_values(to.ptr, t_format, from.ptr, f_format);
+            break;
+          }
+
+        case IR::OpCode::StartFunc: {
+            IR::Types::StartFunc start;
+            stack_frame->IP = IR::Read::StartFunc(stack_frame->IP, stack_frame->IP_END, start);
+
+            if (start.n_values != 0) {
+              comp_thread->report_error(ERROR_CODE::VM_ERROR, Span{}, "Functions do not support parameters in vm");
+              return;
+            }
             break;
           }
 

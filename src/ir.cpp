@@ -536,8 +536,6 @@ void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const 
 
   ASSERT(to.type.size() > 0);
   ASSERT(from.type.size() > 0);
-  ASSERT(to.type.size() <= 8);
-  ASSERT(from.type.size() <= 8);
 
   switch (to.rvt) {
     case Eval::RVT::Constant: INVALID_CODE_PATH("Cannot assign to a constant"); return;
@@ -642,7 +640,8 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(u32 id) {
     if (it->id == id) {
 
       if (it->imported) {
-        ASSERT(it->current_temp.index < ir->current_control_block()->temporaries.size);
+        const IR::ControlBlock* cb = ir->current_control_block();
+        ASSERT(it->current_temp.index < cb->temporaries.size);
         return Eval::as_direct(it->current_temp, sv.type);
       }
 

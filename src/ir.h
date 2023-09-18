@@ -455,6 +455,16 @@ namespace Eval {
         u32 offset;
       } value;
     };
+
+    constexpr const Type& effective_type() const {
+      if (rvt == RVT::Indirect) {
+        ASSERT(type.struct_type() == STRUCTURE_TYPE::POINTER);
+        return type.unchecked_base<PointerStructure>()->base;
+      }
+      else {
+        return type;
+      }
+    }
   };
 
   enum struct Time {

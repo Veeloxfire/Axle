@@ -130,19 +130,15 @@ struct Type {
     return structure->size;
   }
 
-#if 0
-  inline constexpr const Structure* structure() const {
-    return named_struct.structure;
-  }
-#endif
-
   template<typename T>
   inline constexpr const T* unchecked_base() const {
+    ASSERT(structure->type == T::expected_type_enum);
     return static_cast<const T*>(structure);
   }
 
   template<typename T>
   inline constexpr T* unchecked_base_mut() const {
+    ASSERT(structure->type == T::expected_type_enum);
     return static_cast<T*>(structure);
   }
 
