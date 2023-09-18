@@ -3294,8 +3294,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           break;
         }
       case IR::OpCode::CopyLoad: {
-          IR::Types::Copy copy;
-          bc = IR::Read::Copy(bc, bc_end, copy);
+          IR::Types::CopyLoad copy;
+          bc = IR::Read::CopyLoad(bc, bc_end, copy);
 
           VisitRes from = visit_ordered_value(values, lifetimes, resolver, copy.from, expr_id);
           VisitRes to = visit_ordered_value(values, lifetimes, resolver, copy.to, expr_id);
@@ -3310,8 +3310,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           break;
         }
       case IR::OpCode::CopyStore: {
-          IR::Types::Copy copy;
-          bc = IR::Read::Copy(bc, bc_end, copy);
+          IR::Types::CopyStore copy;
+          bc = IR::Read::CopyStore(bc, bc_end, copy);
 
           VisitRes from = visit_ordered_value(values, lifetimes, resolver, copy.from, expr_id);
           VisitRes to = visit_ordered_value(values, lifetimes, resolver, copy.to, expr_id);
@@ -3326,8 +3326,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           break;
         }
       case IR::OpCode::CopyLoadStore: {
-          IR::Types::Copy copy;
-          bc = IR::Read::Copy(bc, bc_end, copy);
+          IR::Types::CopyLoadStore copy;
+          bc = IR::Read::CopyLoadStore(bc, bc_end, copy);
 
           VisitRes from = visit_ordered_value(values, lifetimes, resolver, copy.from, expr_id);
           VisitRes to = visit_ordered_value(values, lifetimes, resolver, copy.to, expr_id);
@@ -3357,13 +3357,15 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           break;
         }
       case IR::OpCode::AddrOfLoad: {
-          IR::Types::AddrOf addr;
-          bc = IR::Read::AddrOf(bc, bc_end, addr);
+          IR::Types::AddrOfLoad addr;
+          bc = IR::Read::AddrOfLoad(bc, bc_end, addr);
 
           VisitRes from = visit_ordered_value(values, lifetimes, resolver, addr.from, expr_id);
-          ASSERT(from.ni == NeedIntermediate::Yes);
           VisitRes to = visit_ordered_value(values, lifetimes, resolver, addr.to, expr_id);
 
+          if (from.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
           if (to.ni == NeedIntermediate::Yes) {
             new_intermediate(intermediates, expr_id);
           }
@@ -3581,17 +3583,14 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           IR::V_ARG v = { current_block->cf_return.val, 0, resolver->sig_struct->return_type.size() };
 
           [[maybe_unused]] auto vr = visit_ordered_value(values, lifetimes, resolver, v, expr_id);
-          new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+          new_fixed_intermediate(intermediates, expr_id, convention->return_register);
           break;
         }
 
       case IR::ControlFlowType::Split: {
           IR::V_ARG v = { current_block->cf_split.condition, 0, comp_thread->builtin_types->t_bool.size() };
 
-          auto vr = visit_ordered_value(values, lifetimes, resolver, v, expr_id);
-          if (vr.ni == NeedIntermediate::Yes) {
-            new_intermediate(intermediates, expr_id);
-          }
+          [[maybe_unused]] auto vr = visit_ordered_value(values, lifetimes, resolver, v, expr_id);
           break;
         }
     }
@@ -3768,6 +3767,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         continue;//Only mapping external
       }
 
+      ASSERT(!v.known_reg);
+
       u32 used_regs = 0;
 
       ASSERT(edge_i == edge_end || edge_i->a >= i);
@@ -3811,6 +3812,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 }
 
 struct ActualTemporary {
+  bool maybe_intermeidate;
   bool is_register;
   union {
     X64::R reg_id;
@@ -3819,6 +3821,7 @@ struct ActualTemporary {
 };
 
 struct X64Value {
+  bool expects_intermeidate;
   ValueType value_type;
   Type t;
   union {
@@ -3856,6 +3859,7 @@ struct Selector {
       ASSERT(!temp.requirements.has_address());
 
       X64Value val = {};
+      val.expects_intermeidate = a_temp.maybe_intermeidate;
       val.value_type = ValueType::Register;
       val.t = temp.type;
       val.reg = a_temp.reg_id;
@@ -3868,6 +3872,7 @@ struct Selector {
       view.known_alignment = temp.type.structure->alignment;
 
       X64Value val = {};
+      val.expects_intermeidate = a_temp.maybe_intermeidate;
       val.value_type = ValueType::Memory;
       val.t = temp.type;
       val.mem = view;
@@ -4566,10 +4571,12 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
         if (mapping.map_type == MapType::Internal) {
           ASSERT(mapping.known_reg);
+          actual.maybe_intermeidate = false;
           actual.is_register = true;
           actual.reg_id = X64::R{ mapping.reg };
         }
         else if(mapping.map_type == MapType::InternalNoMap) {
+          actual.maybe_intermeidate = true;
           actual.is_register = false;
           const IR::SSATemp& t = blck->temporaries.data[i];
 
@@ -4583,6 +4590,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
       FOR(blck->imports, i) {
         const VariableVersionMap& map = var_mappings.variable_versions[i->variable];
         auto& actual = values[i->in_temp.index + temporary_counter];
+        actual.maybe_intermeidate = true;
 
         if (map.memory) {
           actual.is_register = false;
@@ -4608,6 +4616,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
       FOR(blck->exports, e) {
         const VariableVersionMap& map = var_mappings.variable_versions[e->variable];
         auto& actual = values[e->out_temp.index + temporary_counter];
+        actual.maybe_intermeidate = true;
 
         if (map.memory) {
           actual.is_register = false;
@@ -4704,8 +4713,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             break;
           }
         case IR::OpCode::SetStore: {
-            IR::Types::Set set;
-            bc = IR::Read::Set(bc, bc_end, set);
+            IR::Types::SetStore set;
+            bc = IR::Read::SetStore(bc, bc_end, set);
 
             X64Value to = selector.get_val(set.to);
 
@@ -4715,6 +4724,12 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
             switch (to.value_type) {
               case ValueType::Register: {
+                  X64::R to_r = to.reg;
+
+                  if (to.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
+                  }
+
                   MemoryView view = pointer_view(to.reg, pt->base);
 
                   Helpers::load_const_to_mem(program, pt->base.struct_format(), view, set.data);
@@ -4745,6 +4760,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               case ValueType::Register: {
                   switch (from.value_type) {
                     case ValueType::Register: {
+                        if (to.expects_intermeidate && from.expects_intermeidate) {
+                          X64::R _temp = selector.get_next_intermediate_reg();
+                        }
+
                         Helpers::copy_reg_to_reg(program,
                                                  from.reg, from.t.struct_format(),
                                                  to.reg, to.t.struct_format());
@@ -4796,61 +4815,45 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             X64Value to = selector.get_val(copy.to);
             const IR::Format to_format = to.t.struct_format();
 
-            switch (to.value_type) {
+            MemoryView view;
+            switch (from.value_type) {
               case ValueType::Register: {
-                  switch (from.value_type) {
-                    case ValueType::Register: {
-                        MemoryView view = pointer_view(from.reg, pt->base);
-
-                        Helpers::copy_mem_to_reg(program,
-                                                 view, from_format,
-                                                 to.reg, to_format);
-                        break;
-                      }
-                    case ValueType::Memory: {
-                        X64::R temp = selector.get_next_intermediate_reg();
-
-                        Helpers::copy_mem_to_reg(program, from.mem, from_ptr_format, temp, from_ptr_format);
-
-                        MemoryView view = pointer_view(temp, pt->base);
-
-                        Helpers::copy_mem_to_reg(program,
-                                                 view, from_format,
-                                                 to.reg, to_format);
-                        break;
-                      }
+                  if (from.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
                   }
+
+                  view = pointer_view(from.reg, pt->base);
                   break;
                 }
               case ValueType::Memory: {
-                  switch (from.value_type) {
-                    case ValueType::Register: {
-                        X64::R temp = selector.get_next_intermediate_reg();
+                  X64::R temp = selector.get_next_intermediate_reg();
 
-                        MemoryView view = pointer_view(from.reg, pt->base);
+                  Helpers::copy_mem_to_reg(program, from.mem, from_ptr_format, temp, from_ptr_format);
 
-                        Helpers::copy_mem_to_mem_small(program,
-                                                       view, from_format,
-                                                       to.mem, to_format,
-                                                       temp);
-                        break;
-                      }
-                    case ValueType::Memory: {
-                        X64::R temp_ptr = selector.get_next_intermediate_reg();
+                  view = pointer_view(temp, pt->base);
+                  break;
+                }
+            }
 
-                        Helpers::copy_mem_to_reg(program, from.mem, from_ptr_format, temp_ptr, from_ptr_format);
-                        MemoryView view = pointer_view(temp_ptr, pt->base);
-
-
-                        X64::R temp = selector.get_next_intermediate_reg();
-
-                        Helpers::copy_mem_to_mem_small(program,
-                                                       view, from_format,
-                                                       to.mem, to_format,
-                                                       temp);
-                        break;
-                      }
+            switch (to.value_type) {
+              case ValueType::Register: {
+                  if (to.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
                   }
+
+                  Helpers::copy_mem_to_reg(program,
+                                           view, from_format,
+                                           to.reg, to_format);
+                  break;
+
+                }
+              case ValueType::Memory: {
+                  X64::R temp = selector.get_next_intermediate_reg();
+
+                  Helpers::copy_mem_to_mem_small(program,
+                                                 view, from_format,
+                                                 to.mem, to_format,
+                                                 temp);
                   break;
                 }
             }
@@ -4874,6 +4877,13 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               case ValueType::Register: {
                   switch (from.value_type) {
                     case ValueType::Register: {
+                        if (from.expects_intermeidate) {
+                          X64::R _temp = selector.get_next_intermediate_reg();
+                        }
+                        if (to.expects_intermeidate) {
+                          X64::R _temp = selector.get_next_intermediate_reg();
+                        }
+
                         MemoryView view = pointer_view(to.reg, pt->base);
 
                         Helpers::copy_reg_to_mem(program,
@@ -4885,6 +4895,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                         MemoryView view = pointer_view(to.reg, pt->base);
 
                         X64::R temp = selector.get_next_intermediate_reg();
+
+                        if (to.expects_intermeidate) {
+                          X64::R _temp = selector.get_next_intermediate_reg();
+                        }
 
                         Helpers::copy_mem_to_mem_small(program,
                                                        from.mem, from_format,
@@ -4897,6 +4911,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               case ValueType::Memory: {
                   switch (from.value_type) {
                     case ValueType::Register: {
+                        if (from.expects_intermeidate) {
+                          X64::R _temp = selector.get_next_intermediate_reg();
+                        }
+
                         X64::R temp_ptr = selector.get_next_intermediate_reg();
                         Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, temp_ptr, to_ptr_format);
                         MemoryView view = pointer_view(temp_ptr, pt->base);
@@ -4907,11 +4925,12 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                         break;
                       }
                     case ValueType::Memory: {
+                        X64::R temp = selector.get_next_intermediate_reg();
+
                         X64::R temp_ptr = selector.get_next_intermediate_reg();
                         Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, temp_ptr, to_ptr_format);
                         MemoryView view = pointer_view(temp_ptr, pt->base);
 
-                        X64::R temp = selector.get_next_intermediate_reg();
 
                         Helpers::copy_mem_to_mem_small(program,
                                                        from.mem, from_format,
@@ -4927,8 +4946,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             break;
           }
         case IR::OpCode::CopyLoadStore: {
-            IR::Types::CopyStore copy;
-            bc = IR::Read::CopyStore(bc, bc_end, copy);
+            IR::Types::CopyLoadStore copy;
+            bc = IR::Read::CopyLoadStore(bc, bc_end, copy);
 
             X64Value from = selector.get_val(copy.from);
             ASSERT(from.t.struct_type() == STRUCTURE_TYPE::POINTER);
@@ -4947,6 +4966,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             MemoryView from_mem = {};
             switch (from.value_type) {
               case ValueType::Register: {
+                  if (from.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
+                  }
+
                   from_mem = pointer_view(from.reg, pt_f->base);
                   break;
                 }
@@ -4961,12 +4984,16 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             MemoryView to_mem = {};
             switch (to.value_type) {
               case ValueType::Register: {
+                  if (to.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
+                  }
+
                   to_mem = pointer_view(to.reg, pt_t->base);
                   break;
                 }
               case ValueType::Memory: {
-                  X64::R temp = selector.get_next_intermediate_reg();
-                  Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, temp, to_ptr_format);
+                  X64::R m_temp = selector.get_next_intermediate_reg();
+                  Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, m_temp, to_ptr_format);
                   to_mem = pointer_view(temp, pt_t->base);
                   break;
                 }
@@ -4989,6 +5016,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
             switch (t.value_type) {
               case ValueType::Register: {
+                  if (t.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
+                  }
+
                   Helpers::copy_address_to_reg(program, f.mem, t.reg);
                 } break;
               case ValueType::Memory: {
@@ -5016,6 +5047,9 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             MemoryView from_mem = {};
             switch (f.value_type) {
               case ValueType::Register: {
+                  if (f.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
+                  }
                   from_mem = pointer_view(f.reg, pt_f->base);
                   break;
                 }
@@ -5029,6 +5063,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
             switch (t.value_type) {
               case ValueType::Register: {
+                  if (t.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
+                  }
+
                   Helpers::copy_address_to_reg(program, f.mem, t.reg);
                 } break;
               case ValueType::Memory: {
@@ -5191,6 +5229,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
                 switch (arg_v.value_type) {
                   case ValueType::Register: {
+                      if (arg_v.expects_intermeidate) {
+                        X64::R _temp = selector.get_next_intermediate_reg();
+                      }
+
                       Helpers::copy_reg_to_mem(program, arg_v.reg, f, arg_mem, f);
                       break;
                     }
@@ -5264,6 +5306,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                   Helpers::copy_mem_to_reg(program, right.mem, right_format, right_reg, right_format); break;\
                 }\
               case ValueType::Register: {\
+                  if(right.expects_intermeidate) { X64::R _temp = selector.get_next_intermediate_reg(); }\
                   right_reg = right.reg; break;\
                 }\
             }\
@@ -5457,6 +5500,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
     }
   }
 
+  ASSERT(selector.intermediates_counter == selector.intermediates.size);
 
   {
     u32 relative = relative_offset(func.code_start, program->code_store.total_size);
@@ -5659,6 +5703,7 @@ static const char* b64_reg_name(uint8_t reg) {
 struct x86PrintOptions {
   FUNCTION_PTR<const char*, uint8_t> r_name = nullptr;
   FUNCTION_PTR<const char*, uint8_t> rm_name = nullptr;
+  FUNCTION_PTR<const char*, uint8_t> mem_r_name = nullptr;
   const char* mem_size = nullptr;
 };
 
@@ -5731,30 +5776,30 @@ static OwnedArr<char> rm_reg_string(x86PrintOptions* const p_opts,
                 return format("{} [{}]", p_opts->mem_size, disp);
               }
               else if (INDEX_RSP) {
-                return format("{} [{}]", p_opts->mem_size, b64_reg_name(base));
+                return format("{} [{}]", p_opts->mem_size, p_opts->mem_r_name(base));
               }
               else if (BASE_RBP) {
                 int32_t disp = x32_from_itr(rest);
 
                 char sign = disp >= 0 ? '+' : '-';
                 if (scale == 1) {
-                  return format("{} [{} {} {}]", p_opts->mem_size, b64_reg_name(index), sign, absolute(disp));
+                  return format("{} [{} {} {}]", p_opts->mem_size, p_opts->mem_r_name(index), sign, absolute(disp));
                 }
                 else {
-                  return format("{} [({} * {}) {} {}]", p_opts->mem_size, b64_reg_name(index), scale, sign, absolute(disp));
+                  return format("{} [({} * {}) {} {}]", p_opts->mem_size, p_opts->mem_r_name(index), scale, sign, absolute(disp));
                 }
               }
               else if (scale == 1) {
                 return format("{} [{} + {}]",
                               p_opts->mem_size,
-                              b64_reg_name(base),
-                              b64_reg_name(index));
+                              p_opts->mem_r_name(base),
+                              p_opts->mem_r_name(index));
               }
               else {
                 return format("{} [{} + ({} * {})]",
                               p_opts->mem_size,
-                              b64_reg_name(base),
-                              b64_reg_name(index),
+                              p_opts->mem_r_name(base),
+                              p_opts->mem_r_name(index),
                               scale);
               }
             }
@@ -5766,23 +5811,23 @@ static OwnedArr<char> rm_reg_string(x86PrintOptions* const p_opts,
               if (INDEX_RSP) {
                 return format("{} [{} {} {}]",
                               p_opts->mem_size,
-                              b64_reg_name(base),
+                              p_opts->mem_r_name(base),
                               sign, absolute(disp));
               }
               else {
                 if (scale == 1) {
                   return format("{} [{} {} {} + {}]",
                                 p_opts->mem_size,
-                                b64_reg_name(base),
+                                p_opts->mem_r_name(base),
                                 sign, absolute(disp),
-                                b64_reg_name(index));
+                                p_opts->mem_r_name(index));
                 }
                 else {
                   return format("{} [{} {} {} + ({} * {})]",
                                 p_opts->mem_size,
-                                b64_reg_name(base),
+                                p_opts->mem_r_name(base),
                                 sign, absolute(disp),
-                                b64_reg_name(index), scale);
+                                p_opts->mem_r_name(index), scale);
                 }
               }
             }
@@ -5794,22 +5839,22 @@ static OwnedArr<char> rm_reg_string(x86PrintOptions* const p_opts,
               if (INDEX_RSP) {
                 return format("{} [{} {} {}]",
                               p_opts->mem_size,
-                              b64_reg_name(base),
+                              p_opts->mem_r_name(base),
                               sign, absolute(disp));
               }
               else {
                 if (scale == 1) {
                   return format("{} [{} + {} {} {}]",
                                 p_opts->mem_size,
-                                b64_reg_name(base),
-                                b64_reg_name(index),
+                                p_opts->mem_r_name(base),
+                                p_opts->mem_r_name(index),
                                 sign, absolute(disp));
                 }
                 else {
                   return format("{} [{} + ({} * {}) {} {}]",
                                 p_opts->mem_size,
-                                b64_reg_name(base),
-                                b64_reg_name(index), scale,
+                                p_opts->mem_r_name(base),
+                                p_opts->mem_r_name(index), scale,
                                 sign, absolute(disp));
                 }
               }
@@ -5835,21 +5880,21 @@ static OwnedArr<char> rm_reg_string(x86PrintOptions* const p_opts,
 
         switch (address_mode) {
           case 0b00: {
-              return format("{} [{}]", p_opts->mem_size, b64_reg_name(rm));
+              return format("{} [{}]", p_opts->mem_size, p_opts->mem_r_name(rm));
             }
           case 0b01: {
               int8_t disp = rest->read_byte();
 
               char sign = disp >= 0 ? '+' : '-';
 
-              return format("{} [{} {} {}]", p_opts->mem_size, b64_reg_name(rm), sign, absolute(disp));
+              return format("{} [{} {} {}]", p_opts->mem_size, p_opts->mem_r_name(rm), sign, absolute(disp));
             }
           case 0b10: {
               int32_t disp = x32_from_itr(rest);
 
               char sign = disp >= 0 ? '+' : '-';
 
-              return format("{} [{} {} {}]", p_opts->mem_size, b64_reg_name(rm), sign, absolute(disp));
+              return format("{} [{} {} {}]", p_opts->mem_size, p_opts->mem_r_name(rm), sign, absolute(disp));
             }
         }
 
@@ -5878,25 +5923,48 @@ static RegisterNames register_names(x86PrintOptions* p_opts,
   };
 }
 
-static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_address, bool short_operand) {
+static void load_8_sizes(x86PrintOptions* ops, bool rex, bool short_address) {
   if (short_address) {
-    ops->rm_name = b32_reg_name;
+    ops->mem_r_name = b32_reg_name;
   }
   else {
-    ops->rm_name = b64_reg_name;
+    ops->mem_r_name = b64_reg_name;
+  }
+
+  if (rex) {
+    ops->r_name = b8_rex_reg_name;
+    ops->rm_name = b8_rex_reg_name;
+    ops->mem_size = "BYTE PTR";
+  }
+  else {
+    ops->r_name = b8_no_rex_reg_name;
+    ops->rm_name = b8_no_rex_reg_name;
+    ops->mem_size = "BYTE PTR";
+  }
+}
+
+static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_address, bool short_operand) {
+  if (short_address) {
+    ops->mem_r_name = b32_reg_name;
+  }
+  else {
+    ops->mem_r_name = b64_reg_name;
   }
 
   if (rex_w) {
     ops->r_name = b64_reg_name;
+    ops->rm_name = b64_reg_name;
     ops->mem_size = "QWORD PTR";
   }
   else {
     if (short_operand) {
       ops->r_name = b16_reg_name;
+      ops->rm_name = b16_reg_name;
       ops->mem_size = "WORD PTR";
     }
     else {
       ops->r_name = b32_reg_name;
+      ops->rm_name = b32_reg_name;
       ops->mem_size = "DWORD PTR";
     }
   }
@@ -6021,8 +6089,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case X64::SETE_RM8: {
             uint8_t modrm = start.read_byte();
 
-            p_opts.rm_name = b8_rex_reg_name;
-            p_opts.mem_size = "BYTE PTR";
+            load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
             printf("sete %s\n", r_string.data);
@@ -6031,8 +6098,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case X64::SETL_RM8: {
             uint8_t modrm = start.read_byte();
 
-            p_opts.rm_name = b8_rex_reg_name;
-            p_opts.mem_size = "BYTE PTR";
+            load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
             printf("setl %s\n", r_string.data);
@@ -6041,8 +6107,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case X64::SETG_RM8: {
             uint8_t modrm = start.read_byte();
 
-            p_opts.rm_name = b8_rex_reg_name;
-            p_opts.mem_size = "BYTE PTR";
+            load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
             printf("setg %s\n", r_string.data);
@@ -6063,7 +6128,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             load_default_sizes(&p_opts, rex_w, short_address, short_operand);
             //overide
-            p_opts.rm_name = b8_rex_reg_name;
+            p_opts.r_name = b8_rex_reg_name;
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
@@ -6075,7 +6140,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             load_default_sizes(&p_opts, rex_w, short_address, short_operand);
             //overide
-            p_opts.rm_name = b8_rex_reg_name;
+            p_opts.r_name = b8_rex_reg_name;
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
@@ -6100,6 +6165,16 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
             printf("add %s, %s\n", names.rm.data, names.r.data);
+            break;
+          }
+        case X64::OR_R8_TO_RM8: {
+            uint8_t modrm = start.read_byte();
+
+            load_8_sizes(&p_opts, rex, short_address);
+
+            RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
+
+            printf("or  %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::OR_R_TO_RM: {
@@ -6178,6 +6253,31 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             const char* r_string = b64_reg_name(reg);
 
             printf("pop %s\n", r_string);
+            break;
+          }
+        case 0x80: {
+            uint8_t modrm = start.read_byte();
+
+            load_8_sizes(&p_opts, rex, short_address);
+
+            OwnedArr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
+
+            i8 imm8 = start.read_byte();
+
+            uint8_t r_val = (modrm & 0b0011'1000) >> 3;
+
+            if (r_val == 5) {
+              printf("sub %s, 0x%hhx\n", rm_string.data, imm8);
+            }
+            else if (r_val == 7) {
+              printf("cmp %s, 0x%hhx\n", rm_string.data, imm8);
+            }
+            else {
+              printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx.2 0x%.2hhx ...\n",
+                     maybe_rex, op, modrm);
+
+              return;
+            }
             break;
           }
         case 0x81: {
@@ -6376,14 +6476,11 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case X64::MOV_R8_TO_RM8: {
             uint8_t modrm = start.read_byte();
 
-            //Overide
-            p_opts.rm_name = b8_rex_reg_name;
-            p_opts.r_name = b8_rex_reg_name;
-            p_opts.mem_size = "BYTE PTR";
+            load_8_sizes(&p_opts, rex, short_address);
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("mov %s, %s\n", names.r.data, names.rm.data);
+            printf("mov %s, %s\n", names.rm.data, names.r.data);
             break;
           }
         case X64::JMP_NEAR: {
