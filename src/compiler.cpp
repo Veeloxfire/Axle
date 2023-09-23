@@ -845,6 +845,8 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
     c.values = args.data;
 
     IR::Emit::Call(builder->current_bytecode(), c);
+
+    builder->ir->current_control_block()->calls = true;
   }
 
   if (has_return) {

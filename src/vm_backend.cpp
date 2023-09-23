@@ -102,11 +102,11 @@ VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
 
   FOR(builder->control_blocks, it) {
     FOR(it->imports, v_imp) {
-      temporaries[v_imp->in_temp.index + temporaries_counter] = variables[v_imp->variable];
+      temporaries[v_imp->local_temp.index + temporaries_counter] = variables[v_imp->variable];
     }
 
     FOR(it->exports, v_exp) {
-      temporaries[v_exp->out_temp.index + temporaries_counter] = variables[v_exp->variable];
+      temporaries[v_exp->local_temp.index + temporaries_counter] = variables[v_exp->variable];
     }
 
     u32 temp_size_needed = size_base;
