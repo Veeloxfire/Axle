@@ -1367,6 +1367,238 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
   }
 }
 
+void compile_bytecode_assign(CompilerGlobals* const comp,
+                             CompilerThread* const comp_thread,
+                             Eval::IrBuilder* const builder,
+                             AST_LOCAL expr, const Eval::RuntimeValue& assign_from) {
+  TRACING_FUNCTION();
+  ASSERT(expr->node_type.is_valid());
+
+  switch (expr->ast_type) {
+    case AST_TYPE::NAMED_TYPE:
+    case AST_TYPE::ARRAY_TYPE:
+    case AST_TYPE::PTR_TYPE:
+    case AST_TYPE::LAMBDA_TYPE:
+    case AST_TYPE::TUPLE_TYPE:
+    case AST_TYPE::STRUCT_EXPR:
+    case AST_TYPE::LAMBDA_EXPR:
+    case AST_TYPE::TUPLE_LIT:
+    case AST_TYPE::ARRAY_EXPR:
+    case AST_TYPE::ASCII_CHAR:
+    case AST_TYPE::ASCII_STRING:
+    case AST_TYPE::NUMBER:
+    case AST_TYPE::LINK: {
+        comp_thread->report_error(ERROR_CODE::IR_ERROR, expr->node_span, "Cannot assign to constant");
+        return;
+      }
+    case AST_TYPE::MEMBER_ACCESS: {
+        ASTMemberAccessExpr* member_e = (ASTMemberAccessExpr*)expr;
+        AST_LOCAL m_base = member_e->expr;
+
+        STRUCTURE_TYPE st = m_base->node_type.struct_type();
+        if (st == STRUCTURE_TYPE::COMPOSITE) {
+          Eval::RuntimeValue obj = compile_bytecode(comp, comp_thread,
+                                                    builder, m_base);
+          if (comp_thread->is_panic()) {
+            return;
+          }
+
+          const Type ptr_type = generate_pointer_type(comp, member_e->node_type);
+          u64* data = comp->new_constant<u64>();
+          u64 val = member_e->offset;
+          memcpy_ts(data, 1, &val, 1);
+
+          const auto c = Eval::as_constant((const u8*)data, comp->builtin_types->t_u64);
+
+          const Eval::RuntimeValue assign_to = Eval::sub_object(builder, obj, c, expr->node_type);
+
+          Eval::assign(builder, assign_to, assign_from);
+        }
+        else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
+          if (member_e->name == comp->important_names.ptr) {
+            comp_thread->report_error(ERROR_CODE::IR_ERROR, expr->node_span, "Cannot assign to constant");
+            return;
+          }
+          else if (member_e->name == comp->important_names.len) {
+            comp_thread->report_error(ERROR_CODE::IR_ERROR, expr->node_span, "Cannot assign to constant");
+            return;
+          }
+          else {
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span, "No semantics supported for the member \"{}\" on an array", member_e->name);
+            return;
+          }
+        }
+        else {
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span, "Type \"{}\" does not appear to support member access", m_base->node_type.name);
+          return;
+        }
+      }
+    case AST_TYPE::INDEX_EXPR: {
+        const Type base_type = expr->node_type;
+        const size_t base_size = base_type.size();
+
+        ASTIndexExpr* index = (ASTIndexExpr*)expr;
+        AST_LOCAL index_expr = index->expr;
+        AST_LOCAL index_index = index->index;
+
+        ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
+
+        Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
+                                                  builder, index_expr);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        Eval::RuntimeValue index_val = compile_bytecode(comp, comp_thread,
+                                                        builder, index_index);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        u64 u = base_size;
+        const auto c = Eval::as_constant((const u8*)&u, comp_thread->builtin_types->t_u64);
+
+        BinOpEmitInfo emit_info = {};
+        {
+          emit_info.dest_type = comp_thread->builtin_types->t_u64;
+          emit_info.main_side = MainSide::LEFT;
+          emit_info.func = &BinOpArgs::emit_mul_ints;
+        }
+
+        BinOpArgs args = {
+          &emit_info,
+          comp,
+          builder,
+          index_val,
+          c,
+        };
+
+        const Eval::RuntimeValue offset = args.emit_mul_ints();
+
+        const Type t = generate_pointer_type(comp, base_type);
+
+        const Eval::RuntimeValue assign_to = Eval::sub_object(builder, arr, offset, t);
+
+        Eval::assign(builder, assign_to, assign_from);
+      }
+
+    case AST_TYPE::IDENTIFIER_EXPR: {
+        ASTIdentifier* ident = (ASTIdentifier*)expr;
+
+
+        if (ident->id_type == ASTIdentifier::LOCAL) {
+          Local* local = ident->local;
+          const Type t = local->decl.type;
+
+          if (local->is_constant) {
+            comp_thread->report_error(ERROR_CODE::IR_ERROR, ident->node_span, "Cannot assign to constant");
+            return;
+          }
+          else {
+            const auto t = builder->ir->new_temporary(local->decl.type, local->requirements);
+
+            Eval::assign(builder, Eval::as_direct(t, local->decl.type), assign_from);
+
+            builder->set_variable(local->variable_id, t);
+            return;
+          }
+        }
+        else if (ident->id_type == ASTIdentifier::GLOBAL) {
+          const Global* glob = ident->global;
+          ASSERT(glob != nullptr);
+
+          if (glob->is_constant) {
+            comp_thread->report_error(ERROR_CODE::IR_ERROR, ident->node_span, "Cannot assign to constant");
+            return;
+          }
+          else {
+            Eval::RuntimeValue val = load_data_memory(comp, builder, glob);
+
+            Eval::assign(builder, val, assign_from);
+            return;
+          }
+        }
+        else {
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                                    "Invalid or missing identifier type: {}", ident->id_type);
+
+          return;
+        }
+      }
+    case AST_TYPE::CAST: {
+        comp_thread->report_error(ERROR_CODE::IR_ERROR, expr->node_span,
+                                  "The result of a cast is not assignable");
+        return;
+      }
+    case AST_TYPE::UNARY_OPERATOR: {
+        const ASTUnaryOperatorExpr* const un_op = (ASTUnaryOperatorExpr*)expr;
+
+        Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread,
+                                                  builder, un_op->expr);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        UnOpArgs args = {
+          &un_op->emit_info,
+          comp,
+          builder,
+          ref,
+        };
+
+        const auto res = args.emit();
+
+        Eval::assign(builder, res, assign_from);//TODO: make this fail in some cases
+        return;
+      }
+    case AST_TYPE::BINARY_OPERATOR: {
+        const ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)expr;
+        AST_LOCAL left = bin_op->left;
+        AST_LOCAL right = bin_op->right;
+
+        Eval::RuntimeValue temp_left = compile_bytecode(comp, comp_thread,
+                                                        builder, left);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        Eval::RuntimeValue temp_right = compile_bytecode(comp, comp_thread,
+                                                         builder, right);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        BinOpArgs args = {
+          &bin_op->emit_info,
+          comp,
+          builder,
+          temp_left,
+          temp_right,
+        };
+
+        const auto res = args.emit();
+
+        Eval::assign(builder, res, assign_from);//TODO: make this fail in some cases
+        return;
+      }
+    case AST_TYPE::FUNCTION_CALL: {
+        comp_thread->report_error(ERROR_CODE::IR_ERROR, expr->node_span,
+                                  "Cannot assign to an immediate");
+        return;
+      }
+    default: {
+        //Invalid enum type
+        //probably just didnt get around to supporting it
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                                  "Invalid expression type: {}", ast_type_string(expr->ast_type));
+        return;
+      }
+  }
+
+  INVALID_CODE_PATH("Did not return early");
+}
+
+
 void compile_bytecode_of_statement(CompilerGlobals* const comp,
                                    CompilerThread* const comp_thread,
                                    Eval::IrBuilder* const builder,
@@ -1379,22 +1611,13 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     case AST_TYPE::ASSIGN: {
         ASTAssign* assign = (ASTAssign*)statement;
 
-        Eval::RuntimeValue assign_to = compile_bytecode(comp, comp_thread,
-                                                        builder, assign->assign_to);
-        if (comp_thread->is_panic()) {
-          return;
-        }
-
-        ASSERT(assign_to.rvt != Eval::RVT::Constant);
-
         Eval::RuntimeValue v = compile_bytecode(comp, comp_thread,
                                                 builder, assign->value);
         if (comp_thread->is_panic()) {
           return;
         }
 
-        Eval::assign(builder, assign_to, v);
-
+        compile_bytecode_assign(comp, comp_thread, builder, assign->assign_to, v);
         return;
       }
     case AST_TYPE::BLOCK: {
@@ -1481,7 +1704,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           Eval::assign(builder, Eval::as_direct(condition_vi, comp_thread->builtin_types->t_bool), cond);
 
-          builder->export_variables();
           builder->ir->set_current_cf(IR::CFSplt{
             loop_merge_label,
 
@@ -1490,8 +1712,8 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
               escape_label,
           });
         }
-
         builder->export_variables();
+
         Array branch_variables = copy_array(builder->variables_state);
         ASSERT(branch_variables.size == parent_variables.size);//Currently a waste of a copy, but might not be later on
 
@@ -1514,8 +1736,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             parent,
               loop_split_label,
           });
-
-          builder->variables_state = std::move(branch_variables);
         }
         else {
           builder->rescope_variables(parent_variables.size);
@@ -1535,12 +1755,11 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           builder->ir->set_current_cf(IR::CFMerge{
             {parent, loop_end},
 
-              escape_label,
+              loop_split_label,
           });
-
-          builder->variables_state = std::move(branch_variables);
         }
 
+        builder->variables_state = std::move(branch_variables);
         builder->switch_control_block(escape_label, loop_split_label);
         return;
       }
@@ -1664,7 +1883,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
             builder->ir->current_block = else_end;
             builder->ir->set_current_cf(IR::CFInline{
-                else_end_parent,
+              else_end_parent,
                 merge_label
             });
           }

@@ -623,9 +623,8 @@ Eval::RuntimeValue Eval::IrBuilder::new_variable(u32 id) {
   Eval::VariableState var = {};
   var.id = id;
   var.version = 0;
-  var.version_source = ir->current_block;
-  var.version_temp = v;
 
+  var.new_val = true;
   var.imported = true;
   var.current_temp = v;
 
@@ -650,8 +649,7 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(u32 id) {
       IR::ValueIndex v = ir->new_temporary(sv.type, sv.requirements);
 
       auto imp = IR::BlockImport{
-         it->id,
-         { it->version_source, it->version, it->version_temp},
+         { it->id, it->version },
          v
       };
       ir->current_control_block()->imports.insert(std::move(imp));
@@ -676,9 +674,11 @@ void Eval::IrBuilder::set_variable(u32 id, IR::ValueIndex index) {
     if (it->id == id) {
       it->version = var.versions;
       var.versions += 1;
+
+      it->new_val = true;
       it->imported = true;
-      it->version_source = ir->current_block;
       it->current_temp = index;
+      return;
     }
   }
 
@@ -695,7 +695,7 @@ void Eval::IrBuilder::export_variables() {
   IR::LocalLabel current_block = ir->current_block;
 
   FOR_MUT(variables_state, it) {
-    if (it->version_source == current_block) {
+    if (it->new_val) {
       ir->current_control_block()->exports.insert(IR::BlockExport{
         it->id,
           it->version,
@@ -703,6 +703,7 @@ void Eval::IrBuilder::export_variables() {
       });
     }
 
+    it->new_val = false;
     it->imported = false;
   }
 }
@@ -739,31 +740,28 @@ void Eval::merge_variables(Eval::IrBuilder* builder, MergeRules rule,
 
       const IR::SSAVar& ssa_var = builder->ir->variables.data[var0.id];
 
-      const IR::VariableVersion ver0 = {
-        var0.version_source, var0.version, var0.version_temp,
-      };
-
-      const IR::VariableVersion ver1 = {
-        var1.version_source, var1.version, var1.version_temp,
-      };
-
-      IR::ValueIndex new_val = builder->ir->new_temporary(ssa_var.type, ssa_var.requirements);
-
       switch (rule) {
         case MergeRules::New: {
             const auto next = builder->ir->variables.data[i].versions++;
 
+            const IR::VariableVersion next_var = {
+              var0.id, next,
+            };
 
             cb->enter_merge.insert(IR::BlockMerge{
-              static_cast<u32>(i), { ver0, ver1 }, next, new_val,
+              next_var, { var0.version, var1.version },
             });
             
             var0.version = next;
             break;
           }
         case MergeRules::UseFirst: {
+            const IR::VariableVersion next_var = {
+              var0.id, var0.version,
+            };
+
             cb->enter_merge.insert(IR::BlockMerge{
-              static_cast<u32>(i), { ver0, ver1 }, var0.version, new_val,
+              next_var, { var0.version, var1.version },
             });
 
             //TODO: re-import
@@ -771,8 +769,7 @@ void Eval::merge_variables(Eval::IrBuilder* builder, MergeRules rule,
           }
       }
 
-      var0.imported = true;
-      var0.current_temp = new_val;
+      var0.imported = false;
     }
   }
 }
@@ -1107,9 +1104,8 @@ void IR::print_ir(const IR::Builder* builder) {
     if (block->enter_merge.size > 0) {
       format_print_ST("Merges ({}):\n", block->enter_merge.size);
       FOR(block->enter_merge, m) {
-        format_print_ST("  V{} = {} <- phi[ T{} from L{}, T{} from L{} ]\n", m->variable, m->version,
-                        m->in_versions[0].temp.index, m->in_versions[0].block.label,
-                        m->in_versions[1].temp.index, m->in_versions[1].block.label);
+        format_print_ST("  V{} = {} <- phi[ {}, {} ]\n", m->version.variable, m->version.version,
+                        m->in_versions[0], m->in_versions[1]);
       }
     }
 
@@ -1123,8 +1119,14 @@ void IR::print_ir(const IR::Builder* builder) {
     if (block->imports.size > 0) {
       format_print_ST("Imports ({}):\n", block->imports.size);
       FOR(block->imports, imp) {
-        format_print_ST("  T{} = V{} ({}) as T{} from L{}\n", imp->local_temp.index,
-                        imp->variable, imp->in_version.version, imp->in_version.temp.index, imp->in_version.block.label);
+        format_print_ST("  T{} = V{} ({})\n", imp->local_temp.index, imp->in_version.variable, imp->in_version.version);
+      }
+    }
+
+    if (block->exports.size > 0) {
+      format_print_ST("Exports ({}):\n", block->exports.size);
+      FOR(block->exports, e) {
+        format_print_ST("  V{} ({}) = T{}\n", e->out_version.variable, e->out_version.version, e->local_temp.index);
       }
     }
 

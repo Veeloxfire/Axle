@@ -1668,12 +1668,18 @@ struct OwnedArr {
   OwnedArr(const OwnedArr& arr) = delete;
   OwnedArr& operator=(const OwnedArr& arr) = delete;
 
-  ~OwnedArr() noexcept {
+  void free() {
     free_destruct_n(data, size);
+    data = nullptr;
+    size = 0;
+  }
+
+  ~OwnedArr() noexcept {
+    free();
   }
 
   constexpr OwnedArr& operator=(OwnedArr&& arr) noexcept {
-    free_destruct_n(data, size);
+    free();
 
     data = std::exchange(arr.data, nullptr);
     size = std::exchange(arr.size, 0);

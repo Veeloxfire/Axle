@@ -35,37 +35,32 @@ namespace IR {
   }
 
   struct VariableVersion {
-    IR::LocalLabel block;
+    u32 variable;
     u32 version;
-    IR::ValueIndex temp;
   };
 
   constexpr bool operator==(const VariableVersion& a, const VariableVersion& b) {
-    return (a.block == b.block) && (a.version == b.version) && (a.temp == b.temp);
+    return (a.variable == b.variable) && (a.version == b.version);
   }
 
   constexpr bool operator!=(const VariableVersion& a, const VariableVersion& b) {
-    return (a.block != b.block) || (a.version != b.version) || (a.temp != b.temp);
+    return (a.variable != b.variable) || (a.version != b.version);
   }
 
   struct BlockImport {
-    u32 variable;
     VariableVersion in_version;
     IR::ValueIndex local_temp;
   };
 
   struct BlockExport {
-    u32 variable;
-    u32 version;
+    VariableVersion out_version;
     IR::ValueIndex local_temp;
   };
 
   struct BlockMerge {
-    u32 variable;
+    VariableVersion version;
 
-    VariableVersion in_versions[2];
-    u32 version;
-    IR::ValueIndex local_temp;
+    u32 in_versions[2];
   };
 
   enum struct ControlFlowType {
@@ -453,9 +448,8 @@ namespace Eval {
   struct VariableState {
     u32 id;
     u32 version;
-    IR::LocalLabel version_source;
-    IR::ValueIndex version_temp;
 
+    bool new_val;
     bool imported;
     IR::ValueIndex current_temp;
   };
