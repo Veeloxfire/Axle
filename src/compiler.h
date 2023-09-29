@@ -29,7 +29,7 @@ struct Local {
   bool is_constant = false;
   const u8* constant = nullptr;
 
-  u32 variable_id = 0;
+  IR::VariableId variable_id = {};
 };
 
 struct Pipe : AtomicQueue<CompilationUnit*> {

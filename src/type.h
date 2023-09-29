@@ -20,10 +20,7 @@ using META_FLAGS = u8;
 enum struct META_FLAG : META_FLAGS {
   CONST      = FLAGS_DECL(0),
   COMPTIME   = FLAGS_DECL(1),
-  //LITERAL    = FLAGS_DECL(2),
-  ASSIGNABLE = FLAGS_DECL(3),
-  CALL_LEAF  = FLAGS_DECL(4),
-  MAKES_CALL = FLAGS_DECL(5),
+  ASSIGNABLE = FLAGS_DECL(2),
 };
 #undef FLAGS_DECL
 
@@ -68,18 +65,6 @@ inline constexpr auto operator&(META_FLAGS u, META_FLAG t) -> META_FLAGS {
 inline constexpr auto operator&=(META_FLAGS& u, META_FLAG t) -> META_FLAGS& {
   u &= ((META_FLAGS)t);
   return u;
-}
-
-constexpr void balance_flags(META_FLAGS* a, META_FLAGS* b) {
-  constexpr META_FLAGS balanced_flags = 0
-    | META_FLAG::CONST
-    | META_FLAG::COMPTIME
-    | META_FLAG::ASSIGNABLE;
-
-  META_FLAGS balanced = (*a & *b) & balanced_flags;
-
-  *a = (*a & ~balanced_flags) | balanced;
-  *b = (*b & ~balanced_flags) | balanced;
 }
 
 enum struct STRUCTURE_TYPE : u8 {

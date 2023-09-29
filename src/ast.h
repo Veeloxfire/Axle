@@ -394,3 +394,17 @@ struct Printer {
 
 void print_full_ast(const FileAST* file);
 void print_full_ast(AST_LOCAL expr);
+
+constexpr void pass_flags_up(AST_LOCAL low, AST_LOCAL high) {
+  high->meta_flags |= low->meta_flags;
+  high->val_requirements |= low->val_requirements;
+}
+
+constexpr void pass_flags_down(AST_LOCAL low, AST_LOCAL high) {
+  META_FLAGS balanced = (low->meta_flags & high->meta_flags);
+
+  low->meta_flags = balanced;
+  high->meta_flags = balanced;
+
+  low->val_requirements |= high->val_requirements;
+}

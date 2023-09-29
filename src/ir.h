@@ -10,18 +10,6 @@ namespace IR {
 
   void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, EvalPromise* eval);
 
-  struct SSATemp {
-    ValueRequirements requirements;
-    Type type = {};
-  };
-
-  struct SSAVar {
-    ValueRequirements requirements;
-    Type type = {};
-    u32 versions = 0;
-    LocalLabel origin = {0};
-  };
-
   struct ValueIndex {
     u32 index;
   };
@@ -34,33 +22,31 @@ namespace IR {
     return a.index != b.index;
   }
 
-  struct VariableVersion {
+  struct VariableId {
     u32 variable;
-    u32 version;
   };
 
-  constexpr bool operator==(const VariableVersion& a, const VariableVersion& b) {
-    return (a.variable == b.variable) && (a.version == b.version);
+  constexpr bool operator==(const VariableId& a, const VariableId& b) {
+    return (a.variable == b.variable);
   }
 
-  constexpr bool operator!=(const VariableVersion& a, const VariableVersion& b) {
-    return (a.variable != b.variable) || (a.version != b.version);
+  constexpr bool operator!=(const VariableId& a, const VariableId& b) {
+    return (a.variable != b.variable);
   }
 
-  struct BlockImport {
-    VariableVersion in_version;
-    IR::ValueIndex local_temp;
+  struct SSATemp {
+    ValueRequirements requirements;
+    Type type = {};
+
+    bool is_variable;
+    VariableId var_id;
   };
 
-  struct BlockExport {
-    VariableVersion out_version;
-    IR::ValueIndex local_temp;
-  };
+  struct SSAVar {
+    ValueRequirements requirements;
+    Type type = {};
 
-  struct BlockMerge {
-    VariableVersion version;
-
-    u32 in_versions[2];
+    u32 stack_offset;
   };
 
   enum struct ControlFlowType {
@@ -125,12 +111,7 @@ namespace IR {
     };
 
     Array<u8> bytecode = {};
-
     Array<SSATemp> temporaries = {};
-
-    Array<BlockImport> imports = {};
-    Array<BlockExport> exports = {};
-    Array<BlockMerge> enter_merge = {};
   };
 
   struct GlobalReference {
@@ -151,14 +132,16 @@ namespace IR {
     LocalLabel current_block = NULL_LOCAL_LABEL;
 
     Array<SSAVar> variables = {};
+    u32 max_stack;
 
     Array<GlobalReference> globals_used = {};
     Array<LocalLabel> control_flow_labels = {};
     
     Array<ControlBlock> control_blocks = {};
 
-    u32 new_variable(const Type& t, ValueRequirements requirements);
+    VariableId new_variable(const Type& t, ValueRequirements requirements);
     ValueIndex new_temporary(const Type& t, ValueRequirements requirements);
+    ValueIndex new_temporary(const VariableId& var, ValueRequirements requirements);
 
     u32 new_global_reference(const IR::GlobalReference& ref);
 
@@ -446,10 +429,8 @@ MOD(Not, CODE_V_V)
 
 namespace Eval {
   struct VariableState {
-    u32 id;
-    u32 version;
+    IR::VariableId id;
 
-    bool new_val;
     bool imported;
     IR::ValueIndex current_temp;
   };
@@ -492,31 +473,21 @@ namespace Eval {
     IR::LocalLabel parent = IR::NULL_LOCAL_LABEL;
 
     Array<VariableState> variables_state;
+    u32 curr_stack = 0;
 
-    RuntimeValue new_variable(u32 id);
-    RuntimeValue import_variable(u32 id);
-    void set_variable(u32 id, IR::ValueIndex index);
+    IR::VariableId new_variable(const Type& t, IR::ValueRequirements reqs);
+    RuntimeValue import_variable(const IR::VariableId& id, IR::ValueRequirements reqs);
 
     void switch_control_block(IR::LocalLabel index, IR::LocalLabel parent);
 
-    //Add exports to the ir corresponding to the current variables
-    void export_variables();
-
     //Releases the variables that are no longer in scope
     void rescope_variables(usize new_size);
+    void reset_variables();
 
     inline Array<u8>& current_bytecode() const { return ir->current_bytecode(); }
   };
 
   void end_builder(IrBuilder* builder);
-
-  enum struct MergeRules {
-    New, UseFirst,
-  };
-
-  void merge_variables(Eval::IrBuilder* builder, MergeRules rule,
-                       IR::LocalLabel l0, Array<VariableState>&& v0,
-                       IR::LocalLabel l1, Array<VariableState>&& v1);
 
   RuntimeValue sub_object(Eval::IrBuilder* const builder,
                           const RuntimeValue& val,
@@ -566,7 +537,6 @@ namespace VM {
 
   struct StackFrame {
     OwnedArr<u8> bytes;
-    OwnedArr<Value> variables = {};
     OwnedArr<Value> temporaries = {};
 
     const IR::Builder* ir;

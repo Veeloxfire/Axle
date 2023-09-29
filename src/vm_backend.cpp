@@ -76,9 +76,6 @@ RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
 VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
   ASSERT(builder->control_blocks.size > 0);
 
-  u32 size_needed = 0;
-  OwnedArr variables = new_arr<VM::Value>(builder->variables.size);
-
   u64 total_temporaries = 0;
   FOR(builder->control_blocks, b) {
     total_temporaries += b->temporaries.size;
@@ -86,48 +83,40 @@ VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
 
   OwnedArr temporaries = new_arr<VM::Value>(total_temporaries);
 
-  for (usize i = 0; i < builder->variables.size; ++i) {
-    const auto& var = builder->variables.data[i];
-    auto& vm_var = variables[i];
+  const u32 size_base = builder->max_stack;
 
-    size_needed = ceil_to_n(size_needed, var.type.structure->alignment);
-
-    vm_var.data_offset = size_needed;
-    vm_var.type = var.type;
-    size_needed += var.type.structure->size;
-  }
-
-  const u32 size_base = size_needed;
+  u32 size_needed = size_base;
   u64 temporaries_counter = 0;
 
   FOR(builder->control_blocks, it) {
-    FOR(it->imports, v_imp) {
-      temporaries[v_imp->local_temp.index + temporaries_counter] = variables[v_imp->in_version.variable];
-    }
-
-    FOR(it->exports, v_exp) {
-      temporaries[v_exp->local_temp.index + temporaries_counter] = variables[v_exp->out_version.variable];
-    }
-
     u32 temp_size_needed = size_base;
     const usize num_temps = it->temporaries.size;
     for (usize i = 0; i < num_temps; ++i) {
-      auto& temp = it->temporaries.data[i];
+      const auto& temp = it->temporaries.data[i];
       auto& vm_temp = temporaries[i + temporaries_counter];
-      if (vm_temp.type.is_valid()) continue;
 
-      temp_size_needed = ceil_to_n(temp_size_needed, temp.type.structure->alignment);
-      vm_temp.data_offset = temp_size_needed;
-      vm_temp.type = temp.type;
-      temp_size_needed += temp.type.structure->size;
+      if (temp.is_variable) {
+        const auto& var = builder->variables.data[temp.var_id.variable];
+        vm_temp.type = temp.type;
+        vm_temp.data_offset = var.stack_offset;
+      }
+      else {
+        temp_size_needed = ceil_to_n(temp_size_needed, temp.type.structure->alignment);
+        vm_temp.data_offset = temp_size_needed;
+        vm_temp.type = temp.type;
+        temp_size_needed += temp.type.size();
+      }
     }
+
+    temporaries_counter += num_temps;
 
     if (temp_size_needed > size_needed) size_needed = temp_size_needed;
   }
 
+  ASSERT(temporaries_counter == total_temporaries);
+
   VM::StackFrame vm = {};
   vm.bytes = new_arr<u8>(size_needed);
-  vm.variables = std::move(variables);
   vm.temporaries = std::move(temporaries);
   vm.ir = builder;
   vm.current_block = builder->control_blocks.data;
@@ -589,6 +578,7 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
           else {
             goto_block(stack_frame->current_block->cf_split.false_branch);
           }
+          break;
         }
       case IR::ControlFlowType::Merge: break;
     }

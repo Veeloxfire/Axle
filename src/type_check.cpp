@@ -8,23 +8,6 @@ struct Typer;
 struct TypeCheckNode;
 struct CheckResult;
 
-constexpr void pass_flags_up(AST_LOCAL low, AST_LOCAL high) {
-  constexpr META_FLAGS pass_flags = 0
-    | META_FLAG::CALL_LEAF;
-
-  high->meta_flags |= low->meta_flags & pass_flags;
-  high->val_requirements |= low->val_requirements;
-}
-
-constexpr void pass_flags_down(AST_LOCAL low, AST_LOCAL high) {
-  balance_flags(&low->meta_flags, &high->meta_flags);
-
-  constexpr META_FLAGS pass_flags = 0
-    | META_FLAG::MAKES_CALL;
-
-  low->meta_flags |= high->meta_flags & pass_flags;
-}
-
 static CheckResult empty_stage(CompilerGlobals*, CompilerThread*, Typer*, const TypeCheckNode*);
 
 using TypeCheckStageFn = decltype(&empty_stage);
@@ -470,7 +453,7 @@ TC_STAGE(MEMBER_ACCESS, 2) {
       }
 
       //TODO: do this outside of memory
-      member->meta_flags &= ~META_FLAG::COMPTIME;
+      member->val_requirements.add_address();
     }
     else  if (member->name == comp_thread->important_names.len) {
       member->node_type = comp_thread->builtin_types->t_u64;
@@ -524,8 +507,6 @@ TC_STAGE(INDEX_EXPR, 2) {
     return FINISHED;
   }
 
-
-
   ASSERT(index->node_type == comp_thread->builtin_types->t_u64);
   index_expr->node_type = base->node_type.unchecked_base<ArrayStructure>()->base;
   return FINISHED;
@@ -538,10 +519,12 @@ TC_STAGE(INDEX_EXPR, 1) {
   AST_LOCAL base = index_expr->expr;
   AST_LOCAL index = index_expr->index;
 
+  index_expr->val_requirements.add_address();
+
   pass_flags_up(index_expr, base);
   typer->push_node(base, {});
 
-  pass_flags_up(index_expr, index);
+  index->meta_flags |= index_expr->meta_flags & (META_FLAG::CONST | META_FLAG::COMPTIME);
   typer->push_node(index, comp_thread->builtin_types->t_u64);
 
   return next_stage(INDEX_EXPR_stage_2);
@@ -2112,7 +2095,6 @@ TC_STAGE(FUNCTION_CALL, 2) {
 
   FOR_AST(call->arguments, it) {
     pass_flags_up(call, it);
-    it->meta_flags |= META_FLAG::CALL_LEAF;
 
     //TODO: try to infer arguments
     typer->push_node(it, {});
@@ -2128,10 +2110,6 @@ TC_STAGE(FUNCTION_CALL, 2) {
 TC_STAGE(FUNCTION_CALL, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
-
-  //TODO: Allow function execution at compile time
-  //Means we need to have a way to know which functions to load
-  call->meta_flags |= META_FLAG::MAKES_CALL;
 
   typer->push_node_eval(call->function, {});
 

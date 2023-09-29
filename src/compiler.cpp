@@ -825,7 +825,6 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
     }
 
     IR::V_ARG v_arg = Eval::load_v_arg(builder, val);
-
     args.insert(v_arg);
   }
 
@@ -1021,6 +1020,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         STRUCTURE_TYPE st = m_base->node_type.struct_type();
         if (st == STRUCTURE_TYPE::COMPOSITE) {
+          pass_flags_up(expr, m_base);
           Eval::RuntimeValue obj = compile_bytecode(comp, comp_thread,
                                                     builder, m_base);
           if (comp_thread->is_panic()) {
@@ -1038,6 +1038,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         }
         else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
           if (member_e->name == comp->important_names.ptr) {
+            ASSERT(expr->val_requirements.has_address());
+            pass_flags_up(expr, m_base);
             Eval::RuntimeValue obj = compile_bytecode(comp, comp_thread,
                                                       builder, m_base);
             if (comp_thread->is_panic()) {
@@ -1081,6 +1083,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
 
+        pass_flags_up(expr, index_expr);
         Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
                                                   builder, index_expr);
         if (comp_thread->is_panic()) {
@@ -1192,7 +1195,6 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         usize count = 0;
 
-
         FOR_AST(arr_expr->elements, it) {
           Eval::RuntimeValue el = compile_bytecode(comp, comp_thread, builder, it);
           if (comp_thread->is_panic()) {
@@ -1257,16 +1259,16 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* ident = (ASTIdentifier*)expr;
 
-
         if (ident->id_type == ASTIdentifier::LOCAL) {
           Local* local = ident->local;
+          local->requirements |= ident->val_requirements;
           const Type t = local->decl.type;
 
           if (local->is_constant) {
             return Eval::as_constant(local->constant, t);
           }
           else {
-            return builder->import_variable(local->variable_id);
+            return builder->import_variable(local->variable_id, ident->val_requirements);
           }
         }
         else if (ident->id_type == ASTIdentifier::GLOBAL) {
@@ -1413,6 +1415,7 @@ void compile_bytecode_assign(CompilerGlobals* const comp,
           const Eval::RuntimeValue assign_to = Eval::sub_object(builder, obj, c, expr->node_type);
 
           Eval::assign(builder, assign_to, assign_from);
+          return;
         }
         else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
           if (member_e->name == comp->important_names.ptr) {
@@ -1443,6 +1446,7 @@ void compile_bytecode_assign(CompilerGlobals* const comp,
 
         ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
 
+        pass_flags_up(index, index_expr);
         Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
                                                   builder, index_expr);
         if (comp_thread->is_panic()) {
@@ -1480,14 +1484,15 @@ void compile_bytecode_assign(CompilerGlobals* const comp,
         const Eval::RuntimeValue assign_to = Eval::sub_object(builder, arr, offset, t);
 
         Eval::assign(builder, assign_to, assign_from);
+        return;
       }
 
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* ident = (ASTIdentifier*)expr;
 
-
         if (ident->id_type == ASTIdentifier::LOCAL) {
           Local* local = ident->local;
+          local->requirements |= ident->val_requirements;
           const Type t = local->decl.type;
 
           if (local->is_constant) {
@@ -1495,11 +1500,9 @@ void compile_bytecode_assign(CompilerGlobals* const comp,
             return;
           }
           else {
-            const auto t = builder->ir->new_temporary(local->decl.type, local->requirements);
+            const auto l = builder->import_variable(local->variable_id, ident->val_requirements);
 
-            Eval::assign(builder, Eval::as_direct(t, local->decl.type), assign_from);
-
-            builder->set_variable(local->variable_id, t);
+            Eval::assign(builder, l, assign_from);
             return;
           }
         }
@@ -1681,7 +1684,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         IR::LocalLabel body_label = builder->ir->new_control_block();
         IR::LocalLabel escape_label = builder->ir->new_control_block();
 
-        builder->export_variables();
+        builder->reset_variables();
         builder->ir->set_current_cf(IR::CFInline{
           builder->parent,
             loop_merge_label,
@@ -1712,7 +1715,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
               escape_label,
           });
         }
-        builder->export_variables();
+        builder->reset_variables();
 
         Array branch_variables = copy_array(builder->variables_state);
         ASSERT(branch_variables.size == parent_variables.size);//Currently a waste of a copy, but might not be later on
@@ -1739,7 +1742,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         }
         else {
           builder->rescope_variables(parent_variables.size);
-          builder->export_variables();
+          builder->reset_variables();
 
           builder->ir->set_current_cf(IR::CFInline{
             builder->parent,
@@ -1747,10 +1750,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           });
 
           builder->ir->current_block = loop_merge_label;
-
-          Eval::merge_variables(builder, Eval::MergeRules::UseFirst,
-                                parent, std::move(parent_variables),
-                                loop_end, std::move(builder->variables_state));
 
           builder->ir->set_current_cf(IR::CFMerge{
             {parent, loop_end},
@@ -1795,7 +1794,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           Eval::assign(builder, Eval::as_direct(cond_vi, comp_thread->builtin_types->t_bool), cond);
 
-          builder->export_variables();
+          builder->reset_variables();
           builder->ir->set_current_cf(IR::CFSplt{
             parent,
               cond_vi,
@@ -1819,7 +1818,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           if (builder->ir->current_block != IR::NULL_LOCAL_LABEL) {
             builder->rescope_variables(scope_size);
-            builder->export_variables();
+            builder->reset_variables();
           }
           else {
             builder->variables_state = {};
@@ -1844,7 +1843,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           if (builder->ir->current_block != IR::NULL_LOCAL_LABEL) {
             builder->rescope_variables(scope_size);
-            builder->export_variables();
+            builder->reset_variables();
           }
           else {
             builder->variables_state = {};
@@ -1896,10 +1895,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
               final_label,
           });
 
-          Eval::merge_variables(builder, Eval::MergeRules::New,
-                                if_label, std::move(if_variables),
-                                else_end, std::move(builder->variables_state));
-
           builder->switch_control_block(final_label, merge_label);
         }
 
@@ -1915,9 +1910,8 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         if (decl->compile_time_const) {
           ASSERT(local->is_constant && local->constant != nullptr);
 
-          local->variable_id = builder->ir->new_variable(local->decl.type, local->requirements);
-
-          const auto var = builder->new_variable(local->variable_id);
+          local->variable_id = builder->new_variable(local->decl.type, local->requirements);
+          const auto var = builder->import_variable(local->variable_id, decl->val_requirements);
 
           Eval::assign(builder, var, Eval::as_constant(local->constant, local->decl.type));
         }
@@ -1930,9 +1924,8 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             return;
           }
 
-          local->variable_id = builder->ir->new_variable(local->decl.type, local->requirements);
-
-          const auto var = builder->new_variable(local->variable_id);
+          local->variable_id = builder->new_variable(local->decl.type, local->requirements);
+          const auto var = builder->import_variable(local->variable_id, decl->val_requirements);
 
           Eval::assign(builder, var, r);
         }
@@ -1980,35 +1973,39 @@ void start_ir(Eval::IrBuilder* builder, AST_ARR params) {
     first,
   });
 
-  const Type* parameters = ir->signature->parameter_types.begin();
-  const Type* const parameters_end = ir->signature->parameter_types.end();
-
-  OwnedArr<IR::V_ARG> args = new_arr<IR::V_ARG>(params.count);
-
   {
-    IR::V_ARG* va = args.mut_begin();
-    FOR_AST(params, p) {
-      ASSERT(parameters < parameters_end);
-      ASSERT(p->node_type == *parameters);
-      ASSERT(p->ast_type == AST_TYPE::TYPED_NAME);
-      ASTTypedName* n = (ASTTypedName*)p;
-      Local* local_ptr = n->local_ptr;
+    OwnedArr<IR::V_ARG> args = new_arr<IR::V_ARG>(params.count);
 
-      auto id = ir->new_variable(*parameters, local_ptr->requirements);
-      local_ptr->variable_id = id;
-      *va = Eval::load_v_arg(builder, builder->new_variable(id));
-      parameters += 1;
+    {
+      const Type* parameters = ir->signature->parameter_types.begin();
+      const Type* const parameters_end = ir->signature->parameter_types.end();
+      IR::V_ARG* va = args.mut_begin();
+
+      FOR_AST(params, p) {
+        ASSERT(parameters < parameters_end);
+        ASSERT(p->node_type == *parameters);
+        ASSERT(p->ast_type == AST_TYPE::TYPED_NAME);
+        ASTTypedName* n = (ASTTypedName*)p;
+        Local* local_ptr = n->local_ptr;
+
+        auto id = builder->new_variable(*parameters, local_ptr->requirements);
+        local_ptr->variable_id = id;
+        *va = Eval::load_v_arg(builder, builder->import_variable(id, {}));
+        va += 1;
+        parameters += 1;
+      }
+
+      ASSERT(parameters == parameters_end);
     }
+
+    IR::Types::StartFunc sf = {};
+    sf.n_values = (u32)args.size;
+    sf.values = args.data;
+
+    IR::Emit::StartFunc(ir->current_bytecode(), sf);
   }
 
-  IR::Types::StartFunc sf = {};
-  sf.n_values = (u32)args.size;
-  sf.values = args.data;
-
-  ASSERT(parameters == parameters_end);
-  IR::Emit::StartFunc(ir->current_bytecode(), sf);
-
-  builder->export_variables();
+  builder->reset_variables();
   builder->switch_control_block(first, startup);
 }
 

@@ -2,6 +2,23 @@
 #include "compiler.h"
 
 namespace IR {
+  IR::ValueIndex Builder::new_temporary(const VariableId& v_id, ValueRequirements requirements) {
+    IR::ControlBlock* cb = current_control_block();
+    ASSERT(cb != nullptr);
+
+    const SSAVar& var = variables.data[v_id.variable];
+
+    usize i = cb->temporaries.size;
+    cb->temporaries.insert_uninit(1);
+    SSATemp* temp = cb->temporaries.back();
+    temp->type = var.type;
+    temp->requirements = requirements;
+    temp->is_variable = true;
+    temp->var_id = v_id;
+
+    return { static_cast<u32>(i) };
+  }
+
   IR::ValueIndex Builder::new_temporary(const Type& t, ValueRequirements requirements) {
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
@@ -15,16 +32,14 @@ namespace IR {
     return { static_cast<u32>(i) };
   }
 
-  u32 Builder::new_variable(const Type& t, ValueRequirements requirements) {
+  VariableId Builder::new_variable(const Type& t, ValueRequirements requirements) {
     usize i = variables.size;
     variables.insert_uninit(1);
     IR::SSAVar* var = variables.back();
     var->type = t;
     var->requirements = requirements;
-    var->origin = current_block;
-    var->versions = 0;
 
-    return static_cast<u32>(i);
+    return VariableId{ static_cast<u32>(i) };
   }
 
   u32 Builder::new_global_reference(const IR::GlobalReference& ref) {
@@ -603,86 +618,54 @@ void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const 
   INVALID_CODE_PATH("Invalid RVT");
 }
 
-Eval::RuntimeValue Eval::IrBuilder::new_variable(u32 id) {
-  ASSERT(id < ir->variables.size);
-  const IR::SSAVar& sv = ir->variables.data[id];
+IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirements reqs) {
+  IR::VariableId id = ir->new_variable(t, reqs);
 
-#ifndef NDEBUG
-  FOR_MUT(variables_state, it) {
-    if (it->id == id) {
-      INVALID_CODE_PATH("Duplicate imported variable");
-      return Eval::no_value();
-    }
+  {
+    IR::SSAVar& v = ir->variables.data[id.variable];
+    u32 offset = ceil_to_n(curr_stack, v.type.size());
+    v.stack_offset = offset;
+
+    curr_stack = offset + v.type.size();
+
+    if (curr_stack > ir->max_stack) ir->max_stack = curr_stack;
   }
-#endif
-
-  ir->variables.data[id].versions += 1;//There is 1 vesion
-
-  IR::ValueIndex v = ir->new_temporary(sv.type, sv.requirements);
 
   Eval::VariableState var = {};
   var.id = id;
-  var.version = 0;
-
-  var.new_val = true;
-  var.imported = true;
-  var.current_temp = v;
+  var.imported = false;
 
   variables_state.insert(var);
 
-  return Eval::as_direct(v, sv.type);
+  return id;
 }
 
-Eval::RuntimeValue Eval::IrBuilder::import_variable(u32 id) {
-  ASSERT(id < ir->variables.size);
-  const IR::SSAVar& sv = ir->variables.data[id];
+Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR::ValueRequirements reqs) {
+  ASSERT(id.variable < ir->variables.size);
+  IR::SSAVar& sv = ir->variables.data[id.variable];
+  sv.requirements |= reqs;
   
   FOR_MUT(variables_state, it) {
-    if (it->id == id) {
+    if (it->id.variable == id.variable) {
 
       if (it->imported) {
         const IR::ControlBlock* cb = ir->current_control_block();
         ASSERT(it->current_temp.index < cb->temporaries.size);
+        cb->temporaries.data[it->current_temp.index].requirements |= reqs;
         return Eval::as_direct(it->current_temp, sv.type);
       }
 
-      IR::ValueIndex v = ir->new_temporary(sv.type, sv.requirements);
-
-      auto imp = IR::BlockImport{
-         { it->id, it->version },
-         v
-      };
-      ir->current_control_block()->imports.insert(std::move(imp));
+      IR::ValueIndex v = ir->new_temporary(id, reqs);
 
       it->imported = true;
       it->current_temp = v;
 
       return Eval::as_direct(v, sv.type);
-      
     }
   }
 
   INVALID_CODE_PATH("Did not find imported variable");
   return Eval::no_value();
-}
-
-void Eval::IrBuilder::set_variable(u32 id, IR::ValueIndex index) {
-  ASSERT(id < ir->variables.size);
-  auto& var = ir->variables.data[id];
-
-  FOR_MUT(variables_state, it) {
-    if (it->id == id) {
-      it->version = var.versions;
-      var.versions += 1;
-
-      it->new_val = true;
-      it->imported = true;
-      it->current_temp = index;
-      return;
-    }
-  }
-
-  INVALID_CODE_PATH("Did not find imported variable");
 }
 
 void Eval::IrBuilder::switch_control_block(IR::LocalLabel index, IR::LocalLabel _parent) {
@@ -691,86 +674,14 @@ void Eval::IrBuilder::switch_control_block(IR::LocalLabel index, IR::LocalLabel 
   parent = _parent;
 }
 
-void Eval::IrBuilder::export_variables() {
-  IR::LocalLabel current_block = ir->current_block;
-
-  FOR_MUT(variables_state, it) {
-    if (it->new_val) {
-      ir->current_control_block()->exports.insert(IR::BlockExport{
-        it->id,
-          it->version,
-          it->current_temp,
-      });
-    }
-
-    it->new_val = false;
-    it->imported = false;
-  }
-}
-
 void Eval::IrBuilder::rescope_variables(usize new_size) {
   ASSERT(variables_state.size >= new_size);
   variables_state.pop_n(variables_state.size - new_size);
+
 }
-
-void Eval::merge_variables(Eval::IrBuilder* builder, MergeRules rule,
-                           IR::LocalLabel l0, Array<Eval::VariableState>&& in_v0,
-                           IR::LocalLabel l1, Array<Eval::VariableState>&& in_v1) {
-  ASSERT(&in_v0 != &in_v1);
-
-  Array v0_temp = std::move(in_v0);
-  Array v1 = std::move(in_v1);
-
-  ASSERT(l0 != l1);
-  ASSERT(v0_temp.size == v1.size);
-  const usize n = v0_temp.size;
-
-  builder->variables_state = std::move(v0_temp);//can't do this at the start because the moves might overlap
-  auto& v0 = builder->variables_state;
-
-  IR::ControlBlock* cb = builder->ir->current_control_block();
-
-  for (usize i = 0; i < n; ++i) {
-    auto& var0 = v0.data[i];
-    const auto& var1 = v1.data[i];
-    ASSERT(var0.id == var1.id);
-
-    if (var0.version != var1.version) {
-      //Need to merge
-
-      const IR::SSAVar& ssa_var = builder->ir->variables.data[var0.id];
-
-      switch (rule) {
-        case MergeRules::New: {
-            const auto next = builder->ir->variables.data[i].versions++;
-
-            const IR::VariableVersion next_var = {
-              var0.id, next,
-            };
-
-            cb->enter_merge.insert(IR::BlockMerge{
-              next_var, { var0.version, var1.version },
-            });
-            
-            var0.version = next;
-            break;
-          }
-        case MergeRules::UseFirst: {
-            const IR::VariableVersion next_var = {
-              var0.id, var0.version,
-            };
-
-            cb->enter_merge.insert(IR::BlockMerge{
-              next_var, { var0.version, var1.version },
-            });
-
-            //TODO: re-import
-            break;
-          }
-      }
-
-      var0.imported = false;
-    }
+void Eval::IrBuilder::reset_variables() {
+  FOR_MUT(variables_state, it) {
+    it->imported = false;
   }
 }
 
@@ -1062,7 +973,7 @@ void IR::print_ir(const IR::Builder* builder) {
     u32 counter = 0;
     format_print_ST("Variables ({}):\n", builder->variables.size);
     FOR(builder->variables, it) {
-      format_print_ST("  V{}: {} (versions = {})", counter, it->type.name, it->versions);
+      format_print_ST("  V{}: {}", counter, it->type.name);
       if (counter < num_params) {
         format_print_ST(" = param({})", counter);
       }
@@ -1101,32 +1012,16 @@ void IR::print_ir(const IR::Builder* builder) {
 
     format_print_ST("L{} (Type = \"{}\")\n", block->label.label - 1, name);
 
-    if (block->enter_merge.size > 0) {
-      format_print_ST("Merges ({}):\n", block->enter_merge.size);
-      FOR(block->enter_merge, m) {
-        format_print_ST("  V{} = {} <- phi[ {}, {} ]\n", m->version.variable, m->version.version,
-                        m->in_versions[0], m->in_versions[1]);
-      }
-    }
-
     if (block->temporaries.size > 0) {
       format_print_ST("Temporaries ({}):\n", block->temporaries.size);
       for (u32 i = 0; i < block->temporaries.size; ++i) {
-        format_print_ST("  T{}: {}\n", i, block->temporaries.data[i].type.name);
-      }
-    }
-
-    if (block->imports.size > 0) {
-      format_print_ST("Imports ({}):\n", block->imports.size);
-      FOR(block->imports, imp) {
-        format_print_ST("  T{} = V{} ({})\n", imp->local_temp.index, imp->in_version.variable, imp->in_version.version);
-      }
-    }
-
-    if (block->exports.size > 0) {
-      format_print_ST("Exports ({}):\n", block->exports.size);
-      FOR(block->exports, e) {
-        format_print_ST("  V{} ({}) = T{}\n", e->out_version.variable, e->out_version.version, e->local_temp.index);
+        const SSATemp& temp = block->temporaries.data[i];
+        if (temp.is_variable) {
+          format_print_ST("  T{}: {} = V{}\n", i, temp.type.name, temp.var_id.variable);
+        }
+        else {
+          format_print_ST("  T{}: {}\n", i, temp.type.name);
+        }
       }
     }
 
