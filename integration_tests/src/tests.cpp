@@ -200,7 +200,13 @@ ProgramOutput run_program(const char* name, u64& out, bool debugging) {
   }
 }
 
-bool run_test(const APIOptions& opts, const char* expected_output_path, const Expected& expected) noexcept {
+enum struct TestOutcome {
+  Pass,
+  WrongAnswer,
+  CompilationError,
+};
+
+TestOutcome run_test(const APIOptions& opts, const char* expected_output_path, const Expected& expected) noexcept {
   //Time all the tests
   const auto start = std::chrono::high_resolution_clock::now();
 
@@ -222,35 +228,67 @@ bool run_test(const APIOptions& opts, const char* expected_output_path, const Ex
 
   if (return_code != 0) {
     std::cout << "Compiler Error. Return code: " << return_code << '\n';
-    return false;
+    return TestOutcome::CompilationError;
   }
   else {
     switch (output) {
       case ProgramOutput::INVALID_PROGRAM: {
           std::cout << "Could not finish the test - program could not be opened\n";
-          return false;
+          return TestOutcome::CompilationError;
         }
       case ProgramOutput::TIMED_OUT: {
           std::cout << "Could not finish the test - timed out before program could finish executing\n";
-          return false;
+          return TestOutcome::WrongAnswer;
         }
       case ProgramOutput::INCORRECT: {
           std::cout << "Program produced incorrect result format - could not be correct value\n";
-          return false;
+          return TestOutcome::WrongAnswer;
         }
       case ProgramOutput::CORRECT: {
           if (res != expected.val) {
             std::cout << "Incorrect Results. Expected: " << expected.val << ". Actual: " << res << '\n';
-            return false;
+            return TestOutcome::WrongAnswer;
           }
-          return true;
+          else {
+            std::cout << "Test Passed!\n";
+            return TestOutcome::Pass;
+          }
         }
       default: {
           std::cout << "Unexpected Test State\n";
-          return false;
+          return TestOutcome::CompilationError;
         }
     }
   }
+}
+
+void print_test_collection(const char* system_name, const char* group_name, const char* group_list_name, const char** test_collection, size_t num_tests) {
+  const char* indicator = nullptr;
+  if (num_tests == 0) {
+    indicator = "No";
+  }
+  else if (num_tests == NUM_TESTS) {
+    indicator = "All";
+  }
+  else {
+    indicator = "Some";
+  }
+
+  std::cout << "\n" << indicator << " " << system_name << " " << group_name << "!\n";
+
+  if (num_tests > 0) {
+    std::cout << group_list_name << ": ";
+    auto i = test_collection;
+    const auto end = test_collection + num_tests;
+
+    std::cout << " \"" << *i << '\"';
+    i++;
+
+    for (; i < end; i++) {
+      std::cout << ", \"" << *i << '\"';
+    }
+  }
+
 }
 
 bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizationOptions& optimize) {
@@ -275,9 +313,13 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
   }
 #endif
 
-  const char* failed_tests[NUM_TESTS] = {};
+  const char* comp_error_tests[NUM_TESTS] = {};
+  size_t num_comp_errorr_tests = 0;
+
+  const char* wrong_answer_tests[NUM_TESTS] = {};
+  size_t num_wrong_answer_tests = 0;
+
   const char* passed_tests[NUM_TESTS] = {};
-  size_t num_failed_tests = 0;
   size_t num_passed_tests = 0;
 
   const char* system_name = tester.pi->system_name;
@@ -328,71 +370,39 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
 
     Expected expected = {};
     expected.val = test.return_value;
-    const bool passed = run_test(options, exe_name_holder.raw.data, expected);
+    const TestOutcome outcome = run_test(options, exe_name_holder.raw.data, expected);
 
 #ifdef COUNT_ALLOC
     //Print memory leaks
     print_still_allocated_and_reset();
 #endif
 
-    if (passed) {
-      std::cout << "Test passed!\n";
-      passed_tests[num_passed_tests] = test.test_name;
-      num_passed_tests++;
-    }
-    else {
-      std::cerr << "Test failed!\n";
-      failed_tests[num_failed_tests] = test.test_name;
-      num_failed_tests++;
-    }
-
-  }
-
-  if (num_failed_tests == 0) {
-    std::cout << "\nAll " << system_name << " Tests Passed!" << std::endl;
-  }
-  else {
-    if (num_passed_tests == 0) {
-      std::cerr << "\nNo " << system_name << " Tests Passed!\n";
-    }
-    else {
-      std::cerr << "\nSome " << system_name << " Tests passed!\n";
-      std::cerr << "Passed tests:";
-
-      {
-        auto i = passed_tests;
-        const auto end = passed_tests + num_passed_tests;
-
-        std::cerr << " \"" << *i << '\"';
-        i++;
-
-        for (; i < end; i++) {
-          std::cerr << ", \"" << *i << '\"';
+    switch (outcome) {
+      case TestOutcome::Pass: {
+          passed_tests[num_passed_tests] = test.test_name;
+          num_passed_tests++;
+          break;
         }
-      }
-
-      std::cerr << "\n\nSome " << system_name << " Tests Failed!\n";
+      case TestOutcome::WrongAnswer: {
+          wrong_answer_tests[num_wrong_answer_tests] = test.test_name;
+          num_wrong_answer_tests++;
+          break;
+        }
+      case TestOutcome::CompilationError: {
+          comp_error_tests[num_comp_errorr_tests] = test.test_name;
+          num_comp_errorr_tests++;
+          break;
+        }
     }
-
-    std::cerr << "Failed tests:";
-
-    //Show which tests failed
-    {
-      auto i = failed_tests;
-      const auto end = failed_tests + num_failed_tests;
-
-      std::cerr << " \"" << *i << '\"';
-      i++;
-
-      for (; i < end; i++) {
-        std::cerr << ", \"" << *i << '\"';
-      }
-    }
-
-    std::cerr << std::endl;
   }
 
-  return num_failed_tests > 0;
+  print_test_collection(system_name, "Tests passed", "Passed tests", passed_tests, num_passed_tests);
+  std::cout << "\n";
+  print_test_collection(system_name, "Tests produced wrong answers", "Wrong answer tests", wrong_answer_tests, num_wrong_answer_tests);
+  std::cout << "\n";
+  print_test_collection(system_name, "Tests had compile errors", "Compile errorr tests", comp_error_tests, num_comp_errorr_tests);
+
+  return num_passed_tests < NUM_TESTS;
 }
 
 //Runs all the test with a specific calling convention and system

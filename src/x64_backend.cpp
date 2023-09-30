@@ -24,7 +24,7 @@ namespace X64 {
   struct R {
     uint8_t r;
 
-    bool operator==(const R& o) {
+    bool operator==(const R& o) const {
       return o.r == r;
     }
   };
@@ -1519,7 +1519,7 @@ enum struct ValueType : u8 {
   Memory,
 };
 
-namespace Helpers {
+namespace IntHelpers {
   static void zero_register(X64::Program* program, X64::R r) {
     X64::Instruction i = {};
     X64::xor_(i, X64::R32{r}, X64::R32{r});
@@ -1537,13 +1537,6 @@ namespace Helpers {
       i.insert(X64::REX_W);
     }
     i.insert(X64::CQO);
-
-    X64::append_instruction(program, i);
-  }
-
-  static void copy_address_to_reg(X64::Program* program, const MemoryView& mem, X64::R r) {
-    X64::Instruction i = {};
-    X64::lea(i, mem.rm, r);
 
     X64::append_instruction(program, i);
   }
@@ -2170,7 +2163,7 @@ namespace Helpers {
     }
   }
 
-  static void load_const_to_reg(X64::Program* program, IR::Format f, X64::R reg, const IR::C_ARG& const_arg) {
+  static void load_const_to_reg(X64::Program* program, IR::Format f, X64::R reg, const u8* data) {
     ASSERT(f != IR::Format::opaque);
 
     X64::Instruction i = {};
@@ -2178,22 +2171,22 @@ namespace Helpers {
     switch (f) {
       case IR::Format::uint8:
       case IR::Format::sint8: {
-          X64::mov(i, X64::R8{ reg }, X64::IMM8{ const_arg.val[0] });
+          X64::mov(i, X64::R8{ reg }, X64::IMM8{ data[0] });
           break;
         }
       case IR::Format::uint16:
       case IR::Format::sint16: {
-          X64::mov(i, X64::R16{reg}, X64::IMM16{ x16_from_bytes(const_arg.val) });
+          X64::mov(i, X64::R16{reg}, X64::IMM16{ x16_from_bytes(data) });
           break;
         }
       case IR::Format::uint32:
       case IR::Format::sint32: {
-          X64::mov(i, X64::R32{reg}, X64::IMM32{ x32_from_bytes(const_arg.val) });
+          X64::mov(i, X64::R32{reg}, X64::IMM32{ x32_from_bytes(data) });
           break;
         }
       case IR::Format::uint64:
       case IR::Format::sint64: {
-          X64::mov(i, X64::R64{reg}, X64::IMM64{ x64_from_bytes(const_arg.val) });
+          X64::mov(i, X64::R64{reg}, X64::IMM64{ x64_from_bytes(data) });
           break;
         }
       default:
@@ -2203,37 +2196,36 @@ namespace Helpers {
     X64::append_instruction(program, i);
   }
 
-  static void load_const_to_mem(X64::Program* program, IR::Format f, MemoryView view, const IR::C_ARG& const_arg) {
+  static void load_const_to_mem(X64::Program* program, IR::Format f, MemoryView view, const u8* data) {
     ASSERT(f != IR::Format::opaque);
 
-    ASSERT(const_arg.size == view.size);
     ASSERT(x64_types_info.get_size(f) == view.size);
 
     switch (f) {
       case IR::Format::uint8:
       case IR::Format::sint8: {
           X64::Instruction i = {};
-          X64::mov(i, X64::RM8{ view.rm }, X64::IMM8{ const_arg.val[0] });
+          X64::mov(i, X64::RM8{ view.rm }, X64::IMM8{ data[0] });
           X64::append_instruction(program, i);
           break;
         }
       case IR::Format::uint16:
       case IR::Format::sint16: {
           X64::Instruction i = {};
-          X64::mov(i, X64::RM16{ view.rm }, X64::IMM16{ x16_from_bytes(const_arg.val) });
+          X64::mov(i, X64::RM16{ view.rm }, X64::IMM16{ x16_from_bytes(data) });
           X64::append_instruction(program, i);
           break;
         }
       case IR::Format::uint32:
       case IR::Format::sint32: {
           X64::Instruction i = {};
-          X64::mov(i, X64::RM32{ view.rm }, X64::IMM32{ x32_from_bytes(const_arg.val) });
+          X64::mov(i, X64::RM32{ view.rm }, X64::IMM32{ x32_from_bytes(data) });
           X64::append_instruction(program, i);
           break;
         }
       case IR::Format::uint64:
       case IR::Format::sint64: {
-          u64 val = x64_from_bytes(const_arg.val);
+          i64 val = x64_from_bytes(data);
 
           if (X64::can_signed_compress(val)) {
             X64::Instruction first = {};
@@ -2264,162 +2256,10 @@ namespace Helpers {
     }
   }
 
-  static void load_const_to_mem_opaque(X64::Program* program, MemoryView view, const u8* data) {
-    ASSERT(false);//THis implementation is bad, will fix later
-    using PTR = const u8*;
-
-    constexpr static auto COPY8 = [](X64::Program* program, MemoryView& view, PTR& data) {
-      X64::Instruction i = {};
-      X64::mov(i, view.rm, X64::IMM8{ data[0] });
-      view.rm.disp += 1;
-      view.size -= 1;
-      data += 1;
-
-      X64::append_instruction(program, i);
-    };
-
-    constexpr static auto COPY16 = [](X64::Program* program, MemoryView& view, PTR& data) {
-      X64::Instruction i = {};
-      X64::mov(i, view.rm, X64::IMM16{ x16_from_bytes(data) });
-      view.rm.disp += 2;
-      view.size -= 2;
-      data += 2;
-
-      X64::append_instruction(program, i);
-    };
-
-    constexpr static auto COPY32 = [](X64::Program* program, MemoryView& view, PTR& data) {
-      X64::Instruction i = {};
-      X64::mov(i, view.rm, X64::IMM32{ x32_from_bytes(data) });
-      view.rm.disp += 4;
-      view.size -= 4;
-      data += 4;
-
-      X64::append_instruction(program, i);
-    };
-
-    u32 alignment = view.known_alignment;
-
-    while (alignment != 8 && view.size > 0) {
-      switch (alignment) {
-        case 1: {
-            COPY8(program, view, data);
-            alignment = 2;
-            break;
-          }
-        case 2: {
-            if (view.size == 1) {
-              COPY8(program, view, data);
-              alignment = 1;//shouldn't matter but its nice to be correct
-            }
-            else {
-              COPY16(program, view, data);
-              alignment = 4;
-            }
-            break;
-          }
-        case 4: {
-            if (view.size == 1) {
-              COPY8(program, view, data);
-              alignment = 1;//shouldn't matter but its nice to be correct
-            }
-            else if (view.size == 2) {
-              COPY16(program, view, data);
-              alignment = 2;//shouldn't matter but its nice to be correct
-            }
-            else if (view.size == 3) {
-              COPY16(program, view, data);
-              COPY8(program, view, data);
-              alignment = 1;//shouldn't matter but its nice to be correct
-            }
-            else {
-              COPY32(program, view, data);
-              alignment = 4;
-            }
-
-            break;
-          }
-        default: INVALID_CODE_PATH("Invalid alignment");
-      }
-    }
-
-    u32 num_8s = view.size / 8;
-    u32 remainder = view.size % 8;
-
-    for (size_t itr = 0; itr < num_8s; itr++) {
-      i64 val;
-      memcpy_s(&val, sizeof(val), data, 8);
-      data += 8;
-
-      //No 64 bit constant loads in x86 for some reason
-
-      if (X64::can_signed_compress(val)) {
-        X64::Instruction first = {};
-
-        u32 i = static_cast<u64>(val) & 0xffffffff;
-
-        //Can just load the value as 32 bits and it will be sign extended
-        X64::mov(first, view.rm, X64::IMM32Extended{ i });
-        view.rm.disp += 8;
-
-        X64::append_instruction(program, first);
-      }
-      else {
-        X64::Instruction first = {};
-        X64::Instruction second = {};
-        u32 high = static_cast<u64>(val) & 0xffffffff;
-        u32 low = static_cast<u64>(val) >> 32;
-
-        X64::mov(first, view.rm, X64::IMM32{ low });
-        view.rm.disp += 4;
-
-        X64::mov(second, view.rm, X64::IMM32{ high });
-        view.rm.disp += 4;
-
-        X64::append_instruction(program, first);
-        X64::append_instruction(program, second);
-      }
-    }
-
-    switch (remainder) {
-      case 0: break;//Already loaded
-      case 1:
-        COPY8(program, view, data);
-        break;
-      case 2:
-        COPY16(program, view, data);
-        break;
-      case 3:
-        COPY16(program, view, data);
-        COPY8(program, view, data);
-        break;
-      case 4:
-        COPY32(program, view, data);
-        break;
-      case 5:
-        COPY32(program, view, data);
-        COPY8(program, view, data);
-        break;
-      case 6:
-        COPY32(program, view, data);
-        COPY16(program, view, data);
-        break;
-      case 7:
-        COPY32(program, view, data);
-        COPY16(program, view, data);
-        COPY8(program, view, data);
-        break;
-      default:
-        INVALID_CODE_PATH("Somehow n % 8 was bigger than 8 ... We broke maths");
-    }
-  }
-
-
-
-  static void copy_mem_to_mem_small(X64::Program* program,
-                                    const MemoryView& from, IR::Format f_format,
-                                    const MemoryView& to, IR::Format t_format,
-                                    X64::R temp) {
+  static void copy_mem_to_mem(X64::Program* program,
+                              const MemoryView& from, IR::Format f_format,
+                              const MemoryView& to, IR::Format t_format,
+                              X64::R temp) {
     ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
 
     ASSERT(from.size == x64_types_info.get_size(f_format));
@@ -2624,193 +2464,36 @@ namespace Helpers {
     X64::append_instruction(program, second);
   }
 
-  static void copy_mem_to_mem_opaque(X64::Program* program, MemoryView from, MemoryView to, X64::R temp_reg) {
-    constexpr static auto COPY8 = [](X64::Program* program,
-                                     MemoryView& from, X64::R temp, MemoryView& to) {
-      X64::Instruction first = {};
-      X64::Instruction second = {};
-      X64::mov(first, X64::RM8{ from.rm }, X64::R8{ temp });
-      from.rm.disp += 1;
-      from.size -= 1;
-
-      X64::mov(second, X64::R8{ temp }, X64::RM8{ to.rm });
-      to.rm.disp += 1;
-      to.size -= 1;
-
-      X64::append_instruction(program, first);
-      X64::append_instruction(program, second);
-    };
-
-    constexpr static auto COPY16 = [](X64::Program* program,
-                                      MemoryView& from, X64::R temp, MemoryView& to) {
-      X64::Instruction first = {};
-      X64::Instruction second = {};
-
-      X64::mov(first, X64::RM16{ from.rm }, X64::R16{ temp });
-      from.rm.disp += 2;
-      from.size -= 2;
-
-      X64::mov(second, X64::R16{ temp }, X64::RM16{ to.rm });
-      to.rm.disp += 2;
-      to.size -= 2;
-
-      X64::append_instruction(program, first);
-      X64::append_instruction(program, second);
-    };
-
-    constexpr static auto COPY32 = [](X64::Program* program,
-                                      MemoryView& from, X64::R temp, MemoryView& to) {
-      X64::Instruction first = {};
-      X64::Instruction second = {};
-
-      X64::mov(first, X64::RM32{ from.rm }, X64::R32{ temp });
-      from.rm.disp += 4;
-      from.size -= 4;
-
-      X64::mov(second, X64::R32{ temp }, X64::RM32{ to.rm });
-      to.rm.disp += 4;
-      to.size -= 4;
-
-      X64::append_instruction(program, first);
-      X64::append_instruction(program, second);
-    };
-
-    ASSERT(from.size == to.size);
-    ASSERT(from.known_alignment == to.known_alignment);
-
-    u32 alignment = from.known_alignment;
-    while (alignment != 8 && from.size > 0) {
-      switch (alignment) {
-        case 1: {
-            COPY8(program, from, temp_reg, to);
-            alignment = 2;
-            break;
-          }
-        case 2: {
-            if (from.size == 1) {
-              COPY8(program, from, temp_reg, to);
-              alignment = 1;//shouldn't matter but its nice to be correct
-            }
-            else {
-              COPY16(program, from, temp_reg, to);
-              alignment = 4;
-            }
-            break;
-          }
-        case 4: {
-            if (from.size == 1) {
-              COPY8(program, from, temp_reg, to);
-              alignment = 1;//shouldn't matter but its nice to be correct
-            }
-            else if (from.size == 2) {
-              COPY16(program, from, temp_reg, to);
-              alignment = 2;//shouldn't matter but its nice to be correct
-            }
-            else if (from.size == 3) {
-              COPY16(program, from, temp_reg, to);
-              COPY8(program, from, temp_reg, to);
-              alignment = 1;//shouldn't matter but its nice to be correct
-            }
-            else {
-              COPY32(program, from, temp_reg, to);
-              alignment = 4;
-            }
-
-            break;
-          }
-        default: INVALID_CODE_PATH("Invalid alignment");
-      }
-    }
-
-    const size_t num8s = from.size / 8;
-    size_t remaining = from.size % 8;
-
-    for (size_t itr = 0; itr < num8s; ++itr) {
-      X64::Instruction first = {};
-      X64::Instruction second = {};
-
-      X64::mov(first, X64::RM64{ from.rm }, X64::R64{ temp_reg });
-      from.rm.disp += 8;
-      from.size -= 8;
-
-      X64::mov(second, X64::R64{ temp_reg }, X64::RM64{ to.rm });
-      to.rm.disp += 8;
-      to.size -= 8;
-
-      X64::append_instruction(program, first);
-      X64::append_instruction(program, second);
-    }
-
-    switch (remaining) {
-      case 0: break;
-      case 1: {
-          COPY8(program, from, temp_reg, to);
-          break;
-        }
-      case 2: {
-          COPY16(program, from, temp_reg, to);
-          break;
-        }
-      case 3: {
-          COPY16(program, from, temp_reg, to);
-          COPY8(program, from, temp_reg, to);
-          break;
-        }
-      case 4: {
-          COPY32(program, from, temp_reg, to);
-          break;
-        }
-      case 5: {
-          COPY32(program, from, temp_reg, to);
-          COPY8(program, from, temp_reg, to);
-          break;
-        }
-      case 6: {
-          COPY32(program, from, temp_reg, to);
-          COPY16(program, from, temp_reg, to);
-          break;
-        }
-      case 7: {
-          COPY32(program, from, temp_reg, to);
-          COPY16(program, from, temp_reg, to);
-          COPY8(program, from, temp_reg, to);
-          break;
-        }
-      default:  INVALID_CODE_PATH("Should be impossible to have 8 or more left");
-    }
-  }
-
 #define EMIT_SYMMETRICAL_HELPER(name)\
-  IR::Format emit_ ## name(X64::Program* program,\
+  static void emit_ ## name(X64::Program* program,\
                 X64::R left, IR::Format l_format,\
                 X64::R right, IR::Format r_format) {\
     ASSERT(l_format == r_format);\
     X64::Instruction i = {};\
     switch (l_format) {\
-      case  IR::Format::uint8:\
-      case  IR::Format::sint8: {\
+      case IR::Format::uint8:\
+      case IR::Format::sint8: {\
           X64:: name (i, X64::R8{right}, X64::R8{left});\
           break;\
         }\
-      case  IR::Format::uint16:\
-      case  IR::Format::sint16: {\
+      case IR::Format::uint16:\
+      case IR::Format::sint16: {\
           X64:: name (i, X64::R16{right}, X64::R16{left});\
           break;\
         }\
-      case  IR::Format::uint32:\
-      case  IR::Format::sint32: {\
+      case IR::Format::uint32:\
+      case IR::Format::sint32: {\
           X64:: name (i, X64::R32{right}, X64::R32{left});\
           break;\
         }\
-      case  IR::Format::uint64:\
-      case  IR::Format::sint64: {\
+      case IR::Format::uint64:\
+      case IR::Format::sint64: {\
           X64:: name (i, X64::R64{right}, X64::R64{left});\
           break;\
         }\
       default: INVALID_CODE_PATH("Invalid " #name " format");\
     }\
     X64::append_instruction(program, i);\
-    return l_format;\
   }
 
   EMIT_SYMMETRICAL_HELPER(add);
@@ -2821,9 +2504,9 @@ namespace Helpers {
 
 #undef EMIT_SYMMETRICAL_HELPER
 
-  IR::Format emit_mul(X64::Program* program,
-                      X64::R left, IR::Format l_format,
-                      X64::R right, IR::Format r_format) {
+  static void emit_mul(X64::Program* program,
+                X64::R left, IR::Format l_format,
+                X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
     X64::Instruction i = {};
     switch (l_format) {
@@ -2871,12 +2554,11 @@ namespace Helpers {
     }
 
     X64::append_instruction(program, i);
-    return l_format;
   }
 
-  IR::Format emit_div(X64::Program* program,
-                      X64::R left, IR::Format l_format,
-                      X64::R right, IR::Format r_format) {
+  static void emit_div(X64::Program* program,
+                X64::R left, IR::Format l_format,
+                X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
     X64::Instruction i = {};
     switch (l_format) {
@@ -2930,10 +2612,9 @@ namespace Helpers {
     }
 
     X64::append_instruction(program, i);
-    return l_format;
   }
 
-  void emit_cmp(X64::Program* program,
+  static void emit_cmp(X64::Program* program,
                 X64::R left, IR::Format l_format,
                 X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
@@ -2965,44 +2646,805 @@ namespace Helpers {
     X64::append_instruction(program, i);
   }
 
-  IR::Format emit_great(X64::Program* program,
-                        X64::R left, IR::Format l_format,
-                        X64::R right, IR::Format r_format) {
+  static void emit_great(X64::Program* program,
+                  X64::R left, IR::Format l_format,
+                  X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
     X64::Instruction i = {};
     X64::setg(i, X64::R8{left});
     X64::append_instruction(program, i);
-    return IR::Format::uint8;
   }
 
-  IR::Format emit_less(X64::Program* program,
-                       X64::R left, IR::Format l_format,
-                       X64::R right, IR::Format r_format) {
+  static void emit_less(X64::Program* program,
+                 X64::R left, IR::Format l_format,
+                 X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
     X64::Instruction i = {};
     X64::setl(i, X64::R8{left});
     X64::append_instruction(program, i);
-    return IR::Format::uint8;
   }
 
-  IR::Format emit_eq(X64::Program* program,
-                     X64::R left, IR::Format l_format,
-                     X64::R right, IR::Format r_format) {
+  static void emit_eq(X64::Program* program,
+               X64::R left, IR::Format l_format,
+               X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
     X64::Instruction i = {};
     X64::sete(i, X64::R8{left});
     X64::append_instruction(program, i);
-    return IR::Format::uint8;
   }
 
-  IR::Format emit_neq(X64::Program* program,
-                      X64::R left, IR::Format l_format,
-                      X64::R right, IR::Format r_format) {
+  static void emit_neq(X64::Program* program,
+                X64::R left, IR::Format l_format,
+                X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
     X64::Instruction i = {};
     X64::setne(i, X64::R8{left});
     X64::append_instruction(program, i);
-    return IR::Format::uint8;
+  }
+}
+
+namespace Helpers {
+  static void copy_address_to_reg(X64::Program* program, const MemoryView& mem, X64::R r) {
+    X64::Instruction i = {};
+    X64::lea(i, mem.rm, r);
+
+    X64::append_instruction(program, i);
+  }
+
+  static void copy_mem_to_mem_opaque(X64::Program* program, MemoryView from, MemoryView to, X64::R temp_reg) {
+    constexpr static auto COPY8 = [](X64::Program* program,
+                                     MemoryView& from, X64::R temp, MemoryView& to) {
+      X64::Instruction first = {};
+      X64::Instruction second = {};
+      X64::mov(first, X64::RM8{ from.rm }, X64::R8{ temp });
+      from.rm.disp += 1;
+      from.size -= 1;
+
+      X64::mov(second, X64::R8{ temp }, X64::RM8{ to.rm });
+      to.rm.disp += 1;
+      to.size -= 1;
+
+      X64::append_instruction(program, first);
+      X64::append_instruction(program, second);
+    };
+
+    constexpr static auto COPY16 = [](X64::Program* program,
+                                      MemoryView& from, X64::R temp, MemoryView& to) {
+      X64::Instruction first = {};
+      X64::Instruction second = {};
+
+      X64::mov(first, X64::RM16{ from.rm }, X64::R16{ temp });
+      from.rm.disp += 2;
+      from.size -= 2;
+
+      X64::mov(second, X64::R16{ temp }, X64::RM16{ to.rm });
+      to.rm.disp += 2;
+      to.size -= 2;
+
+      X64::append_instruction(program, first);
+      X64::append_instruction(program, second);
+    };
+
+    constexpr static auto COPY32 = [](X64::Program* program,
+                                      MemoryView& from, X64::R temp, MemoryView& to) {
+      X64::Instruction first = {};
+      X64::Instruction second = {};
+
+      X64::mov(first, X64::RM32{ from.rm }, X64::R32{ temp });
+      from.rm.disp += 4;
+      from.size -= 4;
+
+      X64::mov(second, X64::R32{ temp }, X64::RM32{ to.rm });
+      to.rm.disp += 4;
+      to.size -= 4;
+
+      X64::append_instruction(program, first);
+      X64::append_instruction(program, second);
+    };
+
+    constexpr static auto COPY64 = [](X64::Program* program,
+                                      MemoryView& from, X64::R temp, MemoryView& to) {
+      X64::Instruction first = {};
+      X64::Instruction second = {};
+
+      X64::mov(first, X64::RM64{ from.rm }, X64::R64{ temp });
+      from.rm.disp += 8;
+      from.size -= 8;
+
+      X64::mov(second, X64::R64{ temp }, X64::RM64{ to.rm });
+      to.rm.disp += 8;
+      to.size -= 8;
+
+      X64::append_instruction(program, first);
+      X64::append_instruction(program, second);
+    };
+
+    ASSERT(from.size == to.size);
+    ASSERT(from.known_alignment == to.known_alignment);
+
+    u32 alignment = from.known_alignment;
+    ASSERT(from.size % from.known_alignment == 0);
+
+    u32 count = from.known_alignment / alignment;
+
+    switch (alignment) {
+      case 1: {
+          for (u32 c = 0; c < count; ++c) {
+            COPY8(program, from, temp_reg, to);
+          }
+          break;
+        }
+      case 2: {
+          for (u32 c = 0; c < count; ++c) {
+            COPY16(program, from, temp_reg, to);
+          }
+          break;
+        }
+      case 4: {
+          for (u32 c = 0; c < count; ++c) {
+            COPY32(program, from, temp_reg, to);
+          }
+          break;
+        }
+      case 8: {
+          for (u32 c = 0; c < count; ++c) {
+            COPY64(program, from, temp_reg, to);
+          }
+          break;
+        }
+      default: INVALID_CODE_PATH("Invalid alignemnt"); return;
+    }
+
+    ASSERT(from.size == 0);
+    ASSERT(to.size == 0);
+  }
+
+  static void load_const_to_mem_opaque(X64::Program* program, MemoryView view, const u8* data) {
+    using PTR = const u8*;
+
+    constexpr static auto COPY8 = [](X64::Program* program, MemoryView& view, PTR& data) {
+      X64::Instruction i = {};
+      X64::mov(i, view.rm, X64::IMM8{ data[0] });
+      view.rm.disp += 1;
+      view.size -= 1;
+      data += 1;
+
+      X64::append_instruction(program, i);
+    };
+
+    constexpr static auto COPY16 = [](X64::Program* program, MemoryView& view, PTR& data) {
+      X64::Instruction i = {};
+      X64::mov(i, view.rm, X64::IMM16{ x16_from_bytes(data) });
+      view.rm.disp += 2;
+      view.size -= 2;
+      data += 2;
+
+      X64::append_instruction(program, i);
+    };
+
+    constexpr static auto COPY32 = [](X64::Program* program, MemoryView& view, PTR& data) {
+      X64::Instruction i = {};
+      X64::mov(i, view.rm, X64::IMM32{ x32_from_bytes(data) });
+      view.rm.disp += 4;
+      view.size -= 4;
+      data += 4;
+
+      X64::append_instruction(program, i);
+    };
+
+    constexpr static auto COPY64 = [](X64::Program* program, MemoryView& view, PTR& data) {
+      i64 val = x64_from_bytes(data);
+      data += 8;
+
+      //No 64 bit constant loads in x86 for some reason
+
+      if (X64::can_signed_compress(val)) {
+        X64::Instruction first = {};
+
+        u32 i = static_cast<u64>(val) & 0xffffffff;
+
+        //Can just load the value as 32 bits and it will be sign extended
+        X64::mov(first, view.rm, X64::IMM32Extended{ i });
+        view.rm.disp += 8;
+
+        X64::append_instruction(program, first);
+      }
+      else {
+        X64::Instruction first = {};
+        X64::Instruction second = {};
+        u32 high = static_cast<u64>(val) & 0xffffffff;
+        u32 low = static_cast<u64>(val) >> 32;
+
+        X64::mov(first, view.rm, X64::IMM32{ low });
+        view.rm.disp += 4;
+
+        X64::mov(second, view.rm, X64::IMM32{ high });
+        view.rm.disp += 4;
+
+        X64::append_instruction(program, first);
+        X64::append_instruction(program, second);
+      }
+    };
+
+    u32 alignment = view.known_alignment;
+    ASSERT(view.size % alignment == 0);
+    u32 count = view.size / alignment;
+
+    switch (alignment) {
+      case 1: {
+          for (u32 c = 0; c < count; ++c) {
+            COPY8(program, view, data);
+          }
+          break;
+        }
+      case 2: {
+          for (u32 c = 0; c < count; ++c) {
+            COPY16(program, view, data);
+          }
+          break;
+        }
+      case 4: {
+          for (u32 c = 0; c < count; ++c) {
+            COPY32(program, view, data);
+          }
+          break;
+        }
+      case 8: {
+          for (u32 c = 0; c < count; ++c) {
+            COPY64(program, view, data);
+          }
+          break;
+        }
+      default: INVALID_CODE_PATH("Invalid alignment"); return;
+    }
+  }
+
+  template<typename O>
+  static auto dispatch_single(const O& o, const Structure* left) {
+    switch (left->type) {
+      case STRUCTURE_TYPE::VOID: {
+          return o(static_cast<const VoidStructure*>(left));
+        }
+      case STRUCTURE_TYPE::TYPE: {
+          return o(static_cast<const TypeStructure*>(left));
+        }
+      case STRUCTURE_TYPE::INTEGER: {
+          return o(static_cast<const IntegerStructure*>(left));
+        }
+      case STRUCTURE_TYPE::POINTER: {
+          return o(static_cast<const PointerStructure*>(left));
+        }
+      case STRUCTURE_TYPE::ENUM: {
+          return o(static_cast<const EnumStructure*>(left));
+        }
+      case STRUCTURE_TYPE::COMPOSITE: {
+          return o(static_cast<const CompositeStructure*>(left));
+        }
+      case STRUCTURE_TYPE::FIXED_ARRAY: {
+          return o(static_cast<const ArrayStructure*>(left));
+        }
+      case STRUCTURE_TYPE::TUPLE: {
+          return o(static_cast<const TupleStructure*>(left));
+        }
+      case STRUCTURE_TYPE::LAMBDA: {
+          return o(static_cast<const SignatureStructure*>(left));
+        }
+    }
+
+    INVALID_CODE_PATH("Invalid type");
+    return o.invalid();
+  }
+
+  template<typename O, typename T>
+  static auto dispatch_pair_2(const O& o, const T* left, const Structure* right) {
+    switch (right->type) {
+      case STRUCTURE_TYPE::VOID: {
+          return o(left, static_cast<const VoidStructure*>(right));
+        }
+      case STRUCTURE_TYPE::TYPE: {
+          return o(left, static_cast<const TypeStructure*>(right));
+        }
+      case STRUCTURE_TYPE::INTEGER: {
+          return o(left, static_cast<const IntegerStructure*>(right));
+        }
+      case STRUCTURE_TYPE::POINTER: {
+          return o(left, static_cast<const PointerStructure*>(right));
+        }
+      case STRUCTURE_TYPE::ENUM: {
+          return o(left, static_cast<const EnumStructure*>(right));
+        }
+      case STRUCTURE_TYPE::COMPOSITE: {
+          return o(left, static_cast<const CompositeStructure*>(right));
+        }
+      case STRUCTURE_TYPE::FIXED_ARRAY: {
+          return o(left, static_cast<const ArrayStructure*>(right));
+        }
+      case STRUCTURE_TYPE::TUPLE: {
+          return o(left, static_cast<const TupleStructure*>(right));
+        }
+      case STRUCTURE_TYPE::LAMBDA: {
+          return o(left, static_cast<const SignatureStructure*>(right));
+        }
+    }
+
+    INVALID_CODE_PATH("Invalid right type");
+    return o.invalid();
+  }
+
+  template<typename O>
+  static auto dispatch_pair(const O& o, const Structure* left, const Structure* right) {
+    switch (left->type) {
+      case STRUCTURE_TYPE::VOID: {
+          return dispatch_pair_2(o, static_cast<const VoidStructure*>(left), right);
+        }
+      case STRUCTURE_TYPE::TYPE: {
+          return dispatch_pair_2(o, static_cast<const TypeStructure*>(left), right);
+        }
+      case STRUCTURE_TYPE::INTEGER: {
+          return dispatch_pair_2(o, static_cast<const IntegerStructure*>(left), right);
+        }
+      case STRUCTURE_TYPE::POINTER: {
+          return dispatch_pair_2(o, static_cast<const PointerStructure*>(left), right);
+        }
+      case STRUCTURE_TYPE::ENUM: {
+          return dispatch_pair_2(o, static_cast<const EnumStructure*>(left), right);
+        }
+      case STRUCTURE_TYPE::COMPOSITE: {
+          return dispatch_pair_2(o, static_cast<const CompositeStructure*>(left), right);
+        }
+      case STRUCTURE_TYPE::FIXED_ARRAY: {
+          return dispatch_pair_2(o, static_cast<const ArrayStructure*>(left), right);
+        }
+      case STRUCTURE_TYPE::TUPLE: {
+          return dispatch_pair_2(o, static_cast<const TupleStructure*>(left), right);
+        }
+      case STRUCTURE_TYPE::LAMBDA: {
+          return dispatch_pair_2(o, static_cast<const SignatureStructure*>(left), right);
+        }
+    }
+
+    INVALID_CODE_PATH("Invalid left type");
+    return o.invalid();
+  }
+
+  struct RegRegDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid structures for reg to reg copy");
+    }
+
+    //Base case
+    void operator()(const Structure* s1, const Structure* s2) const {
+      invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::copy_reg_to_reg(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void copy_reg_to_reg(X64::Program* program,
+                              X64::R from, const Structure* f_type,
+                              X64::R to, const Structure* t_type) {
+    dispatch_pair(RegRegDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct ConstMemDispatch {
+    X64::Program* program;
+    const u8* from;
+    const MemoryView& to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid structures for mem store");
+    }
+
+    //Base case
+    void operator()(const Structure*) const {
+      return load_const_to_mem_opaque(program, to, from);
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1) const {
+      return IntHelpers::load_const_to_mem(program, s1->ir_format, to, from);
+    }
+  };
+
+  static void load_const_to_mem(X64::Program* program, const Structure* ty, const MemoryView& view, const u8* data) {
+    return dispatch_single(ConstMemDispatch{ program, data, view }, ty);
+  }
+
+  struct ConstRegDispatch {
+    X64::Program* program;
+    const u8* from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid structures for reg store");
+    }
+
+    //Base case
+    void operator()(const Structure*) const {
+      invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1) const {
+      return IntHelpers::load_const_to_reg(program, s1->ir_format, to, from);
+    }
+  };
+
+  static void load_const_to_reg(X64::Program* program, const Structure* ty, X64::R reg, const u8* data) {
+    return dispatch_single(ConstRegDispatch{ program, data, reg }, ty);
+  }
+
+  struct MemRegDispatch {
+    X64::Program* program;
+    const MemoryView& from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid structures for mem to reg copy");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::copy_mem_to_reg(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void copy_mem_to_reg(X64::Program* program,
+                              const MemoryView& from, const Structure* f_type,
+                              X64::R to, const Structure* t_type) {
+    return dispatch_pair(MemRegDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct RegMemDispatch {
+    X64::Program* program;
+    X64::R from;
+    const MemoryView& to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid structures for reg to mem copy");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::copy_reg_to_mem(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void copy_reg_to_mem(X64::Program* program,
+                              X64::R from, const Structure* f_type,
+                              const MemoryView& to, const Structure* t_type) {
+    return dispatch_pair(RegMemDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct MemMemDispatch {
+    X64::Program* program;
+    const MemoryView& from;
+    const MemoryView& to;
+    X64::R temp;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid structures for mem to mem copy");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return copy_mem_to_mem_opaque(program, from, to, temp);
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure> auto* s2) const {
+      return IntHelpers::copy_mem_to_mem(program, from, s1->ir_format, to, s2->ir_format, temp);
+    }
+  };
+
+
+  static void copy_mem_to_mem(X64::Program* program,
+                              const MemoryView& from, const Structure* f_type,
+                              const MemoryView& to, const Structure* t_type,
+                              X64::R temp) {
+    return dispatch_pair(MemMemDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct AddDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid add types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_add(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_add(X64::Program* program,
+                       X64::R from, const Structure* f_type,
+                       X64::R to, const Structure* t_type) {
+    return dispatch_pair(AddDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct SubDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid sub types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_sub(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_sub(X64::Program* program,
+                       X64::R from, const Structure* f_type,
+                       X64::R to, const Structure* t_type) {
+    return dispatch_pair(SubDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct MulDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid mul types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_mul(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_mul(X64::Program* program,
+                       X64::R from, const Structure* f_type,
+                       X64::R to, const Structure* t_type) {
+    return dispatch_pair(MulDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct DivDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid div types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_div(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_div(X64::Program* program,
+                       X64::R from, const Structure* f_type,
+                       X64::R to, const Structure* t_type) {
+    return dispatch_pair(DivDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct AndDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid and types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_and_(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_and(X64::Program* program,
+                       X64::R from, const Structure* f_type,
+                       X64::R to, const Structure* t_type) {
+    return dispatch_pair(AndDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct OrDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid or types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_or_(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_or(X64::Program* program,
+                      X64::R from, const Structure* f_type,
+                      X64::R to, const Structure* t_type) {
+    return dispatch_pair(OrDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct XorDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid xor types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_xor_(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_xor(X64::Program* program,
+                                   X64::R from, const Structure* f_type,
+                                   X64::R to, const Structure* t_type) {
+    return dispatch_pair(XorDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct GreatDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid great types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_great(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_great(X64::Program* program,
+                         X64::R from, const Structure* f_type,
+                         X64::R to, const Structure* t_type) {
+    return dispatch_pair(GreatDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct LessDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid great types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_less(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_less(X64::Program* program,
+                        X64::R from, const Structure* f_type,
+                        X64::R to, const Structure* t_type) {
+    return dispatch_pair(LessDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct EqDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid great types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_eq(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_eq(X64::Program* program,
+                      X64::R from, const Structure* f_type,
+                      X64::R to, const Structure* t_type) {
+    return dispatch_pair(EqDispatch{ program, from, to }, f_type, t_type);
+  }
+
+
+  struct NeqDispatch {
+    X64::Program* program;
+    X64::R from;
+    X64::R to;
+
+    void invalid() const {
+      INVALID_CODE_PATH("Invalid great types");
+    }
+
+    //Base case
+    void operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      return IntHelpers::emit_neq(program, from, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static void emit_neq(X64::Program* program,
+                       X64::R from, const Structure* f_type,
+                       X64::R to, const Structure* t_type) {
+    return dispatch_pair(NeqDispatch{ program, from, to }, f_type, t_type);
   }
 }
 
@@ -3165,6 +3607,29 @@ OwnedArr<LifetimeEdge> determine_edges(const ViewArr<ValueLifetime>& lifetimes,
   return bake_arr(std::move(edges));
 }
 
+constexpr bool temp_needs_memory(const IR::SSATemp& temp) {
+  if (temp.is_variable) return true;
+  if (temp.requirements.has_address()) return true;
+  if (temp.type.size() > 8) return true;
+
+  switch (temp.type.structure->type) {
+    case STRUCTURE_TYPE::VOID: INVALID_CODE_PATH("Cannot have void value"); return false;
+    case STRUCTURE_TYPE::TYPE: INVALID_CODE_PATH("Cannot have type value at runtime"); return false;
+    case STRUCTURE_TYPE::INTEGER: return false;
+    case STRUCTURE_TYPE::POINTER: return false;
+    case STRUCTURE_TYPE::ENUM: return false;
+
+      //TODO: allow these to be inside registers
+    case STRUCTURE_TYPE::COMPOSITE: return true;
+    case STRUCTURE_TYPE::FIXED_ARRAY: return true;
+    case STRUCTURE_TYPE::TUPLE: return true;
+
+    case STRUCTURE_TYPE::LAMBDA: INVALID_CODE_PATH("Cannot have lambda value at runtime"); return false;
+  }
+
+  return false;
+}
+
 ResolvedMappings resolve_values(CompilerGlobals* comp,
                                 CompilerThread* comp_thread,
                                 RegisterResolver* resolver,
@@ -3182,8 +3647,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
   //Is a value too big to fit in a register - don't worry about it
   for (u32 i = 0; i < resolver->local_temporaries.size; ++i) {
     const IR::SSATemp& temp = resolver->local_temporaries[i];
-    if (temp.is_variable || 
-        temp.type.size() > x64_types_info.get_size(IR::Format::uint64) || temp.requirements.has_address()) {
+    if (temp_needs_memory(temp)) {
       values[i].map_type = MapType::Memory;
     }
     else {
@@ -3462,23 +3926,26 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
           VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id + 1);
           /*always a left register needed*/
-          switch (left.t.struct_format()) {
-            case IR::Format::uint8:
-            case IR::Format::sint8: {
-                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
-                break;
-              }
-            case IR::Format::uint16:
-            case IR::Format::uint32:
-            case IR::Format::uint64: {
-                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
-                new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
-                break;
-              }
-            default: {
-                new_intermediate(intermediates, expr_id);
-                break;
-              }
+          if (left.t.struct_type() == STRUCTURE_TYPE::INTEGER
+              || left.t.struct_type() == STRUCTURE_TYPE::ENUM
+              || left.t.struct_type() == STRUCTURE_TYPE::POINTER) {
+            switch (left.t.size()) {
+              case 1: {
+                  new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+                  break;
+                }
+              case 2:
+              case 4:
+              case 5: {
+                  new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+                  new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
+                  break;
+                }
+              default: {
+                  new_intermediate(intermediates, expr_id);
+                  break;
+                }
+            }
           }
 
           if (right.ni == NeedIntermediate::Yes) {
@@ -4210,15 +4677,13 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             X64Value to = selector.get_val(set.to);
             ASSERT(to.t.size() == set.data.size);
 
-            ASSERT(to.t.struct_format() != IR::Format::opaque);
-
             switch (to.value_type) {
               case ValueType::Register: {
-                  Helpers::load_const_to_reg(program, to.t.struct_format(), to.reg, set.data);
+                  Helpers::load_const_to_reg(program, to.t.structure, to.reg, set.data.val);
                   break;
                 }
               case ValueType::Memory: {
-                  Helpers::load_const_to_mem(program, to.t.struct_format(), to.mem, set.data);
+                  Helpers::load_const_to_mem(program, to.t.structure, to.mem, set.data.val);
                   break;
                 }
             }
@@ -4245,17 +4710,16 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
                   MemoryView view = pointer_view(to.reg, pt->base);
 
-                  Helpers::load_const_to_mem(program, pt->base.struct_format(), view, set.data);
+                  Helpers::load_const_to_mem(program, pt->base.structure, view, set.data.val);
                   break;
                 }
               case ValueType::Memory: {
                   X64::R temp = selector.get_next_intermediate_reg();
-                  const auto ptr_format = to.t.struct_format();
-                  Helpers::copy_mem_to_reg(program, to.mem, ptr_format, temp, ptr_format);
+                  Helpers::copy_mem_to_reg(program, to.mem, to.t.structure, temp, to.t.structure);
 
                   MemoryView view = pointer_view(temp, pt->base);
 
-                  Helpers::load_const_to_mem(program, pt->base.struct_format(), view, set.data);
+                  Helpers::load_const_to_mem(program, pt->base.structure, view, set.data.val);
                   break;
                 }
             }
@@ -4278,14 +4742,14 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                         }
 
                         Helpers::copy_reg_to_reg(program,
-                                                 from.reg, from.t.struct_format(),
-                                                 to.reg, to.t.struct_format());
+                                                 from.reg, from.t.structure,
+                                                 to.reg, to.t.structure);
                         break;
                       }
                     case ValueType::Memory: {
                         Helpers::copy_mem_to_reg(program,
-                                                 from.mem, from.t.struct_format(),
-                                                 to.reg, to.t.struct_format());
+                                                 from.mem, from.t.structure,
+                                                 to.reg, to.t.structure);
                         break;
                       }
                   }
@@ -4295,17 +4759,17 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                   switch (from.value_type) {
                     case ValueType::Register: {
                         Helpers::copy_reg_to_mem(program,
-                                                 from.reg, from.t.struct_format(),
-                                                 to.mem, to.t.struct_format());
+                                                 from.reg, from.t.structure,
+                                                 to.mem, to.t.structure);
                         break;
                       }
                     case ValueType::Memory: {
                         X64::R temp = selector.get_next_intermediate_reg();
 
-                        Helpers::copy_mem_to_mem_small(program,
-                                                       from.mem, from.t.struct_format(),
-                                                       to.mem, to.t.struct_format(),
-                                                       temp);
+                        Helpers::copy_mem_to_mem(program,
+                                                 from.mem, from.t.structure,
+                                                 to.mem, to.t.structure,
+                                                 temp);
                         break;
                       }
                   }
@@ -4322,8 +4786,6 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             X64Value from = selector.get_val(copy.from);
             ASSERT(from.t.struct_type() == STRUCTURE_TYPE::POINTER);
             const auto* pt = from.t.unchecked_base<PointerStructure>();
-            const IR::Format from_ptr_format = from.t.struct_format();
-            const IR::Format from_format = pt->base.struct_format();
 
             X64Value to = selector.get_val(copy.to);
             const IR::Format to_format = to.t.struct_format();
@@ -4341,7 +4803,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               case ValueType::Memory: {
                   X64::R temp = selector.get_next_intermediate_reg();
 
-                  Helpers::copy_mem_to_reg(program, from.mem, from_ptr_format, temp, from_ptr_format);
+                  IntHelpers::copy_mem_to_reg(program, from.mem, pt->ir_format, temp, pt->ir_format);
 
                   view = pointer_view(temp, pt->base);
                   break;
@@ -4355,18 +4817,18 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                   }
 
                   Helpers::copy_mem_to_reg(program,
-                                           view, from_format,
-                                           to.reg, to_format);
+                                           view, pt->base.structure,
+                                           to.reg, to.t.structure);
                   break;
 
                 }
               case ValueType::Memory: {
                   X64::R temp = selector.get_next_intermediate_reg();
 
-                  Helpers::copy_mem_to_mem_small(program,
-                                                 view, from_format,
-                                                 to.mem, to_format,
-                                                 temp);
+                  Helpers::copy_mem_to_mem(program,
+                                           view, pt->base.structure,
+                                           to.mem, to.t.structure,
+                                           temp);
                   break;
                 }
             }
@@ -4378,13 +4840,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             bc = IR::Read::CopyStore(bc, bc_end, copy);
 
             X64Value from = selector.get_val(copy.from);
-            const IR::Format from_format = from.t.struct_format();
 
             X64Value to = selector.get_val(copy.to);
             ASSERT(to.t.struct_type() == STRUCTURE_TYPE::POINTER);
             const auto* pt = to.t.unchecked_base<PointerStructure>();
-            const IR::Format to_ptr_format = to.t.struct_format();
-            const IR::Format to_format = pt->base.struct_format();
 
             switch (to.value_type) {
               case ValueType::Register: {
@@ -4400,8 +4859,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                         MemoryView view = pointer_view(to.reg, pt->base);
 
                         Helpers::copy_reg_to_mem(program,
-                                                 from.reg, from_format,
-                                                 view, to_format);
+                                                 from.reg, from.t.structure,
+                                                 view, pt->base.structure);
                         break;
                       }
                     case ValueType::Memory: {
@@ -4413,9 +4872,9 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                           X64::R _temp = selector.get_next_intermediate_reg();
                         }
 
-                        Helpers::copy_mem_to_mem_small(program,
-                                                       from.mem, from_format,
-                                                       view, to_format, temp);
+                        Helpers::copy_mem_to_mem(program,
+                                                 from.mem, from.t.structure,
+                                                 view, pt->base.structure, temp);
                         break;
                       }
                   }
@@ -4429,26 +4888,26 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                         }
 
                         X64::R temp_ptr = selector.get_next_intermediate_reg();
-                        Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, temp_ptr, to_ptr_format);
+                        IntHelpers::copy_mem_to_reg(program, to.mem, pt->ir_format, temp_ptr, pt->ir_format);
                         MemoryView view = pointer_view(temp_ptr, pt->base);
 
                         Helpers::copy_reg_to_mem(program,
-                                                 from.reg, from_format,
-                                                 view, to_format);
+                                                 from.reg, from.t.structure,
+                                                 view, pt->base.structure);
                         break;
                       }
                     case ValueType::Memory: {
                         X64::R temp = selector.get_next_intermediate_reg();
 
                         X64::R temp_ptr = selector.get_next_intermediate_reg();
-                        Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, temp_ptr, to_ptr_format);
+                        IntHelpers::copy_mem_to_reg(program, to.mem, pt->ir_format, temp_ptr, pt->ir_format);
                         MemoryView view = pointer_view(temp_ptr, pt->base);
 
 
-                        Helpers::copy_mem_to_mem_small(program,
-                                                       from.mem, from_format,
-                                                       view, to_format,
-                                                       temp);
+                        Helpers::copy_mem_to_mem(program,
+                                                 from.mem, from.t.structure,
+                                                 view, pt->base.structure,
+                                                 temp);
                         break;
                       }
                   }
@@ -4465,14 +4924,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             X64Value from = selector.get_val(copy.from);
             ASSERT(from.t.struct_type() == STRUCTURE_TYPE::POINTER);
             const auto* pt_f = from.t.unchecked_base<PointerStructure>();
-            const IR::Format from_ptr_format = from.t.struct_format();
-            const IR::Format from_format = pt_f->base.struct_format();
 
             X64Value to = selector.get_val(copy.to);
             ASSERT(to.t.struct_type() == STRUCTURE_TYPE::POINTER);
             const auto* pt_t = to.t.unchecked_base<PointerStructure>();
-            const IR::Format to_ptr_format = to.t.struct_format();
-            const IR::Format to_format = pt_t->base.struct_format();
 
             X64::R temp = selector.get_next_intermediate_reg();
 
@@ -4488,7 +4943,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                 }
               case ValueType::Memory: {
                   X64::R temp = selector.get_next_intermediate_reg();
-                  Helpers::copy_mem_to_reg(program, from.mem, from_ptr_format, temp, from_ptr_format);
+                  IntHelpers::copy_mem_to_reg(program, from.mem, pt_f->ir_format, temp, pt_f->ir_format);
                   from_mem = pointer_view(temp, pt_f->base);
                   break;
                 }
@@ -4506,15 +4961,15 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                 }
               case ValueType::Memory: {
                   X64::R m_temp = selector.get_next_intermediate_reg();
-                  Helpers::copy_mem_to_reg(program, to.mem, to_ptr_format, m_temp, to_ptr_format);
+                  IntHelpers::copy_mem_to_reg(program, to.mem, pt_t->ir_format, m_temp, pt_t->ir_format);
                   to_mem = pointer_view(temp, pt_t->base);
                   break;
                 }
             }
 
-            Helpers::copy_mem_to_mem_small(program,
-                                           from_mem, from_format,
-                                           to_mem, to_format, temp);
+            Helpers::copy_mem_to_mem(program,
+                                     from_mem, pt_f->base.structure,
+                                     to_mem, pt_t->base.structure, temp);
             break;
           }
         case IR::OpCode::AddrOf: {
@@ -4523,7 +4978,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
             X64Value f = selector.get_val(addr.from);
             X64Value t = selector.get_val(addr.to);
-            ASSERT(t.t.struct_format() == IR::Format::uint64);
+            ASSERT(t.t.struct_type() == STRUCTURE_TYPE::POINTER);
 
             ASSERT(f.value_type == ValueType::Memory);
 
@@ -4538,7 +4993,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               case ValueType::Memory: {
                   X64::R temp = selector.get_next_intermediate_reg();
                   Helpers::copy_address_to_reg(program, f.mem, temp);
-                  Helpers::copy_reg_to_mem(program, temp, IR::Format::uint64, t.mem, IR::Format::uint64);
+                  IntHelpers::copy_reg_to_mem(program, temp, t.t.struct_format(), t.mem, t.t.struct_format());
                 } break;
             }
 
@@ -4551,8 +5006,6 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             X64Value f = selector.get_val(addr.from);
             ASSERT(f.t.struct_type() == STRUCTURE_TYPE::POINTER);
             const auto* pt_f = f.t.unchecked_base<PointerStructure>();
-            const IR::Format from_ptr_format = f.t.struct_format();
-            const IR::Format from_format = pt_f->base.struct_format();
 
             X64Value t = selector.get_val(addr.to);
             ASSERT(t.t.struct_format() == IR::Format::uint64);
@@ -4568,7 +5021,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                 }
               case ValueType::Memory: {
                   X64::R temp = selector.get_next_intermediate_reg();
-                  Helpers::copy_mem_to_reg(program, f.mem, from_ptr_format, temp, from_ptr_format);
+                  IntHelpers::copy_mem_to_reg(program, f.mem, pt_f->ir_format, temp, pt_f->ir_format);
                   from_mem = pointer_view(temp, pt_f->base);
                   break;
                 }
@@ -4585,7 +5038,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               case ValueType::Memory: {
                   X64::R temp = selector.get_next_intermediate_reg();
                   Helpers::copy_address_to_reg(program, f.mem, temp);
-                  Helpers::copy_reg_to_mem(program, temp, IR::Format::uint64, t.mem, IR::Format::uint64);
+                  IntHelpers::copy_reg_to_mem(program, temp, pt_f->ir_format, t.mem, pt_f->ir_format);
                 } break;
             }
 
@@ -4601,37 +5054,9 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             ASSERT(g.t.struct_format() == IR::Format::uint64);
 
             INVALID_CODE_PATH("Temporarily unavailable");
-#if 0
-            ASSERT(addr.val.is_temporary());
-            {
-              usize relative = addr.val.index() - (usize)selector.temporary_start;
-
-              const OrderedValue& ov = selector.ordered_values[relative];
-              const IR::Temporary& t = selector.temporaries[relative];
-
-              ASSERT(ov.chosen_id);
-
-              //Temporary always has a register
-              X64::R r = { ov.register_id };
-
-
-              {
-                X64::Instruction move = {};
-                //Move the memory location to r
-                X64::mov(move, X64::R64{r}, X64::IMM64{global_r.data_member});
-
-                Backend::GlobalReloc global_reloc = {};
-                global_reloc.location = program->code_store.total_size + X64::MOV_IM64_OFFSET;
-
-                program->global_relocs.insert(std::move(global_reloc));
-
-                X64::append_instruction(program, move);
-          }
-      }
-#endif
 
             break;
-    }
+          }
         case IR::OpCode::StartFunc: {
             IR::Types::StartFunc start_func;
             bc = IR::Read::StartFunc(bc, bc_end, start_func);
@@ -4687,11 +5112,11 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
               switch (to.value_type) {
                 case ValueType::Register: {
-                    Helpers::copy_reg_to_reg(program, r, arg_format, to.reg, arg_format);
+                    Helpers::copy_reg_to_reg(program, r, to.t.structure, to.reg, to.t.structure);
                     break;
                   }
                 case ValueType::Memory: {
-                    Helpers::copy_reg_to_mem(program, r, arg_format, to.mem, arg_format);
+                    Helpers::copy_reg_to_mem(program, r, to.t.structure, to.mem, to.t.structure);
                     break;
                   }
               }
@@ -4715,19 +5140,18 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               bc += IR::deserialize(bc, bc_end - bc, arg);
 
               X64Value arg_v = selector.get_val(arg);
-
-              IR::Format f = arg_v.t.struct_format();
+              const Type& param_t = sig_struct->parameter_types[i];
 
               if (i < convention->num_parameter_registers) {
                 X64::R arg_reg = selector.get_next_intermediate_reg();
 
                 switch (arg_v.value_type) {
                   case ValueType::Register: {
-                      Helpers::copy_reg_to_reg(program, arg_v.reg, f, arg_reg, f);
+                      Helpers::copy_reg_to_reg(program, arg_v.reg, arg_v.t.structure, arg_reg, param_t.structure);
                       break;
                     }
                   case ValueType::Memory: {
-                      Helpers::copy_mem_to_reg(program, arg_v.mem, f, arg_reg, f);
+                      Helpers::copy_mem_to_reg(program, arg_v.mem, arg_v.t.structure, arg_reg, param_t.structure);
                       break;
                     }
                 }
@@ -4746,13 +5170,13 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                         X64::R _temp = selector.get_next_intermediate_reg();
                       }
 
-                      Helpers::copy_reg_to_mem(program, arg_v.reg, f, arg_mem, f);
+                      Helpers::copy_reg_to_mem(program, arg_v.reg, arg_v.t.structure, arg_mem, param_t.structure);
                       break;
                     }
                   case ValueType::Memory: {
                       X64::R temp = selector.get_next_intermediate_reg();
 
-                      Helpers::copy_mem_to_mem_small(program, arg_v.mem, f, arg_mem, f, temp);
+                      Helpers::copy_mem_to_mem(program, arg_v.mem, arg_v.t.structure, arg_mem, param_t.structure, temp);
                       break;
                     }
                 }
@@ -4779,16 +5203,16 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
               X64::R ret_reg = selector.get_next_intermediate_reg();
               X64Value ret_v = selector.get_val(ret);
-
-              IR::Format ret_format = ret_v.t.struct_format();
+              const Type& ret_t = sig_struct->return_type;
+              ASSERT(ret_t == ret_v.t);
 
               switch (ret_v.value_type) {
                 case ValueType::Register: {
-                    Helpers::copy_reg_to_reg(program, ret_reg, ret_format, ret_v.reg, ret_format);
+                    Helpers::copy_reg_to_reg(program, ret_reg, ret_t.structure, ret_v.reg, ret_t.structure);
                     break;
                   }
                 case ValueType::Memory: {
-                    Helpers::copy_reg_to_mem(program, ret_reg, ret_format, ret_v.mem, ret_format);
+                    Helpers::copy_reg_to_mem(program, ret_reg, ret_t.structure, ret_v.mem, ret_t.structure);
                     break;
                   }
               }
@@ -4803,30 +5227,27 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             X64Value left = selector.get_val(bin_op.left);\
             X64Value right = selector.get_val(bin_op.right);\
             X64Value to = selector.get_val(bin_op.to);\
-            IR::Format left_format = left.t.struct_format();\
-            IR::Format right_format = right.t.struct_format();\
-            IR::Format to_format = to.t.struct_format();\
             /*always a left register*/\
             X64::R left_reg = selector.get_next_intermediate_reg();\
             switch (left.value_type) {\
-              case ValueType::Memory: Helpers::copy_mem_to_reg(program, left.mem, left_format, left_reg, left_format); break;\
-              case ValueType::Register: Helpers::copy_reg_to_reg(program, left.reg, left_format, left_reg, left_format); break;\
+              case ValueType::Memory: Helpers::copy_mem_to_reg(program, left.mem, left.t.structure, left_reg, left.t.structure); break;\
+              case ValueType::Register: Helpers::copy_reg_to_reg(program, left.reg, left.t.structure, left_reg, left.t.structure); break;\
             }\
             X64::R right_reg;\
             switch (right.value_type) {\
               case ValueType::Memory: {\
                   right_reg = selector.get_next_intermediate_reg();\
-                  Helpers::copy_mem_to_reg(program, right.mem, right_format, right_reg, right_format); break;\
+                  Helpers::copy_mem_to_reg(program, right.mem, right.t.structure, right_reg, right.t.structure); break;\
                 }\
               case ValueType::Register: {\
                   if(right.expects_intermeidate) { X64::R _temp = selector.get_next_intermediate_reg(); }\
                   right_reg = right.reg; break;\
                 }\
             }\
-            const IR::Format new_format = helper (program, left_reg, left_format, right_reg, right_format);\
+            helper (program, left_reg, left.t.structure, right_reg, right.t.structure);\
             switch (to.value_type) {\
-              case ValueType::Register: Helpers::copy_reg_to_reg(program, left_reg, new_format, to.reg, to_format); break;\
-              case ValueType::Memory: Helpers::copy_reg_to_mem(program, left_reg, new_format, to.mem, to_format); break;\
+              case ValueType::Register: Helpers::copy_reg_to_reg(program, left_reg, left.t.structure, to.reg, to.t.structure); break;\
+              case ValueType::Memory: Helpers::copy_reg_to_mem(program, left_reg, left.t.structure, to.mem, to.t.structure); break;\
             }\
             break;\
           }\
@@ -4835,15 +5256,48 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                              EMIT_BIN_OP(Sub, Helpers::emit_sub);
                              EMIT_BIN_OP(Mul, Helpers::emit_mul);
                              EMIT_BIN_OP(Div, Helpers::emit_div);
-                             EMIT_BIN_OP(And, Helpers::emit_and_);
-                             EMIT_BIN_OP(Or, Helpers::emit_or_);
-                             EMIT_BIN_OP(Xor, Helpers::emit_xor_);
-                             EMIT_BIN_OP(Great, Helpers::emit_great);
-                             EMIT_BIN_OP(Less, Helpers::emit_less);
-                             EMIT_BIN_OP(Eq, Helpers::emit_eq);
-                             EMIT_BIN_OP(Neq, Helpers::emit_neq);
-
+                             EMIT_BIN_OP(And, Helpers::emit_and);
+                             EMIT_BIN_OP(Or, Helpers::emit_or);
+                             EMIT_BIN_OP(Xor, Helpers::emit_xor);
 #undef EMIT_BIN_OP
+#define EMIT_BIN_OP_CMP(name, helper)\
+        case IR::OpCode:: name: {\
+            const Structure* s_bool = comp_thread->builtin_types->t_bool.structure;\
+            IR::Types:: name bin_op;\
+            bc = IR::Read:: name (bc, bc_end, bin_op);\
+            X64Value left = selector.get_val(bin_op.left);\
+            X64Value right = selector.get_val(bin_op.right);\
+            X64Value to = selector.get_val(bin_op.to);\
+            /*always a left register*/\
+            X64::R left_reg = selector.get_next_intermediate_reg();\
+            switch (left.value_type) {\
+              case ValueType::Memory: Helpers::copy_mem_to_reg(program, left.mem, left.t.structure, left_reg, left.t.structure); break;\
+              case ValueType::Register: Helpers::copy_reg_to_reg(program, left.reg, left.t.structure, left_reg, left.t.structure); break;\
+            }\
+            X64::R right_reg;\
+            switch (right.value_type) {\
+              case ValueType::Memory: {\
+                  right_reg = selector.get_next_intermediate_reg();\
+                  Helpers::copy_mem_to_reg(program, right.mem, right.t.structure, right_reg, right.t.structure); break;\
+                }\
+              case ValueType::Register: {\
+                  if(right.expects_intermeidate) { X64::R _temp = selector.get_next_intermediate_reg(); }\
+                  right_reg = right.reg; break;\
+                }\
+            }\
+            helper (program, left_reg, left.t.structure, right_reg, right.t.structure);\
+            switch (to.value_type) {\
+              case ValueType::Register: Helpers::copy_reg_to_reg(program, left_reg, s_bool, to.reg, to.t.structure); break;\
+              case ValueType::Memory: Helpers::copy_reg_to_mem(program, left_reg, s_bool, to.mem, to.t.structure); break;\
+            }\
+            break;\
+          }\
+
+                             EMIT_BIN_OP_CMP(Great, Helpers::emit_great);
+                             EMIT_BIN_OP_CMP(Less, Helpers::emit_less);
+                             EMIT_BIN_OP_CMP(Eq, Helpers::emit_eq);
+                             EMIT_BIN_OP_CMP(Neq, Helpers::emit_neq);
+
         default: {
             const char* opcode_name = IR::opcode_string(op);
             if (opcode_name == nullptr) {
@@ -4859,8 +5313,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               return;
             }
           }
-  }
-}
+      }
+    }
 
     const auto jump_to = [&](IR::LocalLabel l) {
       ASSERT(l != IR::NULL_LOCAL_LABEL);
@@ -4886,19 +5340,17 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
       case IR::ControlFlowType::Return: {
           X64Value from = selector.get_val(IR::v_arg(blck->cf_return.val, 0, ir->signature->return_type));
-          IR::Format format = from.t.struct_format();
-          ASSERT(format != IR::Format::opaque);//temp
 
           X64::R ret_reg = selector.get_next_intermediate_reg();
           ASSERT(ret_reg.r == convention->return_register);
 
           switch (from.value_type) {
             case ValueType::Register: {
-                Helpers::copy_reg_to_reg(program, from.reg, format, ret_reg, format);
+                Helpers::copy_reg_to_reg(program, from.reg, from.t.structure, ret_reg, from.t.structure);
                 break;
               }
             case ValueType::Memory: {
-                Helpers::copy_mem_to_reg(program, from.mem, format, ret_reg, format);
+                Helpers::copy_mem_to_reg(program, from.mem, from.t.structure, ret_reg, from.t.structure);
                 break;
               }
           }

@@ -3336,30 +3336,26 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   };
 
   {
-    Structure* const s_type = STRUCTS::new_base_structure(structures._ptr,
-                                                          strings->intern("type"));
-    s_type->type = STRUCTURE_TYPE::TYPE;
-    s_type->ir_format = IR::Format::opaque;
+    TypeStructure* const s_type = &structures->s_type;
+    s_type->type = s_type->expected_type_enum;
+    s_type->struct_name = strings->intern("type");
+
     s_type->size = sizeof(Type);
     s_type->alignment = alignof(Type);
-    builtin_types->t_type = to_type(s_type);
 
-    /*_ = */ register_builtin_type(s_type);
+
+    builtin_types->t_type = to_type(s_type);//Need to do this first because its required by register_builtin_type
+    register_builtin_type(s_type);
   }
-
-
+  
   {
-    const auto base_type = [&](const auto& name, STRUCTURE_TYPE ty, u32 size, IR::Format format, Type* t) {
-      Structure* s = STRUCTS::new_base_structure(structures._ptr, strings->intern(name));
-      s->type = ty;
-      s->size = size;
-      s->alignment = size;
+    VoidStructure* s_void = &structures->s_void;
+    s_void->type = s_void->expected_type_enum;
+    s_void->struct_name = strings->intern("void");
+    s_void->size = 0;
+    s_void->alignment = s_void->alignment;
 
-      *t = register_builtin_type(s);
-    };
-
-    base_type("void", STRUCTURE_TYPE::VOID, 0, IR::Format::opaque, &builtin_types->t_void);
-    base_type("ascii", STRUCTURE_TYPE::ASCII_CHAR, 1, IR::Format::uint8, &builtin_types->t_ascii);
+    builtin_types->t_void = register_builtin_type(s_void);
   }
 
   {
@@ -3374,6 +3370,8 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     };
 
     int_type("u8", false, 1, IR::Format::uint8, &builtin_types->t_u8);
+    int_type("ascii", false, 1, IR::Format::uint8, &builtin_types->t_ascii);
+
     int_type("i8", true, 1, IR::Format::sint8, &builtin_types->t_i8);
     int_type("u16", false, 2, IR::Format::uint8, &builtin_types->t_u16);
     int_type("i16", true, 2, IR::Format::sint8, &builtin_types->t_i16);

@@ -180,15 +180,6 @@ EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterne
   return type;
 }
 
-Structure* STRUCTS::new_base_structure(Structures* structures, const InternString* name) {
-  Structure* const type = structures->base_structures.allocate();
-  type->struct_name = name;
-
-  structures->structures.insert(type);
-
-  return type;
-}
-
 ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInterner* strings, const Type& base,
                                              size_t length) {
   const InternString* name = strings->intern(ArrayStructure::gen_name(base, length).data);
@@ -280,6 +271,11 @@ Structures::~Structures() {
       const Structure* s = *i;
 
       switch (s->type) {
+        case STRUCTURE_TYPE::TYPE:
+        case STRUCTURE_TYPE::VOID:
+          INVALID_CODE_PATH("Should not find any of these");
+          break;
+
         case STRUCTURE_TYPE::FIXED_ARRAY:
           array_structures.free((const ArrayStructure*)s);
           break;
@@ -294,11 +290,6 @@ Structures::~Structures() {
           break;
         case STRUCTURE_TYPE::ENUM:
           enum_structures.free((const EnumStructure*)s);
-          break;
-        case STRUCTURE_TYPE::TYPE:
-        case STRUCTURE_TYPE::VOID:
-        case STRUCTURE_TYPE::ASCII_CHAR:
-          base_structures.free(s);
           break;
         case STRUCTURE_TYPE::TUPLE:
           tuple_structures.free((const TupleStructure*)s);
@@ -328,11 +319,6 @@ static bool can_implicit_cast(const Type& from, const Type& to) {
   }
 
   switch (from.struct_type()) {
-    case STRUCTURE_TYPE::ASCII_CHAR: {
-        const auto* to_int = to.extract_base<IntegerStructure>();
-
-        return to_int != nullptr && to_int->size == 1;
-      }
     case STRUCTURE_TYPE::FIXED_ARRAY: {
         if (to.structure->type != STRUCTURE_TYPE::FIXED_ARRAY) {
           return false;

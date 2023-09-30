@@ -1043,19 +1043,6 @@ TC_STAGE(CAST, 3) {
   };
 
   switch (cast_from.struct_type()) {
-    case STRUCTURE_TYPE::ASCII_CHAR: {
-        if (cast_to.struct_type() == STRUCTURE_TYPE::INTEGER) {
-          const auto* to_int = cast_to.unchecked_base<IntegerStructure>();
-
-          if (to_int->size == 1 && !to_int->is_signed) {
-            //Can cast ascii to u8
-            emit_cast_func(cast, CASTS::no_op);
-            return FINISHED;
-          }
-        }
-        break;
-      }
-
     case STRUCTURE_TYPE::ENUM: {
         const auto* en = cast_from.unchecked_base<EnumStructure>();
 
@@ -1097,18 +1084,6 @@ TC_STAGE(CAST, 3) {
 
         if (cast_to.struct_type() == STRUCTURE_TYPE::INTEGER) {
           emit_cast_func(cast, CASTS::int_to_int);
-          return FINISHED;
-        }
-        else if (cast_to.struct_type() == STRUCTURE_TYPE::ASCII_CHAR) {
-          if (from_int->size == 1) {
-            emit_cast_func(cast, CASTS::no_op);
-            return FINISHED;
-          }
-
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, cast->node_span,
-                                    "Cannot cast type '{}' to type '{}'\n"
-                                    "First cast to a smaller int type ({})",
-                                    cast_from.name, cast_to.name, comp_thread->builtin_types->t_u8.name);
           return FINISHED;
         }
 
@@ -1515,18 +1490,6 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
 
     case BINARY_OPERATOR::EQUIVALENT: {
         switch (left.struct_type()) {
-          case STRUCTURE_TYPE::ASCII_CHAR: {
-              if (right.struct_type() == STRUCTURE_TYPE::ASCII_CHAR) {
-                expr->node_type = comp_thread->builtin_types->t_bool;
-                expr->emit_info.main_side = MainSide::LEFT;
-                expr->emit_info.dest_type = expr->node_type;
-                expr->emit_info.func = &BinOpArgs::emit_eq_ints;
-                return FINISHED;
-              }
-
-              break;
-            }
-
           case STRUCTURE_TYPE::ENUM: {
               if (left == right) {
                 const auto* en = left.extract_base<EnumStructure>();
@@ -1588,18 +1551,6 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
 
     case BINARY_OPERATOR::NOT_EQ: {
         switch (left.struct_type()) {
-          case STRUCTURE_TYPE::ASCII_CHAR: {
-              if (left == right) {
-                expr->node_type = comp_thread->builtin_types->t_bool;
-                expr->emit_info.main_side = MainSide::LEFT;
-                expr->emit_info.dest_type = expr->node_type;
-                expr->emit_info.func = &BinOpArgs::emit_neq_ints;
-                return FINISHED;
-              }
-
-              break;
-            }
-
           case STRUCTURE_TYPE::ENUM: {
               if (left == right) {
                 const auto* en = left.extract_base<EnumStructure>();

@@ -2246,3 +2246,6 @@ namespace _iMPL_A_can_cast_to_B {
 
 template<typename A, typename B>
 constexpr bool A_can_cast_to_B = decltype(_iMPL_A_can_cast_to_B::test_overload<A>(static_cast<const B*>(nullptr)))::val;
+
+template<typename T, typename ... Ops>
+concept OneOf = (IS_SAME_TYPE<T, Ops> || ...);

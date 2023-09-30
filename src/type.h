@@ -72,7 +72,6 @@ enum struct STRUCTURE_TYPE : u8 {
   TYPE,
   INTEGER,
   POINTER,
-  ASCII_CHAR,
   ENUM,
   COMPOSITE,
   FIXED_ARRAY,
@@ -146,9 +145,12 @@ constexpr Type to_type(const Structure* s) {
   return { s->struct_name, s };
 }
 
-struct TypeAndFlags {
-  META_FLAGS flags;
-  Type type;
+struct VoidStructure : public Structure {
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::VOID;
+};
+
+struct TypeStructure : public Structure {
+  constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::TYPE;
 };
 
 struct PointerStructure : public Structure {
@@ -248,11 +250,13 @@ struct BuiltinTypes {
 };
 
 struct Structures {
+  VoidStructure s_void;
+  TypeStructure s_type;
+
   FreelistBlockAllocator<TupleStructure> tuple_structures;
   FreelistBlockAllocator<IntegerStructure> int_structures;
   FreelistBlockAllocator<CompositeStructure> composite_structures;
   FreelistBlockAllocator<EnumStructure> enum_structures;
-  FreelistBlockAllocator<Structure> base_structures;
   FreelistBlockAllocator<ArrayStructure> array_structures;
   FreelistBlockAllocator<PointerStructure> pointer_structures;
   FreelistBlockAllocator<SignatureStructure> lambda_structures;
