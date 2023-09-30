@@ -6257,6 +6257,18 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             printf("mov %s, %s\n", names.rm.data, names.r.data);
             break;
           }
+        case X64::MOV_IMM8_RM: {
+            uint8_t modrm = start.read_byte();
+
+            load_8_sizes(&p_opts, rex, short_address);
+
+            OwnedArr<char> rm = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
+
+            uint8_t val = start.read_byte();
+
+            printf("mov %s, %hhu\n", rm.data, val);
+            break;
+          }
         case X64::MOV_IMM32_RM: {
             uint8_t modrm = start.read_byte();
 
@@ -6324,28 +6336,6 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             printf("cqo\n");
             break;
           }
-#if 0
-        case X64::MOV_64_TO_R:
-        case (X64::MOV_64_TO_R + 1):
-        case (X64::MOV_64_TO_R + 2):
-        case (X64::MOV_64_TO_R + 3):
-        case (X64::MOV_64_TO_R + 4):
-        case (X64::MOV_64_TO_R + 5):
-        case (X64::MOV_64_TO_R + 6):
-        case (X64::MOV_64_TO_R + 7): {
-            const uint8_t reg = (op - X64::MOV_64_TO_R) | ((maybe_rex & 0b0000'0001) << 3);
-
-            load_default_sizes(&p_opts, true, short_address, short_operand);
-
-            const char* r_string = p_opts.r_name(reg);
-
-            uint64_t imm64 = x64_from_bytes(bytes);
-            bytes += 8;
-
-            printf("mov %s, 0x%llx\n", r_string, imm64);
-            break;
-          }
-#endif
         case 0xF7: {
             uint8_t modrm = start.read_byte();
 
