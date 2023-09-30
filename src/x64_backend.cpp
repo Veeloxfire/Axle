@@ -3926,26 +3926,23 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
           VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id + 1);
           /*always a left register needed*/
-          if (left.t.struct_type() == STRUCTURE_TYPE::INTEGER
-              || left.t.struct_type() == STRUCTURE_TYPE::ENUM
-              || left.t.struct_type() == STRUCTURE_TYPE::POINTER) {
-            switch (left.t.size()) {
-              case 1: {
-                  new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
-                  break;
-                }
-              case 2:
-              case 4:
-              case 5: {
-                  new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
-                  new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
-                  break;
-                }
-              default: {
-                  new_intermediate(intermediates, expr_id);
-                  break;
-                }
-            }
+          switch (left.t.struct_format()) {
+            case IR::Format::uint8:
+            case IR::Format::sint8: {
+                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+                break;
+              }
+            case IR::Format::uint16:
+            case IR::Format::uint32:
+            case IR::Format::uint64: {
+                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+                new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
+                break;
+              }
+            default: {
+                new_intermediate(intermediates, expr_id);
+                break;
+              }
           }
 
           if (right.ni == NeedIntermediate::Yes) {
