@@ -1,0 +1,21 @@
+hash :: (ptr: *u8, len: u64) -> u64 {
+  hash_v : u64 = 0xcbf29ce484222325;
+
+  while(len > 0) {
+    hash_v = hash_v * 0x100000001b3;
+    hash_v = hash_v ^ cast(u64, *ptr);
+
+    ptr = ptr + 1;
+    len = len - 1;
+  }
+
+  return hash_v;
+}
+
+#import "tester.axl";
+
+main :: () -> u64 {
+  zero : u8 = 0;
+
+  SubmitTest(hash(&zero, 1));
+}
