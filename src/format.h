@@ -4,6 +4,7 @@ struct InternString;
 struct TokenTypeString;
 enum struct AxleTokenType : uint8_t;
 enum struct ErrorCode : uint8_t;
+enum struct VALUE_CATEGORY : uint8_t;
 
 namespace IR { struct Function; }
 struct CallSignature;
@@ -75,6 +76,7 @@ void load_string(Array<char>& res, const InternString* str);
 void load_string(Array<char>& res, const TokenTypeString& str);
 void load_string(Array<char>& res, AxleTokenType tt);
 void load_string(Array<char>& res, ErrorCode ec);
+void load_string(Array<char>& res, VALUE_CATEGORY vc);
 
 void load_string(Array<char>& res, PrintFuncSignature func);
 void load_string(Array<char>& res, PrintSignatureType sig);

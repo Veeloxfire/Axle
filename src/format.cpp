@@ -127,6 +127,11 @@ void load_string(Array<char>& res, ErrorCode er) {
   load_string(res, err_str);
 }
 
+void load_string(Array<char>& res, VALUE_CATEGORY vc) {
+  const char* str = VC::category_name(vc);
+  load_string(res, str);
+}
+
 static void load_unsigned(Array<char>& res, uint64_t u64) {
   bool is_0 = true;
 

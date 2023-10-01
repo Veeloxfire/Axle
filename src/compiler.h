@@ -17,14 +17,12 @@ struct Decl {
   Span span = {};
 
   const InternString* name = {};
-  META_FLAGS meta_flags = {};
+  VALUE_CATEGORY value_category;
   Type type = {};
 };
 
 struct Local {
   Decl decl = {};
-
-  IR::ValueRequirements requirements;
 
   bool is_constant = false;
   const u8* constant = nullptr;
@@ -63,10 +61,10 @@ struct Global {
   Decl decl = {};
 
   bool is_constant = false;
-  union {
-    u32 dynamic_init_index = 0;
-    const u8* constant_value;
-  };
+  const u8* constant_value;
+  
+  bool is_runtime_available = false;
+  u32 dynamic_init_index = 0;
 };
 
 enum struct COMPILATION_EMIT_TYPE : uint8_t {

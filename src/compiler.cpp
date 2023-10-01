@@ -355,17 +355,11 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
 
-        nt->meta_flags |= META_FLAG::CONST;
-        nt->meta_flags |= META_FLAG::COMPTIME;
-
-
         test_global_dependency(comp, comp_thread, state, nt->node_span, nt->name);
         return;
       }
     case AST_TYPE::ARRAY_TYPE: {
         ASTArrayType* at = (ASTArrayType*)a;
-        at->meta_flags |= META_FLAG::CONST;
-        at->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, at->base);
         dependency_check_ast_node(comp, comp_thread, state, at->expr);
@@ -373,8 +367,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::PTR_TYPE: {
         ASTPtrType* ptr = (ASTPtrType*)a;
-        ptr->meta_flags |= META_FLAG::CONST;
-        ptr->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, ptr->base);
 
@@ -382,8 +374,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::LAMBDA_TYPE: {
         ASTLambdaType* lt = (ASTLambdaType*)a;
-        lt->meta_flags |= META_FLAG::CONST;
-        lt->meta_flags |= META_FLAG::COMPTIME;
 
         FOR_AST(lt->args, ty) {
           dependency_check_ast_node(comp, comp_thread, state, ty);
@@ -395,8 +385,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::TUPLE_TYPE: {
         ASTTupleType* tt = (ASTTupleType*)a;
-        tt->meta_flags |= META_FLAG::CONST;
-        tt->meta_flags |= META_FLAG::COMPTIME;
 
         FOR_AST(tt->types, ty) {
           dependency_check_ast_node(comp, comp_thread, state, ty);
@@ -406,8 +394,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::CAST: {
         ASTCastExpr* cast = (ASTCastExpr*)a;
-        cast->meta_flags |= META_FLAG::CONST;
-        cast->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, cast->type);
         dependency_check_ast_node(comp, comp_thread, state, cast->expr);
@@ -415,16 +401,12 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::UNARY_OPERATOR: {
         ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)a;
-        un_op->meta_flags |= META_FLAG::CONST;
-        un_op->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, un_op->expr);
         return;
       }
     case AST_TYPE::BINARY_OPERATOR: {
         ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)a;
-        bin_op->meta_flags |= META_FLAG::CONST;
-        bin_op->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, bin_op->left);
         dependency_check_ast_node(comp, comp_thread, state, bin_op->right);
@@ -432,9 +414,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* ident = (ASTIdentifier*)a;
-        ident->meta_flags |= META_FLAG::CONST;
-        //ident->meta_flags |= META_FLAG::COMPTIME; TODO: get this working
-        ident->meta_flags |= META_FLAG::ASSIGNABLE;
 
         const InternString* name = ident->name;
 
@@ -482,9 +461,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::FUNCTION_CALL: {
         ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)a;
 
-        call->meta_flags |= META_FLAG::CONST;
-        //call->meta_flags |= META_FLAG::COMPTIME; TODO: get this working
-
         dependency_check_ast_node(comp, comp_thread, state, call->function);
 
         FOR_AST(call->arguments, it) {
@@ -495,9 +471,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::TUPLE_LIT: {
         ASTTupleLitExpr* tup = (ASTTupleLitExpr*)a;
-
-        tup->meta_flags |= META_FLAG::CONST;
-        tup->meta_flags |= META_FLAG::COMPTIME;
 
         if (tup->prefix != nullptr) {
           dependency_check_ast_node(comp, comp_thread, state, tup->prefix);
@@ -510,8 +483,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::ARRAY_EXPR: {
         ASTArrayExpr* arr = (ASTArrayExpr*)a;
-        arr->meta_flags |= META_FLAG::CONST;
-        arr->meta_flags |= META_FLAG::COMPTIME;
 
         FOR_AST(arr->elements, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
@@ -521,9 +492,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
 
     case AST_TYPE::INDEX_EXPR: {
         ASTIndexExpr* index = (ASTIndexExpr*)a;
-        index->meta_flags |= META_FLAG::CONST;
-        index->meta_flags |= META_FLAG::COMPTIME;
-        index->meta_flags |= META_FLAG::ASSIGNABLE;
 
         dependency_check_ast_node(comp, comp_thread, state, index->expr);
         dependency_check_ast_node(comp, comp_thread, state, index->index);
@@ -531,17 +499,12 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::MEMBER_ACCESS: {
         ASTMemberAccessExpr* member = (ASTMemberAccessExpr*)a;
-        member->meta_flags |= META_FLAG::CONST;
-        member->meta_flags |= META_FLAG::COMPTIME;
-        member->meta_flags |= META_FLAG::ASSIGNABLE;
 
         dependency_check_ast_node(comp, comp_thread, state, member->expr);
         return;
       }
     case AST_TYPE::LAMBDA_EXPR: {
         ASTLambdaExpr* le = (ASTLambdaExpr*)a;
-        le->meta_flags |= META_FLAG::CONST;
-        le->meta_flags |= META_FLAG::COMPTIME;
 
         ASTLambda* lambda = (ASTLambda*)le->lambda;
         ASTFuncSig* sig = (ASTFuncSig*)lambda->sig;
@@ -554,8 +517,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::STRUCT_EXPR: {
         ASTStructExpr* se = (ASTStructExpr*)a;
-        se->meta_flags |= META_FLAG::CONST;
-        se->meta_flags |= META_FLAG::COMPTIME;
 
         ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
 
@@ -568,8 +529,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::DECL: {
         ASTDecl* decl = (ASTDecl*)a;
-        decl->meta_flags |= META_FLAG::CONST;
-        decl->meta_flags |= META_FLAG::COMPTIME;
 
         if (decl->type_ast != 0) {
           dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
@@ -606,8 +565,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::TYPED_NAME: {
         ASTTypedName* tn = (ASTTypedName*)a;
-        tn->meta_flags |= META_FLAG::CONST;
-        tn->meta_flags |= META_FLAG::COMPTIME;
 
         if (tn->type != 0) {
           dependency_check_ast_node(comp, comp_thread, state, tn->type);
@@ -636,7 +593,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::ASSIGN: {
         ASTAssign* assign = (ASTAssign*)a;
-
         dependency_check_ast_node(comp, comp_thread, state, assign->assign_to);
         dependency_check_ast_node(comp, comp_thread, state, assign->value);
 
@@ -644,8 +600,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::BLOCK: {
         ASTBlock* block = (ASTBlock*)a;
-        block->meta_flags |= META_FLAG::CONST;
-        block->meta_flags |= META_FLAG::COMPTIME;
 
         const usize count = state->locals.size;
 
@@ -659,8 +613,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::IF_ELSE: {
         ASTIfElse* if_else = (ASTIfElse*)a;
-        if_else->meta_flags |= META_FLAG::CONST;
-        if_else->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, if_else->condition);
 
@@ -679,8 +631,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::WHILE: {
         ASTWhile* while_s = (ASTWhile*)a;
-        //index->meta_flags |= META_FLAG::CONST;
-        while_s->meta_flags |= META_FLAG::COMPTIME;
 
         dependency_check_ast_node(comp, comp_thread, state, while_s->condition);
 
@@ -691,8 +641,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::RETURN: {
         ASTReturn* ret = (ASTReturn*)a;
-        ret->meta_flags |= META_FLAG::CONST;
-        ret->meta_flags |= META_FLAG::COMPTIME;
 
         if (ret->expr != nullptr) {
           dependency_check_ast_node(comp, comp_thread, state, ret->expr);
@@ -701,9 +649,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::FUNCTION_SIGNATURE: {
         ASTFuncSig* func_sig = (ASTFuncSig*)a;
-
-        func_sig->meta_flags |= META_FLAG::CONST;
-        func_sig->meta_flags |= META_FLAG::COMPTIME;
 
         FOR_AST(func_sig->parameters, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
@@ -716,26 +661,17 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::IMPORT: {
         ASTImport* imp = (ASTImport*)a;
 
-        imp->meta_flags |= META_FLAG::CONST;
-        imp->meta_flags |= META_FLAG::COMPTIME;
-
         dependency_check_ast_node(comp, comp_thread, state, imp->expr_location);
         return;
       }
     case AST_TYPE::EXPORT_SINGLE: {
         ASTExportSingle* es = (ASTExportSingle*)a;
 
-        es->meta_flags |= META_FLAG::CONST;
-        es->meta_flags |= META_FLAG::COMPTIME;
-
         dependency_check_ast_node(comp, comp_thread, state, es->value);
         return;
       }
     case AST_TYPE::EXPORT: {
         ASTExport* e = (ASTExport*)a;
-
-        e->meta_flags |= META_FLAG::CONST;
-        e->meta_flags |= META_FLAG::COMPTIME;
 
         FOR_AST(e->export_list, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
@@ -745,12 +681,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::LINK: {
         ASTLink* imp = (ASTLink*)a;
 
-        imp->meta_flags |= META_FLAG::CONST;
-
-        if (!imp->dynamic) {
-          imp->meta_flags |= META_FLAG::COMPTIME;
-        }
-
         dependency_check_ast_node(comp, comp_thread, state, imp->import_type);
 
         return;
@@ -758,9 +688,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
 
     case AST_TYPE::LAMBDA: {
         ASTLambda* l = (ASTLambda*)a;
-
-        l->meta_flags |= META_FLAG::CONST;
-        l->meta_flags |= META_FLAG::COMPTIME;
 
         ASSERT(state->locals.size == 0);
         ASSERT(state->num_locals == 0);
@@ -773,9 +700,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::STRUCT: {
         ASTStructBody* s = (ASTStructBody*)a;
 
-        s->meta_flags |= META_FLAG::CONST;
-        s->meta_flags |= META_FLAG::COMPTIME;
-
         FOR_AST(s->elements, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
         }
@@ -786,9 +710,6 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::ASCII_CHAR:
     case AST_TYPE::ASCII_STRING:
     case AST_TYPE::NUMBER: {
-        a->meta_flags |= META_FLAG::CONST;
-        a->meta_flags |= META_FLAG::COMPTIME;
-
         //No dependencies :)
         return;
       }
@@ -798,18 +719,39 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
                             "Not yet implemented dependency checking for this node. Node ID: {}", (usize)a->ast_type);
 }
 
+struct NodeEval {
+  AST_LOCAL expr;
+  IR::ValueRequirements requirements;
+
+  NodeEval forward(AST_LOCAL e2, IR::ValueRequirements req2 = {}) const {
+    NodeEval n2 = {};
+    n2.expr = e2;
+    n2.requirements = requirements | req2;
+
+    return n2;
+  }
+
+  static NodeEval new_value(AST_LOCAL e2, IR::ValueRequirements req2 = {}) {
+    NodeEval n2 = {};
+    n2.expr = e2;
+    n2.requirements = req2;
+
+    return n2;
+  }
+};
+
 static Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                            CompilerThread* const comp_thread,
                                            Eval::IrBuilder* const builder,
-                                           AST_LOCAL expr);
+                                           const NodeEval& eval);
 
 static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
                                                 CompilerThread* const comp_thread,
                                                 Eval::IrBuilder* const builder,
-                                                AST_LOCAL expr) {
+                                                const NodeEval& eval) {
   TRACING_FUNCTION();
 
-  const ASTFunctionCallExpr* const call = downcast_ast<ASTFunctionCallExpr>(expr);
+  const ASTFunctionCallExpr* const call = downcast_ast<ASTFunctionCallExpr>(eval.expr);
 
   const auto* sig_struct = call->sig;
 
@@ -819,7 +761,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
   args.reserve_total(call->arguments.count + (usize)has_return);
 
   FOR_AST(call->arguments, it) {
-    Eval::RuntimeValue val = compile_bytecode(comp, comp_thread, builder, it);
+    Eval::RuntimeValue val = compile_bytecode(comp, comp_thread, builder, NodeEval::new_value(it));
     if (comp_thread->is_panic()) {
       return Eval::no_value();
     }
@@ -832,7 +774,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
 
 
   if (has_return) {
-    IR::ValueIndex v = builder->ir->new_temporary(sig_struct->return_type, call->val_requirements);
+    IR::ValueIndex v = builder->ir->new_temporary(sig_struct->return_type, eval.requirements);
 
     args.insert(IR::v_arg(v, 0, sig_struct->return_type));
   }
@@ -912,10 +854,28 @@ static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
   return to_type(ps);
 }
 
-Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* builder, const Global* global) {
+Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* builder, const Global* global,
+                                    const IR::ValueRequirements reqs) {
   TRACING_FUNCTION();
-  u32 global_id = builder->ir->new_global_reference({ global->decl.type, global->dynamic_init_index });
 
+  ASSERT(global->is_runtime_available);
+
+  u32 global_id = 0;
+  {
+    IR::GlobalReference* grs = builder->ir->globals_used.data;
+    const usize count = builder->ir->globals_used.size;
+
+    for (; global_id < count; ++global_id) {
+      if (grs[global_id].data_member == global->dynamic_init_index) {
+        grs[global_id].requirements |= reqs;
+        goto FOUND;
+      }
+    }
+
+    global_id = builder->ir->new_global_reference({ global->decl.type, reqs, global->dynamic_init_index });
+  }
+
+FOUND:
   const Type ptr_type = generate_pointer_type(comp, global->decl.type);
 
   IR::Builder* ir = builder->ir;
@@ -935,8 +895,9 @@ Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* buil
 Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                     CompilerThread* const comp_thread,
                                     Eval::IrBuilder* const builder,
-                                    AST_LOCAL expr) {
+                                    const NodeEval& eval) {
   TRACING_FUNCTION();
+  AST_LOCAL expr = eval.expr;
   ASSERT(expr->node_type.is_valid());
 
   switch (expr->ast_type) {
@@ -944,6 +905,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTNamedType* nt = (ASTNamedType*)expr;
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
+        ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
         memcpy_ts(struct_c, 1, &nt->actual_type, 1);
@@ -954,6 +916,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTArrayType* nt = (ASTArrayType*)expr;
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
+        ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
         memcpy_ts(struct_c, 1, &nt->actual_type, 1);
@@ -964,6 +927,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTPtrType* nt = (ASTPtrType*)expr;
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
+        ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
         memcpy_ts(struct_c, 1, &nt->actual_type, 1);
@@ -974,6 +938,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTLambdaType* nt = (ASTLambdaType*)expr;
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
+        ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
         memcpy_ts(struct_c, 1, &nt->actual_type, 1);
@@ -984,6 +949,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTTupleType* nt = (ASTTupleType*)expr;
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
+        ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
         memcpy_ts(struct_c, 1, &nt->actual_type, 1);
@@ -995,6 +961,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTStructBody* s = (ASTStructBody*)se->struct_body;
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
+        ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
         memcpy_ts(struct_c, 1, &s->actual_type, 1);
@@ -1006,6 +973,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTLambda* l = (ASTLambda*)le->lambda;
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
+        ASSERT(!eval.requirements.has_address());
 
         IR::GlobalLabel* label = comp->new_constant<IR::GlobalLabel>();
         *label = l->function->signature.label;
@@ -1020,9 +988,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         STRUCTURE_TYPE st = m_base->node_type.struct_type();
         if (st == STRUCTURE_TYPE::COMPOSITE) {
-          pass_flags_up(expr, m_base);
           Eval::RuntimeValue obj = compile_bytecode(comp, comp_thread,
-                                                    builder, m_base);
+                                                    builder, eval.forward(m_base));
           if (comp_thread->is_panic()) {
             return Eval::no_value();
           }
@@ -1038,10 +1005,10 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         }
         else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
           if (member_e->name == comp->important_names.ptr) {
-            ASSERT(expr->val_requirements.has_address());
-            pass_flags_up(expr, m_base);
+            const auto next_eval = eval.forward(m_base, IR::ValueRequirements::Address);
+
             Eval::RuntimeValue obj = compile_bytecode(comp, comp_thread,
-                                                      builder, m_base);
+                                                      builder, next_eval);
             if (comp_thread->is_panic()) {
               return Eval::no_value();
             }
@@ -1052,6 +1019,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             return Eval::arr_to_ptr(builder, obj, ptr);
           }
           else if (member_e->name == comp->important_names.len) {
+            ASSERT(!eval.requirements.has_address());
             const ArrayStructure* as = m_base->node_type.unchecked_base<ArrayStructure>();
 
             u64 val = as->length;
@@ -1064,12 +1032,14 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             return Eval::as_constant(val_c, comp_thread->builtin_types->t_u64);
           }
           else {
-            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span, "No semantics supported for the member \"{}\" on an array", member_e->name);
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                                      "No semantics supported for the member \"{}\" on an array", member_e->name);
             return Eval::no_value();
           }
         }
         else {
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span, "Type \"{}\" does not appear to support member access", m_base->node_type.name);
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                                    "Type \"{}\" does not support member access", m_base->node_type.name);
           return Eval::no_value();
         }
       }
@@ -1083,15 +1053,14 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
 
-        pass_flags_up(expr, index_expr);
         Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
-                                                  builder, index_expr);
+                                                  builder, eval.forward(index_expr, IR::ValueRequirements::Address));
         if (comp_thread->is_panic()) {
           return Eval::no_value();
         }
 
         Eval::RuntimeValue index_val = compile_bytecode(comp, comp_thread,
-                                                        builder, index_index);
+                                                        builder, NodeEval::new_value(index_index));
         if (comp_thread->is_panic()) {
           return Eval::no_value();
         }
@@ -1125,26 +1094,27 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         const auto* cpst = expr->node_type.unchecked_base<CompositeStructure>();
 
+        ASSERT(!eval.requirements.has_address());
         ASTTupleLitExpr* lit = (ASTTupleLitExpr*)expr;
 
         Eval::RuntimeValue tup_lit = {};
         u8* tup_constant = nullptr;
 
 
-        const bool is_constant = test_mask(expr->meta_flags, META_FLAG::COMPTIME | META_FLAG::CONST);
+        const bool is_constant = VC::is_comptime(expr->value_category);
         if (is_constant) {
           tup_constant = comp->new_constant(cpst->size);
           tup_lit = Eval::as_constant(tup_constant, expr->node_type);
         }
         else {
-          IR::ValueIndex v = builder->ir->new_temporary(expr->node_type, expr->val_requirements);
+          IR::ValueIndex v = builder->ir->new_temporary(expr->node_type, eval.requirements);
           tup_lit = Eval::as_direct(v, expr->node_type);
         }
 
         auto i_t = cpst->elements.begin();
 
         FOR_AST(lit->elements, it) {
-          Eval::RuntimeValue v = compile_bytecode(comp, comp_thread, builder, it);
+          Eval::RuntimeValue v = compile_bytecode(comp, comp_thread, builder, NodeEval::new_value(it));
           if (comp_thread->is_panic()) {
             return Eval::no_value();
           }
@@ -1180,23 +1150,25 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         ASTArrayExpr* arr_expr = (ASTArrayExpr*)expr;
 
+        ASSERT(!eval.requirements.has_address());
+
         Eval::RuntimeValue arr = {};
         u8* arr_constant = nullptr;
 
-        const bool is_constant = test_mask(expr->meta_flags, META_FLAG::COMPTIME | META_FLAG::CONST);
+        const bool is_constant = VC::is_comptime(expr->value_category);
         if (is_constant) {
           arr_constant = comp->new_constant(arr_type->size);
           arr = Eval::as_constant(arr_constant, expr->node_type);
         }
         else {
-          IR::ValueIndex v = builder->ir->new_temporary(expr->node_type, expr->val_requirements);
+          IR::ValueIndex v = builder->ir->new_temporary(expr->node_type, eval.requirements);
           arr = Eval::as_direct(v, expr->node_type);
         }
 
         usize count = 0;
 
         FOR_AST(arr_expr->elements, it) {
-          Eval::RuntimeValue el = compile_bytecode(comp, comp_thread, builder, it);
+          Eval::RuntimeValue el = compile_bytecode(comp, comp_thread, builder, NodeEval::new_value(it));
           if (comp_thread->is_panic()) {
             return Eval::no_value();
           }
@@ -1229,6 +1201,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
       }
     case AST_TYPE::ASCII_CHAR: {
         ASTAsciiChar* ch = (ASTAsciiChar*)expr;
+        ASSERT(!eval.requirements.has_address());
 
         char* char_c = comp->new_constant<char>();
         *char_c = ch->character;
@@ -1237,6 +1210,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
       }
     case AST_TYPE::ASCII_STRING: {
         ASTAsciiString* st = (ASTAsciiString*)expr;
+        ASSERT(!eval.requirements.has_address());
 
         const auto* const arr_type = expr->node_type.unchecked_base<ArrayStructure>();
 
@@ -1248,6 +1222,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
       }
     case AST_TYPE::NUMBER: {
         ASTNumber* num = (ASTNumber*)expr;
+        ASSERT(!eval.requirements.has_address());
 
         const size_t size = expr->node_type.structure->size;
 
@@ -1261,25 +1236,28 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         if (ident->id_type == ASTIdentifier::LOCAL) {
           Local* local = ident->local;
-          local->requirements |= ident->val_requirements;
+          ASSERT(local != nullptr);
+
+          builder->ir->variables.data[local->variable_id.variable].requirements |= eval.requirements;
+
           const Type t = local->decl.type;
 
-          if (local->is_constant) {
+          if (local->is_constant && !eval.requirements.has_address()) {
             return Eval::as_constant(local->constant, t);
           }
           else {
-            return builder->import_variable(local->variable_id, ident->val_requirements);
+            return builder->import_variable(local->variable_id, eval.requirements);
           }
         }
         else if (ident->id_type == ASTIdentifier::GLOBAL) {
-          const Global* glob = ident->global;
+          Global* glob = ident->global;
           ASSERT(glob != nullptr);
 
-          if (glob->is_constant) {
+          if (glob->is_constant && !eval.requirements.has_address()) {
             return Eval::as_constant(glob->constant_value, glob->decl.type);
           }
           else {
-            return load_data_memory(comp, builder, glob);
+            return load_data_memory(comp, builder, glob, eval.requirements);
           }
         }
 
@@ -1288,7 +1266,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::no_value();
       }
     case AST_TYPE::LINK: {
-        ASTLink* li = (ASTLink*)expr;
+        const ASTLink* li = (ASTLink*)expr;
+        ASSERT(!eval.requirements.has_address());
 
         IR::DynLibraryImport* imp = comp->dyn_lib_imports.data + (li->import_index - 1);
 
@@ -1301,8 +1280,10 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
       }
     case AST_TYPE::CAST: {
         const ASTCastExpr* const cast = (ASTCastExpr*)expr;
+        ASSERT(!eval.requirements.has_address());
+
         Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread,
-                                                  builder, cast->expr);
+                                                  builder, NodeEval::new_value(cast->expr));
         if (comp_thread->is_panic()) {
           return Eval::no_value();
         }
@@ -1313,9 +1294,28 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
       }
     case AST_TYPE::UNARY_OPERATOR: {
         const ASTUnaryOperatorExpr* const un_op = (ASTUnaryOperatorExpr*)expr;
+        ASSERT(!eval.requirements.has_address());
 
-        Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread,
-                                                  builder, un_op->expr);
+        Eval::RuntimeValue ref;
+        switch (un_op->op) {
+          case UNARY_OPERATOR::NEG: {
+              ref = compile_bytecode(comp, comp_thread,
+                                     builder, NodeEval::new_value(un_op->expr));
+              break;
+            }
+          case UNARY_OPERATOR::ADDRESS: {
+              ref = compile_bytecode(comp, comp_thread,
+                                     builder, NodeEval::new_value(un_op->expr, IR::ValueRequirements::Address));
+              break;
+            }
+          case UNARY_OPERATOR::DEREF: {
+              ref = compile_bytecode(comp, comp_thread,
+                                     builder, NodeEval::new_value(un_op->expr));
+              break;
+            }
+        }
+
+
         if (comp_thread->is_panic()) {
           return Eval::no_value();
         }
@@ -1335,13 +1335,13 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         AST_LOCAL right = bin_op->right;
 
         Eval::RuntimeValue temp_left = compile_bytecode(comp, comp_thread,
-                                                        builder, left);
+                                                        builder, NodeEval::new_value(left));
         if (comp_thread->is_panic()) {
           return Eval::no_value();
         }
 
         Eval::RuntimeValue temp_right = compile_bytecode(comp, comp_thread,
-                                                         builder, right);
+                                                         builder, NodeEval::new_value(right));
         if (comp_thread->is_panic()) {
           return Eval::no_value();
         }
@@ -1357,7 +1357,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return args.emit();
       }
     case AST_TYPE::FUNCTION_CALL: {
-        return compile_function_call(comp, comp_thread, builder, expr);
+        return compile_function_call(comp, comp_thread, builder, eval);
       }
     default: {
         //Invalid enum type
@@ -1382,10 +1382,10 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         ASTAssign* assign = (ASTAssign*)statement;
 
         Eval::RuntimeValue a = compile_bytecode(comp, comp_thread,
-                                                builder, assign->assign_to);
+                                                builder, NodeEval::new_value(assign->assign_to));
 
         Eval::RuntimeValue v = compile_bytecode(comp, comp_thread,
-                                                builder, assign->value);
+                                                builder, NodeEval::new_value(assign->value));
         if (comp_thread->is_panic()) {
           return;
         }
@@ -1414,7 +1414,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
         if (ret->expr != nullptr) {
           Eval::RuntimeValue r = compile_bytecode(comp, comp_thread,
-                                                  builder, ret->expr);
+                                                  builder, NodeEval::new_value(ret->expr));
           if (comp_thread->is_panic()) {
             return;
           }
@@ -1468,7 +1468,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         builder->switch_control_block(loop_split_label, loop_merge_label);
         {
           Eval::RuntimeValue cond = compile_bytecode(comp, comp_thread,
-                                                     builder, while_loop->condition);
+                                                     builder, NodeEval::new_value(while_loop->condition));
           if (comp_thread->is_panic()) {
             return;
           }
@@ -1552,7 +1552,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           builder->switch_control_block(split_label, parent);
 
           Eval::RuntimeValue cond = compile_bytecode(comp, comp_thread,
-                                                     builder, if_else->condition);
+                                                     builder, NodeEval::new_value(if_else->condition));
           if (comp_thread->is_panic()) {
             return;
           }
@@ -1680,22 +1680,24 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         if (decl->compile_time_const) {
           ASSERT(local->is_constant && local->constant != nullptr);
 
-          local->variable_id = builder->new_variable(local->decl.type, local->requirements);
-          const auto var = builder->import_variable(local->variable_id, decl->val_requirements);
+          local->variable_id = builder->new_variable(local->decl.type, {});
+          
+          const auto var = builder->import_variable(local->variable_id, {});
 
           Eval::assign(builder, var, Eval::as_constant(local->constant, local->decl.type));
+          
         }
         else {
           ASSERT(!local->is_constant);
 
           Eval::RuntimeValue r = compile_bytecode(comp, comp_thread,
-                                                  builder, decl->expr);
+                                                  builder, NodeEval::new_value(decl->expr));
           if (comp_thread->is_panic()) {
             return;
           }
 
-          local->variable_id = builder->new_variable(local->decl.type, local->requirements);
-          const auto var = builder->import_variable(local->variable_id, decl->val_requirements);
+          local->variable_id = builder->new_variable(local->decl.type, {});
+          const auto var = builder->import_variable(local->variable_id, {});
 
           Eval::assign(builder, var, r);
         }
@@ -1703,7 +1705,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         return;
       }
     default: {
-        [[maybe_unused]] auto _ = compile_bytecode(comp, comp_thread, builder, statement);
+        [[maybe_unused]] auto _ = compile_bytecode(comp, comp_thread, builder, NodeEval::new_value(statement));
         return;
       }
   }
@@ -1758,7 +1760,7 @@ void start_ir(Eval::IrBuilder* builder, AST_ARR params) {
         ASTTypedName* n = (ASTTypedName*)p;
         Local* local_ptr = n->local_ptr;
 
-        auto id = builder->new_variable(*parameters, local_ptr->requirements);
+        auto id = builder->new_variable(*parameters, {});
         local_ptr->variable_id = id;
         *va = Eval::load_v_arg(builder, builder->import_variable(id, {}));
         va += 1;
@@ -1798,7 +1800,7 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
 
   start_ir(&builder);
 
-  Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread, &builder, root);
+  Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(root));
   if (comp_thread->is_panic()) {
     return;
   }
@@ -2053,22 +2055,13 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
     return;
   }
 
-  global->decl.type = decl->type;
-  if (decl->compile_time_const) {
-    global->decl.meta_flags |= META_FLAG::COMPTIME;
-  }
-  else {
-    global->decl.meta_flags |= META_FLAG::ASSIGNABLE;
-  }
-
   ASSERT(global->decl.type.is_valid());
 
   AST_LOCAL decl_expr = decl->expr;
   ASSERT(global->decl.type.is_valid());
 
-  if (test_mask(global->decl.meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME))) {
+  if (VC::is_comptime(global->decl.value_category)) {
     ASSERT(global->is_constant && global->constant_value != nullptr);
-
 
     if (global->decl.name == comp->build_options.entry_point) {
       if (global->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
@@ -2097,9 +2090,9 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
 
     global->dynamic_init_index = new_dynamic_init_object(comp, global->decl.name, global->decl.type.structure->size, global->decl.type.structure->alignment, ir);
 
-    Eval::RuntimeValue glob_ref = load_data_memory(comp, &builder, global);
+    Eval::RuntimeValue glob_ref = load_data_memory(comp, &builder, global, {});
 
-    Eval::RuntimeValue init_expr = compile_bytecode(comp, comp_thread, &builder, decl->expr);
+    Eval::RuntimeValue init_expr = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(decl->expr));
     if (comp_thread->is_panic()) {
       return;
     }
@@ -2833,11 +2826,11 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
       free_destruct_n(datas, extra_threads);
       free_destruct_n(comp_threads, extra_threads);
     }
-  }
+    }
   else {
     compiler_loop(comp, comp_thread);
   }
-}
+  }
 
 static void free_remaining_compilation_units(Compilation* compilation) {
   for (CompilationUnit* unit : compilation->store.active_units) {
@@ -3032,7 +3025,7 @@ void print_compiled_functions(CompilerGlobals* const comp) {
   }
 
   comp->functions_mutex.release();
-}
+  }
 #endif
 
 Type create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread, NameManager* names, const Span& span, Namespace* ns,
@@ -3044,7 +3037,7 @@ Type create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread, NameM
 
   Type type = { name, s };
 
-  g->decl.meta_flags = (u8)META_FLAG::COMPTIME;
+  g->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
   g->decl.name = name;
   g->decl.type = comp->builtin_types->t_type;
   g->decl.span = span;
@@ -3064,7 +3057,7 @@ void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
 
   ASSERT(v->type.is_valid());
 
-  g->decl.meta_flags = (u8)META_FLAG::COMPTIME;
+  g->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
   g->decl.name = v->name;
   g->decl.type = v->type;
   g->decl.span = span;
@@ -3117,7 +3110,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     builtin_types->t_type = to_type(s_type);//Need to do this first because its required by register_builtin_type
     register_builtin_type(s_type);
   }
-  
+
   {
     VoidStructure* s_void = &structures->s_void;
     s_void->type = s_void->expected_type_enum;
@@ -3199,8 +3192,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     g->decl.name = strings->intern("nullptr");
     g->decl.span = Span{};
     g->decl.type = builtin_types->t_void_ptr;
-    g->decl.meta_flags |= META_FLAG::COMPTIME;
-    g->decl.meta_flags |= META_FLAG::CONST;
+    g->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
 
     g->is_constant = true;
     g->constant_value = (const u8*)comp->new_constant<const u8*>();

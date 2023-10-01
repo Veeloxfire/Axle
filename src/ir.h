@@ -116,6 +116,7 @@ namespace IR {
 
   struct GlobalReference {
     Type type = {};
+    IR::ValueRequirements requirements;
     usize data_member = 0;
   };
 

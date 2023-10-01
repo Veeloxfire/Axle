@@ -54,6 +54,9 @@ constexpr static CheckResult WAIT_FOR_CHILDREN = { false, empty_stage };
 //Gets the underlying type of a type-node e.g. if its an array type node it gets the cached array type
 //Errors if it was not a type
 static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
+  ASSERT(a->node_type == comp_thread->builtin_types->t_type);
+  ASSERT(VC::is_comptime(a->value_category));
+
   switch (a->ast_type) {
     case AST_TYPE::NAMED_TYPE: return static_cast<ASTNamedType*>(a)->actual_type;
     case AST_TYPE::ARRAY_TYPE: return static_cast<ASTArrayType*>(a)->actual_type;
@@ -82,6 +85,8 @@ TC_STAGE(NAMED_TYPE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTNamedType, nt);
 
+  nt->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
+
   //TODO: local types
   const Global* global;
   {
@@ -102,8 +107,8 @@ TC_STAGE(NAMED_TYPE, 1) {
   }
 
   ASSERT(global->constant_value != nullptr);
+  ASSERT(VC::is_comptime(global->decl.value_category));
 
-  nt->meta_flags |= META_FLAG::COMPTIME;
   nt->actual_type = *(const Type*)global->constant_value;
   nt->node_type = comp_thread->builtin_types->t_type;
   return FINISHED;
@@ -113,16 +118,13 @@ TC_STAGE(ARRAY_TYPE, 2) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);
 
-  ASSERT(at->base->node_type.is_valid());
-  ASSERT(at->expr->node_type.is_valid());
-
-  pass_flags_up(at, at->base);
-  pass_flags_up(at, at->expr);
-
   Type base_type = get_type_value(comp_thread, at->base);
   if (comp_thread->is_panic()) {
     return FINISHED;
   }
+
+  ASSERT(at->expr->node_type == comp_thread->builtin_types->t_u64);
+  ASSERT(VC::is_comptime(at->expr->value_category));
 
   IR::EvalPromise eval = typer->pop_eval();
 
@@ -158,10 +160,9 @@ TC_STAGE(ARRAY_TYPE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);
 
-  pass_flags_up(at, at->base);
-  typer->push_node(at->base, comp_thread->builtin_types->t_type);
+  at->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  pass_flags_up(at, at->expr);
+  typer->push_node(at->base, comp_thread->builtin_types->t_type);
   typer->push_node_eval(at->expr, comp_thread->builtin_types->t_u64);
 
   return next_stage(ARRAY_TYPE_stage_2);
@@ -175,8 +176,6 @@ TC_STAGE(PTR_TYPE, 2) {
   if (comp_thread->is_panic()) {
     return FINISHED;
   }
-
-  pass_flags_down(ptr, ptr->base);
 
   const Structure* s;
   {
@@ -198,7 +197,8 @@ TC_STAGE(PTR_TYPE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTPtrType, ptr);
 
-  pass_flags_up(ptr, ptr->base);
+  ptr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   typer->push_node(ptr->base, comp_thread->builtin_types->t_type);
 
   return next_stage(PTR_TYPE_stage_2);
@@ -216,15 +216,12 @@ TC_STAGE(LAMBDA_TYPE, 2) {
     }
 
     args.insert(i_type);
-    pass_flags_down(lt, i);
   }
 
   Type ret = get_type_value(comp_thread, lt->ret);
   if (comp_thread->is_panic()) {
     return FINISHED;
   }
-
-  pass_flags_down(lt, lt->ret);
 
   const SignatureStructure* s;
   {
@@ -247,12 +244,12 @@ TC_STAGE(LAMBDA_TYPE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTLambdaType, lt);
 
+  lt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   FOR_AST(lt->args, ty) {
-    pass_flags_up(lt, ty);
     typer->push_node(ty, comp_thread->builtin_types->t_type);
   }
 
-  pass_flags_up(lt, lt->ret);
   typer->push_node(lt->ret, comp_thread->builtin_types->t_type);
 
   return next_stage(LAMBDA_TYPE_stage_2);
@@ -270,7 +267,6 @@ TC_STAGE(TUPLE_TYPE, 2) {
     }
 
     args.insert(i_type);
-    pass_flags_down(tt, i);
   }
 
   const Structure* s;
@@ -293,8 +289,9 @@ TC_STAGE(TUPLE_TYPE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTTupleType, tt);
 
+  tt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   FOR_AST(tt->types, ty) {
-    pass_flags_up(tt, ty);
     typer->push_node(ty, comp_thread->builtin_types->t_type);
   }
 
@@ -309,11 +306,12 @@ TC_STAGE(STRUCT_EXPR, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTStructExpr, se);
 
+  se->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   ASTStructBody* struct_body = downcast_ast<ASTStructBody>(se->struct_body);
 
   ASSERT(struct_body->actual_type.is_valid());
 
-  set_mask(se->meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME));
   se->node_type = comp_thread->builtin_types->t_type;
   return FINISHED;
 }
@@ -323,12 +321,14 @@ TC_STAGE(LAMBDA_EXPR, 1) {
   EXPAND_THIS(ASTLambdaExpr, le);
 
   ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
-  ASTFuncSig* sig = downcast_ast<ASTFuncSig>(lambda->sig);
+  ASTFuncSig* ast_sig = downcast_ast<ASTFuncSig>(lambda->sig);
 
-  ASSERT(sig->sig->sig_struct != nullptr);
+  const SignatureStructure* sig_struct = ast_sig->sig->sig_struct;
+  ASSERT(sig_struct != nullptr);//should be done in the signature unit
 
-  set_mask(le->meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME));
-  le->node_type = to_type(sig->sig->sig_struct);
+  le->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+  le->node_type = to_type(sig_struct);
+
   return FINISHED;
 }
 
@@ -372,6 +372,8 @@ TC_STAGE(FUNCTION_SIGNATURE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTFuncSig, ast_sig);
 
+  ast_sig->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   FOR_AST(ast_sig->parameters, i) {
     typer->push_node(i, {});
   }
@@ -384,12 +386,15 @@ TC_STAGE(FUNCTION_SIGNATURE, 1) {
 TC_STAGE(LAMBDA, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTLambda, lambda);
+
+  lambda->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   ASTFuncSig* ast_sig = downcast_ast<ASTFuncSig>(lambda->sig);
 
   const SignatureStructure* sig_struct = ast_sig->sig->sig_struct;
-  lambda->node_type = to_type(sig_struct);
-
   ASSERT(sig_struct != nullptr);//should be done in the signature unit
+
+  lambda->node_type = to_type(sig_struct);
 
   typer->return_type = sig_struct->return_type;
   typer->push_node(lambda->body, {});
@@ -403,7 +408,6 @@ TC_STAGE(MEMBER_ACCESS, 2) {
 
   AST_LOCAL base = member->expr;
   ASSERT(base->node_type.is_valid());
-  pass_flags_down(member, base);
 
   STRUCTURE_TYPE struct_type = base->node_type.struct_type();
 
@@ -431,6 +435,8 @@ TC_STAGE(MEMBER_ACCESS, 2) {
                                 cmp_t.name, member->name);
       return FINISHED;
     }
+
+    same_category(member, base);
   }
   else if (struct_type == STRUCTURE_TYPE::FIXED_ARRAY) {
     const Type& arr_t = base->node_type;
@@ -438,6 +444,12 @@ TC_STAGE(MEMBER_ACCESS, 2) {
     const ArrayStructure* as = arr_t.unchecked_base<ArrayStructure>();
 
     if (member->name == comp_thread->important_names.ptr) {
+      if (!VC::is_addressable(base->value_category)) {
+        comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, member->node_span,
+                                  "Cannot get a pointer to a value with no address (this was likely a temporary)");
+        return FINISHED;
+      }
+
       {
         AtomicLock<Structures> structures = {};
         AtomicLock<StringInterner> strings = {};
@@ -447,14 +459,12 @@ TC_STAGE(MEMBER_ACCESS, 2) {
                                                                    comp->platform_interface.ptr_size, as->base));
       }
 
-      //TODO: do this outside of memory
-      member->val_requirements.add_address();
+      reduce_category(member, base);
     }
     else  if (member->name == comp_thread->important_names.len) {
       member->node_type = comp_thread->builtin_types->t_u64;
 
-      //TODO: make this a constant
-      //set_runtime_flags(base, state, false, (u8)RVT::CONST);
+      member->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
     }
     else {
       comp_thread->report_error(ERROR_CODE::NAME_ERROR, member->node_span,
@@ -477,9 +487,10 @@ TC_STAGE(MEMBER_ACCESS, 2) {
 TC_STAGE(MEMBER_ACCESS, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTMemberAccessExpr, member);
-  AST_LOCAL base = member->expr;
+  
+  member->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  pass_flags_up(member, base);
+  AST_LOCAL base = member->expr;
   typer->push_node(base, {});
 
   return next_stage(MEMBER_ACCESS_stage_2);
@@ -492,8 +503,8 @@ TC_STAGE(INDEX_EXPR, 2) {
   AST_LOCAL base = index_expr->expr;
   AST_LOCAL index = index_expr->index;
 
-  pass_flags_down(index_expr, base);
-  pass_flags_down(index_expr, index);
+  same_category(index_expr, base);
+  reduce_category(index_expr, index);
 
   if (!TYPE_TESTS::can_index(base->node_type)) {
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
@@ -511,15 +522,12 @@ TC_STAGE(INDEX_EXPR, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
+  index_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   AST_LOCAL base = index_expr->expr;
   AST_LOCAL index = index_expr->index;
 
-  index_expr->val_requirements.add_address();
-
-  pass_flags_up(index_expr, base);
   typer->push_node(base, {});
-
-  index->meta_flags |= index_expr->meta_flags & (META_FLAG::CONST | META_FLAG::COMPTIME);
   typer->push_node(index, comp_thread->builtin_types->t_u64);
 
   return next_stage(INDEX_EXPR_stage_2);
@@ -530,7 +538,7 @@ TC_STAGE(TUPLE_LIT, known_type) {
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   FOR_AST(tup->elements, it) {
-    pass_flags_down(tup, it);
+    reduce_category(tup, it);
   }
   return FINISHED;
 }
@@ -541,7 +549,7 @@ TC_STAGE(TUPLE_LIT, new_type) {
   Array<Type> element_types = {};
 
   FOR_AST(tup->elements, it) {
-    pass_flags_down(tup, it);
+    reduce_category(tup, it);
     element_types.insert(it->node_type);
   }
 
@@ -654,7 +662,6 @@ TC_STAGE(TUPLE_LIT, 2) {
   }
   else {
     FOR_AST(tup->elements, it) {
-      pass_flags_up(tup, it);
       typer->push_node(it, {});
     }
 
@@ -669,6 +676,8 @@ TC_STAGE(TUPLE_LIT, 2) {
 TC_STAGE(TUPLE_LIT, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTTupleLitExpr, tup);
+
+  tup->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   if (tup->prefix != nullptr) {
     typer->push_node_eval(tup->prefix, comp_thread->builtin_types->t_type);
@@ -690,12 +699,12 @@ TC_STAGE(ARRAY_EXPR, infer_2) {
   const Type base = first->node_type;
   ASSERT(base.is_valid());
 
-  pass_flags_down(arr_expr, first);
+  reduce_category(arr_expr, first);
 
   for (; l; l = l->next) {
     AST_LOCAL it = l->curr;
 
-    pass_flags_down(arr_expr, it);
+    reduce_category(arr_expr, it);
   }
 
   const Structure* arr_s;
@@ -730,7 +739,6 @@ TC_STAGE(ARRAY_EXPR, infer_1) {
   for (; l; l = l->next) {
     AST_LOCAL it = l->curr;
 
-    pass_flags_up(arr_expr, it);
     typer->push_node(it, base);
   }
 
@@ -747,7 +755,7 @@ TC_STAGE(ARRAY_EXPR, known) {
   ASSERT(this_infer->infer.is_valid());
 
   FOR_AST(arr_expr->elements, it) {
-    pass_flags_down(arr_expr, it);
+    reduce_category(arr_expr, it);
   }
 
   arr_expr->node_type = this_infer->infer;
@@ -757,6 +765,8 @@ TC_STAGE(ARRAY_EXPR, known) {
 TC_STAGE(ARRAY_EXPR, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTArrayExpr, arr_expr);
+
+  arr_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   const Type infer_type = this_infer->infer;
 
@@ -780,7 +790,6 @@ TC_STAGE(ARRAY_EXPR, 1) {
     Type base = as->base;
 
     FOR_AST(arr_expr->elements, it) {
-      pass_flags_up(arr_expr, it);
       typer->push_node(it, base);
     }
 
@@ -797,8 +806,6 @@ TC_STAGE(ARRAY_EXPR, 1) {
 
     if (l) {
       AST_LOCAL base_test = l->curr;
-
-      pass_flags_up(arr_expr, base_test);
       typer->push_node(base_test, {});
 
       return next_stage(ARRAY_EXPR_stage_infer_1);
@@ -811,6 +818,7 @@ TC_STAGE(ARRAY_EXPR, 1) {
 TC_STAGE(ASCII_CHAR, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTAsciiChar, a);
+  a->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   a->node_type = comp_thread->builtin_types->t_ascii;
   return FINISHED;
 }
@@ -818,6 +826,8 @@ TC_STAGE(ASCII_CHAR, 1) {
 TC_STAGE(ASCII_STRING, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTAsciiString, ascii);
+  ascii->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+  
   const size_t len = ascii->string->len + 1;
 
   const Structure* s;
@@ -838,6 +848,7 @@ TC_STAGE(ASCII_STRING, 1) {
 TC_STAGE(NUMBER, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTNumber, num);
+  num->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   const Type infer_type = this_infer->infer;
 
@@ -915,8 +926,8 @@ TC_STAGE(EXPORT_SINGLE, 2) {
 TC_STAGE(EXPORT_SINGLE, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTExportSingle, es);
-  set_mask(es->meta_flags, META_FLAG::CONST | META_FLAG::COMPTIME);
 
+  es->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   typer->push_node(es->value, {});
 
   return next_stage(EXPORT_SINGLE_stage_2);
@@ -925,7 +936,7 @@ TC_STAGE(EXPORT_SINGLE, 1) {
 TC_STAGE(EXPORT, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTExport, e);
-  set_mask(e->meta_flags, META_FLAG::CONST | META_FLAG::COMPTIME);
+  e->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   FOR_AST(e->export_list, it) {
     typer->push_node(it, {});
@@ -977,6 +988,7 @@ TC_STAGE(LINK, 2) {
 TC_STAGE(LINK, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTLink, imp);
+  imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   typer->push_node(imp->import_type, comp_thread->builtin_types->t_type);
 
@@ -992,16 +1004,25 @@ TC_STAGE(IDENTIFIER_EXPR, 1) {
     ASSERT(local != nullptr);
     ASSERT(local->decl.type.is_valid());
 
-    local->requirements |= ident->val_requirements;
-
     ident->node_type = local->decl.type;
-    ident->meta_flags = local->decl.meta_flags;
+    if (local->is_constant) {
+      ident->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
+    }
+    else {
+      ident->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
+    }
   }
   else if (ident->id_type == ASTIdentifier::GLOBAL) {
     Global* glob = ident->global;
 
     ident->node_type = glob->decl.type;
-    ident->meta_flags |= glob->decl.meta_flags;
+
+    if (glob->is_constant) {
+      ident->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
+    }
+    else {
+      ident->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
+    }
   }
   else {
     comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, ident->node_span,
@@ -1017,7 +1038,7 @@ TC_STAGE(CAST, 3) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
-  pass_flags_down(cast, expr);
+  reduce_category(cast, expr);
 
   const Type cast_to = get_type_value(comp_thread, cast->type);
   if (comp_thread->is_panic()) {
@@ -1025,24 +1046,19 @@ TC_STAGE(CAST, 3) {
   }
   ASSERT(cast_to.is_valid());
 
-  META_FLAGS from_flags = cast->expr->meta_flags;
   const Type cast_from = cast->expr->node_type;
   ASSERT(cast_from.is_valid());
 
-  DEFER(&) { if (!comp_thread->is_panic()) ASSERT(cast->emit != nullptr); };
+  cast->node_type = cast_to;
 
-  const auto emit_cast_func = [from_flags, cast_to](ASTCastExpr* cast, CASTS::CAST_FUNCTION cast_fn) {
-    cast->emit = cast_fn;
-    cast->node_type = cast_to;
-    cast->meta_flags = from_flags;
-  };
+  DEFER(&) { if (!comp_thread->is_panic()) ASSERT(cast->emit != nullptr); };
 
   switch (cast_from.struct_type()) {
     case STRUCTURE_TYPE::ENUM: {
         const auto* en = cast_from.unchecked_base<EnumStructure>();
 
         if (cast_to == en->base) {
-          emit_cast_func(cast, CASTS::no_op);
+          cast->emit = CASTS::no_op;
           return FINISHED;
         }
 
@@ -1051,23 +1067,18 @@ TC_STAGE(CAST, 3) {
     case STRUCTURE_TYPE::FIXED_ARRAY: {
         const auto* from_arr = cast_from.unchecked_base<ArrayStructure>();
 
-        /*if (cast_to.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
-          const auto* to_arr = cast_to.unchecked_base<ArrayStructure>();
-
-          if (TYPE_TESTS::can_implicit_cast(from_arr->base, to_arr->base) && from_arr->size() == to_arr->size()) {
-            emit_cast_func(expr, CASTS::no_op);
-            return;
-          }
-        }
-        else */
         if (cast_to.struct_type() == STRUCTURE_TYPE::POINTER) {
           const auto* to_ptr = cast_to.unchecked_base<PointerStructure>();
 
           if (from_arr->base == to_ptr->base) {
-            //Cannot be a constant to cast like this
-            cast->expr->meta_flags &= ~META_FLAG::COMPTIME;
-            cast->meta_flags &= ~META_FLAG::COMPTIME;;
-            emit_cast_func(cast, CASTS::take_address);
+            if (!VC::is_addressable(cast->expr->value_category)) {
+              comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, cast->node_span,
+                                        "Value is not addressible");
+              return FINISHED;
+            }
+
+            cast->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
+            cast->emit = CASTS::take_address;
             return FINISHED;
           }
         }
@@ -1078,7 +1089,7 @@ TC_STAGE(CAST, 3) {
         const auto* from_int = cast_from.unchecked_base<IntegerStructure>();
 
         if (cast_to.struct_type() == STRUCTURE_TYPE::INTEGER) {
-          emit_cast_func(cast, CASTS::int_to_int);
+          cast->emit = CASTS::int_to_int;
           return FINISHED;
         }
 
@@ -1092,12 +1103,12 @@ TC_STAGE(CAST, 3) {
           // can always cast to and from *void
           if (from_ptr->base.struct_type() == STRUCTURE_TYPE::VOID
               || to_ptr->base.struct_type() == STRUCTURE_TYPE::VOID) {
-            emit_cast_func(cast, CASTS::no_op);
+            cast->emit = CASTS::no_op;
             return FINISHED;
           }
 
           if (TYPE_TESTS::match_sizes(from_ptr->base, to_ptr->base)) {
-            emit_cast_func(cast, CASTS::no_op);
+            cast->emit = CASTS::no_op;
             return FINISHED;
           }
         }
@@ -1124,7 +1135,6 @@ TC_STAGE(CAST, 2) {
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
 
-  pass_flags_up(cast, expr);
   typer->push_node(expr, {});
 
   return next_stage(CAST_stage_3);
@@ -1133,6 +1143,8 @@ TC_STAGE(CAST, 2) {
 TC_STAGE(CAST, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
+  cast->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   AST_LOCAL ty = cast->type;
 
   typer->push_node(ty, comp_thread->builtin_types->t_type);
@@ -1147,7 +1159,9 @@ TC_STAGE(UNARY_OPERATOR, neg_2) {
 
   AST_LOCAL prim = expr->expr;
 
-  pass_flags_down(expr, prim);
+  expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+  reduce_category(expr, prim);
+
   Type ty = prim->node_type;
 
   if (ty.struct_type() != STRUCTURE_TYPE::INTEGER) {
@@ -1178,7 +1192,7 @@ TC_STAGE(UNARY_OPERATOR, addr_2) {
 
   AST_LOCAL prim = expr->expr;
 
-  pass_flags_down(expr, prim);
+  expr->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
 
   const Structure* ptr;
   {
@@ -1192,9 +1206,6 @@ TC_STAGE(UNARY_OPERATOR, addr_2) {
 
   expr->node_type = to_type(ptr);
   expr->emit_info = { prim->node_type, expr->node_type, &UnOpArgs::emit_address };
-
-  //Current cant do these at comptime
-  expr->meta_flags &= ~META_FLAG::COMPTIME;
   return FINISHED;
 }
 
@@ -1204,10 +1215,16 @@ TC_STAGE(UNARY_OPERATOR, deref_2) {
   ASSERT(expr->op == UNARY_OPERATOR::DEREF);
 
   AST_LOCAL prim = expr->expr;
-  pass_flags_down(expr, prim);
 
   if (prim->node_type.struct_type() == STRUCTURE_TYPE::POINTER) {
     const auto* ptr = prim->node_type.unchecked_base<PointerStructure>();
+
+    if (ptr->is_mut) {
+      expr->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
+    }
+    else {
+      expr->value_category = VALUE_CATEGORY::VARIABLE_IMMUTABLE;
+    }
 
     expr->node_type = ptr->base;
     expr->emit_info = { prim->node_type, expr->node_type, &UnOpArgs::emit_deref_ptr };
@@ -1227,6 +1244,7 @@ TC_STAGE(UNARY_OPERATOR, deref_2) {
 TC_STAGE(UNARY_OPERATOR, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
+  expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   AST_LOCAL prim = expr->expr;
 
@@ -1234,8 +1252,6 @@ TC_STAGE(UNARY_OPERATOR, 1) {
 
   switch (expr->op) {
     case UNARY_OPERATOR::NEG: {
-        pass_flags_up(expr, prim);
-
         if (infer_type.is_valid()) {
           if (infer_type.struct_type() == STRUCTURE_TYPE::INTEGER) {
             const IntegerStructure* is = infer_type.unchecked_base<IntegerStructure>();
@@ -1257,16 +1273,11 @@ TC_STAGE(UNARY_OPERATOR, 1) {
         }
       }
     case UNARY_OPERATOR::ADDRESS: {
-        expr->val_requirements.add_address();
-        pass_flags_up(expr, prim);
-
         //TODO: can we infer anything here??
         typer->push_node(prim, {});
         return next_stage(UNARY_OPERATOR_stage_addr_2);
       }
     case UNARY_OPERATOR::DEREF: {
-        pass_flags_up(expr, prim);
-
         //TODO: can we infer anything here
         typer->push_node(prim, {});
 
@@ -1857,8 +1868,8 @@ TC_STAGE(BINARY_OPERATOR, 2) {
   AST_LOCAL left = bin_op->left;
   AST_LOCAL right = bin_op->right;;
 
-  pass_flags_down(bin_op, left);
-  pass_flags_down(bin_op, right);
+  reduce_category(bin_op, left);
+  reduce_category(bin_op, right);
 
   //TODO: constant folding
   //TODO: inference
@@ -1869,15 +1880,14 @@ TC_STAGE(BINARY_OPERATOR, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTBinaryOperatorExpr, bin_op);
 
+  bin_op->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
   AST_LOCAL left = bin_op->left;
   AST_LOCAL right = bin_op->right;
 
   //TODO: Can we do type inference?
 
-  pass_flags_up(bin_op, left);
   typer->push_node(left, {});
-
-  pass_flags_up(bin_op, right);
   typer->push_node(right, {});
 
   return next_stage(BINARY_OPERATOR_stage_2);
@@ -1908,7 +1918,7 @@ TC_STAGE(IMPORT, 2) {
     return FINISHED;
   }
 
-  if (!test_mask(expr->meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME))) {
+  if (!VC::is_comptime(expr->value_category)) {
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
                               "#{} expression must be a compile time constant",
                               comp_thread->intrinsics.import);
@@ -1922,9 +1932,9 @@ TC_STAGE(IMPORT, 2) {
 TC_STAGE(IMPORT, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTImport, imp);
+  imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+  
   AST_LOCAL expr = imp->expr_location;
-
-  pass_flags_up(imp, expr);
   typer->push_node(expr, {});
 
   return next_stage(IMPORT_stage_2);
@@ -1994,7 +2004,7 @@ TC_STAGE(FUNCTION_CALL, 3) {
   call->sig = func_type.unchecked_base<SignatureStructure>();
 
   FOR_AST(call->arguments, it) {
-    pass_flags_down(call, it);
+    reduce_category(call, it);
   }
 
   check_call_arguments(comp, comp_thread, typer, call);
@@ -2025,7 +2035,6 @@ TC_STAGE(FUNCTION_CALL, 3) {
   call->node_type = sig->return_type;
 
   return FINISHED;
-
 }
 
 TC_STAGE(FUNCTION_CALL, 2) {
@@ -2039,9 +2048,9 @@ TC_STAGE(FUNCTION_CALL, 2) {
     return FINISHED;
   }
 
-  FOR_AST(call->arguments, it) {
-    pass_flags_up(call, it);
+  ASSERT(VC::is_comptime(call->function->value_category));
 
+  FOR_AST(call->arguments, it) {
     //TODO: try to infer arguments
     typer->push_node(it, {});
   }
@@ -2057,6 +2066,8 @@ TC_STAGE(FUNCTION_CALL, 1) {
   TRACING_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
+  call->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;//not constant yet
+
   typer->push_node_eval(call->function, {});
 
   return next_stage(FUNCTION_CALL_stage_2);
@@ -2068,9 +2079,9 @@ TC_STAGE(ASSIGN, 2) {
 
   AST_LOCAL assign_to = assign->assign_to;
 
-  if (!test_mask(assign_to->meta_flags, static_cast<META_FLAGS>(META_FLAG::ASSIGNABLE))) {
+  if (!VC::is_mutable(assign_to->value_category)) {
     comp_thread->report_error(ERROR_CODE::CONST_ERROR, assign_to->node_span,
-                              "Cannot assign to non-assignable expression");
+                              "Cannot assign to \"const\" expression");
     return FINISHED;
   }
 
@@ -2104,7 +2115,7 @@ TC_STAGE(DECL, 3) {
   AST_LOCAL decl_expr = decl->expr;
 
   if (decl->compile_time_const
-      && (decl_expr == nullptr || !test_mask(decl_expr->meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME)))) {
+      && (decl_expr == nullptr || !VC::is_comptime(decl_expr->value_category))) {
     comp_thread->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
                               "Compile time declaration '{}' must be initialized by a compile time expression",
                               decl->name);
@@ -2116,20 +2127,16 @@ TC_STAGE(DECL, 3) {
         Local* const loc = decl->local_ptr;
         loc->decl.type = decl->type;
         if (decl->compile_time_const) {
-          loc->decl.meta_flags |= META_FLAG::COMPTIME;
-          loc->decl.meta_flags |= META_FLAG::CONST;
-          loc->decl.meta_flags &= ~META_FLAG::ASSIGNABLE;
+          loc->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
         }
         else {
-          loc->decl.meta_flags &= ~META_FLAG::COMPTIME;
-          loc->decl.meta_flags |= META_FLAG::ASSIGNABLE;
+          loc->decl.value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
         }
 
         ASSERT(loc->decl.type.is_valid());
 
         if (decl->compile_time_const) {
-          if (!test_mask(loc->decl.meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME))
-              || !test_mask(decl_expr->meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME))) {
+          if (!VC::is_comptime(decl_expr->value_category)) {
             comp_thread->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
                                       "Cannot initialize a compile time constant with "
                                       "a non compile time constant value");
@@ -2152,20 +2159,16 @@ TC_STAGE(DECL, 3) {
         Global* global = decl->global_ptr;
         global->decl.type = decl->type;
         if (decl->compile_time_const) {
-          global->decl.meta_flags |= META_FLAG::COMPTIME;
-          global->decl.meta_flags |= META_FLAG::CONST;
-          global->decl.meta_flags &= ~META_FLAG::ASSIGNABLE;
+          global->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
         }
         else {
-          global->decl.meta_flags &= ~META_FLAG::COMPTIME;
-          global->decl.meta_flags |= META_FLAG::ASSIGNABLE;
+          global->decl.value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
         }
 
         decl->node_type = comp_thread->builtin_types->t_void;
 
         if (decl->compile_time_const) {
-          if (!test_mask(global->decl.meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME))
-              || !test_mask(decl_expr->meta_flags, static_cast<META_FLAGS>(META_FLAG::COMPTIME))) {
+          if (!VC::is_comptime(decl_expr->value_category)) {
             comp_thread->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
                                       "Cannot initialize a compile time constant with "
                                       "a non compile time constant value");
@@ -2375,7 +2378,6 @@ TC_STAGE(TYPED_NAME, 2) {
 
   ASSERT(loc->decl.name == name->name);
   loc->decl.type = name->node_type;
-  loc->decl.meta_flags |= META_FLAG::ASSIGNABLE;
 
   return FINISHED;
 }
@@ -2483,6 +2485,12 @@ void TC::type_check_ast(CompilerGlobals* comp,
         ASSERT(typer.new_nodes.size == 0);
 
         if (n->eval) {
+          if (!VC::is_comptime(n->node->value_category)) {
+            comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, n->node->node_span,
+                                      "Attempted to execute code at compile time which was runtime dependent");
+            return;
+          }
+
           IR::EvalPromise* eval = typer.evals.back();
           IR::eval_ast(comp, comp_thread, n->node, eval);
           if (comp_thread->is_panic()) {

@@ -651,7 +651,9 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR
       if (it->imported) {
         const IR::ControlBlock* cb = ir->current_control_block();
         ASSERT(it->current_temp.index < cb->temporaries.size);
+
         cb->temporaries.data[it->current_temp.index].requirements |= reqs;
+
         return Eval::as_direct(it->current_temp, sv.type);
       }
 

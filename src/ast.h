@@ -113,9 +113,7 @@ constexpr bool valid_type_node(AST_TYPE t) {
 
 struct AST {
   AST_TYPE ast_type;
-
-  META_FLAGS meta_flags = 0;
-  IR::ValueRequirements val_requirements = {};
+  VALUE_CATEGORY value_category;
 
   Type node_type = {};
   Span node_span = {};
@@ -395,16 +393,33 @@ struct Printer {
 void print_full_ast(const FileAST* file);
 void print_full_ast(AST_LOCAL expr);
 
-constexpr void pass_flags_up(AST_LOCAL low, AST_LOCAL high) {
-  high->meta_flags |= low->meta_flags;
-  high->val_requirements |= low->val_requirements;
+constexpr void same_category(AST_LOCAL low, AST_LOCAL high) {
+  low->value_category = high->value_category;
 }
 
-constexpr void pass_flags_down(AST_LOCAL low, AST_LOCAL high) {
-  META_FLAGS balanced = (low->meta_flags & high->meta_flags);
+constexpr void reduce_category(AST_LOCAL low, AST_LOCAL high) {
+  switch (high->value_category) {
+    case VALUE_CATEGORY::TEMPORARY_CONSTANT:
+    case VALUE_CATEGORY::VARIABLE_CONSTANT: return;
 
-  low->meta_flags = balanced;
-  high->meta_flags = balanced;
+    case VALUE_CATEGORY::TEMPORARY_IMMUTABLE:
+    case VALUE_CATEGORY::VARIABLE_IMMUTABLE:
+    case VALUE_CATEGORY::VARIABLE_MUTABLE:
+      switch (low->value_category) {
+        case VALUE_CATEGORY::TEMPORARY_CONSTANT:
+          low->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
+          return;
+        case VALUE_CATEGORY::VARIABLE_CONSTANT:
+          low->value_category = VALUE_CATEGORY::VARIABLE_IMMUTABLE;
+          return;
 
-  low->val_requirements |= high->val_requirements;
+        case VALUE_CATEGORY::TEMPORARY_IMMUTABLE:
+        case VALUE_CATEGORY::VARIABLE_IMMUTABLE:
+        case VALUE_CATEGORY::VARIABLE_MUTABLE:
+          return;
+      }
+      return;
+  }
+
+  return;
 }

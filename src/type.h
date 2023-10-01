@@ -13,58 +13,58 @@ struct ASTFuncSig;
 struct ASTLambda;
 struct ASTStructBody;
 
+enum struct VALUE_CATEGORY : u8 {
+  TEMPORARY_CONSTANT,
+  TEMPORARY_IMMUTABLE,
 
-using META_FLAGS = u8;
-
-#define FLAGS_DECL(num) (1 << num)
-enum struct META_FLAG : META_FLAGS {
-  CONST      = FLAGS_DECL(0),
-  COMPTIME   = FLAGS_DECL(1),
-  ASSIGNABLE = FLAGS_DECL(2),
+  VARIABLE_CONSTANT,
+  VARIABLE_IMMUTABLE,
+  VARIABLE_MUTABLE,
 };
-#undef FLAGS_DECL
 
-/*
-  WARNING: For the following functions be careful of
-  META_FLAG vs META_FLAGS (notice the trailing s)
-*/
+namespace VC {
+  constexpr const char* category_name(VALUE_CATEGORY vc) {
+    switch (vc) {
+      case VALUE_CATEGORY::TEMPORARY_CONSTANT: return "Temporary Constant";
+      case VALUE_CATEGORY::TEMPORARY_IMMUTABLE: return "Temporary Immutable";
 
-inline constexpr auto operator~(META_FLAG t) -> META_FLAGS {
-  return ~(META_FLAGS)t;
-}
+      case VALUE_CATEGORY::VARIABLE_CONSTANT: return "Variable Constant";
+      case VALUE_CATEGORY::VARIABLE_IMMUTABLE: return "Variable Immutable";
+      case VALUE_CATEGORY::VARIABLE_MUTABLE: return "Variable Mutable";
+    }
 
-inline constexpr auto operator|(META_FLAG t, META_FLAGS u) -> META_FLAGS {
-  return u | ((META_FLAGS)t);
-}
+    return nullptr;
+  }
 
-inline constexpr auto operator|(META_FLAGS u, META_FLAG t) -> META_FLAGS {
-  return u | ((META_FLAGS)t);
-}
+  constexpr bool is_mutable(VALUE_CATEGORY vc) {
+    return vc == VALUE_CATEGORY::VARIABLE_MUTABLE;
+  }
 
-inline constexpr auto operator|(META_FLAG u, META_FLAG t) -> META_FLAGS {
-  return (META_FLAGS)u | (META_FLAGS)t;
-}
+  constexpr bool is_addressable(VALUE_CATEGORY vc) {
+    switch (vc) {
+      case VALUE_CATEGORY::TEMPORARY_CONSTANT:
+      case VALUE_CATEGORY::TEMPORARY_IMMUTABLE: return false;
 
-inline constexpr auto operator|=(META_FLAGS& u, META_FLAG t) -> META_FLAGS& {
-  u |= ((META_FLAGS)t);
-  return u;
-}
+      case VALUE_CATEGORY::VARIABLE_CONSTANT: 
+      case VALUE_CATEGORY::VARIABLE_IMMUTABLE:
+      case VALUE_CATEGORY::VARIABLE_MUTABLE: return true;
+    }
 
-inline constexpr auto operator&(META_FLAG u, META_FLAG t) -> META_FLAGS {
-  return (META_FLAGS)u & (META_FLAGS)t;
-}
+    return false;
+  }
 
-inline constexpr auto operator&(META_FLAG t, META_FLAGS u) -> META_FLAGS {
-  return u & ((META_FLAGS)t);
-}
+  constexpr bool is_comptime(VALUE_CATEGORY vc) {
+    switch (vc) {
+      case VALUE_CATEGORY::TEMPORARY_CONSTANT:
+      case VALUE_CATEGORY::VARIABLE_CONSTANT: return true;
 
-inline constexpr auto operator&(META_FLAGS u, META_FLAG t) -> META_FLAGS {
-  return u & ((META_FLAGS)t);
-}
+      case VALUE_CATEGORY::TEMPORARY_IMMUTABLE:
+      case VALUE_CATEGORY::VARIABLE_IMMUTABLE:
+      case VALUE_CATEGORY::VARIABLE_MUTABLE: return false;
+    }
 
-inline constexpr auto operator&=(META_FLAGS& u, META_FLAG t) -> META_FLAGS& {
-  u &= ((META_FLAGS)t);
-  return u;
+    return false;
+  }
 }
 
 enum struct STRUCTURE_TYPE : u8 {
@@ -155,6 +155,7 @@ struct TypeStructure : public Structure {
 
 struct PointerStructure : public Structure {
   Type base ={};
+  bool is_mut = false;//TODO: move this to be part of the type
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::POINTER;
   static OwnedArr<char> gen_name(const Type& nt);
