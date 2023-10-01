@@ -143,7 +143,7 @@ struct Test {
 static constexpr char TEST_DIR[] = "src/";
 static constexpr char EXE_DIR[] = "out/";
 
-static constexpr u8 ZEROS_U8[2] = { 0, 0 };
+static constexpr u8 ONES_U8[2] = { 1, 1 };
 
 //Add tests here to make a new test
 static constexpr Test tests[] = {
@@ -155,8 +155,8 @@ static constexpr Test tests[] = {
   Test{"Arrays", "arrays", arrays_main()},
   Test{"Pointers", "pointers", 3},
   Test{"FNV1 Hash", "fnv1_hash", fnv1_hash("hello", 5)},
-  Test{"FNV1 Hash Single", "fnv1_hash_single", fnv1_hash(ZEROS_U8, 1)},
-  Test{"FNV1 Hash Double", "fnv1_hash_double", fnv1_hash(ZEROS_U8, 2)},
+  Test{"FNV1 Hash Single", "fnv1_hash_single", fnv1_hash(ONES_U8, 1)},
+  Test{"FNV1 Hash Double", "fnv1_hash_double", fnv1_hash(ONES_U8, 2)},
   Test{"Globals", "globals", fib_recurse_main()},
   Test{"Structs", "structs", 3},
 };

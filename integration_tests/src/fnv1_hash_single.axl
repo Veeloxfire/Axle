@@ -15,7 +15,7 @@ hash :: (ptr: *u8, len: u64) -> u64 {
 #import "tester.axl";
 
 main :: () -> u64 {
-  zero : u8 = 0;
+  zero : u8 = 1;
 
   SubmitTest(hash(&zero, 1));
 }

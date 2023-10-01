@@ -15,7 +15,7 @@ hash :: (ptr: *u8, len: u64) -> u64 {
 #import "tester.axl";
 
 main :: () -> u64 {
-  arr : [u8; 2] =  [ 0, 0 ];
+  arr : [u8; 2] =  [ 1, 1 ];
 
   SubmitTest(hash(arr.ptr, 2));
 }

@@ -71,14 +71,10 @@ Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
 
-  const auto* ptr = dest_type.unchecked_base<PointerStructure>();
-
-  u64 size_holder = ptr->size;
-  Type size_type = comp->builtin_types->t_u64;
-  const Eval::RuntimeValue ptr_size = Eval::as_constant((const u8*)&size_holder, size_type);
 
   Eval::RuntimeValue int_val;
   Eval::RuntimeValue ptr_val;
+  const Type size_type = comp->builtin_types->t_u64;
 
   if (info->main_side == MainSide::LEFT) {
     ASSERT(dest_type == lt);
@@ -96,10 +92,20 @@ Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
     ptr_val = right;
   }
 
+  const auto* ptr = dest_type.unchecked_base<PointerStructure>();
+  const u64 size_holder = ptr->base.size();
+  ASSERT(size_holder != 0);
 
-  const Eval::RuntimeValue to_add = bin_op_impl<IR::Types::Mul>(builder, right, ptr_size, size_type, IR::Emit::Mul);
+  if (size_holder > 1) {
+    const Eval::RuntimeValue ptr_size = Eval::as_constant((const u8*)&size_holder, size_type);
 
-  return bin_op_impl<IR::Types::Add>(builder, ptr_val, to_add, size_type, IR::Emit::Add);
+    const Eval::RuntimeValue to_add = bin_op_impl<IR::Types::Mul>(builder, right, ptr_size, size_type, IR::Emit::Mul);
+
+    return bin_op_impl<IR::Types::Add>(builder, ptr_val, to_add, size_type, IR::Emit::Add);
+  }
+  else {
+    return bin_op_impl<IR::Types::Add>(builder, ptr_val, int_val, size_type, IR::Emit::Add);
+  }
 }
 
 Eval::RuntimeValue BinOpArgs::emit_sub_ints() {
@@ -117,18 +123,21 @@ Eval::RuntimeValue BinOpArgs::emit_sub_ptrs() {
   ASSERT(lt == rt);
   ASSERT(lt == info->dest_type);
   ASSERT(info->dest_type == comp->builtin_types->t_u64);
+  Type size_type = comp->builtin_types->t_u64;
 
   const auto* ptr = lt.unchecked_base<PointerStructure>();
 
-  u64 size_holder = ptr->size;
+  const Eval::RuntimeValue scaled = bin_op_impl<IR::Types::Sub>(builder, left, right, size_type, IR::Emit::Sub);
+  
+  const u64 size_holder = ptr->base.size();
   ASSERT(size_holder > 0);
-
-  Type size_type = comp->builtin_types->t_u64;
-  const Eval::RuntimeValue ptr_size = Eval::as_constant((const u8*)&size_holder, size_type);
-
-  const Eval::RuntimeValue scaled = bin_op_impl<IR::Types::Sub>(builder, right, ptr_size, size_type, IR::Emit::Sub);
-
-  return bin_op_impl<IR::Types::Div>(builder, scaled, ptr_size, size_type, IR::Emit::Div);
+  if (size_holder > 1) {
+    const Eval::RuntimeValue ptr_size = Eval::as_constant((const u8*)&size_holder, size_type);
+    return bin_op_impl<IR::Types::Div>(builder, scaled, ptr_size, size_type, IR::Emit::Div);
+  }
+  else {
+    return scaled;
+  }
 }
 
 Eval::RuntimeValue BinOpArgs::emit_mul_ints() {
