@@ -102,11 +102,6 @@ TC_STAGE(NAMED_TYPE, 1) {
   }
 
   ASSERT(global->constant_value != nullptr);
-  /*if (global->constant_value.ptr == nullptr) {
-    ASSERT(g->unit != nullptr);
-    comp->set_dep(context, g->unit);
-    return;
-  }*/
 
   nt->meta_flags |= META_FLAG::COMPTIME;
   nt->actual_type = *(const Type*)global->constant_value;

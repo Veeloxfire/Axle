@@ -1920,19 +1920,6 @@ constexpr inline void load_to_bytes(uint8_t* bytes, size_t bytes_size,
   memcpy_ts(bytes + offset, bytes_size - offset, in_bytes, len);
 }
 
-namespace BIT_MASKS {
-  enum BIT_MASKS : uint8_t {
-    B0 = 0b0000'0001,
-    B1 = 0b0000'0010,
-    B2 = 0b0000'0100,
-    B3 = 0b0000'1000,
-    B4 = 0b0001'0000,
-    B5 = 0b0010'0000,
-    B6 = 0b0100'0000,
-    B7 = 0b1000'0000,
-  };
-}
-
 template<typename T>
 constexpr void set_mask(T& t, const T mask) {
   t |= mask;

@@ -274,10 +274,10 @@ void print_test_collection(const char* system_name, const char* group_name, cons
     indicator = "Some";
   }
 
-  std::cout << "\n" << indicator << " " << system_name << " " << group_name << "!\n";
+  std::cout << '\n' << indicator << ' ' << system_name << ' ' << group_name << '!';
 
   if (num_tests > 0) {
-    std::cout << group_list_name << ": ";
+    std::cout << '\n' << group_list_name << ": ";
     auto i = test_collection;
     const auto end = test_collection + num_tests;
 

@@ -1553,7 +1553,7 @@ namespace IntHelpers {
           switch (t_format) {
             case IR::Format::uint8:
             case IR::Format::sint8:
-              if (from == to) break;
+              if (from == to) return;
               X64::mov(inst, X64::R8{ from }, X64::R8{ to });
               break;
             case IR::Format::uint16:
@@ -1576,7 +1576,7 @@ namespace IntHelpers {
           switch (t_format) {
             case IR::Format::uint8:
             case IR::Format::sint8:
-              if (from == to) break;
+              if (from == to) return;
               X64::mov(inst, X64::R8{ from }, X64::R8{ to });
               break;
             case IR::Format::uint16:
@@ -1603,7 +1603,7 @@ namespace IntHelpers {
               break;
             case IR::Format::uint16:
             case IR::Format::sint16:
-              if (from == to) break;
+              if (from == to) return;
               X64::mov(inst, X64::R16{ from }, X64::R16{ to });
               break;
             case IR::Format::uint32:
@@ -1626,7 +1626,7 @@ namespace IntHelpers {
               break;
             case IR::Format::uint16:
             case IR::Format::sint16:
-              if (from == to) break;
+              if (from == to) return;
               X64::mov(inst, X64::R16{ from }, X64::R16{ to });
               break;
             case IR::Format::uint32:
@@ -1653,7 +1653,7 @@ namespace IntHelpers {
               break;
             case IR::Format::uint32:
             case IR::Format::sint32:
-              if (from == to) break;
+              if (from == to) return;
               X64::mov(inst, X64::R32{ from }, X64::R32{ to });
               break;
             case IR::Format::uint64:
@@ -1676,7 +1676,7 @@ namespace IntHelpers {
               break;
             case IR::Format::uint32:
             case IR::Format::sint32:
-              if (from == to) break;
+              if (from == to) return;
               X64::mov(inst, X64::R32{ from }, X64::R32{ to });
               break;
             case IR::Format::uint64:
@@ -1704,7 +1704,7 @@ namespace IntHelpers {
               break;
             case IR::Format::uint64:
             case IR::Format::sint64:
-              if (from == to) break;
+              if (from == to) return;
               X64::mov(inst, X64::R64{ from }, X64::R64{ to });
 
               break;
