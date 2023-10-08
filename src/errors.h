@@ -20,7 +20,7 @@ OwnedArr<char> load_span_from_source(const Span& span, const char* source);
 struct ErrorMessage {
   ERROR_CODE type = ERROR_CODE::NO_ERRORS;
   Span span = {};
-  OwnedArr<char> message = {};
+  OwnedArr<const char> message = {};
 };
 
 struct Errors {
@@ -28,16 +28,27 @@ struct Errors {
   Array<ErrorMessage> error_messages ={};
 
   template<typename ... T>
-  void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) {
+  void report_error(ERROR_CODE code, const Span& span, const FormatString& f_message, const T& ... ts) {
     panic = true;
 
-    ASSERT(f_message != nullptr);
+    ASSERT(f_message.arr != nullptr);
+    ASSERT(f_message.len != 0);
 
-    OwnedArr<char> message = format(f_message, ts...);
+    OwnedArr<const char> message = format(f_message, ts...);
     ASSERT(message.data != nullptr);
     ASSERT(message.size > 0);
     error_messages.insert({ code, span, std::move(message) });
   }
+
+  inline void report_error(ERROR_CODE code, const Span& span, OwnedArr<const char>&& message) {
+    panic = true;
+
+    ASSERT(message.data != nullptr);
+    ASSERT(message.size > 0);
+
+    error_messages.insert({ code, span, std::move(message) });
+  }
+
 
   inline constexpr bool is_panic() const { return panic; }
   ERROR_CODE print_all() const;

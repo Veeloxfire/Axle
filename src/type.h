@@ -23,17 +23,17 @@ enum struct VALUE_CATEGORY : u8 {
 };
 
 namespace VC {
-  constexpr const char* category_name(VALUE_CATEGORY vc) {
+  constexpr ViewArr<const char> category_name(VALUE_CATEGORY vc) {
     switch (vc) {
-      case VALUE_CATEGORY::TEMPORARY_CONSTANT: return "Temporary Constant";
-      case VALUE_CATEGORY::TEMPORARY_IMMUTABLE: return "Temporary Immutable";
+      case VALUE_CATEGORY::TEMPORARY_CONSTANT: return view_arr("Temporary Constant");
+      case VALUE_CATEGORY::TEMPORARY_IMMUTABLE: return view_arr("Temporary Immutable");
 
-      case VALUE_CATEGORY::VARIABLE_CONSTANT: return "Variable Constant";
-      case VALUE_CATEGORY::VARIABLE_IMMUTABLE: return "Variable Immutable";
-      case VALUE_CATEGORY::VARIABLE_MUTABLE: return "Variable Mutable";
+      case VALUE_CATEGORY::VARIABLE_CONSTANT: return view_arr("Variable Constant");
+      case VALUE_CATEGORY::VARIABLE_IMMUTABLE: return view_arr("Variable Immutable");
+      case VALUE_CATEGORY::VARIABLE_MUTABLE: return view_arr("Variable Mutable");
     }
 
-    return nullptr;
+    return {};
   }
 
   constexpr bool is_mutable(VALUE_CATEGORY vc) {

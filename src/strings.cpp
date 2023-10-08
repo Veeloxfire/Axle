@@ -1,6 +1,8 @@
 #include "strings.h"
 #include "safe_lib.h"
 
+#include "trace.h"
+
 constexpr char TOMBSTONE_DATA[sizeof(InternString)] ={};
 const InternString* TOMBSTONE = (const InternString*)TOMBSTONE_DATA;
 
@@ -98,6 +100,7 @@ const InternString* StringInterner::intern(const char* string) {
 }
 
 const InternString* StringInterner::intern(const char* string, const size_t length) {
+  TRACING_FUNCTION();
   ASSERT(string != nullptr);
 
   const uint64_t hash = fnv1a_hash(string, length);

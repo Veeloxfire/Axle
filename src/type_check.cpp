@@ -2391,7 +2391,9 @@ TC_STAGE(TYPED_NAME, 1) {
   return next_stage(TYPED_NAME_stage_2);
 }
 
-constexpr static TypeCheckStageFn get_first_stage(AST_TYPE type) {
+static TypeCheckStageFn get_first_stage(AST_TYPE type) {
+  TRACING_FUNCTION();
+
   switch (type) {
 #define MOD(ty) case AST_TYPE:: ty : return ty ## _stage_1;
       AST_TYPE_MOD;
@@ -2443,6 +2445,7 @@ void TC::type_check_ast(CompilerGlobals* comp,
   typer.in_progress.insert({ false, root, infer, get_first_stage(root->ast_type) });
 
   constexpr auto sumbit_new_nodes = [](Typer& typer) {
+    TRACING_SCOPE("Submit New Nodes");
     ASSERT(typer.new_nodes.size > 0);
 
     usize count = typer.new_nodes.size;
@@ -2472,6 +2475,8 @@ void TC::type_check_ast(CompilerGlobals* comp,
       }
 
       if (res.finished) {
+        TRACING_SCOPE("Single TC Finished");
+
         ASSERT(n->node->node_type.is_valid());
 
         if (n->infer.is_valid() && n->infer != n->node->node_type) {

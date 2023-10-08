@@ -1704,6 +1704,63 @@ struct OwnedArr {
 };
 
 template<typename T>
+struct OwnedArr<const T> {
+  const T* data = nullptr;
+  usize size = 0;
+
+  constexpr OwnedArr() = default;
+  constexpr OwnedArr(const T* t, usize s) : data(t), size(s) {}
+  constexpr OwnedArr(OwnedArr<const T>&& arr) noexcept
+    : data(std::exchange(arr.data, nullptr)),
+    size(std::exchange(arr.size, 0))
+  {}
+
+  constexpr OwnedArr(OwnedArr<T>&& arr) noexcept
+    : data(std::exchange(arr.data, nullptr)),
+    size(std::exchange(arr.size, 0))
+  {}
+
+  OwnedArr(const OwnedArr& arr) = delete;
+  OwnedArr& operator=(const OwnedArr& arr) = delete;
+
+  void free() {
+    free_destruct_n(data, size);
+    data = nullptr;
+    size = 0;
+  }
+
+  ~OwnedArr() noexcept {
+    free();
+  }
+
+  constexpr OwnedArr<const T>& operator=(OwnedArr<const T>&& arr) noexcept {
+    free();
+
+    data = std::exchange(arr.data, nullptr);
+    size = std::exchange(arr.size, 0);
+
+    return *this;
+  }
+
+  constexpr OwnedArr<const T>& operator=(OwnedArr<T>&& arr) noexcept {
+    free();
+
+    data = std::exchange(arr.data, nullptr);
+    size = std::exchange(arr.size, 0);
+
+    return *this;
+  }
+
+  constexpr const T& operator[](usize i) const {
+    ASSERT(i < size);
+    return data[i];
+  }
+
+  constexpr const T* begin() const { return data; }
+  constexpr const T* end() const { return data + size; }
+};
+
+template<typename T>
 OwnedArr<T> new_arr(usize size) {
   T* arr = allocate_default<T>(size);
   return OwnedArr(arr, size);
@@ -1716,7 +1773,7 @@ OwnedArr<T> copy_arr(const OwnedArr<T>& in_arr) {
   for (usize i = 0; i < in_arr.size; ++i) {
     arr[i] = in_arr.data[i];
   }
-  return OwnedArr(arr, in_arr.size);
+  return OwnedArr<T>(arr, in_arr.size);
 }
 
 template<typename T>
@@ -1724,19 +1781,23 @@ OwnedArr<T> bake_arr(Array<T>&& arr) {
   arr.shrink();
   T* d = std::exchange(arr.data, nullptr);
   usize s = std::exchange(arr.size, 0);
+
+  d = reallocate_default<T>(d, arr.capacity, s);
   arr.capacity = 0;
 
-  return OwnedArr(d, s);
+  return OwnedArr<T>(d, s);
 }
 
 template<typename T>
 OwnedArr<const T> bake_const_arr(Array<T>&& arr) {
   arr.shrink();
-  const T* d = std::exchange(arr.data, nullptr);
+  T* d = std::exchange(arr.data, nullptr);
   usize s = std::exchange(arr.size, 0);
+
+  d = reallocate_default<T>(d, arr.capacity, s);
   arr.capacity = 0;
 
-  return OwnedArr(d, s);
+  return OwnedArr<const T>(d, s);
 }
 
 template<typename T>
@@ -1889,16 +1950,15 @@ namespace ErrorCodeString {
 #undef modify
 }
 
-constexpr const char* error_code_string(const ErrorCode code) {
+constexpr ViewArr<const char> error_code_string(const ErrorCode code) {
   switch (code) {
-#define modify(NAME) case ErrorCode :: NAME : return ErrorCodeString :: NAME ;
+#define modify(NAME) case ErrorCode :: NAME : return view_arr(ErrorCodeString :: NAME);
     ERROR_CODES_X
 #undef modify
   }
 
-  return nullptr;
+  return {};
 }
-
 
 template<typename T>
 void serialise_to_array(Array<uint8_t>& bytes, const T& t) {

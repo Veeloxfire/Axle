@@ -366,8 +366,12 @@ struct CompilerThread : CompilerConstants {
   }
 
   template<typename ... T>
-  void report_error(ERROR_CODE code, const Span& span, const char* f_message, const T& ... ts) {
-    errors.report_error(code, span, f_message, ts...);
+  void report_error(ERROR_CODE code, const Span& span, const FormatString& f_message, const T& ... ts) {
+    return errors.report_error(code, span, f_message, ts...);
+  }
+
+  inline void report_error(ERROR_CODE code, const Span& span, OwnedArr<const char>&& msg) {
+    return errors.report_error(code, span, std::move(msg));
   }
 };
 

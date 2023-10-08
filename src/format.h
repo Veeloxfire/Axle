@@ -1,5 +1,7 @@
 #pragma once
 #include "utility.h"
+#include "trace.h"
+
 struct InternString;
 struct TokenTypeString;
 enum struct AxleTokenType : uint8_t;
@@ -71,6 +73,9 @@ void load_string(Array<char>& res, MagicNumber mn);
 void load_string(Array<char>& res, const char* str);
 void load_string(Array<char>& res, const OwnedArr<char>& str);
 void load_string(Array<char>& res, const OwnedArr<const char>& str);
+void load_string(Array<char>& res, const ViewArr<char>& str);
+void load_string(Array<char>& res, const ViewArr<const char>& str);
+void load_string(Array<char>& res, const Array<char>& str);
 void load_string(Array<char>& res, const Array<char>& str);
 void load_string(Array<char>& res, const InternString* str);
 void load_string(Array<char>& res, const TokenTypeString& str);
@@ -82,6 +87,11 @@ void load_string(Array<char>& res, PrintFuncSignature func);
 void load_string(Array<char>& res, PrintSignatureType sig);
 void load_string(Array<char>& res, PrintCallSignature call);
 void load_string(Array<char>& res, const CallSignature& call_sig);
+
+template<usize N>
+void load_string(Array<char>& res, const char(&str)[N]) {
+  res.concat(str, N);
+}
 
 template<typename T>
 void load_string(Array<char>& res, const PrintList<T>& arr) {
@@ -133,6 +143,8 @@ Formatter& operator<<(Formatter& f, const T& t) {
 //Doesnt null terminate!
 template<typename ... T>
 void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
+  TRACING_FUNCTION();
+
   //Account for no formatting
   format = ([](Array<char>& result, const char* format, const auto& ... ts) {
     if constexpr (sizeof...(T) == 0) {
@@ -169,32 +181,45 @@ void format_to_array(Array<char>& result, const char* format, const T& ... ts) {
   }
 }
 
+struct FormatString {
+  const char* arr;
+  usize len;
+
+  template<usize N>
+  constexpr FormatString(const char(&_arr)[N]) : arr(_arr), len(N) {}
+
+  constexpr FormatString(const char*_arr, usize _len) : arr(_arr), len(_len) {}
+};
+
 //Does null terminate
 template<typename ... T>
-OwnedArr<char> format(const char* format, const T& ... ts) {
+OwnedArr<char> format(const FormatString& format, const T& ... ts) {
   Array<char> result ={};
+  result.reserve_total(format.len);
 
-  format_to_array(result, format, ts...);
+  format_to_array(result, format.arr, ts...);
   result.insert('\0');
 
   return bake_arr(std::move(result));
 }
 
 template<typename ... T>
-void format_print(const char* format, const T& ... ts) {
+void format_print(const FormatString& format, const T& ... ts) {
   Array<char> result ={};
+  result.reserve_total(format.len);
 
-  format_to_array(result, format, ts...);
+  format_to_array(result, format.arr, ts...);
   result.insert('\0');
 
   IO::print(result.data);
 }
 
 template<typename ... T>
-void format_print_ST(const char* format, const T& ... ts) {
+void format_print_ST(const FormatString& format, const T& ... ts) {
   Array<char> result = {};
+  result.reserve_total(format.len);
 
-  format_to_array(result, format, ts...);
+  format_to_array(result, format.arr, ts...);
   result.insert('\0');
 
   IO_Single::print(result.data);

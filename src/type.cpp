@@ -2,6 +2,7 @@
 #include "format.h"
 
 #include "type.h"
+#include "trace.h"
 
 //TODO: Do we actually need this?
 Type BuiltinTypes::get_signed_of(const Type& ty) {
@@ -37,6 +38,8 @@ Type BuiltinTypes::get_signed_of(const Type& ty) {
 
 
 TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInterner* strings, Array<Type>&& types) {
+  TRACING_FUNCTION();
+
   TupleStructure* const type = structures->tuple_structures.allocate();
 
   type->type = STRUCTURE_TYPE::TUPLE;
@@ -107,6 +110,8 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
 SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, StringInterner* strings, usize ptr_size, const CallingConvention* conv,
                                                   Array<Type>&& params,
                                                   Type ret_type) {
+  TRACING_FUNCTION();
+
   SignatureStructure* type = structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
   type->ir_format = IR::Format::opaque;
@@ -146,6 +151,8 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
 
 
 IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const InternString* name) {
+  TRACING_FUNCTION();
+
   IntegerStructure* const type = structures->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
   type->struct_name = name;
@@ -155,6 +162,8 @@ IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const Inter
 }
 
 CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, StringInterner* strings) {
+  TRACING_FUNCTION();
+
   CompositeStructure* const type = structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
   type->ir_format = IR::Format::opaque;
@@ -166,6 +175,8 @@ CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Str
 }
 
 EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterner* strings, const Type& base) {
+  TRACING_FUNCTION();
+
   EnumStructure* const type = structures->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
   type->ir_format = base.struct_format();
@@ -182,6 +193,8 @@ EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterne
 
 ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInterner* strings, const Type& base,
                                              size_t length) {
+  TRACING_FUNCTION();
+
   const InternString* name = strings->intern(ArrayStructure::gen_name(base, length).data);
 
   ArrayStructure* const type = structures->array_structures.allocate();
@@ -200,6 +213,7 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
 }
 
 PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringInterner* strings, usize ptr_size, const Type& base) {
+  TRACING_FUNCTION();
   const InternString* name = strings->intern(PointerStructure::gen_name(base).data);
 
   PointerStructure* const type = structures->pointer_structures.allocate();
@@ -220,6 +234,8 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
                                    EnumStructure* enum_s,
                                    const InternString* enum_name,
                                    const InternString* value_name) {
+  TRACING_FUNCTION();
+
   EnumValue* const val = structures->enum_values.allocate();
   val->type = Type{ enum_name, enum_s };
   val->name = value_name;
@@ -264,6 +280,8 @@ OwnedArr<char> EnumStructure::gen_name(const Type& base) {
 
 Structures::~Structures() {
   {
+    TRACING_FUNCTION();
+
     auto i = structures.begin();
     const auto end = structures.end();
 

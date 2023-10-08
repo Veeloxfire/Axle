@@ -21,25 +21,20 @@ struct _TestAdder {
 #define TEST_FUNCTION(space, name) namespace JOIN( _anon_ns_ ## space, __LINE__) { static void JOIN(_anon_tf_ ## name, __LINE__) (TestErrors*); } static _TestAdder JOIN(_test_adder_, __LINE__) = {#space "::" #name, JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) }; static void JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) (TestErrors* test_errors)
 
 template<typename T>
-struct TestPrintTypeGetter {
-  using Type = const T&;
-};
-
-template<typename T>
-struct TestPrintTypeGetter<const T*> {
-  using Type = PrintPtr;
-};
-
-template<typename T>
-typename TestPrintTypeGetter<std::remove_reference_t<T>>::Type test_print_val(T const& t) {
-  return { t };
-}
-
-template<typename T>
 void test_eq(TestErrors* errors, usize line, const char* expected_str, const T& expected, const char* actual_str, const T& actual) {
   if (expected != actual) {
     errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\nExpected: {} = {}\nActual: {} = {}",
-                         line, errors->test_name, expected_str, test_print_val(expected), actual_str, test_print_val(actual));
+                         line, errors->test_name, expected_str, expected, actual_str, actual);
+
+  }
+}
+
+
+template<typename T>
+void test_eq(TestErrors* errors, usize line, const char* expected_str, T* expected, const char* actual_str, T* actual) {
+  if (expected != actual) {
+    errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\nExpected: {} = {}\nActual: {} = {}",
+                         line, errors->test_name, expected_str, PrintPtr{ expected }, actual_str, PrintPtr{ actual });
 
   }
 }

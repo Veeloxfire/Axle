@@ -74,6 +74,8 @@ RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
 //}
 
 VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
+  TRACING_FUNCTION();
+
   ASSERT(builder->control_blocks.size > 0);
 
   u64 total_temporaries = 0;

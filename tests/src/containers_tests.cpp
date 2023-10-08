@@ -146,8 +146,20 @@ TEST_FUNCTION(Util_OwnedArr, bake) {
 
     OwnedArr<int> ints_arr = bake_arr(std::move(ints));
 
+    static_assert(IS_SAME_TYPE<decltype(ints_arr[0]), int&>, "Must return ref");
+
+    TEST_EQ((int*)nullptr, ints.data);
     TEST_EQ((usize)0, ints.size);
+    TEST_EQ((usize)0, ints.capacity);
     TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr.data, ints_arr.size);
+
+    const OwnedArr<int> ints_arr2 = std::move(ints_arr);
+
+    static_assert(IS_SAME_TYPE<decltype(ints_arr2[0]), int&>, "Must return ref");
+
+    TEST_EQ((int*)nullptr, ints_arr.data);
+    TEST_EQ((usize)0, ints_arr.size);
+    TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr2.data, ints_arr2.size);
   }
 
   {
@@ -159,8 +171,20 @@ TEST_FUNCTION(Util_OwnedArr, bake) {
     const usize prev_size = ints.size;
     OwnedArr<const int> ints_arr = bake_const_arr(std::move(ints));
 
+    static_assert(IS_SAME_TYPE<decltype(ints_arr[0]), const int&>, "Must return const ref");
+
+    TEST_EQ((int*)nullptr, ints.data);
     TEST_EQ((usize)0, ints.size);
+    TEST_EQ((usize)0, ints.capacity);
     TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr.data, ints_arr.size);
+
+    const OwnedArr<const int> ints_arr2 = std::move(ints_arr);
+
+    static_assert(IS_SAME_TYPE<decltype(ints_arr2[0]), const int&>, "Must return const ref");
+
+    TEST_EQ((const int*)nullptr, ints_arr.data);
+    TEST_EQ((usize)0, ints_arr.size);
+    TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr2.data, ints_arr2.size);
   }
 
   {
@@ -168,6 +192,37 @@ TEST_FUNCTION(Util_OwnedArr, bake) {
     constexpr int COUNTER = 20;
     {
       OwnedArr<CheckDelete> owned;
+      {
+        Array<CheckDelete> deleter = {};
+        for (int counter = 0; counter < COUNTER; counter += 1) {
+          deleter.insert(CheckDelete{ &i });
+        }
+
+        owned = bake_arr(std::move(deleter));
+      }
+
+      TEST_EQ(0, i);
+
+      {
+        Array<CheckDelete> deleter = {};
+        for (int counter = 0; counter < 20; counter += 1) {
+          deleter.insert(CheckDelete{ &i });
+        }
+
+        owned = bake_arr(std::move(deleter));
+      }
+
+      TEST_EQ(COUNTER, i);
+    }
+
+    TEST_EQ(COUNTER * 2, i);
+  }
+
+  {
+    int i = 0;
+    constexpr int COUNTER = 20;
+    {
+      OwnedArr<const CheckDelete> owned;
       {
         Array<CheckDelete> deleter = {};
         for (int counter = 0; counter < COUNTER; counter += 1) {

@@ -138,7 +138,7 @@ template<typename ... T>
 void set_unfound_name(CompilerThread* const comp_thread,
                       UnknownName&& name,
                       ERROR_CODE code, const Span& span,
-                      const char* f_message, T&& ... ts) {
+                      const FormatString& f_message, T&& ... ts) {
 
   ASSERT(name.ident != nullptr);
 
@@ -2560,6 +2560,35 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     return;
   }
 
+  if (comp->pipelines.comp_body.try_pop_front(&unit)) {
+    TRACING_SCOPE("Compile Lambda Body");
+    thead_doing_work(comp, comp_thread);
+
+    if (comp->print_options.work) {
+      format_print("Work | Work {}\n", unit->id);
+    }
+
+    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
+    ASSERT(unit->waiting_on_count == 0);
+
+    LambdaBodyCompilation* lbc = (LambdaBodyCompilation*)unit->detail;
+
+    ASSERT(unit->ast != nullptr);
+    ASTLambda* lambda = downcast_ast<ASTLambda>(unit->ast);
+
+    compile_lambda_body(comp, comp_thread, unit->available_names, lambda, lbc);
+    if (comp_thread->is_panic()) {
+      return;
+    }
+
+    //Finished
+    auto compilation = comp->services.compilation.get();
+
+    compilation->lambda_body_compilation.free(lbc);
+    close_compilation_unit(comp_thread, compilation._ptr, unit);
+    return;
+  }
+
   if (comp->pipelines.comp_global.try_pop_front(&unit)) {
     TRACING_SCOPE("Emit Global");
     thead_doing_work(comp, comp_thread);
@@ -2659,35 +2688,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     comp->pipelines.depend_check.push_back(body_unit);
 
-    return;
-  }
-
-  if (comp->pipelines.comp_body.try_pop_front(&unit)) {
-    TRACING_SCOPE("Compile Lambda Body");
-    thead_doing_work(comp, comp_thread);
-
-    if (comp->print_options.work) {
-      format_print("Work | Work {}\n", unit->id);
-    }
-
-    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-    ASSERT(unit->waiting_on_count == 0);
-
-    LambdaBodyCompilation* lbc = (LambdaBodyCompilation*)unit->detail;
-
-    ASSERT(unit->ast != nullptr);
-    ASTLambda* lambda = downcast_ast<ASTLambda>(unit->ast);
-
-    compile_lambda_body(comp, comp_thread, unit->available_names, lambda, lbc);
-    if (comp_thread->is_panic()) {
-      return;
-    }
-
-    //Finished
-    auto compilation = comp->services.compilation.get();
-
-    compilation->lambda_body_compilation.free(lbc);
-    close_compilation_unit(comp_thread, compilation._ptr, unit);
     return;
   }
 
@@ -3003,7 +3003,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       format_to_array(error, "- Compile Export: {}\n", comp->pipelines.comp_export.size);
       comp->pipelines.comp_export.mutex.release();
 
-      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, error.data);
+      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, bake_const_arr(std::move(error)));
       comp->global_panic.set();
       comp->global_errors_mutex.acquire();
       comp->global_errors.concat(std::move(comp_thread->errors.error_messages));
@@ -3380,7 +3380,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
         format_to_array(error_message, "No calling conventions available");
       }
 
-      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, error_message.data);
+      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, bake_const_arr(std::move(error_message)));
       return;
     }
     else {

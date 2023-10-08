@@ -55,7 +55,6 @@ constexpr char hex_char(int c) {
 void load_string(Array<char>& res, MagicNumber c) {
   char chars[5] = {};
 
-
   chars[0] = hex_char(((int)c.num & 0x00f0) >> 4);
   chars[1] = hex_char(((int)c.num & 0x000f));
   chars[2] = hex_char(((int)c.num & 0xf000) >> 12);
@@ -65,13 +64,7 @@ void load_string(Array<char>& res, MagicNumber c) {
 }
 
 static void load_string_raw(Array<char>& res, const char* str, usize size) {
-  res.reserve_extra(size);
-
-  memcpy_ts(res.data + res.size,
-            res.capacity - res.size,
-            str, size);
-
-  res.size += size;
+  res.concat(str, size);
 }
 
 void load_string(Array<char>& res, const char* str) {
@@ -85,6 +78,15 @@ void load_string(Array<char>& res, const OwnedArr<const char>& str) {
 void load_string(Array<char>& res, const OwnedArr<char>& str) {
   load_string_raw(res, str.data, str.size);
 }
+
+void load_string(Array<char>& res, const ViewArr<const char>& str) {
+  load_string_raw(res, str.data, str.size);
+}
+
+void load_string(Array<char>& res, const ViewArr<char>& str) {
+  load_string_raw(res, str.data, str.size);
+}
+
 
 void load_string(Array<char>& res, const Array<char>& str) {
   load_string_raw(res, str.data, str.size);
@@ -123,43 +125,33 @@ void load_string(Array<char>& res, const AxleTokenType tt) {
 }
 
 void load_string(Array<char>& res, ErrorCode er) {
-  const char* err_str = error_code_string(er);
+  ViewArr<const char> err_str = error_code_string(er);
   load_string(res, err_str);
 }
 
 void load_string(Array<char>& res, VALUE_CATEGORY vc) {
-  const char* str = VC::category_name(vc);
+  ViewArr<const char> str = VC::category_name(vc);
   load_string(res, str);
 }
 
-static void load_unsigned(Array<char>& res, uint64_t u64) {
-  bool is_0 = true;
-
-  for (auto i = 20; i > 0; i--) {
-    char res_digit = '0';
-
-    const auto digit = pow_10((uint64_t)i - 1ull);
-    if (u64 < digit) {
-      if (!is_0) {
-        res.insert('0');
-      }
-
-      continue;
-    }
-
-    while (u64 >= digit) {
-      u64 -= digit;
-      res_digit += 1;
-    }
-
-    is_0 = false;
-
-    res.insert(res_digit);
+static void load_unsigned(Array<char>& res, uint64_t u) {
+  if (u == 0) {
+    return load_string(res, '0');
   }
 
-  if (is_0) {
-    res.insert('0');
+  constexpr usize MAX = 20;
+  usize i = MAX;
+  char arr[MAX + 1] = {};
+
+  while (u > 0) {
+    ASSERT(i > 0);
+    auto d = u % 10;
+    arr[i - 1] = static_cast<char>('0' + d);
+    i -= 1;
+    u /= 10;
   }
+
+  return load_string_raw(res, arr + i, MAX - i);
 }
 
 static void load_unsigned_hex(Array<char>& res, uint64_t u) {
@@ -197,11 +189,11 @@ void load_string(Array<char>& res, PrintPtr ptr) {
 }
 
 void load_string(Array<char>& res, uint64_t u64) {
-  load_unsigned(res, u64);
+  return load_unsigned(res, u64);
 }
 
 void load_string(Array<char>& res, long l) {
-  load_unsigned(res, l);
+  return load_unsigned(res, l);
 }
 
 void load_string(Array<char>& res, int64_t i64) {
@@ -209,7 +201,7 @@ void load_string(Array<char>& res, int64_t i64) {
     res.insert('-');
   }
 
-  load_unsigned(res, absolute(i64));
+  return load_unsigned(res, absolute(i64));
 }
 
 void load_string(Array<char>& res, int8_t i8) {
@@ -217,7 +209,7 @@ void load_string(Array<char>& res, int8_t i8) {
     res.insert('-');
   }
 
-  load_unsigned(res, (uint64_t)absolute(i8));
+  return load_unsigned(res, (uint64_t)absolute(i8));
 }
 
 void load_string(Array<char>& res, PrintHexByte hb) {
@@ -248,11 +240,11 @@ void load_string(Array<char>& res, PrintHexByte hb) {
     }
   }
 
-  load_string(res, str);
+  return load_string(res, str);
 }
 
 void load_string(Array<char>& res, uint8_t u8) {
-  load_unsigned(res, (uint64_t)u8);
+  return load_unsigned(res, (uint64_t)u8);
 }
 
 void load_string(Array<char>& res, int16_t i16) {
@@ -260,11 +252,11 @@ void load_string(Array<char>& res, int16_t i16) {
     res.insert('-');
   }
 
-  load_unsigned(res, (uint64_t)absolute(i16));
+  return load_unsigned(res, (uint64_t)absolute(i16));
 }
 
 void load_string(Array<char>& res, uint16_t u16) {
-  load_unsigned(res, (uint64_t)u16);
+  return load_unsigned(res, (uint64_t)u16);
 }
 
 void load_string(Array<char>& res, int32_t i32) {
@@ -272,11 +264,11 @@ void load_string(Array<char>& res, int32_t i32) {
     res.insert('-');
   }
 
-  load_unsigned(res, (uint64_t)absolute(i32));
+  return load_unsigned(res, (uint64_t)absolute(i32));
 }
 
 void load_string(Array<char>& res, uint32_t u32) {
-  load_unsigned(res, (uint64_t)u32);
+  return load_unsigned(res, (uint64_t)u32);
 }
 
 void load_string(Array<char>& res, const ByteArray& arr) {
@@ -323,7 +315,7 @@ void load_string(Array<char>& res, PrintCallSignature p_call) {
 }
 
 void load_string(Array<char>& res, PrintFuncSignature p_func) {
-  load_string(res, PrintSignatureType{ p_func.func->signature.sig_struct });
+  return load_string(res, PrintSignatureType{ p_func.func->signature.sig_struct });
 }
 
 void load_string(Array<char>& res, PrintSignatureType p_sig) {
