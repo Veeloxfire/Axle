@@ -196,11 +196,23 @@ const ArrayStructure* find_or_make_array_structure(Structures* const structures,
 
 static u32 new_dynamic_init_object(CompilerGlobals* const comp, const InternString* name, u32 size, u32 alignment,
                                    IR::Builder* ir_builder) {
-  DynamicInitData holder = {};
-  holder.name = name;
+  Backend::GlobalData holder = {};
   holder.size = size;
   holder.alignment = alignment;
+  holder.constant_init = false;
   holder.init_expr_label = ir_builder->global_label;
+
+  comp->dynamic_inits.insert(holder);
+  return (u32)comp->dynamic_inits.size;
+}
+
+static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, const InternString* name, u32 size, u32 alignment,
+                                         const u8* value) {
+  Backend::GlobalData holder = {};
+  holder.size = size;
+  holder.alignment = alignment;
+  holder.constant_init = true;
+  holder.constant_value = value;
 
   comp->dynamic_inits.insert(holder);
   return (u32)comp->dynamic_inits.size;
@@ -854,11 +866,18 @@ static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
   return to_type(ps);
 }
 
-Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* builder, const Global* global,
+Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* builder, Global* global,
                                     const IR::ValueRequirements reqs) {
   TRACING_FUNCTION();
 
-  ASSERT(global->is_runtime_available);
+  if (!global->is_runtime_available) {
+    ASSERT(global->is_constant);
+    global->dynamic_init_index = new_dynamic_init_object_const(comp, global->decl.name,
+                                                               global->decl.type.size(),
+                                                               global->decl.type.structure->alignment,
+                                                               global->constant_value);
+    global->is_runtime_available = true;
+  }
 
   u32 global_id = 0;
   {
@@ -995,13 +1014,14 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           }
 
           const Type ptr_type = generate_pointer_type(comp, member_e->node_type);
+
           u64* data = comp->new_constant<u64>();
           u64 val = member_e->offset;
           memcpy_ts(data, 1, &val, 1);
 
           const auto c = Eval::as_constant((const u8*)data, comp->builtin_types->t_u64);
 
-          return Eval::sub_object(builder, obj, c, expr->node_type);
+          return Eval::sub_object(builder, obj, c, ptr_type);
         }
         else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
           if (member_e->name == comp->important_names.ptr) {
@@ -1681,11 +1701,11 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           ASSERT(local->is_constant && local->constant != nullptr);
 
           local->variable_id = builder->new_variable(local->decl.type, {});
-          
+
           const auto var = builder->import_variable(local->variable_id, {});
 
           Eval::assign(builder, var, Eval::as_constant(local->constant, local->decl.type));
-          
+
         }
         else {
           ASSERT(!local->is_constant);
@@ -1838,6 +1858,16 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
 
     eval->data = result;
   }
+}
+
+static void compile_structure(CompilerGlobals* comp,
+                              CompilerThread* comp_thread,
+                              Namespace* names,
+                              ASTStructBody* body,
+                              const StructCompilation* s_comp) {
+  TRACING_FUNCTION();
+
+  TC::type_check_ast(comp, comp_thread, names, body, comp_thread->builtin_types->t_type);
 }
 
 static void compile_lambda_signature(CompilerGlobals* comp,
@@ -2088,6 +2118,7 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
     builder.eval_time = Eval::Time::Runtime;
     start_ir(&builder);
 
+    global->is_runtime_available = true;
     global->dynamic_init_index = new_dynamic_init_object(comp, global->decl.name, global->decl.type.structure->size, global->decl.type.structure->alignment, ir);
 
     Eval::RuntimeValue glob_ref = load_data_memory(comp, &builder, global, {});
@@ -2500,12 +2531,11 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   CompilationUnit* unit = nullptr;
 
   if (comp->pipelines.comp_import.try_pop_front(&unit)) {
-    TRACING_SCOPE("Import loop");
+    TRACING_SCOPE("Import");
     thead_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       format_print("Work | Import {}\n", unit->id);
     }
-
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
@@ -2555,6 +2585,35 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     auto compilation = comp->services.compilation.get();
 
     compilation->global_compilation.free(global_extra);
+    close_compilation_unit(comp_thread, compilation._ptr, unit);
+    return;
+  }
+
+  if (comp->pipelines.comp_structure.try_pop_front(&unit)) {
+    TRACING_SCOPE("Compile Structure");
+    thead_doing_work(comp, comp_thread);
+    if (comp->print_options.work) {
+      format_print("Work | Structure {}\n", unit->id);
+    }
+
+    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
+
+    ASSERT(unit->waiting_on_count == 0);
+
+    ASSERT(unit->ast != nullptr);
+
+    ASTStructBody* body = downcast_ast<ASTStructBody>(unit->ast);
+    const StructCompilation* struct_extra = (StructCompilation*)unit->detail;
+
+    compile_structure(comp, comp_thread, unit->available_names, body, struct_extra);
+    if (comp_thread->is_panic()) {
+      return;
+    }
+
+    //Finished
+    auto compilation = comp->services.compilation.get();
+
+    compilation->struct_compilation.free(struct_extra);
     close_compilation_unit(comp_thread, compilation._ptr, unit);
     return;
   }
@@ -3008,25 +3067,6 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
     comp->platform_interface.emit_start(comp, comp->entry_point_label, comp->services.out_program._ptr);
   }
 }
-
-#if 0
-void print_compiled_functions(CompilerGlobals* const comp) {
-  comp->functions_mutex.acquire();
-
-  auto i = comp->functions_single_threaded.begin_const_iter();
-  const auto end = comp->functions_single_threaded.end_const_iter();
-
-  for (; i != end; i.next()) {
-    const IR::Function* func = i.get();
-
-    printf("FUNCTION %s:\n", func->signature.name->string);
-    IR::print_ir(func->ir);
-    IO::print('\n');
-  }
-
-  comp->functions_mutex.release();
-  }
-#endif
 
 Type create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread, NameManager* names, const Span& span, Namespace* ns,
                        const InternString* name, const Structure* s) {

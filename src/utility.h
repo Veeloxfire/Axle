@@ -439,6 +439,11 @@ struct Array {
   size_t size = 0;// used size
   size_t capacity = 0;
 
+  T& operator[](size_t index) const {
+    ASSERT(index < size);
+    return data[index];
+  }
+
   //No copy!
   Array(const Array&) = delete;
 

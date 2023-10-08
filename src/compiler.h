@@ -48,15 +48,6 @@ struct DependencyChecker {
   Local* get_local(const InternString* name);
 };
 
-struct DynamicInitData {
-  const InternString* name = nullptr;
-  size_t size = 0;
-  size_t alignment = 0;
-  size_t data_index = 0;
-
-  IR::GlobalLabel init_expr_label = IR::NULL_GLOBAL_LABEL;
-};
-
 struct Global {
   Decl decl = {};
 
@@ -301,7 +292,7 @@ struct CompilerGlobals : CompilerConstants {
 
   Array<IR::DynLibraryImport> dyn_lib_imports = {};
   Array<FileAST> parsed_files = {};
-  Array<DynamicInitData> dynamic_inits = {};
+  Array<Backend::GlobalData> dynamic_inits = {};
 
   SpinLockMutex locals_mutex;
   BucketArray<Local> locals_single_threaded = {};

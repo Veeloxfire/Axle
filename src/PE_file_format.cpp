@@ -281,6 +281,7 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
   const uint32_t TIME = time(0) & 0x0000000000000000FFFFFFFFFFFFFFFF;
 
   const bool has_dynamic_imports = program->dyn_imports.size > 0;
+  const bool has_globals = program->globals.size > 0;
 
   InternHashTable<ProgramLocation> strings = {};
 
@@ -391,6 +392,15 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
     write_to_image(out, constants_header, &file_pointer, &memory_pointer);
   }
 
+  const size_t globals_header_location = file_pointer;
+
+  if (has_globals) {
+    Section_Header globals_header = {};
+    num_sections += 1;
+    static_assert(sizeof(globals_header) == 40);
+    write_to_image(out, globals_header, &file_pointer, &memory_pointer);
+  }
+
   const size_t imports_header_location = file_pointer;
 
   if (has_dynamic_imports) {
@@ -452,7 +462,6 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
       string_itr.next();
     }
-
   }
 
   const usize constants_raw_size = file_pointer - constants_start;
@@ -462,6 +471,21 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
   initialized_data_size += constants_file_size;
 
+  const usize globals_start = file_pointer;
+  const usize globals_memory_start = memory_pointer;
+
+  if (has_globals) {
+    auto itr = program->data_store.start();
+    write_code_partial(out, &itr, program->data_store.total_size, &file_pointer, &memory_pointer);
+    ASSERT(itr.actual_location == program->data_store.total_size);
+  }
+
+  const usize globals_raw_size = file_pointer - constants_start;
+  file_align(out, &file_pointer, file_alignmnet);
+  mem_align(&memory_pointer, section_alignment);
+  const usize globals_file_size = file_pointer - constants_start;
+
+  initialized_data_size += globals_file_size;
 
   const usize imports_start = file_pointer;
   const usize imports_memory_start = memory_pointer;
@@ -793,6 +817,19 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
               code.jump_to(reloc->location + 4);
               break;
             }
+          case Backend::RelocationType::Global: {
+              const Backend::GlobalData gd = program->globals[reloc->label.label - 1];
+
+              i32 disp = 0;
+              bool can_local_jump = X64::try_relative_disp(code_memory_start + reloc->location + 4,
+                                                           globals_memory_start + gd.data_index, &disp);
+              ASSERT(can_local_jump);//TODO: absolute addressing in this case?
+
+
+              write_to_image(out, disp, &file_pointer, &memory_pointer);
+              code.jump_to(reloc->location + 4);
+              break;
+            }
         }
 
         reloc += 1;
@@ -1067,6 +1104,30 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
     constants_header.characteristics = Section_Flags::READABLE | Section_Flags::CONTAINS_INITIALIZED;
 
     FILES::write_obj(out, constants_header);
+  }
+
+  if (has_globals) {
+    FILES::seek_from_start(out, globals_header_location);
+
+    Section_Header globals_header = {};
+
+    globals_header.name[0] = '.';
+    globals_header.name[1] = 'd';
+    globals_header.name[2] = 'a';
+    globals_header.name[3] = 't';
+    globals_header.name[4] = 'a';
+    globals_header.name[5] = 0x00;
+    globals_header.name[6] = 0x00;
+    globals_header.name[7] = 0x00;
+
+    globals_header.virtual_size = (uint32_t)globals_raw_size;
+    globals_header.virtual_address = (RVA)globals_memory_start;
+    globals_header.size_of_raw_data = (uint32_t)globals_file_size;
+    globals_header.pointer_to_raw_data = (uint32_t)globals_start;
+
+    globals_header.characteristics = Section_Flags::READABLE | Section_Flags::WRITABLE  | Section_Flags::CONTAINS_INITIALIZED;
+
+    FILES::write_obj(out, globals_header);
   }
 
   if (has_dynamic_imports) {

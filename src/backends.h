@@ -127,11 +127,13 @@ namespace Backend {
       total_size = std::exchange(b.total_size, 0);
     }
 
+    void push_zeros(usize count);
     void push_arr(const u8* arr, const u8* end);
 
     inline void push_arr(const u8* arr, usize count) {
       push_arr(arr, arr + count);
     }
+
 
     constexpr DataBucketIterator current_location() const {
       DataBucketIterator f = {};
@@ -159,7 +161,8 @@ namespace Backend {
 
   enum struct RelocationType {
     Label,
-    LibraryLabel
+    LibraryLabel,
+    Global,
   };
 
   struct Relocation {
@@ -167,6 +170,7 @@ namespace Backend {
     union {
       IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
       u32 library_call;
+      u32 global_index;
     };
     usize location = 0;
   };
@@ -180,14 +184,29 @@ namespace Backend {
     const InternString* name;
     IR::GlobalLabel label;
   };
+  
+  struct GlobalData {
+    bool constant_init = false;
+
+    usize size = 0;
+    usize alignment = 0;
+    usize data_index = 0;
+
+    union {
+      IR::GlobalLabel init_expr_label = IR::NULL_GLOBAL_LABEL;
+      const u8* constant_value;
+    };
+  };
 
   struct GenericProgram {
     DataBucketStore code_store = {};
+    DataBucketStore data_store = {};
 
     IR::GlobalLabel entry_point = IR::NULL_GLOBAL_LABEL;
     FunctionMetadata start_code;
 
     Array<FunctionMetadata> functions;
+    Array<GlobalData> globals;
 
     Array<Relocation> relocations;
     Array<DynImport> dyn_imports;

@@ -910,6 +910,7 @@ namespace X64 {
     emit_mod_rm(arr, to, from);
   }
 
+
   static void lea(Instruction& arr,
                   const RM& rm,
                   R r) {
@@ -917,6 +918,19 @@ namespace X64 {
     arr.insert(X64::LEA_RM_TO_R);
 
     emit_mod_rm(arr, r, rm);
+  }
+
+  constexpr u32 LEA_RM_DISP_OFFSET = 3;
+
+  static void lea(Instruction& arr,
+                  IMM32 offset,
+                  R r) {
+    arr.insert(X64::REX_W | X64::rex_r_rm(r.r, rbp.REG));
+    arr.insert(X64::LEA_RM_TO_R);
+
+    arr.insert(((r.r & 0b111) << 3) | (rbp.REG & 0b111));
+    u8* im = arr.sub_range(4);
+    x32_to_bytes(offset.imm, im);
   }
 
   static void sub(Instruction& arr,
@@ -2505,8 +2519,8 @@ namespace IntHelpers {
 #undef EMIT_SYMMETRICAL_HELPER
 
   static void emit_mul(X64::Program* program,
-                X64::R left, IR::Format l_format,
-                X64::R right, IR::Format r_format) {
+                       X64::R left, IR::Format l_format,
+                       X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
     X64::Instruction i = {};
     switch (l_format) {
@@ -2557,8 +2571,8 @@ namespace IntHelpers {
   }
 
   static void emit_div(X64::Program* program,
-                X64::R left, IR::Format l_format,
-                X64::R right, IR::Format r_format) {
+                       X64::R left, IR::Format l_format,
+                       X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
     X64::Instruction i = {};
     switch (l_format) {
@@ -2615,8 +2629,8 @@ namespace IntHelpers {
   }
 
   static void emit_cmp(X64::Program* program,
-                X64::R left, IR::Format l_format,
-                X64::R right, IR::Format r_format) {
+                       X64::R left, IR::Format l_format,
+                       X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
     X64::Instruction i = {};
     switch (l_format) {
@@ -2647,8 +2661,8 @@ namespace IntHelpers {
   }
 
   static void emit_great(X64::Program* program,
-                  X64::R left, IR::Format l_format,
-                  X64::R right, IR::Format r_format) {
+                         X64::R left, IR::Format l_format,
+                         X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
     X64::Instruction i = {};
     X64::setg(i, X64::R8{left});
@@ -2656,8 +2670,8 @@ namespace IntHelpers {
   }
 
   static void emit_less(X64::Program* program,
-                 X64::R left, IR::Format l_format,
-                 X64::R right, IR::Format r_format) {
+                        X64::R left, IR::Format l_format,
+                        X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
     X64::Instruction i = {};
     X64::setl(i, X64::R8{left});
@@ -2665,8 +2679,8 @@ namespace IntHelpers {
   }
 
   static void emit_eq(X64::Program* program,
-               X64::R left, IR::Format l_format,
-               X64::R right, IR::Format r_format) {
+                      X64::R left, IR::Format l_format,
+                      X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
     X64::Instruction i = {};
     X64::sete(i, X64::R8{left});
@@ -2674,8 +2688,8 @@ namespace IntHelpers {
   }
 
   static void emit_neq(X64::Program* program,
-                X64::R left, IR::Format l_format,
-                X64::R right, IR::Format r_format) {
+                       X64::R left, IR::Format l_format,
+                       X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
     X64::Instruction i = {};
     X64::setne(i, X64::R8{left});
@@ -3337,8 +3351,8 @@ namespace Helpers {
   };
 
   static void emit_xor(X64::Program* program,
-                                   X64::R from, const Structure* f_type,
-                                   X64::R to, const Structure* t_type) {
+                       X64::R from, const Structure* f_type,
+                       X64::R to, const Structure* t_type) {
     return dispatch_pair(XorDispatch{ program, from, to }, f_type, t_type);
   }
 
@@ -4415,11 +4429,44 @@ void x64_emit_start(CompilerGlobals* comp,
     X64::append_instruction(program, trap);
   }
 
+  program->globals = std::move(comp->dynamic_inits);
+  comp->dynamic_inits = {};
+
+  FOR_MUT(program->globals, it) {
+    if (program->data_store.total_size % it->alignment != 0) {
+      const usize fill = it->alignment - (program->data_store.total_size % it->alignment);
+      program->data_store.push_zeros(fill);
+    }
+
+    ASSERT(program->data_store.total_size % it->alignment == 0);
+    it->data_index = program->data_store.total_size;
+
+    if (it->constant_init) {
+      program->data_store.push_arr(it->constant_value, it->size);
+    }
+    else {
+      program->data_store.push_zeros(it->size);
+
+      Backend::Relocation relocation = {};
+      relocation.type = Backend::RelocationType::Label;
+      relocation.label = it->init_expr_label;
+      relocation.location = program->code_store.total_size + X64::CALL_NEAR_OFFSET;
+
+      program->relocations.insert(std::move(relocation));
+
+      X64::Instruction call_entry = {};
+      X64::call_near(call_entry, 0);
+
+      X64::append_instruction(program, call_entry);
+    }
+  }
+
   {
     Backend::Relocation relocation = {};
     relocation.type = Backend::RelocationType::Label;
     relocation.label = entry;
     relocation.location = program->code_store.total_size + X64::CALL_NEAR_OFFSET;
+
     program->relocations.insert(std::move(relocation));
 
     X64::Instruction call_entry = {};
@@ -5045,12 +5092,54 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             IR::Types::AddrOfGlobal addr;
             bc = IR::Read::AddrOfGlobal(bc, bc_end, addr);
 
-            IR::GlobalReference global_r = ir->globals_used.data[addr.im32];
+            const IR::GlobalReference& global_r = ir->globals_used[addr.im32];
 
             X64Value g = selector.get_val(addr.val);
             ASSERT(g.t.struct_format() == IR::Format::uint64);
 
-            INVALID_CODE_PATH("Temporarily unavailable");
+            switch (g.value_type) {
+              case ValueType::Register: {
+                  if (g.expects_intermeidate) {
+                    X64::R _temp = selector.get_next_intermediate_reg();
+                  }
+
+                  Backend::Relocation reloc = {};
+                  reloc.type = Backend::RelocationType::Global;
+                  reloc.global_index = (u32)global_r.data_member;
+                  reloc.location = program->code_store.total_size + X64::LEA_RM_DISP_OFFSET;
+
+                  program->relocations.insert(reloc);
+                  
+                  X64::Instruction inst = {};
+                  X64::lea(inst, X64::IMM32{0}, g.reg);
+                  X64::append_instruction(program, inst);
+                  
+                  break;
+                }
+              case ValueType::Memory: {
+                  X64::R temp = selector.get_next_intermediate_reg();
+
+                  Backend::Relocation reloc = {};
+                  reloc.type = Backend::RelocationType::Global;
+                  reloc.global_index = (u32)global_r.data_member;
+                  reloc.location = program->code_store.total_size + X64::LEA_RM_DISP_OFFSET;
+
+                  program->relocations.insert(reloc);
+
+                  X64::Instruction inst = {};
+
+                  X64::RM rm = {};
+                  rm.indirect = true;
+                  rm.disp = 0;
+                  rm.r = X64::rbp.REG;
+
+                  X64::lea(inst, X64::IMM32{0}, g.reg);
+                  X64::append_instruction(program, inst);
+
+                  IntHelpers::copy_reg_to_mem(program, temp, IR::Format::uint64, g.mem, IR::Format::uint64);
+                  break;
+                }
+            }
 
             break;
           }
@@ -5683,7 +5772,7 @@ static OwnedArr<char> rm_reg_string(x86PrintOptions* const p_opts,
   uint8_t address_mode = (modrm & 0b11'000000) >> 6;
   uint8_t rm = modrm & X64::MODRM_RM_MASK;
 
-  if ((modrm & 0b11'000000) == 0b11'000000) {
+  if (address_mode == 0b11) {
     rm |= ((rex & X64::REX_B) << X64::REX_B_SHIFT);
 
     return format("{}", p_opts->rm_name(rm));

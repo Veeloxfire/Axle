@@ -391,6 +391,39 @@ void Backend::DataBucketStore::free_held() {
   total_size = 0;
 }
 
+
+void Backend::DataBucketStore::push_zeros(usize count) {
+  if (bottom == nullptr) {
+    bottom = allocate_default<DataBucket>();
+    top = bottom;
+    top_fill = 0;
+    total_size = 0;
+  }
+
+  while (BUCKET_SIZE - top_fill < count) {
+    usize bucket_remaining = BUCKET_SIZE - top_fill;
+
+    for (; top_fill < BUCKET_SIZE; ++top_fill) {
+      top->arr[top_fill] = 0;
+    }
+
+    total_size += bucket_remaining;
+    count -= bucket_remaining;
+
+    DataBucket* new_b = allocate_default<DataBucket>();
+    top->next = new_b;
+    top = new_b;
+    top_fill = 0;
+  }
+  
+  usize top_end = top_fill + count;
+  for (; top_fill < top_end; ++top_fill) {
+    top->arr[top_fill] = 0;
+  }
+
+  total_size += count;
+}
+
 void Backend::DataBucketStore::push_arr(const u8* arr, const u8* end) {
   if (bottom == nullptr) {
     bottom = allocate_default<DataBucket>();

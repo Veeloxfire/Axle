@@ -3,14 +3,14 @@ Pair :: struct {
   b: u64;
 };
 
-add :: (p: Pair) -> u64 {
-  return p.a + p.b;
+add :: (p: *Pair) -> u64 {
+  return (*p).a + (*p).b;
 }
 
 test :: () -> u64 {
   p := Pair{1, 2};
 
-  return add(p);
+  return add(&p);
 }
 
 #import "tester.axl";

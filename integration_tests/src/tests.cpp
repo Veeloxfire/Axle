@@ -62,9 +62,27 @@ constexpr auto constexpr_fibonacci(uint64_t a) -> uint64_t {
   return n1;
 }
 
-//Should be the equivalent of "fib_recurse.axl" even though written differently
+constexpr auto constexpr_fibonacci_recurse_count(uint64_t* c, uint64_t a) -> uint64_t {
+  *c += 1;
+
+  if (a == 0 || a == 1) return 1;
+  else {
+    const auto res1 = constexpr_fibonacci_recurse_count(c, a - 1);
+    const auto res2 = constexpr_fibonacci_recurse_count(c, a - 2);
+    return res1 + res2;
+  }
+}
+
 constexpr auto fib_recurse_main() -> uint64_t {
-  return constexpr_fibonacci(5);
+  uint64_t n = 0;
+  return constexpr_fibonacci_recurse_count(&n, 5);
+}
+
+constexpr auto fib_count_main() -> uint64_t {
+  uint64_t n = 0;
+  constexpr_fibonacci_recurse_count(&n, 5);
+
+  return n;
 }
 
 constexpr auto fib_loop_main() -> uint64_t {
@@ -157,7 +175,7 @@ static constexpr Test tests[] = {
   Test{"FNV1 Hash", "fnv1_hash", fnv1_hash("hello", 5)},
   Test{"FNV1 Hash Single", "fnv1_hash_single", fnv1_hash(ONES_U8, 1)},
   Test{"FNV1 Hash Double", "fnv1_hash_double", fnv1_hash(ONES_U8, 2)},
-  Test{"Globals", "globals", fib_recurse_main()},
+  Test{"Globals", "globals", fib_count_main()},
   Test{"Structs", "structs", 3},
 };
 
