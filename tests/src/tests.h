@@ -3,22 +3,22 @@
 #include "errors.h"
 
 struct TestErrors : Errors {
-  const char* test_name;
+  ViewArr<const char> test_name;
 };
 using TEST_FN = void(*)(TestErrors* _test_errors);
 
 struct UnitTest {
-  const char* test_name;
+  ViewArr<const char> test_name;
   TEST_FN test_func;
 };
 
 Array<UnitTest>& unit_tests_ref();
 
 struct _TestAdder {
-  _TestAdder(const char* test_name, TEST_FN fn);
+  _TestAdder(const ViewArr<const char>& test_name, TEST_FN fn);
 };
 
-#define TEST_FUNCTION(space, name) namespace JOIN( _anon_ns_ ## space, __LINE__) { static void JOIN(_anon_tf_ ## name, __LINE__) (TestErrors*); } static _TestAdder JOIN(_test_adder_, __LINE__) = {#space "::" #name, JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) }; static void JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) (TestErrors* test_errors)
+#define TEST_FUNCTION(space, name) namespace JOIN( _anon_ns_ ## space, __LINE__) { static void JOIN(_anon_tf_ ## name, __LINE__) (TestErrors*); } static _TestAdder JOIN(_test_adder_, __LINE__) = {lit_view_arr(#space "::" #name), JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) }; static void JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) (TestErrors* test_errors)
 
 template<typename T>
 void test_eq(TestErrors* errors, usize line, const char* expected_str, const T& expected, const char* actual_str, const T& actual) {

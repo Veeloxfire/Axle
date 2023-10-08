@@ -1033,8 +1033,7 @@ void IR::print_ir(const IR::Builder* builder) {
       u8 op_byte = *bc;
       OpCode op = static_cast<OpCode>(op_byte);
 
-      IO_Single::print("  ");
-      IO_Single::print(opcode_string(op), ":\t");
+      format_print_ST("  {}:\t", op);
 
       switch (op) {
         case IR::OpCode::Set: {

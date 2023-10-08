@@ -8,15 +8,17 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-TokenTypeString token_type_string(AxleTokenType t) {
-  switch (t) {
-#define MODIFY(tt, str) case AxleTokenType :: tt : return { #tt, sizeof(#tt) };
-    AXLE_TOKEN_MODIFY
-#undef MODIFY
-  }
+struct KeywordPair {
+  const char* keyword = nullptr;
+  size_t size = 0;
 
-  return { "UNKNOWN TOKEN TYPE", sizeof("UNKNOWN TOKEN TYPE") };
-}
+  AxleTokenType type = AxleTokenType::End;
+
+  template<usize N>
+  constexpr KeywordPair(const char (&kw)[N], AxleTokenType t)
+    :keyword(kw), size(N - 1), type(t)
+  {}
+};
 
 constexpr KeywordPair keywords[] = {
 #define MODIFY(n, str) {str, AxleTokenType :: n},
@@ -304,7 +306,7 @@ static Token make_single_char_token(CompilerGlobals* comp, CompilerThread* comp_
     if (pair.keyword[0] == lex->top[0]) {
       Token tok;
       tok.type = pair.type;
-      tok.string = comp->services.strings.get()->intern(pair.keyword);
+      tok.string = comp->services.strings.get()->intern(pair.keyword, pair.size);
 
       lex->top += pair.size;
       lex->curr_pos.character += pair.size;
@@ -474,10 +476,12 @@ static Token lex_unpositioned_token(CompilerGlobals* const comp, CompilerThread*
     return lex_intrinsic(comp, comp_thread, lex);
   }
   else if (c == '\0') {
+    constexpr char EOF_Token[] = "End of file";
+
     // \0 is the end of file
     Token eof = {};
     eof.type = AxleTokenType::End;
-    eof.string = comp->services.strings.get()->intern("End of file");
+    eof.string = comp->services.strings.get()->intern(EOF_Token, array_size(EOF_Token) - 1);
 
     return eof;
   }

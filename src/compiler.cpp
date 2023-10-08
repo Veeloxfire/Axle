@@ -2958,8 +2958,8 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       auto i = compilation->store.active_units.begin();
       const auto end = compilation->store.active_units.end();
 
-      Array<char> error = {};
-      format_to_array(error, "Work still exists but is not accessable\nThe following compilation units are inaccessable:\n");
+      Format::ArrayFormatter error = {};
+      Format::format_to_formatter(error, "Work still exists but is not accessable\nThe following compilation units are inaccessable:\n");
 
       for (; i < end; ++i) {
         CompilationUnit* unit = *i;
@@ -2970,40 +2970,40 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
           debug_name = unit->main_pipe->_debug_name;
         }
 
-        format_to_array(error, "- Id: {} | Type: {} | Waiting on count: {}\n", unit->id, debug_name, unit->waiting_on_count);
+        Format::format_to_formatter(error, "- Id: {} | Type: {} | Waiting on count: {}\n", unit->id, debug_name, unit->waiting_on_count);
       }
 
-      format_to_array(error, "Pipeline states:\n");
+      Format::format_to_formatter(error, "Pipeline states:\n");
 
       comp->pipelines.depend_check.mutex.acquire();
-      format_to_array(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
+      Format::format_to_formatter(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
       comp->pipelines.depend_check.mutex.release();
 
       comp->pipelines.comp_structure.mutex.acquire();
-      format_to_array(error, "- Compile Structure: {}\n", comp->pipelines.comp_structure.size);
+      Format::format_to_formatter(error, "- Compile Structure: {}\n", comp->pipelines.comp_structure.size);
       comp->pipelines.comp_structure.mutex.release();
 
       comp->pipelines.comp_body.mutex.acquire();
-      format_to_array(error, "- Compile Lambda Body: {}\n", comp->pipelines.comp_body.size);
+      Format::format_to_formatter(error, "- Compile Lambda Body: {}\n", comp->pipelines.comp_body.size);
       comp->pipelines.comp_body.mutex.release();
 
       comp->pipelines.comp_signature.mutex.acquire();
-      format_to_array(error, "- Compile Lambda Signature: {}\n", comp->pipelines.comp_signature.size);
+      Format::format_to_formatter(error, "- Compile Lambda Signature: {}\n", comp->pipelines.comp_signature.size);
       comp->pipelines.comp_signature.mutex.release();
 
       comp->pipelines.comp_global.mutex.acquire();
-      format_to_array(error, "- Compile Global: {}\n", comp->pipelines.comp_global.size);
+      Format::format_to_formatter(error, "- Compile Global: {}\n", comp->pipelines.comp_global.size);
       comp->pipelines.comp_global.mutex.release();
 
       comp->pipelines.comp_import.mutex.acquire();
-      format_to_array(error, "- Compile Import: {}\n", comp->pipelines.comp_import.size);
+      Format::format_to_formatter(error, "- Compile Import: {}\n", comp->pipelines.comp_import.size);
       comp->pipelines.comp_import.mutex.release();
 
       comp->pipelines.comp_export.mutex.acquire();
-      format_to_array(error, "- Compile Export: {}\n", comp->pipelines.comp_export.size);
+      Format::format_to_formatter(error, "- Compile Export: {}\n", comp->pipelines.comp_export.size);
       comp->pipelines.comp_export.mutex.release();
 
-      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, bake_const_arr(std::move(error)));
+      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, error.take());
       comp->global_panic.set();
       comp->global_errors_mutex.acquire();
       comp->global_errors.concat(std::move(comp_thread->errors.error_messages));
@@ -3141,7 +3141,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   {
     TypeStructure* const s_type = &structures->s_type;
     s_type->type = s_type->expected_type_enum;
-    s_type->struct_name = strings->intern("type");
+    s_type->struct_name = strings->intern("type", 4);
 
     s_type->size = sizeof(Type);
     s_type->alignment = alignof(Type);
@@ -3154,7 +3154,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   {
     VoidStructure* s_void = &structures->s_void;
     s_void->type = s_void->expected_type_enum;
-    s_void->struct_name = strings->intern("void");
+    s_void->struct_name = strings->intern("void", 4);
     s_void->size = 0;
     s_void->alignment = s_void->alignment;
 
@@ -3163,7 +3163,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   {
     const auto int_type = [&](const auto& name, bool is_signed, u32 size, IR::Format ir_format, Type* t) {
-      IntegerStructure* s = STRUCTS::new_int_structure(structures._ptr, strings->intern(name));
+      IntegerStructure* s = STRUCTS::new_int_structure(structures._ptr, strings->intern(name, array_size(name) - 1));
       s->is_signed = is_signed;
       s->size = size;
       s->alignment = size;
@@ -3200,7 +3200,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   {
     EnumStructure* const s_bool = STRUCTS::new_enum_structure(structures._ptr, strings._ptr, builtin_types->t_u8);
-    const InternString* bool_name = strings->intern("bool");
+    const InternString* bool_name = strings->intern("bool", 4);
 
     builtin_types->t_bool = create_named_type(comp, comp_thread, names._ptr, Span{}, builtin_namespace, bool_name, s_bool);
     ASSERT(!comp_thread->is_panic());
@@ -3208,14 +3208,14 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     s_bool->enum_values.reserve_extra(2);
     {
       EnumValue* const e_true = STRUCTS::new_enum_value(structures._ptr, s_bool, bool_name,
-                                                        strings->intern("true"));
+                                                        strings->intern("true", 4));
       e_true->representation = 1;
       builtin_types->e_true = e_true;
       register_builtin_enum_value(e_true);
 
 
       EnumValue* const e_false = STRUCTS::new_enum_value(structures._ptr, s_bool, bool_name,
-                                                         strings->intern("false"));
+                                                         strings->intern("false", 5));
 
       e_true->representation = 0;
       builtin_types->e_false = e_false;
@@ -3229,7 +3229,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     //Nullptr
     Global* g = comp->new_global();
 
-    g->decl.name = strings->intern("nullptr");
+    g->decl.name = strings->intern("nullptr", 7);
     g->decl.span = Span{};
     g->decl.type = builtin_types->t_void_ptr;
     g->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
@@ -3242,12 +3242,12 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   //Intrinsics
-#define MOD(n) comp->intrinsics . n = strings->intern(#n);
+#define MOD(n) comp->intrinsics . n = strings->intern(#n, array_size(#n) - 1);
   INTRINSIC_MODS;
 #undef MOD
 
   //Other important names
-#define MOD(n) comp->important_names . n = strings->intern(#n);
+#define MOD(n) comp->important_names . n = strings->intern(#n, array_size(#n) - 1);
   IMPORTANT_NAMES_INC;
 #undef MOD
 
@@ -3281,7 +3281,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     return;
   }
 
-  comp->build_options.file_name = strings->intern(options.build.file_name);
+  comp->build_options.file_name = strings->intern(options.build.file_name, strlen_ts(options.build.file_name));
 
   if (options.build.library) {
     if (options.build.entry_point != nullptr) {
@@ -3301,7 +3301,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     }
 
     comp->build_options.is_library = false;
-    comp->build_options.entry_point = strings->intern(options.build.entry_point);
+    comp->build_options.entry_point = strings->intern(options.build.entry_point, strlen_ts(options.build.entry_point));
   }
 
   if (options.build.output_name == nullptr) {
@@ -3311,7 +3311,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   }
 
-  comp->build_options.output_name = strings->intern(options.build.output_name);
+  comp->build_options.output_name = strings->intern(options.build.output_name, strlen_ts(options.build.output_name));
 
   if (options.build.output_folder == nullptr) {
     comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
@@ -3320,7 +3320,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   }
 
-  comp->build_options.output_folder = strings->intern(options.build.output_folder);
+  comp->build_options.output_folder = strings->intern(options.build.output_folder, strlen_ts(options.build.output_folder));
 
 
   if (options.build.std_lib_folder == nullptr) {
@@ -3362,25 +3362,25 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     const auto num = comp->platform_interface.num_calling_conventions;
 
     if (options.build.default_calling_convention >= num) {
-      Array<char> error_message = {};
-      format_to_array(error_message, "\"[{}]\" was not a valid calling convention for system \"{}\"\n",
+      Format::ArrayFormatter error_message = {};
+      Format::format_to_formatter(error_message, "\"[{}]\" was not a valid calling convention for system \"{}\"\n",
                       options.build.default_calling_convention,
                       comp->platform_interface.system_name);
 
       if (num > 0) {
-        format_to_array(error_message, "{} options are available:", num);
+        Format::format_to_formatter(error_message, "{} options are available:", num);
 
         for (usize i = 0; i < num; ++i) {
           const CallingConvention* cc = list[i];
           ASSERT(cc != nullptr);
-          format_to_array(error_message, "\n[{}] = \"{}\"", i, cc->name);
+          Format::format_to_formatter(error_message, "\n[{}] = \"{}\"", i, cc->name);
         }
       }
       else {
-        format_to_array(error_message, "No calling conventions available");
+        Format::format_to_formatter(error_message, "No calling conventions available");
       }
 
-      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, bake_const_arr(std::move(error_message)));
+      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, error_message.take());
       return;
     }
     else {

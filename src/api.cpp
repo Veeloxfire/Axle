@@ -18,43 +18,8 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 #include "trace.h"
 
 #include <utility>
-#include <iostream>
 
 #include <chrono>
-
-#if 0
-void print_globals(CompilerGlobals* comp) {
-  //theoretically very slow to do
-
-  auto i = comp->globals_single_threaded.begin_const_iter();
-  auto end = comp->globals_single_threaded.end_const_iter();
-
-  for (; i != end; i.next()) {
-    const Global* g = i.get();
-
-    format_print("{} = {}\n", g->decl.name, g->decl.type.name);
-
-    if (g->decl.type.struct_type() == STRUCTURE_TYPE::LAMBDA) {
-      usize label = *(usize*)g->constant_value;
-      format_print("{}:\n", label);
-
-      auto fi = comp->functions_single_threaded.begin_const_iter();
-      auto fend = comp->functions_single_threaded.end_const_iter();
-      for (; fi != fend; fi.next()) {
-        if (fi.get()->code_block.label == label) {
-          const Function* f = fi.get();
-          const CodeBlock* block = &f->code_block;
-
-          ByteCode::print_bytecode(comp->build_options.endpoint_system->reg_name_from_num, stdout, block->code.data, block->code.size);
-          break;
-        }
-      }
-    }
-
-    IO::print('\n');
-  }
-}
-#endif
 
 int compile_and_write(const APIOptions& options) {
   TRACING_FUNCTION();
@@ -129,9 +94,7 @@ int compile_and_write(const APIOptions& options) {
     compile_all(&compiler, &compiler_thread);
     if (compiler.is_global_panic() || compiler_thread.is_panic()) {
       ERROR_CODE code = print_error_messages(compiler.global_errors);
-      std::cerr << "Compilation was not completed due to an error!\nError Code '"
-        << error_code_string(code)
-        << "'\n";
+      format_err_print("Compilation was not completed due to an error!\nError Code '{}'\n", code);
       return -2;
     }
   }
@@ -165,9 +128,7 @@ int compile_and_write(const APIOptions& options) {
 
     if (compiler_thread.is_panic()) {
       ERROR_CODE code = print_error_messages(compiler_thread.errors.error_messages);
-      std::cerr << "Compilation was not completed due to an error!\nError Code '"
-        << error_code_string(code)
-        << "'\n";
+      format_err_print("Compilation was not completed due to an error!\nError Code '{}'\n", code);
       return -2;
     }
   }

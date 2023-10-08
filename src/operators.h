@@ -62,9 +62,6 @@ struct UnOpEmitInfo {
 struct UnOpArgs {
   const UnOpEmitInfo* info;
   CompilerGlobals* comp;
-#if 0
-  CompilerThread* comp_thread;
-#endif
   Eval::IrBuilder* builder;
   const Eval::RuntimeValue& prim;
 

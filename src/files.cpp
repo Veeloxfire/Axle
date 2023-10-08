@@ -174,7 +174,7 @@ static void real_seek(FILES::FileData* file, usize ptr) {
 
     SetFilePointerEx(file->handle, li, &li, FILE_CURRENT);
 
-    ASSERT(li.QuadPart == ptr);
+    ASSERT(static_cast<usize>(li.QuadPart) == ptr);
     file->real_file_ptr = ptr;
   }
 }
@@ -334,7 +334,7 @@ static void write_new_buffer(FILES::FileData* file, usize abstract_ptr, const ui
   memcpy_s(file->buffer, size, bytes + (num_bytes - size), size);
 }
 
-ErrorCode FILES::read_to_bytes(FileData* file, uint8_t* bytes, size_t num_bytes) {
+FILES::ErrorCode FILES::read_to_bytes(FileData* file, uint8_t* bytes, size_t num_bytes) {
   ASSERT(num_bytes <= ULONG_MAX);
 
   BufferRange range = get_loaded_range(file, file->abstract_file_ptr, num_bytes);
@@ -406,7 +406,7 @@ OwnedArr<const char> FILES::load_file_to_string(const char* file_name) {
   return { string, static_cast<usize>(li.QuadPart) };
 }
 
-ErrorCode FILES::write(FileData* file, const uint8_t* bytes, size_t num_bytes) {
+FILES::ErrorCode FILES::write(FileData* file, const uint8_t* bytes, size_t num_bytes) {
   usize end = file->abstract_file_ptr + num_bytes;
   usize max_buffer_end = file->real_buffer_ptr + BUFFER_SIZE;
 
@@ -435,7 +435,7 @@ ErrorCode FILES::write(FileData* file, const uint8_t* bytes, size_t num_bytes) {
   return ErrorCode::OK;
 }
 
-ErrorCode FILES::write_padding_bytes(FileData* file, uint8_t byte, size_t num) {
+FILES::ErrorCode FILES::write_padding_bytes(FileData* file, uint8_t byte, size_t num) {
   //TODO: actual buffered io
 
   sync_buffer(file);
@@ -464,7 +464,7 @@ ErrorCode FILES::write_padding_bytes(FileData* file, uint8_t byte, size_t num) {
   return ErrorCode::OK;
 }
 
-ErrorCode FILES::write_aligned_array(FileData* file, const uint8_t* arr, const size_t size, const size_t align) {
+FILES::ErrorCode FILES::write_aligned_array(FileData* file, const uint8_t* arr, const size_t size, const size_t align) {
   //Write the data
   write(file, arr, size);
 
@@ -480,7 +480,7 @@ ErrorCode FILES::write_aligned_array(FileData* file, const uint8_t* arr, const s
   }
 }
 
-ErrorCode FILES::write_aligned_array(FileData* file, const Array<uint8_t>& arr, const size_t align) {
+FILES::ErrorCode FILES::write_aligned_array(FileData* file, const Array<uint8_t>& arr, const size_t align) {
   return write_aligned_array(file, arr.data, arr.size, align);
 }
 

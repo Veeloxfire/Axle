@@ -6,6 +6,8 @@
 #include "errors.h"
 #include "memory.h"
 
+#include "format.h"
+
 #define AXLE_TOKEN_KEYWORDS \
 MODIFY(Return, "return") \
 MODIFY(Function, "function") \
@@ -61,12 +63,27 @@ enum class AxleTokenType : uint8_t {
 #undef MODIFY
 };
 
-struct TokenTypeString {
-  const char* string = nullptr;
-  size_t length = 0;
-};
+constexpr ViewArr<const char> token_type_string(AxleTokenType t) {
+  switch (t) {
+#define MODIFY(tt, str) case AxleTokenType :: tt : return lit_view_arr(#tt);
+    AXLE_TOKEN_MODIFY
+#undef MODIFY
+  }
 
-TokenTypeString token_type_string(AxleTokenType);
+  return lit_view_arr("UNKNOWN TOKEN TYPE");
+}
+
+namespace Format {
+  template<>
+  struct FormatArg<AxleTokenType> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, AxleTokenType tt) {
+      const ViewArr<const char> str = token_type_string(tt);
+      res.load_string(str.data, str.size);
+    }
+  };
+
+}
 
 struct Position {
   size_t line = 0;
@@ -151,13 +168,3 @@ void reset_parser(CompilerGlobals* comp,
 
 struct FileAST;
 void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser, FileAST* const file);
-
-struct KeywordPair {
-  const char* keyword = nullptr;
-  AxleTokenType type = AxleTokenType::End;
-  size_t size = 0;
-
-  constexpr KeywordPair(const char* kw, AxleTokenType t)
-    :keyword(kw), type(t), size(strlen_ts(kw))
-  {}
-};

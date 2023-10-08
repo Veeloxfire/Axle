@@ -1,5 +1,22 @@
 #include "tests.h"
 
+constexpr int RANDOM_ARR[] = {
+  65, 55, 71, 23, 92,
+  57, 51, 84, 86, 30,
+  1, 37, 100, 97, 86,
+  14, 98, 38, 88, 45,
+};
+
+constexpr int SORTED_RANDOM_ARR[] = {
+  1, 14, 23, 30, 37,
+  38, 45, 51, 55, 57,
+  65, 71, 84, 86, 86,
+  88, 92, 97, 98, 100
+};
+
+
+constexpr usize RANDOM_ARR_SIZE = array_size(RANDOM_ARR);
+
 TEST_FUNCTION(Util_Array, Insert_Remove) {
   Array<usize> a = {};
 
@@ -92,23 +109,6 @@ TEST_FUNCTION(Util_Queue, Insert_Remove) {
   }
 }
 
-constexpr int RANDOM_ARR[] = {
-  65, 55, 71, 23, 92,
-  57, 51, 84, 86, 30,
-  1, 37, 100, 97, 86,
-  14, 98, 38, 88, 45,
-};
-
-constexpr int SORTED_RANDOM_ARR[] = {
-  1, 14, 23, 30, 37,
-  38, 45, 51, 55, 57,
-  65, 71, 84, 86, 86,
-  88, 92, 97, 98, 100
-};
-
-
-constexpr usize RANDOM_ARR_SIZE = array_size(RANDOM_ARR);
-
 TEST_FUNCTION(Util, sort) {
   Array<int> ints = {};
 
@@ -135,58 +135,80 @@ struct CheckDelete {
   }
 };
 
-
 TEST_FUNCTION(Util_OwnedArr, bake) {
-  {
-    Array<int> ints = {};
+  Array<int> ints = {};
 
-    for (int i : RANDOM_ARR) {
-      ints.insert(i);
-    }
-
-    OwnedArr<int> ints_arr = bake_arr(std::move(ints));
-
-    static_assert(IS_SAME_TYPE<decltype(ints_arr[0]), int&>, "Must return ref");
-
-    TEST_EQ((int*)nullptr, ints.data);
-    TEST_EQ((usize)0, ints.size);
-    TEST_EQ((usize)0, ints.capacity);
-    TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr.data, ints_arr.size);
-
-    const OwnedArr<int> ints_arr2 = std::move(ints_arr);
-
-    static_assert(IS_SAME_TYPE<decltype(ints_arr2[0]), int&>, "Must return ref");
-
-    TEST_EQ((int*)nullptr, ints_arr.data);
-    TEST_EQ((usize)0, ints_arr.size);
-    TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr2.data, ints_arr2.size);
+  for (int i : RANDOM_ARR) {
+    ints.insert(i);
   }
 
-  {
-    Array<int> ints = {};
+  OwnedArr<int> ints_arr = bake_arr(std::move(ints));
 
-    for (int i : RANDOM_ARR) {
-      ints.insert(i);
-    }
-    const usize prev_size = ints.size;
-    OwnedArr<const int> ints_arr = bake_const_arr(std::move(ints));
+  static_assert(IS_SAME_TYPE<decltype(ints_arr[0]), int&>, "Must return ref");
 
-    static_assert(IS_SAME_TYPE<decltype(ints_arr[0]), const int&>, "Must return const ref");
+  TEST_EQ((int*)nullptr, ints.data);
+  TEST_EQ((usize)0, ints.size);
+  TEST_EQ((usize)0, ints.capacity);
+  TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr.data, ints_arr.size);
 
-    TEST_EQ((int*)nullptr, ints.data);
-    TEST_EQ((usize)0, ints.size);
-    TEST_EQ((usize)0, ints.capacity);
-    TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr.data, ints_arr.size);
+  const OwnedArr<int> ints_arr2 = std::move(ints_arr);
 
-    const OwnedArr<const int> ints_arr2 = std::move(ints_arr);
+  static_assert(IS_SAME_TYPE<decltype(ints_arr2[0]), int&>, "Must return ref");
 
-    static_assert(IS_SAME_TYPE<decltype(ints_arr2[0]), const int&>, "Must return const ref");
+  TEST_EQ((int*)nullptr, ints_arr.data);
+  TEST_EQ((usize)0, ints_arr.size);
+  TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr2.data, ints_arr2.size);
+  
+}
 
-    TEST_EQ((const int*)nullptr, ints_arr.data);
-    TEST_EQ((usize)0, ints_arr.size);
-    TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr2.data, ints_arr2.size);
+TEST_FUNCTION(Util_OwnedArr, bake_const) {
+  Array<int> ints = {};
+
+  for (int i : RANDOM_ARR) {
+    ints.insert(i);
+  }
+  const usize prev_size = ints.size;
+  OwnedArr<const int> ints_arr = bake_const_arr(std::move(ints));
+
+  static_assert(IS_SAME_TYPE<decltype(ints_arr[0]), const int&>, "Must return const ref");
+
+  TEST_EQ((int*)nullptr, ints.data);
+  TEST_EQ((usize)0, ints.size);
+  TEST_EQ((usize)0, ints.capacity);
+  TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr.data, ints_arr.size);
+
+  const OwnedArr<const int> ints_arr2 = std::move(ints_arr);
+
+  static_assert(IS_SAME_TYPE<decltype(ints_arr2[0]), const int&>, "Must return const ref");
+
+  TEST_EQ((const int*)nullptr, ints_arr.data);
+  TEST_EQ((usize)0, ints_arr.size);
+  TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints_arr2.data, ints_arr2.size);
+}
+
+TEST_FUNCTION(Util_OwnedArr, copy) {
+  Array<int> ints = {};
+
+  for (int i : RANDOM_ARR) {
+    ints.insert(i);
   }
 
+  TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, ints.data, ints.size);
+
+  OwnedArr<int> arr = copy_arr(ints);
+
+  TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, arr.data, arr.size);
+
+  OwnedArr<int> arr2 = copy_arr(arr);
+
+  TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, arr2.data, arr2.size);
+
+  OwnedArr<int> arr3 = copy_arr(RANDOM_ARR, RANDOM_ARR_SIZE);
+
+  TEST_ARR_EQ(RANDOM_ARR, RANDOM_ARR_SIZE, arr3.data, arr3.size);
+}
+
+TEST_FUNCTION(Util_OwnedArr, destruction) {
   {
     int i = 0;
     constexpr int COUNTER = 20;
@@ -248,6 +270,60 @@ TEST_FUNCTION(Util_OwnedArr, bake) {
 
     TEST_EQ(COUNTER * 2, i);
   }
+}
+
+
+TEST_FUNCTION(Util_ViewArr, view_Array) {
+  Array<usize> arr = {};
+  arr.reserve_extra(RANDOM_ARR_SIZE);
+
+  for (int i : RANDOM_ARR) {
+    arr.insert(i);
+  }
+
+  {
+    ViewArr<usize> v = view_arr(arr);
+
+    TEST_EQ(arr.data, v.data);
+    TEST_EQ(arr.size, v.size);
+
+    ViewArr<const usize> v2 = v;
+    TEST_EQ((const usize*)arr.data, v2.data);
+    TEST_EQ(arr.size, v2.size);
+  }
+
+  {
+    ViewArr<usize> v = view_arr(arr, 3, 5);
+
+    TEST_EQ(arr.data + 3, v.data);
+    TEST_EQ((usize)5, v.size);
+
+    ViewArr<const usize> v2 = v;
+    TEST_EQ((const usize*)arr.data + 3, v2.data);
+    TEST_EQ((usize)5, v2.size);
+  }
+
+  {
+    ViewArr<const usize> v = const_view_arr(arr);
+
+    TEST_EQ((const usize*)arr.data, v.data);
+    TEST_EQ(arr.size, v.size);
+  }
+
+  {
+    ViewArr<const usize> v = const_view_arr(arr, 3, 5);
+
+    TEST_EQ((const usize*)arr.data + 3, v.data);
+    TEST_EQ((usize)5, v.size);
+  }
+}
+
+TEST_FUNCTION(Util_ViewArr, literal_view) {
+  ViewArr<const char> view = lit_view_arr("hello world");
+
+  const char expected[] = { 'h', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', };
+
+  TEST_ARR_EQ(expected, array_size(expected), view.data, view.size);
 }
 
 TEST_FUNCTION(Util, freelist_block_allocator) {

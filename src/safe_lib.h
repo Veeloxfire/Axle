@@ -353,3 +353,93 @@ constexpr size_t strlen_ts(const char* c) {
 }
 
 #define TODO() static_assert(false, "Code is broken")
+
+template<typename T>
+struct ViewArr {
+  T* data = nullptr;
+  usize size = 0;
+
+  const T* begin() const { return data; }
+  const T* end() const { return data + size; }
+
+  T* mut_begin() const { return data; }
+  T* mut_end() const { return data + size; }
+
+  T& operator[](usize i) const {
+    ASSERT(i < size);
+    return data[i];
+  }
+
+  template<typename T>
+  operator ViewArr<const T>() {
+    return { data, size };
+  }
+};
+
+template<typename T>
+struct ViewArr<const T> {
+  const T* data = nullptr;
+  usize size = 0;
+
+  const T* begin() const { return data; }
+  const T* end() const { return data + size; }
+
+  const T& operator[](usize i) const {
+    ASSERT(i < size);
+    return data[i];
+  }
+};
+
+template<usize N>
+ViewArr<const char> lit_view_arr(const char(&arr)[N]) {
+  ASSERT(arr[N - 1] == '\0');
+  return {
+    arr,
+    N - 1,
+  };
+}
+
+constexpr ViewArr<const char> error_code_string(ERROR_CODE c) {
+  switch (c) {
+#define MOD(E) case ERROR_CODE ::  E : return lit_view_arr(#E);
+    COMPCODEINC
+#undef MOD
+  }
+
+  return lit_view_arr("Invalid code");
+}
+
+namespace BINARY_OP_STRING {
+#define MODIFY(name, str, prec) inline constexpr char name[] = str;
+  BIN_OP_INCS;
+#undef MODIFY
+
+  constexpr ViewArr<const char> get(BINARY_OPERATOR op) noexcept {
+    switch (op)
+    {
+#define MODIFY(name, str, prec) case BINARY_OPERATOR :: name : return lit_view_arr(name);
+      BIN_OP_INCS;
+#undef MODIFY
+    }
+
+    return lit_view_arr("UNKNOWN OPERATOR");
+  }
+}
+
+
+namespace UNARY_OP_STRING {
+#define MODIFY(name, str) inline constexpr char name[] = str;
+  UN_OP_INCS;
+#undef MODIFY
+
+  constexpr ViewArr<const char> get(UNARY_OPERATOR op) noexcept {
+    switch (op)
+    {
+#define MODIFY(name, str) case UNARY_OPERATOR :: name :  return lit_view_arr(name);
+      UN_OP_INCS;
+#undef MODIFY
+    }
+
+    return lit_view_arr("UNKNOWN OPERATOR");
+  }
+}

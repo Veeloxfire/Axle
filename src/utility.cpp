@@ -9,7 +9,9 @@ void throw_testing_assertion(const char* message) {
 }
 
 void abort_assertion(const char* message) {
-  IO::err_print(message);
+  const ViewArr<const char> msg_view = {message, strlen_ts(message) };
+
+  IO::err_print(msg_view);
   abort();
 }
 
@@ -510,44 +512,64 @@ void IO_Single::unlock() {
   io_mutex.release();
 }
 
-void IO_Single::print_impl(const char* string) {
+void IO_Single::print_impl(const char* string, usize n) {
   TRACING_FUNCTION();
-  fputs(string, stdout);
+  fwrite(string, 1, n, stdout);
+}
+
+void IO_Single::print_impl(const ViewArr<char>& string) {
+  TRACING_FUNCTION();
+  fwrite(string.data, 1, string.size, stdout);
+}
+
+void IO_Single::print_impl(const ViewArr<const char>& string) {
+  TRACING_FUNCTION();
+  fwrite(string.data, 1, string.size, stdout);
 }
 
 void IO_Single::print_impl(const OwnedArr<char>& string) {
   TRACING_FUNCTION();
-  fputs(string.data, stdout);
+  fwrite(string.data, 1, string.size, stdout);
 }
 
 void IO_Single::print_impl(const OwnedArr<const char>& string) {
   TRACING_FUNCTION();
-  fputs(string.data, stdout);
+  fwrite(string.data, 1, string.size, stdout);
 }
 
 void IO_Single::print_impl(const char c) {
   TRACING_FUNCTION();
-  putc(c, stdout);
+  fputc(c, stdout);
 }
 
-void IO_Single::err_print_impl(const char* string) {
+void IO_Single::err_print_impl(const char* string, usize n) {
   TRACING_FUNCTION();
-  fputs(string, stderr);
+  fwrite(string, 1, n, stderr);
+}
+
+void IO_Single::err_print_impl(const ViewArr<char>& string) {
+  TRACING_FUNCTION();
+  fwrite(string.data, 1, string.size, stderr);
+}
+
+void IO_Single::err_print_impl(const ViewArr<const char>& string) {
+  TRACING_FUNCTION();
+  fwrite(string.data, 1, string.size, stderr);
 }
 
 void IO_Single::err_print_impl(const OwnedArr<char>& string) {
   TRACING_FUNCTION();
-  fputs(string.data, stderr);
+  fwrite(string.data, 1, string.size, stderr);
 }
 
 void IO_Single::err_print_impl(const OwnedArr<const char>& string) {
   TRACING_FUNCTION();
-  fputs(string.data, stderr);
+  fwrite(string.data, 1, string.size, stderr);
 }
 
-void IO_Single::err_print_impl(const char c)  {
+void IO_Single::err_print_impl(const char c) {
   TRACING_FUNCTION();
-  putc(c, stderr);
+  fputc(c, stderr);
 }
 
 void serialize_zeros(Array<u8>& bytes, usize size, usize alignment) {

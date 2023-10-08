@@ -1231,7 +1231,7 @@ TC_STAGE(UNARY_OPERATOR, deref_2) {
     return FINISHED;
   }
   else {
-    const char* const op_string = UNARY_OP_STRING::get(expr->op);
+    const ViewArr<const char> op_string = UNARY_OP_STRING::get(expr->op);
 
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
                               "No unary operator '{}' exists for type: '{}'",
@@ -1285,7 +1285,7 @@ TC_STAGE(UNARY_OPERATOR, 1) {
       }
   }
 
-  const char* name = UNARY_OP_STRING::get(expr->op);
+  const ViewArr<const char> name = UNARY_OP_STRING::get(expr->op);
 
   comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
                             "Type checking is not implemented for unary operator '{}'",
@@ -1854,7 +1854,7 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
 #endif
   }
 
-  const char* const op_string = BINARY_OP_STRING::get(expr->op);
+  const ViewArr<const char> op_string = BINARY_OP_STRING::get(expr->op);
 
   comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
                             "No binary operator '{}' exists for left type: '{}', and right type: '{}'",

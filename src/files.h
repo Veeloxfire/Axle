@@ -1,8 +1,39 @@
 #pragma once
 #include "utility.h"
-
+#include "format.h"
 
 namespace FILES {
+#define FILE_ERROR_CODES_X \
+modify(OK)\
+modify(COULD_NOT_CREATE_FILE)\
+modify(COULD_NOT_OPEN_FILE)\
+modify(COULD_NOT_CLOSE_FILE)\
+
+  enum struct ErrorCode : uint8_t {
+  #define modify(NAME) NAME,
+    FILE_ERROR_CODES_X
+  #undef modify
+  };
+
+  namespace ErrorCodeString {
+  #define modify(NAME) inline constexpr char NAME[] = #NAME;
+    FILE_ERROR_CODES_X
+  #undef modify
+  }
+
+  constexpr ViewArr<const char> error_code_string(const ErrorCode code) {
+    switch (code) {
+  #define modify(NAME) case ErrorCode :: NAME :\
+return lit_view_arr(ErrorCodeString :: NAME);
+      FILE_ERROR_CODES_X
+  #undef modify
+    }
+
+    return {};
+  }
+
+#undef FILE_ERROR_CODES_X
+
   enum struct OPEN_MODE : uint8_t {
     READ = 'r', WRITE = 'w'
   };
@@ -54,6 +85,17 @@ namespace FILES {
   ErrorCode write_str(FileData* file, const char(&str)[N]) {
     return write(file, (const uint8_t*)str, N - 1);
   }
+}
+
+namespace Format {
+  template<>
+  struct FormatArg<FILES::ErrorCode> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, FILES::ErrorCode er) {
+      ViewArr<const char> err_str = FILES::error_code_string(er);
+      res.load_string_raw(err_str.data, err_str.size);
+    }
+  };
 }
 
 struct InternString;

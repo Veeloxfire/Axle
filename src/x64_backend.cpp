@@ -4003,8 +4003,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         }
 
       default: {
-          const char* opcode_name = IR::opcode_string(op);
-          if (opcode_name == nullptr) {
+          const ViewArr<const char> opcode_name = IR::opcode_string(op);
+          if (opcode_name.data == nullptr) {
             comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                       "Invalid instruction encountered during ir compilation\n"
                                       "Id = {} (a name for this opcode could not be found)",
@@ -4384,8 +4384,8 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread, Backend::Gener
     comp->services.get_multiple(&structs, &strings);
 
 
-    lib.path = strings->intern("kernel32.dll");
-    lib.name = strings->intern("ExitProcess");
+    lib.path = strings->intern("kernel32.dll", array_size("kernel32.dll") - 1);
+    lib.name = strings->intern("ExitProcess", array_size("ExitProcess") - 1);
 
 
     Array<Type> params = {};
@@ -5377,7 +5377,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               case ValueType::Memory: Helpers::copy_reg_to_mem(program, left_reg, s_bool, to.mem, to.t.structure); break;\
             }\
             break;\
-          }\
+          }
 
                              EMIT_BIN_OP_CMP(Great, Helpers::emit_great);
                              EMIT_BIN_OP_CMP(Less, Helpers::emit_less);
@@ -5385,8 +5385,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                              EMIT_BIN_OP_CMP(Neq, Helpers::emit_neq);
 
         default: {
-            const char* opcode_name = IR::opcode_string(op);
-            if (opcode_name == nullptr) {
+            const ViewArr<const char> opcode_name = IR::opcode_string(op);
+            if (opcode_name.data == nullptr) {
               comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                         "Invalid instruction encountered during ir compilation\n"
                                         "Id = {} (a name for this opcode could not be found)",

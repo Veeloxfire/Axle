@@ -4,6 +4,7 @@
 #include "comp_utilities.h"
 #include "names.h"
 #include "errors.h"
+#include "format.h"
 
 struct CompilationUnit;
 struct CallingConvention;
@@ -25,12 +26,12 @@ enum struct VALUE_CATEGORY : u8 {
 namespace VC {
   constexpr ViewArr<const char> category_name(VALUE_CATEGORY vc) {
     switch (vc) {
-      case VALUE_CATEGORY::TEMPORARY_CONSTANT: return view_arr("Temporary Constant");
-      case VALUE_CATEGORY::TEMPORARY_IMMUTABLE: return view_arr("Temporary Immutable");
+      case VALUE_CATEGORY::TEMPORARY_CONSTANT: return lit_view_arr("Temporary Constant");
+      case VALUE_CATEGORY::TEMPORARY_IMMUTABLE: return lit_view_arr("Temporary Immutable");
 
-      case VALUE_CATEGORY::VARIABLE_CONSTANT: return view_arr("Variable Constant");
-      case VALUE_CATEGORY::VARIABLE_IMMUTABLE: return view_arr("Variable Immutable");
-      case VALUE_CATEGORY::VARIABLE_MUTABLE: return view_arr("Variable Mutable");
+      case VALUE_CATEGORY::VARIABLE_CONSTANT: return lit_view_arr("Variable Constant");
+      case VALUE_CATEGORY::VARIABLE_IMMUTABLE: return lit_view_arr("Variable Immutable");
+      case VALUE_CATEGORY::VARIABLE_MUTABLE: return lit_view_arr("Variable Mutable");
     }
 
     return {};
@@ -66,6 +67,18 @@ namespace VC {
     return false;
   }
 }
+
+namespace Format {
+  template<>
+  struct FormatArg<VALUE_CATEGORY> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, VALUE_CATEGORY vc) {
+      ViewArr<const char> str = VC::category_name(vc);
+      res.load_string(str.data, str.size);
+    }
+  };
+}
+
 
 enum struct STRUCTURE_TYPE : u8 {
   VOID = 0,
@@ -224,6 +237,37 @@ struct SignatureStructure : public Structure {
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::LAMBDA;
 };
+
+struct PrintSignatureType {
+  const SignatureStructure* sig;
+};
+
+namespace Format {
+  template<>
+  struct FormatArg<PrintSignatureType> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, PrintSignatureType p_sig) {
+      const SignatureStructure* sig = p_sig.sig;
+
+      res.load_char('(');
+
+      auto i = sig->parameter_types.begin();
+      const auto end = sig->parameter_types.end();
+
+      if (i < end) {
+        for (; i < (end - 1); i++) {
+          FormatArg<const InternString*>::load_string(res, i->name);
+          res.load_string_lit(", ");
+        }
+
+        FormatArg<const InternString*>::load_string(res, i->name);
+      }
+
+      res.load_string_lit(") -> ");
+      FormatArg<const InternString*>::load_string(res, sig->return_type.name);
+    }
+  };
+}
 
 struct BuiltinTypes {
   Type t_bool ={};

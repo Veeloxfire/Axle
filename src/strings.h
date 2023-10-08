@@ -1,5 +1,6 @@
 #pragma once
 #include "utility.h"
+#include "format.h"
 
 struct InternString {
   uint64_t hash;
@@ -19,6 +20,17 @@ struct InternString {
     return sizeof(InternString) + string_len + 1 /* for null byte */;
   }
 };
+
+namespace Format {
+  template<>
+  struct FormatArg<const InternString*> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const InternString* str) {
+      res.load_string(str->string, str->len);
+    }
+  };
+}
+
 
 extern const InternString* TOMBSTONE;
 
@@ -42,8 +54,15 @@ struct StringInterner {
   BumpAllocator allocs = {};
   Table table = {};
 
-  const InternString* intern(const char* string);
   const InternString* intern(const char* string, size_t len);
+
+  inline const InternString* intern(const ViewArr<const char>& arr) {
+    return intern(arr.data, arr.size);
+  }
+
+  inline const InternString* intern(const OwnedArr<const char>& arr) {
+    return intern(arr.data, arr.size);
+  }
 };
 
 struct TempUTF8String {

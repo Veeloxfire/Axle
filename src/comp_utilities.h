@@ -44,16 +44,6 @@ enum struct ERROR_CODE : uint8_t {
 #undef MOD
 };
 
-constexpr const char* error_code_string(ERROR_CODE c) {
-  switch (c) {
-  #define MOD(E) case ERROR_CODE ::  E : return #E;
-    COMPCODEINC
-    #undef MOD
-  }
-
-  return "Invalid code";
-}
-
 #define BIN_OP_INCS \
 MODIFY(ADD, "+", 3)\
 MODIFY(SUB, "-", 3)\
@@ -76,22 +66,6 @@ enum struct BINARY_OPERATOR : uint8_t {
 #undef MODIFY
 };
 
-namespace BINARY_OP_STRING {
-#define MODIFY(name, str, prec) inline constexpr auto name = str;
-  BIN_OP_INCS;
-#undef MODIFY
-
-  constexpr const char* get(BINARY_OPERATOR op) noexcept {
-    switch (op)
-    {
-    #define MODIFY(name, str, prec) case BINARY_OPERATOR :: name : return name;
-      BIN_OP_INCS;
-    #undef MODIFY
-
-      default: return "UNKNOWN OPERATOR";
-    }
-  }
-}
 
 #define UN_OP_INCS \
 MODIFY(NEG, "-") \
@@ -103,23 +77,6 @@ enum struct UNARY_OPERATOR : uint8_t {
   UN_OP_INCS
 #undef MODIFY
 };
-
-namespace UNARY_OP_STRING {
-#define MODIFY(name, str) inline constexpr auto name = str;
-  UN_OP_INCS;
-#undef MODIFY
-
-  constexpr const char* get(UNARY_OPERATOR op) noexcept {
-    switch (op)
-    {
-    #define MODIFY(name, str) case UNARY_OPERATOR :: name : return name;
-      UN_OP_INCS;
-    #undef MODIFY
-
-      default: return "UNKNOWN OPERATOR";
-    }
-  }
-}
 
 #define INTRINSIC_MODS \
 MOD(import) \

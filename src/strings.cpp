@@ -95,10 +95,6 @@ void Table::try_resize() {
   }
 }
 
-const InternString* StringInterner::intern(const char* string) {
-  return intern(string, strlen_ts(string));
-}
-
 const InternString* StringInterner::intern(const char* string, const size_t length) {
   TRACING_FUNCTION();
   ASSERT(string != nullptr);

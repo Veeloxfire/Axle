@@ -212,14 +212,14 @@ MOD(Not, CODE_V_V)
 #undef MOD
   };
 
-  constexpr const char* opcode_string(OpCode c) {
+  constexpr ViewArr<const char> opcode_string(OpCode c) {
     switch (c) {
-#define MOD(n, ...) case OpCode:: n: return #n;
+#define MOD(n, ...) case OpCode:: n: return lit_view_arr(#n);
       OPCODES_MOD;
 #undef MOD
     }
 
-    return nullptr;
+    return {};
   }
 
   struct V_ARG {
@@ -426,6 +426,29 @@ MOD(Not, CODE_V_V)
   }
 
 #undef OPCODES_MOD
+}
+
+struct PrintFuncSignature {
+  const IR::Function* func;
+};
+
+namespace Format {
+  template<>
+  struct FormatArg<IR::OpCode> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, IR::OpCode op) {
+      const ViewArr<const char> str = IR::opcode_string(op);
+      return res.load_string(str.data, str.size);
+    }
+  };
+
+  template<>
+  struct FormatArg<PrintFuncSignature> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, PrintFuncSignature p_func) {
+      return load_string(res, PrintSignatureType{ p_func.func->signature.sig_struct });
+    }
+  };
 }
 
 namespace Eval {

@@ -312,7 +312,7 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
   FILES::OpenedFile file = FILES::replace(file_path.raw.data, FILES::OPEN_MODE::WRITE);
 
-  if (file.error_code != ErrorCode::OK) {
+  if (file.error_code != FILES::ErrorCode::OK) {
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, Span{}, "Could not open output file \"{}\" to write", file_path.raw);
     return;
   }
@@ -1220,11 +1220,6 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
     FILES::write_obj(out, exports_header);
   }
 
-#if 0
-  static_assert(false, "Checksum?");
-  static_assert(false, "Attribute Certificate?");
-#endif
-
   FILES::close(out);
   }
 
@@ -1272,7 +1267,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
   FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::READ);
 
-  if (file.error_code != ErrorCode::OK) {
+  if (file.error_code != FILES::ErrorCode::OK) {
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                               "Could not open file '{}'\n"
                               "Perhaps it does not exist",
@@ -1458,7 +1453,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
 
         name_holder.insert('\0');
 
-        ptr->str = comp->services.strings.get()->intern(name_holder.data);
+        ptr->str = comp->services.strings.get()->intern(name_holder.data, name_holder.size);
         pe_file->export_table.names.insert(ptr->str);
 
         name_holder.clear();

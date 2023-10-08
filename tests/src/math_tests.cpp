@@ -20,6 +20,22 @@ TEST_FUNCTION(Math, CEIL_TO_N) {
   TEST_EQ(16, ceil_to_8(9));
 }
 
+TEST_FUNCTION(Math, CEIL_TO_POW_2) {
+  TEST_EQ((u64)1, ceil_to_pow_2(1));
+  TEST_EQ((u64)2, ceil_to_pow_2(2));
+
+  for (u64 p = 2; p < 63; ++p) {
+    u64 n = static_cast<u64>(1) << p;
+
+    TEST_EQ(n, ceil_to_pow_2(n - 1));
+    TEST_EQ(n, ceil_to_pow_2(n));
+    TEST_EQ(n << 1, ceil_to_pow_2(n + 1));
+  }
+
+  TEST_EQ(1llu << 63llu, ceil_to_pow_2((1llu << 63llu) - 1llu));
+  TEST_EQ(1llu << 63llu, ceil_to_pow_2(1llu << 63llu));
+}
+
 TEST_FUNCTION(Math, bit_fills) {
   TEST_EQ(static_cast<u64>(0), bit_fill_lower<u64>(0));
   TEST_EQ(static_cast<u64>(1), bit_fill_lower<u64>(1));

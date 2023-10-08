@@ -152,17 +152,46 @@ constexpr T bit_fill_upper(B bits) {
   return ~bit_fill_lower<T, B>((sizeof(T) * 8) - bits);
 }
 
-template<typename T, size_t i>
-constexpr size_t array_size(T(&)[i]) {
-  return i;
+template<typename T, size_t N>
+constexpr size_t array_size(T(&)[N]) {
+  return N;
 }
+
+template<typename A>
+struct ArraySize;
+
+
+template<typename T, usize N>
+struct ArraySize<T[N]> {
+  constexpr static usize VAL = N;
+};
+
 
 constexpr size_t ceil_div(size_t x, size_t y) noexcept {
   return x / y + (x % y != 0);
 }
 
+constexpr uint64_t ceil_to_pow_2(uint64_t v) {
+  //See: https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
+  ASSERT(v != 0);
+  ASSERT(v <= (1llu << 63llu));
+
+  v--;
+  v |= v >> 1;
+  v |= v >> 2;
+  v |= v >> 4;
+  v |= v >> 8;
+  v |= v >> 16;
+  v |= v >> 32;
+  v++;
+
+  return v;
+}
+
 //Log 2 for uniform random 64 bit number
 constexpr inline uint64_t log_2(uint64_t v) {
+  //TODO: fancy bitwise stuff
+
   if (v == 0) {
     INVALID_CODE_PATH("MATH ERROR! Cannot log of 0");
   }
@@ -184,7 +213,6 @@ constexpr inline uint64_t log_2(uint64_t v) {
       max = mid;
     }
   }
-
 
   return min;
 }
@@ -604,21 +632,11 @@ struct Array {
     const size_t prev = capacity;
 
     //Min capacity should be 8
-    if (capacity < 8) {
+    if (total_required < 8) {
       capacity = 8;
-
-      //8 might still be less that total_required
-      while (total_required > capacity) {
-        capacity <<= 1;
-      }
-    }
-    else if (total_required > capacity) {
-      do {
-        capacity <<= 1;
-      } while (total_required > capacity);
     }
     else {
-      return;
+      capacity = ceil_to_pow_2(total_required);
     }
 
     data = reallocate_default<T>(data, prev, capacity);
@@ -1767,22 +1785,31 @@ OwnedArr<T> new_arr(usize size) {
 }
 
 template<typename T>
-OwnedArr<T> copy_arr(const OwnedArr<T>& in_arr) {
-  T* arr = allocate_default<T>(in_arr.size);
+OwnedArr<T> copy_arr(const T* source, usize n) {
+  T* arr = allocate_default<T>(n);
 
-  for (usize i = 0; i < in_arr.size; ++i) {
-    arr[i] = in_arr.data[i];
+  for (usize i = 0; i < n; ++i) {
+    arr[i] = source[i];
   }
-  return OwnedArr<T>(arr, in_arr.size);
+  return OwnedArr<T>(arr, n);
+}
+
+template<typename T>
+OwnedArr<T> copy_arr(const OwnedArr<T>& in_arr) {
+  return copy_arr(in_arr.data, in_arr.size);
+}
+
+template<typename T>
+OwnedArr<T> copy_arr(const Array<T>& in_arr) {
+  return copy_arr(in_arr.data, in_arr.size);
 }
 
 template<typename T>
 OwnedArr<T> bake_arr(Array<T>&& arr) {
   arr.shrink();
+
   T* d = std::exchange(arr.data, nullptr);
   usize s = std::exchange(arr.size, 0);
-
-  d = reallocate_default<T>(d, arr.capacity, s);
   arr.capacity = 0;
 
   return OwnedArr<T>(d, s);
@@ -1791,28 +1818,13 @@ OwnedArr<T> bake_arr(Array<T>&& arr) {
 template<typename T>
 OwnedArr<const T> bake_const_arr(Array<T>&& arr) {
   arr.shrink();
+
   T* d = std::exchange(arr.data, nullptr);
   usize s = std::exchange(arr.size, 0);
-
-  d = reallocate_default<T>(d, arr.capacity, s);
   arr.capacity = 0;
 
   return OwnedArr<const T>(d, s);
 }
-
-template<typename T>
-struct ViewArr {
-  T* data = nullptr;
-  usize size = 0;
-
-  T* begin() const { return data; }
-  T* end() const { return data + size; }
-
-  T& operator[](usize i) const {
-    ASSERT(i < size);
-    return data[i];
-  }
-};
 
 template<typename T>
 ViewArr<T> view_arr(const OwnedArr<T>& arr, usize start, usize count) {
@@ -1930,36 +1942,6 @@ struct ConstArray {
   }
 };
 
-#define ERROR_CODES_X \
-modify(OK)\
-modify(COULD_NOT_CREATE_FILE)\
-modify(COULD_NOT_OPEN_FILE)\
-modify(COULD_NOT_CLOSE_FILE)\
-modify(UNDEFINED_INSTRUCTION)\
-modify(STACK_OVERFLOW)
-
-enum struct ErrorCode : uint8_t {
-#define modify(NAME) NAME,
-  ERROR_CODES_X
-#undef modify
-};
-
-namespace ErrorCodeString {
-#define modify(NAME) inline constexpr char NAME[] = #NAME;
-  ERROR_CODES_X
-#undef modify
-}
-
-constexpr ViewArr<const char> error_code_string(const ErrorCode code) {
-  switch (code) {
-#define modify(NAME) case ErrorCode :: NAME : return view_arr(ErrorCodeString :: NAME);
-    ERROR_CODES_X
-#undef modify
-  }
-
-  return {};
-}
-
 template<typename T>
 void serialise_to_array(Array<uint8_t>& bytes, const T& t) {
   bytes.reserve_extra(sizeof(T));
@@ -2061,20 +2043,6 @@ inline constexpr X64_UNION x64_from_bytes(const uint8_t* const bytes) noexcept {
   return val;
 }
 
-inline constexpr ErrorCode x64_from_bytes_s(const uint8_t* buffer,
-                                            size_t buffer_length,
-                                            X64_UNION& uint,
-                                            uint8_t* const bytes) noexcept {
-  if (bytes >= buffer && buffer + buffer_length - 8 <= bytes) {
-    //safe
-    uint = x64_from_bytes(bytes);
-    return ErrorCode::OK;
-  }
-  else {
-    return ErrorCode::STACK_OVERFLOW;
-  }
-}
-
 inline constexpr uint32_t x32_from_bytes(const uint8_t* const bytes) noexcept {
   return (static_cast<uint32_t>(bytes[3]) << 24)
     | (static_cast<uint32_t>(bytes[2]) << 16)
@@ -2109,20 +2077,6 @@ inline constexpr void x32_to_bytes(const uint32_t uint, uint8_t* const bytes) no
 inline constexpr void x16_to_bytes(const uint16_t uint, uint8_t* const bytes) noexcept {
   bytes[1] = static_cast<uint8_t>(uint >> 8);
   bytes[0] = static_cast<uint8_t>(uint);
-}
-
-inline constexpr ErrorCode x64_to_bytes_s(const uint8_t* buffer,
-                                          size_t buffer_length,
-                                          const X64_UNION uint,
-                                          uint8_t* const bytes) noexcept {
-  if (bytes >= buffer && buffer + buffer_length - 8 <= bytes) {
-    //safe
-    x64_to_bytes(uint, bytes);
-    return ErrorCode::OK;
-  }
-  else {
-    return ErrorCode::STACK_OVERFLOW;
-  }
 }
 
 template<typename RET, typename ... PARAMS>
@@ -2194,15 +2148,29 @@ EXECUTE_AT_END(T&& t) -> EXECUTE_AT_END<T>;
 #define DEFER(...) EXECUTE_AT_END JOIN(defer, __LINE__) = [__VA_ARGS__]() mutable ->void 
 
 namespace IO_Single {
-  void print_impl(const char* string);
+  void print_impl(const char* string, usize N);
   void print_impl(const OwnedArr<char>& string);
   void print_impl(const OwnedArr<const char>& string);
+  void print_impl(const ViewArr<char>& string);
+  void print_impl(const ViewArr<const char>& string);
   void print_impl(const char c);
 
-  void err_print_impl(const char* string);
+  template<usize N>
+  void print_impl(const char(&str)[N]) {
+    print_impl(str, N);
+  }
+
+  void err_print_impl(const char* string, usize N);
   void err_print_impl(const OwnedArr<char>& string);
   void err_print_impl(const OwnedArr<const char>& string);
+  void err_print_impl(const ViewArr<char>& string);
+  void err_print_impl(const ViewArr<const char>& string);
   void err_print_impl(const char c);
+
+  template<usize N>
+  void err_print_impl(const char(&str)[N]) {
+    err_print_impl(str, N);
+  }
 
   template<typename ... T>
   void print(const T& ... t) {
@@ -2301,3 +2269,8 @@ constexpr bool A_can_cast_to_B = decltype(_iMPL_A_can_cast_to_B::test_overload<A
 
 template<typename T, typename ... Ops>
 concept OneOf = (IS_SAME_TYPE<T, Ops> || ...);
+
+template<typename T>
+struct TemplateFalse {
+  constexpr static bool VAL = false;
+};

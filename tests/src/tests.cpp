@@ -6,13 +6,13 @@ Array<UnitTest>& unit_tests_ref() {
   return t;
 }
 
-_TestAdder::_TestAdder(const char* test_name, TEST_FN fn) {
+_TestAdder::_TestAdder(const ViewArr<const char>& test_name, TEST_FN fn) {
   unit_tests_ref().insert({ test_name, fn });
 }
 
 struct FailedTest {
   Errors errors;
-  const char* test_name = nullptr;
+  ViewArr<const char> test_name = {};
 };
 
 int main() {

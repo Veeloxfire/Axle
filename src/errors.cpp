@@ -150,15 +150,14 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
   for (; i < end; i++) {
     ret = i->type;
 
-    const char* message_type = error_code_string(i->type);
+    const ViewArr<const char> message_type = error_code_string(i->type);
     IO::err_print(message_type);
     IO::err_print(":\n");
 
-    OwnedArr<char> type_set_message = format_type_set(i->message.data, 4, 70);
+    OwnedArr<char> type_set_message = format_type_set(const_view_arr(i->message), 4, 70);
 
-    IO::err_print(type_set_message.data);
-    IO::err_print('\n');
-    IO::err_print("\n");
+    IO::err_print(type_set_message);
+    IO::err_print("\n\n");
 
     if (i->span.full_path != nullptr) {
       const Span& span = i->span;
@@ -177,9 +176,9 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
       const char* source = ptr_ptr->data;
       OwnedArr<char> string = load_span_from_source(span, source);
 
-      IO::err_print(format("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start));
-      IO::err_print(string.data);
-      IO::err_print("\n");
+      format_err_print("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start);
+      IO::err_print(string);
+      IO::err_print('\n');
     }
   }
 

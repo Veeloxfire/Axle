@@ -98,19 +98,6 @@ constexpr const char* ast_type_string(AST_TYPE ty) {
   }
 }
 
-#if 0
-constexpr bool valid_type_node(AST_TYPE t) {
-  switch (t) {
-    case AST_TYPE::NAMED_TYPE:
-    case AST_TYPE::ARRAY_TYPE:
-    case AST_TYPE::PTR_TYPE:
-    case AST_TYPE::LAMBDA_TYPE:
-    case AST_TYPE::TUPLE_TYPE: return true;
-    default: return false;
-  }
-}
-#endif
-
 struct AST {
   AST_TYPE ast_type;
   VALUE_CATEGORY value_category;
@@ -236,6 +223,21 @@ struct ASTIdentifier : public AST {
   };
 };
 
+namespace Format {
+  template<>
+  struct FormatArg<ASTIdentifier::TYPE> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, ASTIdentifier::TYPE ty) {
+      switch (ty) {
+        case ASTIdentifier::LOCAL: res.load_string_lit("LOCAL"); return;
+        case ASTIdentifier::GLOBAL: res.load_string_lit("GLOBAL"); return;
+      }
+
+      return res.load_string_lit("INVALID");
+    }
+  };
+}
+
 struct ASTMemberAccessExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::MEMBER_ACCESS;
   AST_LOCAL expr = 0;
@@ -297,6 +299,37 @@ struct ASTFuncSig : public AST {
   AST_LOCAL return_type = 0;
   AST_ARR parameters = {};
 };
+
+struct PrintCallSignature {
+  const ASTFunctionCallExpr* call;
+};
+
+namespace Format {
+  template<>
+  struct FormatArg<PrintCallSignature> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, PrintCallSignature p_call) {
+      const ASTFunctionCallExpr* call = p_call.call;
+
+      res.load_char_raw('(');
+
+      auto l = call->arguments.start;
+
+      if (l) {
+        FormatArg<const InternString*>::load_string(res, l->curr->node_type.name);
+        l = l->next;
+
+        while (l) {
+          res.load_string_raw(", ");
+          FormatArg<const InternString*>::load_string(res, l->curr->node_type.name);
+          l = l->next;
+        }
+      }
+
+      res.load_char_raw(')');
+    }
+  };
+}
 
 struct ASTLambdaExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LAMBDA_EXPR;

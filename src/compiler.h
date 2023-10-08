@@ -87,9 +87,6 @@ struct DependencyManager {
   void close_dependency(CompilationUnit* ptr, bool print);
   void remove_dependency_from(CompilationUnit* ptr, bool print);
   void add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on);
-#if 0
-  void add_external_dependency(CompilationUnit* now_waiting);
-#endif
 };
 
 struct CompilationUnit {
@@ -131,6 +128,31 @@ struct ExportCompilation {};
 struct CallSignature {
   Array<Type> arguments = {};
 };
+
+namespace Format {
+  template<>
+  struct FormatArg<CallSignature> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const CallSignature& call_sig) {
+      auto i = call_sig.arguments.begin();
+      const auto end = call_sig.arguments.end();
+
+      res.load_char('(');
+
+      if (i < end) {
+        for (; i < (end - 1); i++) {
+          FormatArg<const InternString*>::load_string(res, i->name);
+          res.load_string_lit(", ");
+        }
+
+        FormatArg<const InternString*>::load_string(res, i->name);
+      }
+
+      res.load_char(')');
+    }
+  };
+}
+
 
 struct UnknownName {
   const InternString* ident = nullptr;
@@ -381,23 +403,6 @@ inline constexpr void thead_doing_work(CompilerGlobals* comp, CompilerThread* co
     comp_thread->doing_work = true;
   }
 }
-
-#if 0
-void set_dependency(CompilerGlobals* const comp, Context* const context, CompilationUnit* current, CompilationUnit* waiting_on);
-
-CompilationUnit* compile_and_execute(Compiler* const comp, Namespace* const available_names, AST_LOCAL ast, Type cast_to);
-
-
-void cast_operator_type(Compiler* const comp,
-                        State* const state,
-                        ASTCastExpr* const expr);
-
-void process_parsed_file(Compiler* const comp, FileAST* const func);
-
-void print_compiled_functions(const Compiler* comp);
-
-
-#endif
 
 void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread);
 

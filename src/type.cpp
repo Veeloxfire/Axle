@@ -52,7 +52,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
     uint32_t current_size = 0;
     uint32_t current_align = 0;
 
-    Array<char> name = {};
+    Format::ArrayFormatter name = {};
 
     auto i = types.begin();
     const auto end = types.end();
@@ -62,7 +62,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
     if (i < end) {
       ASSERT(tup_el < tup_el_end);
 
-      format_to_array(name, "({}", i->name);
+      Format::format_to_formatter(name, "({}", i->name);
 
       tup_el->type = *i;
       tup_el->offset = current_size;
@@ -77,7 +77,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
 
       for (; i < end; (i++, tup_el++)) {
         ASSERT(tup_el < tup_el_end);
-        format_to_array(name, ", {}", i->name);
+        Format::format_to_formatter(name, ", {}", i->name);
 
         tup_el->type = *i;
         tup_el->offset = current_size;
@@ -88,17 +88,18 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
         current_align = larger(i->structure->alignment, current_align);
       }
 
-      format_to_array(name, ")");
+      Format::format_to_formatter(name, ")");
     }
     else {
-      format_to_array(name, "()");
+      Format::format_to_formatter(name, "()");
     }
 
-    name.insert('\n');
+    name.load_char('\n');
 
     type->size = current_size;
     type->alignment = current_align;
-    type->struct_name = strings->intern(name.data);
+
+    type->struct_name = strings->intern(name.view());
   }
 
   structures->structures.insert(type);
@@ -122,26 +123,26 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
   type->alignment = (u32)ptr_size;
 
   {
-    Array<char> name = {};
+    Format::ArrayFormatter name = {};
 
     auto i = type->parameter_types.begin();
     auto end = type->parameter_types.end();
 
-    name.insert('(');
+    name.load_char('(');
 
     if (i < end) {
-      format_to_array(name, "{}", i->name);
+      Format::format_to_formatter(name, "{}", i->name);
       i++;
     }
 
     for (; i < end; i++) {
-      format_to_array(name, ", {}", i->name);
+      Format::format_to_formatter(name, ", {}", i->name);
     }
 
-    format_to_array(name, ") -> {}", type->return_type.name);
-    name.insert('\0');
+    Format::format_to_formatter(name, ") -> {}", type->return_type.name);
+    name.load_char('\0');
 
-    type->struct_name = strings->intern(name.data);
+    type->struct_name = strings->intern(name.view());
   }
 
   structures->structures.insert(type);
@@ -167,7 +168,7 @@ CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Str
   CompositeStructure* const type = structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
   type->ir_format = IR::Format::opaque;
-  type->struct_name = strings->intern("anoymous-struct");
+  type->struct_name = strings->intern("anoymous-struct", array_size("anoymous-struct") - 1);
 
   structures->structures.insert(type);
 
@@ -177,10 +178,14 @@ CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Str
 EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterner* strings, const Type& base) {
   TRACING_FUNCTION();
 
+
   EnumStructure* const type = structures->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
   type->ir_format = base.struct_format();
-  type->struct_name = strings->intern(EnumStructure::gen_name(base).data);
+  {
+    OwnedArr name = EnumStructure::gen_name(base);
+    type->struct_name = strings->intern(name.data, name.size);
+  }
   type->base = base;
 
   type->size = base.structure->size;
@@ -195,14 +200,17 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
                                              size_t length) {
   TRACING_FUNCTION();
 
-  const InternString* name = strings->intern(ArrayStructure::gen_name(base, length).data);
 
   ArrayStructure* const type = structures->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
   type->ir_format = IR::Format::opaque;
   type->base = base;
   type->length = length;
-  type->struct_name = name;
+
+  {
+    OwnedArr name = ArrayStructure::gen_name(base, length);
+    type->struct_name = strings->intern(name.data, name.size);
+  }
 
   type->size = base.structure->size * (u32)length;
   type->alignment = base.structure->alignment;
@@ -214,13 +222,16 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
 
 PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringInterner* strings, usize ptr_size, const Type& base) {
   TRACING_FUNCTION();
-  const InternString* name = strings->intern(PointerStructure::gen_name(base).data);
-
+  
   PointerStructure* const type = structures->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
   type->ir_format = IR::Format::uint64;
   type->base = base;
-  type->struct_name = name;
+
+  {
+    OwnedArr name = PointerStructure::gen_name(base);
+    type->struct_name = strings->intern(name.data, name.size);
+  }
 
   type->size = (u32)ptr_size;
   type->alignment = (u32)ptr_size;
