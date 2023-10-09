@@ -371,7 +371,7 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
 
     options.optimize = optimize;
 
-    const auto file_name_holder = format("{}.axl", test.base_name);
+    const auto file_name_holder = format("{}.axl\0", test.base_name);
     const auto exe_name_holder = format_file_path(EXE_DIR, test.base_name, "exe");
 
 

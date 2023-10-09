@@ -663,9 +663,6 @@ struct Array {
       i->~T();
     }
 
-    //Zero the memory just to be safe
-    zero_init(data, capacity);
-
     size = 0;
   }
 

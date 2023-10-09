@@ -107,7 +107,6 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
     }
 
     Format::format_to_formatter(name, ") -> {}", type->return_type.name);
-    name.load_char('\0');
 
     type->struct_name = strings->intern(name.view());
   }

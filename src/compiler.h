@@ -388,7 +388,7 @@ struct CompilerThread : CompilerConstants {
   }
 
   template<typename ... T>
-  void report_error(ERROR_CODE code, const Span& span, const FormatString& f_message, const T& ... ts) {
+  void report_error(ERROR_CODE code, const Span& span, const Format::FormatString& f_message, const T& ... ts) {
     return errors.report_error(code, span, f_message, ts...);
   }
 

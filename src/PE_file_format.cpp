@@ -1298,7 +1298,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     static_assert(SIGNATURE_SIZE == 4, "Must be 4");
     char* sig = (char*)pe_file->header.signature;
 
-    if (memcmp_ts(expected_sig, sig, 4) != 0) {
+    if (!memeq_ts<char>(expected_sig, sig, 4)) {
       comp_thread->report_error(ERROR_CODE::FILE_ERROR, span,
                                 "File '{}' did not have correct signature\n"
                                 "Expected: {} {} {} {}. Found: {} {} {} {}",

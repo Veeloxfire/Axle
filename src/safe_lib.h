@@ -38,27 +38,34 @@ throw_testing_assertion("Assertion failed in at line " STR_REPLACE(__LINE__) ", 
 
 template<typename T>
 constexpr inline void memcpy_ts(T* dest, size_t dest_size, const T* source, size_t src_size) {
-  const errno_t res = memcpy_s((void*)dest, dest_size * sizeof(T), (const void*)source, src_size * sizeof(T));
-  ASSERT(res == 0);
+  ASSERT(dest_size >= src_size);
+
+  for (size_t i = 0; i < src_size; ++i) {
+    dest[i] = source[i];
+  }
 }
 
 template<typename T>
-constexpr inline int memcmp_ts(const T* buff1, const T* buff2, size_t length) {
-  return memcmp((const void*)buff1, (const void*)buff2, length * sizeof(T));
-}
+constexpr inline bool memeq_ts(const T* buff1, const T* buff2, size_t length) {
+  if (buff1 == buff2) return true;
 
-template<typename T>
-constexpr inline void zero_init(T* const dest, const size_t dest_size) {
-  memset((void*)dest, 0, dest_size * sizeof(T));
+  for (size_t i = 0; i < length; ++i) {
+    if (buff1[i] != buff2[i]) return false;
+  }
+
+  return true;
 }
 
 template<typename T>
 constexpr inline void default_init(T* const dest, const size_t dest_size) {
-  zero_init(dest, dest_size);
-
-  for (auto i = 0; i < dest_size; i++) {
+  for (size_t i = 0; i < dest_size; i++) {
     new(dest + i) T();
   }
+}
+
+template<typename T>
+constexpr inline void default_init(T* const dest) {
+  new(dest) T();
 }
 
 template<typename T>
@@ -71,11 +78,6 @@ constexpr inline void destruct_arr(T* const ptr, const size_t num) {
 template<typename T>
 constexpr inline void destruct_single(T* const ptr) {
   ptr->~T();
-}
-
-template<typename T>
-constexpr inline void default_init(T* const dest) {
-  new(dest) T();
 }
 
 

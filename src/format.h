@@ -439,40 +439,52 @@ namespace Format {
     }
   };
 
+  struct FormatString {
+    const char* arr;
+    usize len;
+
+    template<usize N>
+    constexpr FormatString(const char(&_arr)[N]) : arr(_arr), len(N) {}
+
+    constexpr FormatString(const char* _arr, usize _len) : arr(_arr), len(_len) {}
+  };
+
   template<Formatter F>
   struct FormatDispatch {
-    const char* format_string;
+    FormatString format_string;
 
     F& result;
   };
 
   template<Formatter F, typename T>
   constexpr FormatDispatch<F>& operator<<(FormatDispatch<F>& f, const T& t) {
-    const char* const string = f.format_string;
+    const char* const string = f.format_string.arr;
 
     while (true) {
-      if (f.format_string[0] == '\0') {
+      if (f.format_string.len == 0) {
         INVALID_CODE_PATH("Invalid format");
       }
-      else if (f.format_string[0] == '{' && f.format_string[1] == '}') {
-        const size_t num_chars = f.format_string - string;
+      else if (f.format_string.arr[0] == '{' && f.format_string.arr[1] == '}') {
+        const size_t num_chars = f.format_string.arr - string;
         if (num_chars > 0) {
           f.result.load_string(string, num_chars);
         }
 
         FormatArg<T>::load_string(f.result, t);
 
-        f.format_string += 2;
+        f.format_string.arr += 2;
+        f.format_string.len -= 2;
         return f;
       }
 
-      f.format_string++;
+      f.format_string.arr += 1;
+      f.format_string.len -= 1;
     }
   }
 
   //Doesnt null terminate!
   template<Formatter F, typename ... T>
-  constexpr void format_to_formatter(F& result, const char* format, const T& ... ts) {
+  constexpr void format_to_formatter(F& result, FormatString format, const T& ... ts) {
     TRACING_FUNCTION();
 
     if constexpr (sizeof...(T) > 0) {
@@ -482,22 +494,23 @@ namespace Format {
       format = f.format_string;
     }
 
-    const char* const string = format;
+    const char* const string = format.arr;
 
     while (true) {
-      if (format[0] == '{' && format[1] == '}') {
+      if (format.arr[0] == '{' && format.arr[1] == '}') {
         INVALID_CODE_PATH("Invalid format");
         break;
       }
-      else if (format[0] == '\0') {
-        const size_t num_chars = format - string;
+      else if (format.len == 0) {
+        const size_t num_chars = format.arr - string;
         if (num_chars > 0) {
           result.load_string(string, num_chars);
         }
         return;
       }
 
-      format++;
+      format.arr += 1;
+      format.len -= 1;
     }
   }
 
@@ -555,7 +568,6 @@ namespace Format {
 
     inline void load_string(const char* str, usize N) {
       ASSERT(N > 0);
-      ASSERT(str[N - 1] != '\0');
 
       if (local_arr.heap) {
         heap_arr.arr.concat(str, N);
@@ -666,50 +678,40 @@ namespace Format {
   };
 }
 
-struct FormatString {
-  const char* arr;
-  usize len;
-
-  template<usize N>
-  constexpr FormatString(const char(&_arr)[N]) : arr(_arr), len(N) {}
-
-  constexpr FormatString(const char* _arr, usize _len) : arr(_arr), len(_len) {}
-};
-
 //Does null terminate
 template<typename ... T>
-OwnedArr<char> format(const FormatString& format, const T& ... ts) {
+OwnedArr<char> format(const Format::FormatString& format, const T& ... ts) {
   Format::ArrayFormatter result = {};
   //result.arr.reserve_total(format.len);
 
-  Format::format_to_formatter(result, format.arr, ts...);
+  Format::format_to_formatter(result, format, ts...);
 
   return result.take();
 }
 
 template<typename ... T>
-void format_print(const FormatString& format, const T& ... ts) {
+void format_print(const Format::FormatString& format, const T& ... ts) {
   IO_Single::lock();
   DEFER() { IO_Single::unlock(); };
   Format::STPrintFormatter result = {};
 
-  Format::format_to_formatter(result, format.arr, ts...);
+  Format::format_to_formatter(result, format, ts...);
 }
 
 template<typename ... T>
-void format_err_print(const FormatString& format, const T& ... ts) {
+void format_err_print(const Format::FormatString& format, const T& ... ts) {
   IO_Single::lock();
   DEFER() { IO_Single::unlock(); };
   Format::STErrPrintFormatter result = {};
 
-  Format::format_to_formatter(result, format.arr, ts...);
+  Format::format_to_formatter(result, format, ts...);
 }
 
 template<typename ... T>
-void format_print_ST(const FormatString& format, const T& ... ts) {
+void format_print_ST(const Format::FormatString& format, const T& ... ts) {
   Format::STPrintFormatter result = {};
 
-  Format::format_to_formatter(result, format.arr, ts...);
+  Format::format_to_formatter(result, format, ts...);
 }
 
 OwnedArr<char> format_type_set(const ViewArr<const char>& format, size_t prepend_spaces, size_t max_width);

@@ -255,7 +255,7 @@ static Token lex_identifier(CompilerGlobals* comp, Lexer* const lex) {
     const KeywordPair& pair = keywords[i];
 
     if (pair.size == ident_len
-        && memcmp_ts(pair.keyword, ident.string->string, ident_len) == 0) {
+        && memeq_ts<char>(pair.keyword, ident.string->string, ident_len)) {
       //Is keyword
       ident.type = pair.type;
       //Exit early

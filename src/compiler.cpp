@@ -138,7 +138,7 @@ template<typename ... T>
 void set_unfound_name(CompilerThread* const comp_thread,
                       UnknownName&& name,
                       ERROR_CODE code, const Span& span,
-                      const FormatString& f_message, T&& ... ts) {
+                      const Format::FormatString& f_message, T&& ... ts) {
 
   ASSERT(name.ident != nullptr);
 

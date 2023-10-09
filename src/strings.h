@@ -9,7 +9,7 @@ struct InternString {
 
   constexpr bool operator==(const InternString& i)const {
     return i.hash == hash && i.len == len
-      && (memcmp_ts((const char*)i.string, (const char*)string, len) == 0);
+      && memeq_ts<char>(i.string, string, len);
   }
 
   constexpr bool operator!=(const InternString& i)const {
@@ -73,10 +73,10 @@ struct StringInterner {
   }
 
   template<typename ... T>
-  inline const InternString* format_intern(const FormatString& fmt, const T& ... ts) {
+  inline const InternString* format_intern(const Format::FormatString& fmt, const T& ... ts) {
     Format::ArrayFormatter formatter = {};
 
-    Format::format_to_formatter(formatter, fmt.arr, ts...);
+    Format::format_to_formatter(formatter, fmt, ts...);
 
     return intern(formatter.view());
   }

@@ -30,7 +30,7 @@ const InternString** Table::find(const char* str, size_t len, uint64_t hash) con
       //Tombstone space
       first_tombstone =  data + test_index;
     }
-    else if (el->hash == hash && el->len == len && memcmp_ts(str, el->string, len) == 0) {
+    else if (el->hash == hash && el->len == len && memeq_ts<char>(str, el->string, len)) {
       //Success
       return data + test_index;
     }

@@ -25,7 +25,12 @@ OwnedArr<char> format_type_set(const ViewArr<const char>& format_in, const size_
   prepend();
 
   while (true) {
-    if (curr_length == max_width && format_i[0] != '\n') {
+    if (format_i == format_end) {
+      result.concat(string, format_i - string);
+
+      return bake_arr(std::move(result));
+    }
+    else if (curr_length == max_width && format_i[0] != '\n' && last_space > string) {
       //Need to insert a new line
       result.concat(string, last_space - string);
       result.insert('\n');
@@ -47,11 +52,6 @@ OwnedArr<char> format_type_set(const ViewArr<const char>& format_in, const size_
     }
     else if (format_i[0] == ' ') {
       last_space = format_i;
-    }
-    else if (format_i == format_end) {
-      result.concat(string, format_i - string);
-
-      return bake_arr(std::move(result));
     }
 
     format_i++;
