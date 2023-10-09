@@ -3163,7 +3163,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   {
     const auto int_type = [&](const auto& name, bool is_signed, u32 size, IR::Format ir_format, Type* t) {
-      IntegerStructure* s = STRUCTS::new_int_structure(structures._ptr, strings->intern(name, array_size(name) - 1));
+      IntegerStructure* s = STRUCTS::new_int_structure(structures._ptr, strings->intern(lit_view_arr(name)));
       s->is_signed = is_signed;
       s->size = size;
       s->alignment = size;
@@ -3242,12 +3242,12 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   //Intrinsics
-#define MOD(n) comp->intrinsics . n = strings->intern(#n, array_size(#n) - 1);
+#define MOD(n) comp->intrinsics . n = strings->intern(lit_view_arr(#n));
   INTRINSIC_MODS;
 #undef MOD
 
   //Other important names
-#define MOD(n) comp->important_names . n = strings->intern(#n, array_size(#n) - 1);
+#define MOD(n) comp->important_names . n = strings->intern(lit_view_arr(#n));
   IMPORTANT_NAMES_INC;
 #undef MOD
 

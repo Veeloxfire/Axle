@@ -4384,8 +4384,8 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread, Backend::Gener
     comp->services.get_multiple(&structs, &strings);
 
 
-    lib.path = strings->intern("kernel32.dll", array_size("kernel32.dll") - 1);
-    lib.name = strings->intern("ExitProcess", array_size("ExitProcess") - 1);
+    lib.path = strings->intern(lit_view_arr("kernel32.dll"));
+    lib.name = strings->intern(lit_view_arr("ExitProcess"));
 
 
     Array<Type> params = {};

@@ -40,6 +40,26 @@ void test_eq(TestErrors* errors, usize line, const char* expected_str, T* expect
 }
 
 template<typename T>
+void test_neq(TestErrors* errors, usize line, const char* expected_str, const T& expected, const char* actual_str, const T& actual) {
+  if (expected == actual) {
+    errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\n{} = {}\n{} = {}\nThese should not be equal",
+                         line, errors->test_name, expected_str, expected, actual_str, actual);
+
+  }
+}
+
+
+template<typename T>
+void test_neq(TestErrors* errors, usize line, const char* expected_str, T* expected, const char* actual_str, T* actual) {
+  if (expected == actual) {
+    errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\n{} = {}\n{} = {}\nThese should not be equal",
+                         line, errors->test_name, expected_str, PrintPtr{ expected }, actual_str, PrintPtr{ actual });
+
+  }
+}
+
+
+template<typename T>
 void test_eq_arr(TestErrors* errors, usize line,
                  const char* expected_str, const T* expected, const char* esize_str, usize e_size,
                  const char* actual_str, const T* actual, const char* asize_str, usize a_size) {
@@ -104,6 +124,10 @@ ERROR:
 
 #define TEST_EQ(expected, actual) do {\
 test_eq(test_errors, __LINE__, #expected, expected, #actual, actual);\
+if (test_errors->is_panic()) return; } while (false)
+
+#define TEST_NEQ(expected, actual) do {\
+test_neq(test_errors, __LINE__, #expected, expected, #actual, actual);\
 if (test_errors->is_panic()) return; } while (false)
 
 #define TEST_ARR_EQ(expected, e_size, actual, a_size) do { \

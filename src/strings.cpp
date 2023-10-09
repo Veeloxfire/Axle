@@ -98,6 +98,7 @@ void Table::try_resize() {
 const InternString* StringInterner::intern(const char* string, const size_t length) {
   TRACING_FUNCTION();
   ASSERT(string != nullptr);
+  ASSERT(length > 0);
 
   const uint64_t hash = fnv1a_hash(string, length);
 
@@ -132,6 +133,7 @@ InternStringSet::~InternStringSet() {
 }
 
 bool InternStringSet::contains(const InternString* key) const {
+  ASSERT(key != nullptr && key != TOMBSTONE);
   if(el_capacity == 0) return false;
 
   size_t index = key->hash % el_capacity;
@@ -205,32 +207,31 @@ void InternStringSet::try_extend(size_t num) {
 }
 
 void InternStringSet::insert(const InternString* const key) {
+  ASSERT(key != nullptr && key != TOMBSTONE);
+
   if (el_capacity == 0) {
+    ASSERT(used == 0);
     el_capacity = 8;
     data = allocate_default<const InternString*>(el_capacity);
 
     const InternString** loc = get(key);
     *loc = key;
+    used += 1;
   }
   else {
     const InternString** loc = get(key);
 
-    {
-      const InternString* test_key = *loc;
+    const InternString* test_key = *loc;
+    if (test_key == key) return;//already contained
 
-      if ((test_key == nullptr || test_key == TOMBSTONE) &&
-          needs_resize(1)) {
-        //need to resize
-        try_extend(1);
-        //need to reset the key
-        loc = get(key);
-      }
-    }
+    ASSERT(test_key == nullptr || test_key == TOMBSTONE);
 
     *loc = key;
+    used += 1;
+    if (needs_resize(0)) {
+      try_extend(0);
+    }
   }
-
-  used++;
 }
 
 bool is_alphabetical_order(const InternString* l, const InternString* r) {

@@ -4,39 +4,6 @@
 #include "type.h"
 #include "trace.h"
 
-//TODO: Do we actually need this?
-Type BuiltinTypes::get_signed_of(const Type& ty) {
-  ASSERT(ty.struct_type() == STRUCTURE_TYPE::INTEGER);
-
-  switch (ty.structure->size) {
-    case 1: return t_i8;
-      //case 2: return t_i16;
-    case 4: return t_i32;
-    case 8: return t_i64;
-    default: INVALID_CODE_PATH("Should always exist"); return {};
-  }
-}
-
-//void StructCreator::add_type_to_namespace(const Structure* s, const InternString* name, const Span& span) {
-//  NamedElement* el = comp->services.names->create_name(current_namespace, name);
-//  if (el == nullptr) {
-//    comp->report_error(ERROR_CODE::NAME_ERROR, span,
-//                       "Tried to make type '{}' but it conflicted with existing names",
-//                       name);
-//    return;
-//  }
-//
-//  Global* glob = comp->globals.insert();
-//  glob->decl.name = name;
-//  glob->decl.type = meta_struct;//meta type for all types
-//  glob->constant_value.size = 8;
-//  glob->constant_value.ptr = comp->constants.alloc_no_construct(glob->constant_value.size);
-//  memcpy_ts((const Structure**)glob->constant_value.ptr, 1, &s, 1);
-//
-//  el->globals.insert(glob);
-//}
-
-
 TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInterner* strings, Array<Type>&& types) {
   TRACING_FUNCTION();
 
@@ -168,7 +135,7 @@ CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Str
   CompositeStructure* const type = structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
   type->ir_format = IR::Format::opaque;
-  type->struct_name = strings->intern("anoymous-struct", array_size("anoymous-struct") - 1);
+  type->struct_name = strings->intern(lit_view_arr("anoymous-struct"));
 
   structures->structures.insert(type);
 
@@ -182,10 +149,7 @@ EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterne
   EnumStructure* const type = structures->enum_structures.allocate();
   type->type = STRUCTURE_TYPE::ENUM;
   type->ir_format = base.struct_format();
-  {
-    OwnedArr name = EnumStructure::gen_name(base);
-    type->struct_name = strings->intern(name.data, name.size);
-  }
+  type->struct_name = strings->format_intern("anoymous-enum({})", base.name);
   type->base = base;
 
   type->size = base.structure->size;
@@ -206,12 +170,7 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
   type->ir_format = IR::Format::opaque;
   type->base = base;
   type->length = length;
-
-  {
-    OwnedArr name = ArrayStructure::gen_name(base, length);
-    type->struct_name = strings->intern(name.data, name.size);
-  }
-
+  type->struct_name = strings->format_intern("[{}; {}]", base.name, length);
   type->size = base.structure->size * (u32)length;
   type->alignment = base.structure->alignment;
 
@@ -227,12 +186,7 @@ PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringI
   type->type = STRUCTURE_TYPE::POINTER;
   type->ir_format = IR::Format::uint64;
   type->base = base;
-
-  {
-    OwnedArr name = PointerStructure::gen_name(base);
-    type->struct_name = strings->intern(name.data, name.size);
-  }
-
+  type->struct_name = strings->format_intern("*{}", base.name);
   type->size = (u32)ptr_size;
   type->alignment = (u32)ptr_size;
 
@@ -254,39 +208,7 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
   enum_s->enum_values.insert(val);
   structures->enums.insert(val);
 
-  //NamedElement* el = comp->services.names->create_name(current_namespace, name);
-  //if (el == nullptr) {
-  //  comp->report_error(ERROR_CODE::NAME_ERROR, span,
-  //                     "Tried to make type '{}' but it conflicted with existing names",
-  //                     name);
-  //}
-  //else {
-  //  Global* glob = comp->globals.insert();
-  //  glob->decl.type = enum_s;
-  //  glob->decl.name = name;
-  //  glob->constant_value.size = 8;
-  //  glob->constant_value.ptr = comp->constants.alloc_no_construct(glob->constant_value.size);
-  //  memcpy_ts((EnumValue**)glob->constant_value.ptr, 1, &val, 1);
-
-  //  el->globals.insert(glob);
-  //}
-
-
   return val;
-}
-
-
-OwnedArr<char> PointerStructure::gen_name(const Type& base) {
-  return format("*{}", base.name);
-}
-
-OwnedArr<char> ArrayStructure::gen_name(const Type& base, size_t length) {
-  return format("[{}, {}]", base.name, length);
-}
-
-
-OwnedArr<char> EnumStructure::gen_name(const Type& base) {
-  return format("anoymous-enum({})", base.name);
 }
 
 Structures::~Structures() {

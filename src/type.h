@@ -171,7 +171,6 @@ struct PointerStructure : public Structure {
   bool is_mut = false;//TODO: move this to be part of the type
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::POINTER;
-  static OwnedArr<char> gen_name(const Type& nt);
 };
 
 struct ArrayStructure : public Structure {
@@ -179,7 +178,6 @@ struct ArrayStructure : public Structure {
   size_t length = 0;
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::FIXED_ARRAY;
-  static OwnedArr<char> gen_name(const Type& nt, size_t length);
 };
 
 struct IntegerStructure : public Structure {
@@ -201,7 +199,6 @@ struct EnumStructure : public Structure {
   Array<const EnumValue*> enum_values ={};
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::ENUM;
-  static OwnedArr<char> gen_name(const Type& nt);
 };
 
 struct TupleElement {
@@ -289,9 +286,6 @@ struct BuiltinTypes {
 
   const EnumValue* e_false = nullptr;
   const EnumValue* e_true  = nullptr;
-
-  //Returns nullptr for types that dont have a signed version or are already signed
-  Type get_signed_of(const Type& ty);
 };
 
 struct Structures {

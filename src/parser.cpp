@@ -476,12 +476,10 @@ static Token lex_unpositioned_token(CompilerGlobals* const comp, CompilerThread*
     return lex_intrinsic(comp, comp_thread, lex);
   }
   else if (c == '\0') {
-    constexpr char EOF_Token[] = "End of file";
-
     // \0 is the end of file
     Token eof = {};
     eof.type = AxleTokenType::End;
-    eof.string = comp->services.strings.get()->intern(EOF_Token, array_size(EOF_Token) - 1);
+    eof.string = comp->services.strings.get()->intern(lit_view_arr("End of file"));
 
     return eof;
   }

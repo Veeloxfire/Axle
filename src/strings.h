@@ -29,6 +29,14 @@ namespace Format {
       res.load_string(str->string, str->len);
     }
   };
+
+  template<>
+  struct FormatArg<InternString> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const InternString& str) {
+      res.load_string(str.string, str.len);
+    }
+  };
 }
 
 
@@ -62,6 +70,15 @@ struct StringInterner {
 
   inline const InternString* intern(const OwnedArr<const char>& arr) {
     return intern(arr.data, arr.size);
+  }
+
+  template<typename ... T>
+  inline const InternString* format_intern(const FormatString& fmt, const T& ... ts) {
+    Format::ArrayFormatter formatter = {};
+
+    Format::format_to_formatter(formatter, fmt.arr, ts...);
+
+    return intern(formatter.view());
   }
 };
 
@@ -187,6 +204,7 @@ struct InternHashTable {
   }
 
   bool contains(const InternString* key) const {
+    ASSERT(key != nullptr && key != TOMBSTONE);
     if (el_capacity == 0) return false;
 
     const InternString** keys = key_arr();
@@ -209,6 +227,7 @@ struct InternHashTable {
   }
 
   size_t get_soa_index(const InternString* key) const {
+    ASSERT(key != nullptr && key != TOMBSTONE);
     const InternString** hash_arr = (const InternString**)data;
 
     bool found_tombstone = false;
@@ -281,104 +300,98 @@ struct InternHashTable {
   }
 
   T* get_val(const InternString* const key) const {
+    ASSERT(key != nullptr && key != TOMBSTONE);
     if (el_capacity == 0) return nullptr;
 
     const size_t soa_index = get_soa_index(key);
 
-    {
-      const InternString* test_key = ((const InternString**)data)[soa_index];
-
-      if (test_key == nullptr || test_key == TOMBSTONE) {
-        return nullptr;
-      }
+    const InternString* test_key = key_arr()[soa_index];
+    if (test_key == key) return val_arr() + soa_index;
+    else {
+      ASSERT(test_key == nullptr || test_key == TOMBSTONE);
+      return nullptr;
     }
 
-    T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
-    return vals + soa_index;
   }
 
   void insert(const InternString* const key, T&& val) {
+    ASSERT(key != nullptr && key != TOMBSTONE);
     if (el_capacity == 0) {
       el_capacity = 8;
       data = allocate_default<uint8_t>(8 * (sizeof(const InternString*) + sizeof(T)));
 
       size_t soa_index = get_soa_index(key);
 
-      const InternString** const keys = (const InternString**)data;
-      T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
-
-      used++;
-      keys[soa_index] = key;
-      vals[soa_index] = std::move(val);
+      key_arr()[soa_index] = key;
+      val_arr()[soa_index] = std::move(val);
+      used += 1;
     }
     else {
       size_t soa_index = get_soa_index(key);
-
-      {
-        const InternString* test_key = ((const InternString**)data)[soa_index];
-
-        if ((test_key == nullptr || test_key == TOMBSTONE) &&
-            needs_resize(1)) {
-          //need to resize
-          try_extend(1);
-          //need to reset the key
-          soa_index = get_soa_index(key);
-        }
+      
+      const InternString** key_loc = key_arr() + soa_index;
+      if (*key_loc == key) {
+        val_arr()[soa_index] = std::move(val);
+        return;
       }
 
-      const InternString** const keys = (const InternString**)data;
-      T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
+      ASSERT(*key_loc == nullptr || *key_loc == TOMBSTONE);
 
-      used++;
-      keys[soa_index] = key;
-      vals[soa_index] = std::move(val);
+      *key_loc = key;
+      val_arr()[soa_index] = std::move(val);
+      used += 1;
+
+      if (needs_resize(0)) {
+        try_extend(0);
+      }
     }
   }
 
   T* get_or_create(const InternString* const key) {
+    ASSERT(key != nullptr && key != TOMBSTONE);
     if (el_capacity == 0) {
       el_capacity = 8;
       data = allocate_default<uint8_t>(8 * (sizeof(const InternString*) + sizeof(T)));
 
       size_t soa_index = get_soa_index(key);
 
-      const InternString** const keys = (const InternString**)data;
-      T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
+      T* const val = val_arr() + soa_index;
 
-      used++;
-      keys[soa_index] = key;
-      vals[soa_index] = T{};
-      return vals + soa_index;
+      key_arr()[soa_index] = key;
+      *val = T{};
+      used += 1;
+      return val;
     }
     else {
       size_t soa_index = get_soa_index(key);
 
 
-      const InternString* test_key = ((const InternString**)data)[soa_index];
+      const InternString** test_key = key_arr() + soa_index;
 
-      if (test_key == key) {
-        T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
-
-        return vals + soa_index;
+      if (*test_key == key) {
+        return val_arr() + soa_index;
       }
 
-      ASSERT(test_key == nullptr || test_key == TOMBSTONE);
+      ASSERT(*test_key == nullptr || *test_key == TOMBSTONE);
 
-      if (needs_resize(1)) {
-        //need to resize
-        try_extend(1);
-        //need to reset the key
+      T* val = val_arr() + soa_index;
+
+      *test_key = key;
+      *val = T{};
+      used += 1;
+
+      if (needs_resize(0)) {
+        try_extend(0);
+
+        //need to reset the key and val location
         soa_index = get_soa_index(key);
+
+        ASSERT(key_arr()[soa_index] == key);
+        return val_arr() + soa_index;
       }
-
-
-      const InternString** const keys = (const InternString**)data;
-      T* const vals = (T*)(data + (sizeof(const InternString*) * el_capacity));
-
-      used++;
-      keys[soa_index] = key;
-      vals[soa_index] = T{};
-      return vals + soa_index;
+      else {
+        return val;
+      }
     }
   }
 };
