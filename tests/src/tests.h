@@ -89,27 +89,24 @@ ERROR:
   return;
 }
 
+inline void test_eq_str_impl(TestErrors* errors, usize line,
+                        const char* expected_str, const ViewArr<const char>& expected,
+                        const char* actual_str, const ViewArr<const char>& actual) {
+  const size_t e_size = expected.size;
+  const size_t a_size = actual.size;
+  if (e_size != a_size) {
+    goto ERROR;
+  }
 
-inline void test_eq_str(TestErrors* errors, usize line,
-                 const char* expected_str, const char* expected,
-                 const char* actual_str, const char* actual) {
-  const char* e = expected;
-  const char* a = actual;
-  while (true) {
-    char ec = e[0];
-    char ac = a[0];
-
-    if (ec != ac) {
+  for (usize n = 0; n < e_size; ++n) {
+    const auto& l = expected[n];
+    const auto& r = actual[n];
+    if (l != r) {
       goto ERROR;
     }
-
-    if (ec == '\0') {
-      return;
-    }
-
-    a += 1;
-    e += 1;
   }
+
+  return;
 
 ERROR:
   errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{},
@@ -117,9 +114,38 @@ ERROR:
                        "Expected String: {} = \"{}\"\n"
                        "Actual String: {} = \"{}\"",
                        line, errors->test_name,
-                       expected_str, expected,
-                       actual_str, actual);
+                       expected_str, DisplayString{ expected.data, expected.size },
+                       actual_str, DisplayString{ actual.data, actual.size });
   return;
+}
+
+constexpr const ViewArr<const char> test_str(const ViewArr<const char>& c) {
+  return c;
+}
+
+constexpr const ViewArr<const char> test_str(const ViewArr<char>& c) {
+  return c;
+}
+
+inline const ViewArr<const char> test_str(const OwnedArr<char>& c) {
+  return const_view_arr(c);
+}
+
+inline const ViewArr<const char> test_str(const OwnedArr<const char>& c) {
+  return view_arr(c);
+}
+
+constexpr const ViewArr<const char> test_str(const InternString* c) {
+  return { c->string, c->len };
+}
+
+template<typename L, typename R>
+inline void test_eq_str(TestErrors* errors, usize line,
+                        const char* expected_str, const L& expected,
+                        const char* actual_str, const R& actual) {
+  return test_eq_str_impl(errors, line,
+                     expected_str, test_str(expected),
+                     actual_str, test_str(actual));
 }
 
 #define TEST_EQ(expected, actual) do {\

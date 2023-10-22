@@ -361,19 +361,18 @@ struct ViewArr {
   T* data = nullptr;
   usize size = 0;
 
-  const T* begin() const { return data; }
-  const T* end() const { return data + size; }
+  constexpr const T* begin() const { return data; }
+  constexpr const T* end() const { return data + size; }
 
-  T* mut_begin() const { return data; }
-  T* mut_end() const { return data + size; }
+  constexpr T* mut_begin() const { return data; }
+  constexpr T* mut_end() const { return data + size; }
 
-  T& operator[](usize i) const {
+  constexpr T& operator[](usize i) const {
     ASSERT(i < size);
     return data[i];
   }
 
-  template<typename T>
-  operator ViewArr<const T>() {
+  constexpr operator ViewArr<const T>() const {
     return { data, size };
   }
 };
@@ -383,17 +382,17 @@ struct ViewArr<const T> {
   const T* data = nullptr;
   usize size = 0;
 
-  const T* begin() const { return data; }
-  const T* end() const { return data + size; }
+  constexpr const T* begin() const { return data; }
+  constexpr const T* end() const { return data + size; }
 
-  const T& operator[](usize i) const {
+  constexpr const T& operator[](usize i) const {
     ASSERT(i < size);
     return data[i];
   }
 };
 
 template<usize N>
-ViewArr<const char> lit_view_arr(const char(&arr)[N]) {
+constexpr ViewArr<const char> lit_view_arr(const char(&arr)[N]) {
   ASSERT(arr[N - 1] == '\0');
   return {
     arr,

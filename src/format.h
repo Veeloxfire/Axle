@@ -7,6 +7,11 @@ struct DisplayChar {
   char c;
 };
 
+struct DisplayString {
+  const char* arr;
+  usize size;
+};
+
 struct PrintHexByte {
   u8 c;
 };
@@ -98,6 +103,16 @@ namespace Format {
         default:
           res.load_char(c.c);
           break;
+      }
+    }
+  };
+
+  template<>
+  struct FormatArg<DisplayString> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const DisplayString& ds) {
+      for (usize i = 0; i < ds.size; ++i) {
+        FormatArg<DisplayChar>::load_string(res, DisplayChar{ ds.arr[i] });
       }
     }
   };
@@ -461,7 +476,7 @@ namespace Format {
     const char* const string = f.format_string.arr;
 
     while (true) {
-      if (f.format_string.len == 0) {
+      if (f.format_string.len == 0 || f.format_string.arr[0] == '\0') {
         INVALID_CODE_PATH("Invalid format");
       }
       else if (f.format_string.arr[0] == '{' && f.format_string.arr[1] == '}') {
@@ -501,7 +516,7 @@ namespace Format {
         INVALID_CODE_PATH("Invalid format");
         break;
       }
-      else if (format.len == 0) {
+      else if (format.len == 0 || format.arr[0] == '\0') {
         const size_t num_chars = format.arr - string;
         if (num_chars > 0) {
           result.load_string(string, num_chars);

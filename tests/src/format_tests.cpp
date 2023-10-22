@@ -5,60 +5,60 @@ TEST_FUNCTION(ArrayFormat, strings) {
   const ViewArr<const char> expected = lit_view_arr("hello world");
   OwnedArr<const char> arr = format("hello {}", lit_view_arr("world"));
 
-  TEST_ARR_EQ(expected.data, expected.size, arr.data, arr.size);
+  TEST_STR_EQ(expected, arr);
 }
 
 void test_all_valid_signed_ints(TestErrors* test_errors, const ViewArr<const char>& expected, i64 i) {
   if(SCHAR_MAX >= i && i >= SCHAR_MIN) {
     OwnedArr<const char> sc123 = format("{}", (signed char)i);
-    TEST_ARR_EQ(expected.data, expected.size, sc123.data, sc123.size);
+    TEST_STR_EQ(expected, sc123);
   }
 
   if (SHRT_MAX >= i && i >= SHRT_MIN) {
     OwnedArr<const char> ss123 = format("{}", (signed short)i);
-    TEST_ARR_EQ(expected.data, expected.size, ss123.data, ss123.size);
+    TEST_STR_EQ(expected, ss123);
   }
 
   if (INT_MAX >= i && i >= INT_MIN) {
     OwnedArr<const char> si123 = format("{}", (signed int)i);
-    TEST_ARR_EQ(expected.data, expected.size, si123.data, si123.size);
+    TEST_STR_EQ(expected, si123);
   }
 
   if (LONG_MAX >= i && i >= LONG_MIN) {
     OwnedArr<const char> sl123 = format("{}", (signed long)i);
-    TEST_ARR_EQ(expected.data, expected.size, sl123.data, sl123.size);
+    TEST_STR_EQ(expected, sl123);
   }
 
   {
     OwnedArr<const char> sll123 = format("{}", (signed long long)i);
-    TEST_ARR_EQ(expected.data, expected.size, sll123.data, sll123.size);
+    TEST_STR_EQ(expected, sll123);
   }
 }
 
 void test_all_valid_unsigned_ints(TestErrors* test_errors, const ViewArr<const char>& expected, u64 i) {
   if (UCHAR_MAX >= i) {
     OwnedArr<const char> sc123 = format("{}", (unsigned char)i);
-    TEST_ARR_EQ(expected.data, expected.size, sc123.data, sc123.size);
+    TEST_STR_EQ(expected, sc123);
   }
 
   if (USHRT_MAX >= i) {
     OwnedArr<const char> ss123 = format("{}", (unsigned short)i);
-    TEST_ARR_EQ(expected.data, expected.size, ss123.data, ss123.size);
+    TEST_STR_EQ(expected, ss123);
   }
 
   if (UINT_MAX >= i) {
     OwnedArr<const char> si123 = format("{}", (unsigned int)i);
-    TEST_ARR_EQ(expected.data, expected.size, si123.data, si123.size);
+    TEST_STR_EQ(expected, si123);
   }
 
   if (ULONG_MAX >= i) {
     OwnedArr<const char> sl123 = format("{}", (unsigned long)i);
-    TEST_ARR_EQ(expected.data, expected.size, sl123.data, sl123.size);
+    TEST_STR_EQ(expected, sl123);
   }
 
   {
     OwnedArr<const char> sll123 = format("{}", (unsigned long long)i);
-    TEST_ARR_EQ(expected.data, expected.size, sll123.data, sll123.size);
+    TEST_STR_EQ(expected, sll123);
   }
 }
 

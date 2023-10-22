@@ -1824,7 +1824,7 @@ OwnedArr<const T> bake_const_arr(Array<T>&& arr) {
 }
 
 template<typename T>
-ViewArr<T> view_arr(const OwnedArr<T>& arr, usize start, usize count) {
+constexpr ViewArr<T> view_arr(const OwnedArr<T>& arr, usize start, usize count) {
   ASSERT(arr.size >= start + count);
   return {
     arr.data + start,
@@ -1833,7 +1833,7 @@ ViewArr<T> view_arr(const OwnedArr<T>& arr, usize start, usize count) {
 }
 
 template<typename T>
-ViewArr<T> view_arr(const Array<T>& arr, usize start, usize count) {
+constexpr ViewArr<T> view_arr(const Array<T>& arr, usize start, usize count) {
   ASSERT(arr.size >= start + count);
   return {
     arr.data + start,
@@ -1842,7 +1842,7 @@ ViewArr<T> view_arr(const Array<T>& arr, usize start, usize count) {
 }
 
 template<typename T>
-ViewArr<T> view_arr(const ViewArr<T>& arr, usize start, usize count) {
+constexpr ViewArr<T> view_arr(const ViewArr<T>& arr, usize start, usize count) {
   ASSERT(arr.size >= start + count);
   return {
     arr.data + start,
@@ -1851,7 +1851,7 @@ ViewArr<T> view_arr(const ViewArr<T>& arr, usize start, usize count) {
 }
 
 template<typename T>
-ViewArr<const T> const_view_arr(const OwnedArr<T>& arr, usize start, usize count) {
+constexpr ViewArr<const T> const_view_arr(const OwnedArr<T>& arr, usize start, usize count) {
   ASSERT(arr.size >= start + count);
   return {
     arr.data + start,
@@ -1861,7 +1861,7 @@ ViewArr<const T> const_view_arr(const OwnedArr<T>& arr, usize start, usize count
 
 
 template<typename T>
-ViewArr<const T> const_view_arr(const Array<T>& arr, usize start, usize count) {
+constexpr ViewArr<const T> const_view_arr(const Array<T>& arr, usize start, usize count) {
   ASSERT(arr.size >= start + count);
   return {
     arr.data + start,
@@ -1870,7 +1870,7 @@ ViewArr<const T> const_view_arr(const Array<T>& arr, usize start, usize count) {
 }
 
 template<typename T>
-ViewArr<T> view_arr(const OwnedArr<T>& arr) {
+constexpr ViewArr<T> view_arr(const OwnedArr<T>& arr) {
   return {
     arr.data,
     arr.size,
@@ -1878,7 +1878,7 @@ ViewArr<T> view_arr(const OwnedArr<T>& arr) {
 }
 
 template<typename T>
-ViewArr<T> view_arr(const Array<T>& arr) {
+constexpr ViewArr<T> view_arr(const Array<T>& arr) {
   return {
     arr.data,
     arr.size,
@@ -1886,7 +1886,7 @@ ViewArr<T> view_arr(const Array<T>& arr) {
 }
 
 template<typename T>
-ViewArr<const T> const_view_arr(const OwnedArr<T>& arr) {
+constexpr ViewArr<const T> const_view_arr(const OwnedArr<T>& arr) {
   return {
     arr.data,
     arr.size,
@@ -1894,7 +1894,7 @@ ViewArr<const T> const_view_arr(const OwnedArr<T>& arr) {
 }
 
 template<typename T>
-ViewArr<const T> const_view_arr(const Array<T>& arr) {
+constexpr ViewArr<const T> const_view_arr(const Array<T>& arr) {
   return {
     arr.data,
     arr.size,
@@ -1902,7 +1902,7 @@ ViewArr<const T> const_view_arr(const Array<T>& arr) {
 }
 
 template<typename T, usize N>
-ViewArr<T> view_arr(T (&arr)[N]) {
+constexpr ViewArr<T> view_arr(T (&arr)[N]) {
   return {
     arr,
     N,
