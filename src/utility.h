@@ -544,7 +544,7 @@ struct Array {
 
     for (size_t i = 0; i < size; i++) {
       if (lambda(data[i])) {
-        T removed = std::move(data[i]);
+        [[maybe_unused]]T removed = std::move(data[i]);
         num_removed++;
       }
       else {

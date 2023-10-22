@@ -14,191 +14,9 @@ static_assert(sizeof(MS_DOS_Header) == 64, "Must be 64 bytes");
 static_assert(sizeof(MS_DOS_Stub) == 128, "Must be 128 bytes");
 static_assert(MS_DOS_STUB_SIZE == 128, "Must be 128 bytes");
 
-///// Definitions /////
-
-RVA ConstantTable::get_constant_rva(ConstantOffset offset) const {
-  const ConstantEntry* const entry = constants.data + offset.offset;
-
-  return table_rva + entry->loaded_offset;
-}
-
-VA ConstantTable::get_constant_va(ConstantOffset offset) const {
-  const ConstantEntry* const entry = constants.data + offset.offset;
-
-  return table_va + entry->loaded_offset;
-}
-
-
-ConstantOffset ConstantTable::string_constant(const InternString* string) {
-  const size_t size = constants.size;
-  size_t i = 0;
-
-  for (; i < size; i++) {
-    const ConstantEntry* const entry = constants.data + i;
-    if (entry->type == ConstantType::STRING && entry->string == string) {
-      //Already exists
-      return ConstantOffset{ i };
-    }
-  }
-
-  constants.insert_uninit(1);
-
-  ConstantEntry* const entry = constants.data + constants.size - 1;
-  entry->type = ConstantType::STRING;
-  entry->string = string;
-
-  return ConstantOffset{ i };
-}
-
-Import* new_import(const InternString* dll_name, ImportTable* imports, ConstantTable* constants) {
-  imports->imports.insert_uninit(1);
-
-  Import* new_i = imports->imports.data + imports->imports.size - 1;
-  new_i->DLL_name = constants->string_constant(dll_name);
-
-  return new_i;
-}
-
-void add_name_to_import(Import* import_ptr, const InternString* name_to_import, VA estimated_va, ImportTable* table) {
-  {
-    auto i = import_ptr->imported_names.begin();
-    const auto end = import_ptr->imported_names.end();
-
-    for (; i < end; i++) {
-      const ImportNameEntry* entry = table->import_names.data + *i;
-
-      if (entry->name == name_to_import) {
-        //Already imported
-        return;
-      }
-    }
-  }
-
-  {
-    size_t i = 0;
-    const size_t end = table->import_names.size;
-
-    for (; i < end; i++) {
-      const ImportNameEntry* entry = table->import_names.data + i;
-
-      if (entry->name == name_to_import) {
-        //Same name already used
-        import_ptr->imported_names.insert(i);
-        return;
-      }
-    }
-  }
-
-  table->import_names.insert_uninit(1);
-  auto* name = table->import_names.back();
-  name->name = name_to_import;
-  name->va = estimated_va;
-
-  import_ptr->imported_names.insert(table->import_names.size - 1);
-}
-
 constexpr uint32_t FILE_ALIGNMENT = 512;
 
-static uint32_t round_to_file_alignment(uint32_t v) {
-  const uint32_t v_mod = v % FILE_ALIGNMENT;
-
-  if (v_mod == 0) {
-    return v;
-  }
-  else {
-    return v + FILE_ALIGNMENT - (v % FILE_ALIGNMENT);
-  }
-}
-
-static uint32_t round_to_section_alignment(uint32_t v) {
-  const uint32_t v_mod = v % PAGE_SIZE;
-
-  if (v_mod == 0) {
-    return v;
-  }
-  else {
-    return v + PAGE_SIZE - (v % PAGE_SIZE);
-  }
-}
-
-static void constants_to_bytes(const RVA rva, const VA va, ConstantTable* const constants, Array<uint8_t>& bytes) {
-  auto i = constants->constants.mut_begin();
-  const auto end = constants->constants.mut_end();
-
-  constants->table_rva = rva;
-  constants->table_va = va;
-
-  uint32_t offset = 0;
-
-  for (; i < end; i++) {
-    i->loaded_offset = offset;
-
-    switch (i->type) {
-      /*case ConstantType::UTF8_STRING: {
-          TempUTF8String utf8 = ascii_to_utf8(i->string.string);
-
-          bytes.reserve_extra(utf8.size);
-          memcpy_ts(bytes.data + bytes.size, bytes.capacity - bytes.size, utf8.bytes, utf8.size);
-          bytes.size += utf8.size;
-
-          offset += (uint32_t)utf8.size;
-          break;
-        }*/
-      case ConstantType::STRING: {
-          const size_t save = bytes.size;
-          const char* str = i->string->string;
-          while (str[0] != '\0') {
-            bytes.insert(str[0]);
-            str++;
-          }
-
-          bytes.insert('\0');
-
-          offset += (uint32_t)(bytes.size - save);
-          break;
-        }
-      case ConstantType::INTEGER: {
-          bytes.reserve_extra(8);
-          x64_to_bytes(i->integer, bytes.data + bytes.size);
-          bytes.size += 8;
-
-          offset += 8;
-          break;
-        }
-    }
-  }
-}
-
-static void import_names_to_bytes(VA va, Array<ImportNameEntry>& import_names, Array<uint8_t>& bytes) {
-  auto i = import_names.mut_begin();
-  const auto end = import_names.mut_end();
-
-  for (; i < end; i++) {
-    i->va = va;
-
-    size_t saved_size = bytes.size;
-
-    bytes.reserve_extra(2);
-    bytes.data[bytes.size] = 0xFF;
-    bytes.data[bytes.size + 1] = 0xFF;
-    bytes.size += 2;
-
-    const char* str = i->name->string;
-    while (str[0] != '\0') {
-      bytes.insert(str[0]);
-      str++;
-    }
-
-    bytes.insert('\0');
-
-    if (bytes.size % 2 != 0) {
-      //Padding
-      bytes.insert('\0');
-    }
-
-    va += (uint32_t)(bytes.size - saved_size);
-  }
-}
+///// Definitions /////
 
 static void write_code_partial(FILES::FileData* out,
                                Backend::DataBucketIterator* code, usize end,
@@ -548,16 +366,16 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
     {
       const InternString* previous_lib = nullptr;
-      const DynImport* dyn_imports = dyn_imports_start;
+      const DynImport* dyn_import_i = dyn_imports_start;
 
       LI* li = nullptr;
 
-      for (; dyn_imports < dyn_imports_end; dyn_imports += 1) {
-        if (previous_lib != dyn_imports->library) {
-          previous_lib = dyn_imports->library;
+      for (; dyn_import_i < dyn_imports_end; dyn_import_i += 1) {
+        if (previous_lib != dyn_import_i->library) {
+          previous_lib = dyn_import_i->library;
           library_infos.insert_uninit(1);
           li = library_infos.back();
-          li->lib_name = dyn_imports->library;
+          li->lib_name = dyn_import_i->library;
           li->num_funcs = 1;
         }
         else {
@@ -633,7 +451,7 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
     import_address_table_memory_start = memory_pointer;
 
     {
-      const DynImport* dyn_imports = dyn_imports_start;
+      const DynImport* dyn_import_i = dyn_imports_start;
 
       const LI* li = library_infos.begin();
       const LI* li_end = library_infos.end();
@@ -641,14 +459,14 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
       for (; li < li_end; li += 1) {
         ASSERT(li->address_table_estimate == memory_pointer);
-        for (; dyn_imports < dyn_imports_end && dyn_imports->library == li->lib_name; dyn_imports += 1) {
+        for (; dyn_import_i < dyn_imports_end && dyn_import_i->library == li->lib_name; dyn_import_i += 1) {
           u64 entry = 0;
           entry |= (hint_name_table_start_estimate + hint_name_table_size) & 0x7fffffff;
 
-          dyn_import_lookup.data[dyn_imports->index] = memory_pointer;
+          dyn_import_lookup.data[dyn_import_i->index] = memory_pointer;
           write_to_image(out, entry, &file_pointer, &memory_pointer);
 
-          const usize name_size = dyn_imports->function->len + 1;
+          const usize name_size = dyn_import_i->function->len + 1;
 
           hint_name_table_size += 2;
           hint_name_table_size += name_size;
@@ -659,14 +477,14 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
       }
 
-      ASSERT(dyn_imports == dyn_imports_end);
+      ASSERT(dyn_import_i == dyn_imports_end);
     }
 
     import_address_table_size = file_pointer - import_address_table_start;
     ASSERT(import_lookup_start_estimate == file_pointer);
 
     {
-      const DynImport* dyn_imports = dyn_imports_start;
+      const DynImport* dyn_import_i = dyn_imports_start;
 
       const LI* li = library_infos.begin();
       const LI* li_end = library_infos.end();
@@ -676,13 +494,13 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
       for (; li < li_end; li += 1) {
         ASSERT(li->lookup_table_estimate == memory_pointer);
-        for (; dyn_imports < dyn_imports_end && dyn_imports->library == li->lib_name; dyn_imports += 1) {
+        for (; dyn_import_i < dyn_imports_end && dyn_import_i->library == li->lib_name; dyn_import_i += 1) {
           u64 entry = 0;
           entry |= (hint_name_table_start_estimate + hint_name_table_acc) & 0x7fffffff;
 
           write_to_image(out, entry, &file_pointer, &memory_pointer);
 
-          const usize name_size = dyn_imports->function->len + 1;
+          const usize name_size = dyn_import_i->function->len + 1;
 
           hint_name_table_acc += 2;
           hint_name_table_acc += name_size;
@@ -701,16 +519,16 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
     ASSERT(hint_name_table_start_estimate == memory_pointer);
 
     {
-      const DynImport* dyn_imports = dyn_imports_start;
+      const DynImport* dyn_import_i = dyn_imports_start;
 
       constexpr u16 GUESS = 0;
       constexpr u8 PAD = '\0';
 
-      for (; dyn_imports < dyn_imports_end; ++dyn_imports) {
-        const usize name_size = dyn_imports->function->len + 1;
+      for (; dyn_import_i < dyn_imports_end; ++dyn_import_i) {
+        const usize name_size = dyn_import_i->function->len + 1;
 
         write_to_image(out, GUESS, &file_pointer, &memory_pointer);
-        write_raw_to_image(out, (const u8*)dyn_imports->function->string, name_size, &file_pointer, &memory_pointer);
+        write_raw_to_image(out, (const u8*)dyn_import_i->function->string, name_size, &file_pointer, &memory_pointer);
         if (name_size % 2 == 1) {
           write_to_image(out, PAD, &file_pointer, &memory_pointer);
         }

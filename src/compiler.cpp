@@ -194,7 +194,7 @@ const ArrayStructure* find_or_make_array_structure(Structures* const structures,
   return STRUCTS::new_array_structure(structures, strings, base, length);
 }
 
-static u32 new_dynamic_init_object(CompilerGlobals* const comp, const InternString* name, u32 size, u32 alignment,
+static u32 new_dynamic_init_object(CompilerGlobals* const comp, u32 size, u32 alignment,
                                    IR::Builder* ir_builder) {
   Backend::GlobalData holder = {};
   holder.size = size;
@@ -206,7 +206,7 @@ static u32 new_dynamic_init_object(CompilerGlobals* const comp, const InternStri
   return (u32)comp->dynamic_inits.size;
 }
 
-static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, const InternString* name, u32 size, u32 alignment,
+static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, u32 size, u32 alignment,
                                          const u8* value) {
   Backend::GlobalData holder = {};
   holder.size = size;
@@ -329,11 +329,7 @@ const SignatureStructure* find_or_make_lamdba_structure(Structures* const struct
   return STRUCTS::new_lambda_structure(structures, strings, ptr_size, conv, std::move(params), ret_type);
 }
 
-inline constexpr bool is_global_depend(const GlobalName* g) {
-  return (g->global == nullptr || (g->global->constant_value == nullptr && g->global->dynamic_init_index == 0));
-}
-
-void test_global_dependency(CompilerGlobals* const comp, CompilerThread* const comp_thread, DependencyChecker* const state, const Span& span, const InternString* ident) {
+Global* test_global_dependency(CompilerGlobals* const comp, CompilerThread* const comp_thread, DependencyChecker* const state, const Span& span, const InternString* ident) {
   auto names = comp->services.names.get();
   const GlobalName* name = names->find_global_name(state->available_names, ident);
 
@@ -346,11 +342,13 @@ void test_global_dependency(CompilerGlobals* const comp, CompilerThread* const c
     set_unfound_name(comp_thread, std::move(unknown),
                      ERROR_CODE::NAME_ERROR, span,
                      "Could not find name '{}'", ident);
+    return nullptr;
   }
-  else if (is_global_depend(name)) {
-    UnitID unit_id = name->unit_id;
+  else {
+    Global* g = name->global;
     names.release();
-    set_dependency(comp_thread, unit_id);
+    ASSERT(name->global->decl.type.is_valid());
+    return g;
   }
 }
 
@@ -367,7 +365,7 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
 
-        test_global_dependency(comp, comp_thread, state, nt->node_span, nt->name);
+        nt->global = test_global_dependency(comp, comp_thread, state, nt->node_span, nt->name);
         return;
       }
     case AST_TYPE::ARRAY_TYPE: {
@@ -440,34 +438,8 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
           }
         }
 
-        {
-          auto names = comp->services.names.get();
-          const GlobalName* non_local = names->find_global_name(state->available_names, name);
-
-          if (non_local != nullptr) {
-            if (!non_local->global->decl.type.is_valid()) {
-              UnitID id = non_local->unit_id;
-              names.release();
-              //Need to wait for this if its not ready
-              set_dependency(comp_thread, id);
-            }
-
-            ident->id_type = ASTIdentifier::GLOBAL;
-            ident->global = non_local->global;
-            return;
-          }
-        }
-
-        UnknownName unknown = {};
-        unknown.ident = name;
-        unknown.ns = state->available_names;
-
-        set_unfound_name(comp_thread, std::move(unknown),
-                         ERROR_CODE::UNFOUND_DEPENDENCY, a->node_span,
-                         "'{}' was used but a it has no matching declaration",
-                         name);
-
-
+        ident->id_type = ASTIdentifier::GLOBAL;//is definitely a global
+        ident->global = test_global_dependency(comp, comp_thread, state, ident->node_span, ident->name);
         return;
       }
     case AST_TYPE::FUNCTION_CALL: {
@@ -837,7 +809,7 @@ Eval::RuntimeValue CASTS::int_to_int(Eval::IrBuilder* const builder,
   return Eval::as_direct(temp, to);
 }
 
-Eval::RuntimeValue CASTS::no_op(Eval::IrBuilder* const builder,
+Eval::RuntimeValue CASTS::no_op(Eval::IrBuilder* const,
                                 const Type& to,
                                 const Eval::RuntimeValue& val) {
   ASSERT(val.type.is_valid());
@@ -871,11 +843,10 @@ Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* buil
   TRACING_FUNCTION();
 
   if (!global->is_runtime_available) {
-    ASSERT(global->is_constant);
-    global->dynamic_init_index = new_dynamic_init_object_const(comp, global->decl.name,
+    global->dynamic_init_index = new_dynamic_init_object_const(comp,
                                                                global->decl.type.size(),
                                                                global->decl.type.structure->alignment,
-                                                               global->constant_value);
+                                                               global->decl.init_value);
     global->is_runtime_available = true;
   }
 
@@ -1165,9 +1136,6 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         const Type base_type = arr_type->base;
 
-        //const size_t full_align = arr_type->alignment;
-        const size_t full_size = arr_type->size;
-
         ASTArrayExpr* arr_expr = (ASTArrayExpr*)expr;
 
         ASSERT(!eval.requirements.has_address());
@@ -1262,8 +1230,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
           const Type t = local->decl.type;
 
-          if (local->is_constant && !eval.requirements.has_address()) {
-            return Eval::as_constant(local->constant, t);
+          if (VC::is_comptime(local->decl.value_category) && !eval.requirements.has_address()) {
+            ASSERT(local->decl.init_value != nullptr);
+            return Eval::as_constant(local->decl.init_value, t);
           }
           else {
             return builder->import_variable(local->variable_id, eval.requirements);
@@ -1273,8 +1242,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           Global* glob = ident->global;
           ASSERT(glob != nullptr);
 
-          if (glob->is_constant && !eval.requirements.has_address()) {
-            return Eval::as_constant(glob->constant_value, glob->decl.type);
+          if (VC::is_comptime(glob->decl.value_category) && !eval.requirements.has_address()) {
+            ASSERT(glob->decl.init_value != nullptr);
+            return Eval::as_constant(glob->decl.init_value, glob->decl.type);
           }
           else {
             return load_data_memory(comp, builder, glob, eval.requirements);
@@ -1555,8 +1525,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     case AST_TYPE::IF_ELSE: {
         ASTIfElse* const if_else = (ASTIfElse*)statement;
 
-        const bool has_else = if_else->else_statement != nullptr;
-
         const IR::LocalLabel parent = builder->ir->current_block;
         const IR::LocalLabel split_label = builder->ir->new_control_block();
 
@@ -1697,18 +1665,15 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         ASSERT(decl->decl_type == ASTDecl::TYPE::LOCAL);//globals are done elsewhere (maybe move that to here?)
         Local* const local = decl->local_ptr;
 
-        if (decl->compile_time_const) {
-          ASSERT(local->is_constant && local->constant != nullptr);
-
+        if (local->decl.init_value != nullptr) {
           local->variable_id = builder->new_variable(local->decl.type, {});
 
           const auto var = builder->import_variable(local->variable_id, {});
 
-          Eval::assign(builder, var, Eval::as_constant(local->constant, local->decl.type));
-
+          Eval::assign(builder, var, Eval::as_constant(local->decl.init_value, local->decl.type));
         }
         else {
-          ASSERT(!local->is_constant);
+          ASSERT(!decl->compile_time_const);
 
           Eval::RuntimeValue r = compile_bytecode(comp, comp_thread,
                                                   builder, NodeEval::new_value(decl->expr));
@@ -1811,6 +1776,11 @@ void submit_ir(CompilerGlobals* comp, IR::Builder* ir) {
 void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, IR::EvalPromise* eval) {
   TRACING_FUNCTION();
 
+  if (!VC::is_comptime(root->value_category)) {
+    comp_thread->report_error(ERROR_CODE::VM_ERROR, root->node_span, "Cannot evaluate a non-comptime expression");
+    return;
+  }
+
   IR::Builder expr_ir = {};
   expr_ir.signature = comp_thread->builtin_types->t_void_call.extract_base<SignatureStructure>();
 
@@ -1837,8 +1807,14 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
     ASSERT(eval->type == ref_type);
   }
 
+  const Type& type = ref_type;
+  
+  if (eval->data == nullptr) {
+    eval->data = comp->new_constant(type.size());
+  }
+
   if (ref.rvt == Eval::RVT::Constant) {
-    eval->data = ref.constant;
+    memcpy_ts(eval->data, type.size(), ref.constant, type.size());
   }
   else {
     IR::V_ARG out = Eval::load_v_arg(&builder, ref);
@@ -1849,14 +1825,10 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
       return;
     }
 
-    const Type& type = ref_type;
-
     auto res = vm.get_value(out);
     ASSERT(res.t == type);
-    u8* result = comp->new_constant(type.size());
-    memcpy_ts(result, type.size(), res.ptr, type.size());
 
-    eval->data = result;
+    memcpy_ts(eval->data, type.size(), res.ptr, type.size());
   }
 }
 
@@ -1864,7 +1836,7 @@ static void compile_structure(CompilerGlobals* comp,
                               CompilerThread* comp_thread,
                               Namespace* names,
                               ASTStructBody* body,
-                              const StructCompilation* s_comp) {
+                              const StructCompilation*) {
   TRACING_FUNCTION();
 
   TC::type_check_ast(comp, comp_thread, names, body, comp_thread->builtin_types->t_type);
@@ -1874,7 +1846,7 @@ static void compile_lambda_signature(CompilerGlobals* comp,
                                      CompilerThread* comp_thread,
                                      Namespace* names,
                                      ASTFuncSig* root,
-                                     const LambdaSigCompilation* l_comp) {
+                                     const LambdaSigCompilation*) {
   TRACING_FUNCTION();
 
   TC::type_check_ast(comp, comp_thread, names, root, {});
@@ -1925,7 +1897,7 @@ static void compile_lambda_body(CompilerGlobals* comp,
 
 
 static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
-                           ASTExport* root, const ExportCompilation* ec) {
+                           ASTExport* root, const ExportCompilation*) {
   TRACING_FUNCTION();
 
   if (!comp_thread->build_options.is_library) {
@@ -2087,11 +2059,8 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
 
   ASSERT(global->decl.type.is_valid());
 
-  AST_LOCAL decl_expr = decl->expr;
-  ASSERT(global->decl.type.is_valid());
-
   if (VC::is_comptime(global->decl.value_category)) {
-    ASSERT(global->is_constant && global->constant_value != nullptr);
+    ASSERT(global->decl.init_value != nullptr);
 
     if (global->decl.name == comp->build_options.entry_point) {
       if (global->decl.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
@@ -2104,10 +2073,10 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
         return;
       }
 
-      comp->entry_point_label = *(IR::GlobalLabel*)global->constant_value;
+      comp->entry_point_label = *(IR::GlobalLabel*)(global->decl.init_value);
     }
   }
-  else {
+  else if (global->decl.init_value == nullptr) {
     const SignatureStructure* sig = (const SignatureStructure*)comp->builtin_types->t_void_call.structure;
     IR::GlobalLabel label = comp->next_function_label(sig);
 
@@ -2119,7 +2088,10 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
     start_ir(&builder);
 
     global->is_runtime_available = true;
-    global->dynamic_init_index = new_dynamic_init_object(comp, global->decl.name, global->decl.type.structure->size, global->decl.type.structure->alignment, ir);
+    global->dynamic_init_index = new_dynamic_init_object(comp,
+                                                         global->decl.type.structure->size,
+                                                         global->decl.type.structure->alignment,
+                                                         ir);
 
     Eval::RuntimeValue glob_ref = load_data_memory(comp, &builder, global, {});
 
@@ -2132,6 +2104,12 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
 
     Eval::end_builder(&builder);
     submit_ir(comp, ir);
+  }
+
+  {
+    auto names = comp->services.names.get();
+
+    names->add_global_name(comp_thread, available_names, global->decl.name, global);
   }
 }
 
@@ -2258,7 +2236,7 @@ void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExp
   comp->pipelines.depend_check.push_back(exp_unit);
 }
 
-void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTDecl* global) noexcept {
+void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDecl* global) noexcept {
   ASSERT(global->decl_type == ASTDecl::TYPE::GLOBAL);
 
   Global* glob = comp->new_global();
@@ -2274,27 +2252,16 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const
                                      (void*)extra, comp->print_options.comp_units);
   }
 
-  //i->global_ptr = glob;
-
   glob->decl.name = global->name;
   glob->decl.span = global->node_span;
 
   global->global_ptr = glob;
 
-  {
-    auto names = comp->services.names.get();
-
-    names->add_global_name(comp_thread, ns, global->name, glob_unit->id, glob);
-  }
-  if (comp_thread->is_panic()) {
-    return;
-  }
-
   ASSERT(glob_unit != nullptr);
   comp->pipelines.depend_check.push_back(glob_unit);
 }
 
-void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTLambda* lambda) noexcept {
+void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLambda* lambda) noexcept {
   TRACING_FUNCTION();
 
   //Setup the function object
@@ -2355,12 +2322,10 @@ void DependencyManager::remove_dependency_from(CompilationUnit* unit, bool print
       format_print("Remove Dependency from unit {} -> starting again\n", unit->id);
     }
 
-    in_flight_units += 1;
-
     ASSERT(depend_check_pipe != nullptr);
 
-
     depend_check_pipe->push_back(unit);//has to re-run through depend check
+    in_flight_units += 1;
   }
   else {
     if (print) {
@@ -2683,7 +2648,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       lbc->func = func;
 
       body_unit = new_compilation_unit(compilation._ptr, COMPILATION_EMIT_TYPE::LAMBDA_BODY, &comp->pipelines.comp_body,
-                                       unit->available_names, lambda, lbc, comp->print_options.comp_units);
+                                       available_names, lambda, lbc, comp->print_options.comp_units);
     }
 
     comp->pipelines.depend_check.push_back(body_unit);
@@ -2833,7 +2798,7 @@ struct ThreadData {
   CompilerThread* comp_thread;
 };
 
-void compiler_loop_thread_proc(const ThreadHandle* handle, void* data) {
+void compiler_loop_thread_proc(const ThreadHandle*, void* data) {
   ASSERT(data != nullptr);
   ThreadData* t_data = (ThreadData*)data;
   CompilerGlobals* comp = t_data->comp;
@@ -3081,13 +3046,11 @@ Type create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread, NameM
   g->decl.name = name;
   g->decl.type = comp->builtin_types->t_type;
   g->decl.span = span;
+  g->decl.init_value = (const u8*)comp->new_constant<Type>();
 
-  g->is_constant = true;
-  g->constant_value = (const u8*)comp->new_constant<Type>();
+  memcpy_ts((Type*)g->decl.init_value, 1, &type, 1);
 
-  memcpy_ts((Type*)g->constant_value, 1, &type, 1);
-
-  names->add_global_name(comp_thread, ns, name, NULL_ID, g);
+  names->add_global_name(comp_thread, ns, name, g);
 
   return type;
 }
@@ -3101,13 +3064,11 @@ void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
   g->decl.name = v->name;
   g->decl.type = v->type;
   g->decl.span = span;
+  g->decl.init_value = (const u8*)comp->new_constant<const EnumValue*>();
 
-  g->is_constant = true;
-  g->constant_value = (const u8*)comp->new_constant<const EnumValue*>();
+  memcpy_ts((const EnumValue**)g->decl.init_value, 1, &v, 1);
 
-  memcpy_ts((const EnumValue**)g->constant_value, 1, &v, 1);
-
-  names->add_global_name(comp_thread, ns, v->name, NULL_ID, g);
+  names->add_global_name(comp_thread, ns, v->name, g);
 }
 
 void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThread* comp_thread) {
@@ -3233,12 +3194,10 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     g->decl.span = Span{};
     g->decl.type = builtin_types->t_void_ptr;
     g->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
+    g->decl.init_value = (const u8*)comp->new_constant<const u8*>();
+    *(const u8**)g->decl.init_value = 0;//This is disgusting
 
-    g->is_constant = true;
-    g->constant_value = (const u8*)comp->new_constant<const u8*>();
-    *(const u8**)g->constant_value = 0;//This is disgusting
-
-    names->add_global_name(comp_thread, builtin_namespace, g->decl.name, NULL_ID, g);
+    names->add_global_name(comp_thread, builtin_namespace, g->decl.name, g);
   }
 
   //Intrinsics

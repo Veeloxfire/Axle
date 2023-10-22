@@ -79,7 +79,7 @@ constexpr auto fib_recurse_main() -> uint64_t {
 }
 
 constexpr auto fib_count_main() -> uint64_t {
-  uint64_t n = 0;
+  uint64_t n = 3;
   constexpr_fibonacci_recurse_count(&n, 5);
 
   return n;

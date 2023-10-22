@@ -18,7 +18,6 @@ struct CheckResult {
 };
 
 struct TypeCheckNode {
-  bool eval;
   AST_LOCAL node;
   Type infer;
   TypeCheckStageFn stage;
@@ -28,15 +27,11 @@ struct Typer {
   Array<TypeCheckNode> new_nodes = {};
   Array<TypeCheckNode> in_progress = {};
 
-  Array<IR::EvalPromise> evals = {};
-
   Type return_type = {};
 
   Namespace* available_names;
 
-  IR::EvalPromise pop_eval();
   void push_node(AST_LOCAL loc, Type infer);
-  void push_node_eval(AST_LOCAL loc, Type infer);
 };
 
 static constexpr CheckResult next_stage(TypeCheckStageFn stage) {
@@ -69,6 +64,46 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
         ASSERT(body->ast_type == AST_TYPE::STRUCT);
         return static_cast<ASTStructBody*>(body)->actual_type;
       }
+    case AST_TYPE::IDENTIFIER_EXPR: {
+        ASTIdentifier* ident = downcast_ast<ASTIdentifier>(a);
+        switch (ident->id_type) {
+          case ASTIdentifier::LOCAL: {
+              const Local* l = ident->local;
+              if (!VC::is_comptime(l->decl.value_category)) {
+                comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
+                                          "Runtime types are invalid");
+                return {};
+              }
+
+              ASSERT(l->decl.type == comp_thread->builtin_types->t_type);
+              ASSERT(l->decl.init_value != nullptr);
+
+              Type t = {};
+              memcpy_ts(&t, 1, (const Type*)(l->decl.init_value), 1);
+              return t;
+            }
+          case ASTIdentifier::GLOBAL: {
+              const Global* g = ident->global;
+              if (!VC::is_comptime(g->decl.value_category)) {
+                comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
+                                          "Runtime types are invalid");
+                return {};
+              }
+
+              ASSERT(g->decl.type == comp_thread->builtin_types->t_type);
+              ASSERT(g->decl.init_value != nullptr);
+
+              Type t = {};
+              memcpy_ts(&t, 1, (const Type*)(g->decl.init_value), 1);
+              return t;
+            }
+        }
+
+        INVALID_CODE_PATH("Invalid identifier type");
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
+                                  "Invalid identifier type");
+        return {};
+      }
 
     default: {
         comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
@@ -86,18 +121,12 @@ TC_STAGE(NAMED_TYPE, 1) {
   EXPAND_THIS(ASTNamedType, nt);
 
   nt->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
-
+  
   //TODO: local types
-  const Global* global;
-  {
-    auto names = comp->services.names.get();
-    GlobalName* g = names->find_global_name(typer->available_names, nt->name);
+  const Global* global = nt->global;
 
-    ASSERT(g != nullptr);
-
-    global = g->global;
-    ASSERT(global != nullptr);
-  }
+  ASSERT(global != nullptr);
+  ASSERT(global->decl.type.is_valid());
 
   if (global->decl.type.struct_type() != STRUCTURE_TYPE::TYPE) {
     comp_thread->report_error(ERROR_CODE::NAME_ERROR, nt->node_span,
@@ -106,10 +135,10 @@ TC_STAGE(NAMED_TYPE, 1) {
     return FINISHED;
   }
 
-  ASSERT(global->constant_value != nullptr);
+  ASSERT(global->decl.init_value != nullptr);
   ASSERT(VC::is_comptime(global->decl.value_category));
 
-  nt->actual_type = *(const Type*)global->constant_value;
+  nt->actual_type = *(const Type*)global->decl.init_value;
   nt->node_type = comp_thread->builtin_types->t_type;
   return FINISHED;
 }
@@ -126,12 +155,14 @@ TC_STAGE(ARRAY_TYPE, 2) {
   ASSERT(at->expr->node_type == comp_thread->builtin_types->t_u64);
   ASSERT(VC::is_comptime(at->expr->value_category));
 
-  IR::EvalPromise eval = typer->pop_eval();
+  IR::EvalPromise eval = {};
+  eval.type = comp_thread->builtin_types->t_u64;
+  eval.data = (u8*)&at->array_length;
 
-  ASSERT(eval.type == comp_thread->builtin_types->t_u64);
-  ASSERT(at->expr != nullptr && at->expr->node_type == comp_thread->builtin_types->t_u64);
-
-  memcpy_ts(&at->array_length, 1, (const u64*)(eval.data), 1);
+  IR::eval_ast(comp, comp_thread, at->expr, &eval);
+  if (comp_thread->is_panic()) {
+    return FINISHED;
+  }
 
   if (at->array_length == 0) {
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
@@ -163,7 +194,7 @@ TC_STAGE(ARRAY_TYPE, 1) {
   at->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   typer->push_node(at->base, comp_thread->builtin_types->t_type);
-  typer->push_node_eval(at->expr, comp_thread->builtin_types->t_u64);
+  typer->push_node(at->expr, comp_thread->builtin_types->t_u64);
 
   return next_stage(ARRAY_TYPE_stage_2);
 }
@@ -575,11 +606,12 @@ TC_STAGE(TUPLE_LIT, 2) {
   ASSERT(!tup->node_type.is_valid());
 
   if (tup->prefix) {
-    IR::EvalPromise t = typer->pop_eval();
-    ASSERT(t.type == comp_thread->builtin_types->t_type);
-    Type type = *(const Type*)t.data;
-    tup->node_type = type;
+    Type type = get_type_value(comp_thread, tup->prefix);
+    if (comp_thread->is_panic()) {
+      return FINISHED;
+    }
 
+    tup->node_type = type;
 
     if (infer_type.is_valid() && infer_type != tup->node_type) {
       comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, tup->node_span,
@@ -680,7 +712,7 @@ TC_STAGE(TUPLE_LIT, 1) {
   tup->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   if (tup->prefix != nullptr) {
-    typer->push_node_eval(tup->prefix, comp_thread->builtin_types->t_type);
+    typer->push_node(tup->prefix, comp_thread->builtin_types->t_type);
     return next_stage(TUPLE_LIT_stage_2);
   }
 
@@ -1005,24 +1037,15 @@ TC_STAGE(IDENTIFIER_EXPR, 1) {
     ASSERT(local->decl.type.is_valid());
 
     ident->node_type = local->decl.type;
-    if (local->is_constant) {
-      ident->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
-    }
-    else {
-      ident->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
-    }
+    ident->value_category = local->decl.value_category;
   }
   else if (ident->id_type == ASTIdentifier::GLOBAL) {
     Global* glob = ident->global;
+    ASSERT(glob != nullptr);
+    ASSERT(glob->decl.type.is_valid());
 
     ident->node_type = glob->decl.type;
-
-    if (glob->is_constant) {
-      ident->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
-    }
-    else {
-      ident->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
-    }
+    ident->value_category = glob->decl.value_category;
   }
   else {
     comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, ident->node_span,
@@ -2024,10 +2047,19 @@ TC_STAGE(FUNCTION_CALL, 3) {
     return FINISHED;
   }
 
-  IR::EvalPromise eval = typer->pop_eval();
-  ASSERT(eval.type == func_type);
+  IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
+  {
+    IR::EvalPromise eval = {};
+    eval.type = func_type;
+    eval.data = (u8*)&label;
 
-  IR::GlobalLabel label = *(IR::GlobalLabel*)eval.data;
+    IR::eval_ast(comp, comp_thread, call->function, &eval);
+    if (comp_thread->is_panic()) {
+      return FINISHED;
+    }
+  }
+
+
   ASSERT(label != IR::NULL_GLOBAL_LABEL);
   call->label = label;
 
@@ -2068,7 +2100,7 @@ TC_STAGE(FUNCTION_CALL, 1) {
 
   call->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;//not constant yet
 
-  typer->push_node_eval(call->function, {});
+  typer->push_node(call->function, {});
 
   return next_stage(FUNCTION_CALL_stage_2);
 }
@@ -2103,92 +2135,122 @@ TC_STAGE(ASSIGN, 1) {
 
 TC_STAGE(DECL, 3) {
   TRACING_FUNCTION();
-  EXPAND_THIS(ASTDecl, decl);
+  EXPAND_THIS(ASTDecl, ast_decl);
 
-  if (!decl->type.is_valid()) {
-    ASSERT(decl->expr != nullptr);
-    decl->type = decl->expr->node_type;
+  AST_LOCAL decl_expr = ast_decl->expr;
+
+  if (!ast_decl->type.is_valid()) {
+    ASSERT(decl_expr != nullptr);
+    ast_decl->type = ast_decl->expr->node_type;
   }
 
-  ASSERT(decl->type.is_valid());
+  ASSERT(ast_decl->type.is_valid());
 
-  AST_LOCAL decl_expr = decl->expr;
-
-  if (decl->compile_time_const
+  if (ast_decl->compile_time_const
       && (decl_expr == nullptr || !VC::is_comptime(decl_expr->value_category))) {
-    comp_thread->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
+    comp_thread->report_error(ERROR_CODE::CONST_ERROR, ast_decl->node_span,
                               "Compile time declaration '{}' must be initialized by a compile time expression",
-                              decl->name);
+                              ast_decl->name);
     return FINISHED;
   }
 
-  switch (decl->decl_type) {
+  Decl* decl;
+
+  switch (ast_decl->decl_type) {
     case ASTDecl::TYPE::LOCAL: {
-        Local* const loc = decl->local_ptr;
-        loc->decl.type = decl->type;
-        if (decl->compile_time_const) {
-          loc->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
-        }
-        else {
-          loc->decl.value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
-        }
-
-        ASSERT(loc->decl.type.is_valid());
-
-        if (decl->compile_time_const) {
-          if (!VC::is_comptime(decl_expr->value_category)) {
-            comp_thread->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
-                                      "Cannot initialize a compile time constant with "
-                                      "a non compile time constant value");
-            return FINISHED;
-          }
-
-          IR::EvalPromise p = typer->pop_eval();
-          ASSERT(p.data != nullptr);
-          ASSERT(p.type == loc->decl.type);
-
-          loc->is_constant = true;
-          loc->constant = p.data;
-        }
-
-        decl->node_type = comp_thread->builtin_types->t_void;
-        return FINISHED;
+        Local* const loc = ast_decl->local_ptr;
+        decl = &loc->decl;
+        break;
       }
     case ASTDecl::TYPE::GLOBAL: {
-        ASSERT(decl->global_ptr != nullptr);
-        Global* global = decl->global_ptr;
-        global->decl.type = decl->type;
-        if (decl->compile_time_const) {
-          global->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
-        }
-        else {
-          global->decl.value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
-        }
+        ASSERT(ast_decl->global_ptr != nullptr);
+        Global* global = ast_decl->global_ptr;
 
-        decl->node_type = comp_thread->builtin_types->t_void;
-
-        if (decl->compile_time_const) {
-          if (!VC::is_comptime(decl_expr->value_category)) {
-            comp_thread->report_error(ERROR_CODE::CONST_ERROR, decl->node_span,
-                                      "Cannot initialize a compile time constant with "
-                                      "a non compile time constant value");
-            return FINISHED;
-          }
-
-          IR::EvalPromise p = typer->pop_eval();
-          ASSERT(p.data != nullptr);
-          ASSERT(p.type == global->decl.type);
-
-          global->is_constant = true;
-          global->constant_value = p.data;
-        }
-
+        decl = &global->decl;
+        break;
+      }
+    default: {
+        INVALID_CODE_PATH("Declaration was somehow not a global or local variable ...");
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, {}, "Declaration was somehow not a global or local");
         return FINISHED;
       }
   }
 
-  INVALID_CODE_PATH("Declaration was somehow not a global or local variable ...");
+  decl->type = ast_decl->type;
+
+  if (ast_decl->compile_time_const) {
+    decl->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
+  }
+  else {
+    decl->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
+  }
+
+  if (VC::is_comptime(decl->value_category) || VC::is_comptime(decl_expr->value_category)) {
+    if (!VC::is_comptime(decl_expr->value_category)) {
+      comp_thread->report_error(ERROR_CODE::CONST_ERROR, ast_decl->node_span,
+                                "Cannot initialize a compile time constant with "
+                                "a non compile time constant value");
+      return FINISHED;
+    }
+
+    IR::EvalPromise p = {};
+    p.data = nullptr;
+    p.type = decl->type;
+
+    IR::eval_ast(comp, comp_thread, decl_expr, &p);
+    if (comp_thread->is_panic()) {
+      return FINISHED;
+    }
+
+    ASSERT(p.data != nullptr);
+    ASSERT(p.type == decl->type);
+
+    decl->init_value = p.data;
+  }
+
+  ASSERT(VC::is_variable(decl->value_category));
+
+  ast_decl->value_category = decl->value_category;
+  ast_decl->node_type = comp_thread->builtin_types->t_void;
   return FINISHED;
+}
+
+TC_STAGE(DECL, 2) {
+  TRACING_FUNCTION();
+  EXPAND_THIS(ASTDecl, decl);
+
+  Type expr_type = {};
+  if (decl->type_ast != nullptr) {
+    decl->type = get_type_value(comp_thread, decl->type_ast);
+    if (comp_thread->is_panic()) {
+      return FINISHED;
+    }
+
+    expr_type = decl->type;
+  }
+  else {
+    decl->type = {};
+  }
+
+  if (decl->expr != nullptr) {
+    typer->push_node(decl->expr, expr_type);
+  }
+
+  return next_stage(DECL_stage_3);
+}
+
+TC_STAGE(DECL, 1) {
+  TRACING_FUNCTION();
+  EXPAND_THIS(ASTDecl, decl);
+  AST_LOCAL decl_expr = decl->expr;
+
+  if (decl->type_ast != nullptr) {
+    typer->push_node(decl->type_ast, comp_thread->builtin_types->t_type);
+
+    return next_stage(DECL_stage_2);
+  }
+
+  return DECL_stage_2(comp, comp_thread, typer, this_infer);
 }
 
 TC_STAGE(IF_ELSE, 1) {
@@ -2227,47 +2289,6 @@ TC_STAGE(BLOCK, 1) {
 
   block->node_type = comp_thread->builtin_types->t_void;
   return WAIT_FOR_CHILDREN;
-}
-
-TC_STAGE(DECL, 2) {
-  TRACING_FUNCTION();
-  EXPAND_THIS(ASTDecl, decl);
-
-  Type expr_type = {};
-  if (decl->type_ast != nullptr) {
-    decl->type = get_type_value(comp_thread, decl->type_ast);
-    if (comp_thread->is_panic()) {
-      return FINISHED;
-    }
-
-    expr_type = decl->type;
-  }
-  else {
-    decl->type = {};
-  }
-
-  if (decl->compile_time_const) {
-    typer->push_node_eval(decl->expr, expr_type);
-  }
-  else {
-    typer->push_node(decl->expr, expr_type);
-  }
-
-  return next_stage(DECL_stage_3);
-}
-
-TC_STAGE(DECL, 1) {
-  TRACING_FUNCTION();
-  EXPAND_THIS(ASTDecl, decl);
-  AST_LOCAL decl_expr = decl->expr;
-
-  if (decl->type_ast != nullptr) {
-    typer->push_node(decl->type_ast, comp_thread->builtin_types->t_type);
-
-    return next_stage(DECL_stage_2);
-  }
-
-  return DECL_stage_2(comp, comp_thread, typer, this_infer);
 }
 
 TC_STAGE(RETURN, 1) {
@@ -2378,6 +2399,8 @@ TC_STAGE(TYPED_NAME, 2) {
 
   ASSERT(loc->decl.name == name->name);
   loc->decl.type = name->node_type;
+  loc->decl.value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
+  loc->decl.init_value = nullptr;
 
   return FINISHED;
 }
@@ -2403,32 +2426,12 @@ static TypeCheckStageFn get_first_stage(AST_TYPE type) {
   }
 }
 
-IR::EvalPromise Typer::pop_eval() {
-  ASSERT(evals.size > 0);
-  return evals.take();
-}
-
 void Typer::push_node(AST_LOCAL loc, Type infer) {
   ASSERT(loc != nullptr);
   ASSERT(!loc->node_type.is_valid());
 
   new_nodes.insert_uninit(1);
   TypeCheckNode* n = new_nodes.back();
-  n->eval = false;
-  n->node = loc;
-  n->infer = infer;
-  n->stage = get_first_stage(loc->ast_type);
-}
-
-void Typer::push_node_eval(AST_LOCAL loc, Type infer) {
-  ASSERT(loc != nullptr);
-  ASSERT(!loc->node_type.is_valid());
-
-  evals.insert({ nullptr, infer });
-
-  new_nodes.insert_uninit(1);
-  TypeCheckNode* n = new_nodes.back();
-  n->eval = true;
   n->node = loc;
   n->infer = infer;
   n->stage = get_first_stage(loc->ast_type);
@@ -2442,7 +2445,7 @@ void TC::type_check_ast(CompilerGlobals* comp,
 
   Typer typer = {};
   typer.available_names = ns;
-  typer.in_progress.insert({ false, root, infer, get_first_stage(root->ast_type) });
+  typer.in_progress.insert({ root, infer, get_first_stage(root->ast_type) });
 
   constexpr auto sumbit_new_nodes = [](Typer& typer) {
     TRACING_SCOPE("Submit New Nodes");
@@ -2480,28 +2483,14 @@ void TC::type_check_ast(CompilerGlobals* comp,
         ASSERT(n->node->node_type.is_valid());
 
         if (n->infer.is_valid() && n->infer != n->node->node_type) {
-          const Type& infer = n->infer;
+          const Type& expected = n->infer;
           const Type& actual = n->node->node_type;
           comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, n->node->node_span,
-                                    "Expected type: {}. Actual type: {}", infer.name, actual.name);
+                                    "Expected type: {}. Actual type: {}", expected.name, actual.name);
           return;
         }
 
         ASSERT(typer.new_nodes.size == 0);
-
-        if (n->eval) {
-          if (!VC::is_comptime(n->node->value_category)) {
-            comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, n->node->node_span,
-                                      "Attempted to execute code at compile time which was runtime dependent");
-            return;
-          }
-
-          IR::EvalPromise* eval = typer.evals.back();
-          IR::eval_ast(comp, comp_thread, n->node, eval);
-          if (comp_thread->is_panic()) {
-            return;
-          }
-        }
 
         typer.in_progress.pop();
       }

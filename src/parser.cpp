@@ -97,7 +97,7 @@ static u64 parse_hex_uint(const char* digits, const u64 len) {
       return (c - 'A' + 0xa);
     }
     else {
-      return -1;
+      return '\0';
     }
   };
 
@@ -147,15 +147,6 @@ static u64 string_to_uint(const char* str) {
 
   const auto len = num_dec_digits(str);
   return parse_dec_uint(str, len);
-}
-
-[[maybe_unused]] constexpr static Token make_token(Lexer* const lex, const AxleTokenType type, const InternString* string) {
-  Token tok;
-
-  tok.type = type;
-  tok.string = string;
-
-  return tok;
 }
 
 constexpr static bool is_new_line(Lexer* const lex) {
@@ -2188,7 +2179,7 @@ static AST_LOCAL parse_lambda(CompilerGlobals* const comp, CompilerThread* const
   l->body = body;
 
   //Load to a compilation unit
-  add_comp_unit_for_lambda(comp, comp_thread, parser->current_namespace, l);
+  add_comp_unit_for_lambda(comp, parser->current_namespace, l);
 
   return l;
 }
@@ -2412,7 +2403,7 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
 
       linked->curr = decl;
 
-      add_comp_unit_for_global(comp, comp_thread, parser->current_namespace, decl);
+      add_comp_unit_for_global(comp, parser->current_namespace, decl);
       if (comp_thread->is_panic()) {
         return;
       }

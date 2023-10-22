@@ -305,64 +305,6 @@ struct ImportDataDirectory {
   RVA import_address_table;
 };
 
-struct CodeSection {
-  const uint8_t* bytes = nullptr;
-  size_t size = 0;
-  size_t entry_point = 0;
-};
-
-enum struct ConstantType : uint8_t {
-  //UTF8_STRING,
-  STRING,
-  INTEGER,
-};
-
-struct ConstantEntry {
-  ConstantType type;
-  union {
-    const InternString* string = nullptr;
-    uint64_t integer;
-  };
-
-  uint32_t loaded_offset = 0;
-};
-
-struct ConstantOffset {
-  size_t offset;
-};
-
-struct ConstantTable {
-  Array<ConstantEntry> constants;
-  RVA table_rva;
-  VA table_va;
-
-  ConstantOffset string_constant(const InternString*);
-  RVA get_constant_rva(ConstantOffset offset) const;
-  VA get_constant_va(ConstantOffset offset) const;
-};
-
-struct ImportNameEntry {
-  const InternString* name;
-  VA va;
-};
-
-struct Import {
-  ConstantOffset DLL_name;
-  VA lookup_table1;
-  VA lookup_table2;
-
-  Array<size_t> imported_names;
-};
-
-struct ImportTable {
-  Array<ImportNameEntry> import_names;
-
-  Array<Import> imports;
-};
-
-Import* new_import(const InternString* dll_name, ImportTable* imports, ConstantTable* constants);
-void add_name_to_import(Import* import_ptr, const InternString* name_to_import, VA estimated_va, ImportTable* table);
-
 struct ImportantValues {
   uint32_t num_sections;
 

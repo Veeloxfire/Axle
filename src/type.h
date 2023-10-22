@@ -54,6 +54,19 @@ namespace VC {
     return false;
   }
 
+  constexpr bool is_variable(VALUE_CATEGORY vc) {
+    switch (vc) {
+      case VALUE_CATEGORY::TEMPORARY_CONSTANT:
+      case VALUE_CATEGORY::TEMPORARY_IMMUTABLE: return false;
+
+      case VALUE_CATEGORY::VARIABLE_CONSTANT:
+      case VALUE_CATEGORY::VARIABLE_IMMUTABLE:
+      case VALUE_CATEGORY::VARIABLE_MUTABLE: return true;
+    }
+
+    return false;
+  }
+
   constexpr bool is_comptime(VALUE_CATEGORY vc) {
     switch (vc) {
       case VALUE_CATEGORY::TEMPORARY_CONSTANT:

@@ -523,6 +523,7 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
             auto from = stack_frame->get_value(op.from);
             const IR::Format t_format = to.t.struct_format();
             const IR::Format f_format = from.t.struct_format();
+            ASSERT(t_format == f_format);
             if (t_format == IR::Format::uint8) {
               *to.ptr = static_cast<u8>(!static_cast<bool>(*from.ptr));
             }
@@ -555,9 +556,11 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
           goto_block(stack_frame->current_block->cf_start.child);
           break;
         }
-      case IR::ControlFlowType::End:
+      case IR::ControlFlowType::End: {
+          return;
+        }
       case IR::ControlFlowType::Return: {
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Currently don't support call control flow inside the vm");
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Currently don't support returning values");
           return;
         }
 

@@ -117,6 +117,7 @@ struct ASTNamedType : public AST {
 
   Type actual_type = {};
   const InternString* name = nullptr;
+  const Global* global;
 };
 
 struct ASTArrayType : public AST {

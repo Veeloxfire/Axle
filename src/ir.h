@@ -4,7 +4,7 @@
 
 namespace IR {
   struct EvalPromise {
-    const u8* data;
+    u8* data;
     Type type;
   };
 
@@ -562,6 +562,7 @@ namespace VM {
   struct StackFrame {
     OwnedArr<u8> bytes;
     OwnedArr<Value> temporaries = {};
+    Value return_val;
 
     const IR::Builder* ir;
 

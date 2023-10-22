@@ -3,7 +3,6 @@
 #include "windows_specifics.h"
 #include "x64_backend.h"
 #include "PE_file_format.h"
-#include <iostream>
 #include "trace.h"
 
 constexpr char output_folder[] = ".\\out";
@@ -18,11 +17,13 @@ int main(int argc, const char** args) {
 #endif
 
   if (argc != 2) {
-    std::cerr << "Invalid number of arguments!";
+    IO::err_print("Invalid number of arguments!");
     return 1;
   }
 
   Windows::MAX_PATH_STR cwd = Windows::get_current_directory();
+  IO::err_print("CWD: ", cwd.str, '\n');
+
 
   constexpr Backend::PlatformInterface pi = x86_64_platform_interface();
   constexpr Backend::ExecutableFormatInterface efi = pe_plus_file_interface();
@@ -60,6 +61,7 @@ int main(int argc, const char** args) {
   options.print.comptime_res = false;
   options.print.comptime_exec = false;
   options.print.finished_ir = false;
+  options.print.finished_mc = false;
   options.print.run_headers = false;
   options.print.register_select = false;
   options.print.file_loads = false;
@@ -73,7 +75,7 @@ int main(int argc, const char** args) {
     int out = compile_and_write(options);
 
     if (out != 0) {
-      std::cerr << "Error!";
+      IO::err_print("Error!");
       return out;
     }
   }

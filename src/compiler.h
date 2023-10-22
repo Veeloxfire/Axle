@@ -19,13 +19,12 @@ struct Decl {
   const InternString* name = {};
   VALUE_CATEGORY value_category;
   Type type = {};
+
+  const u8* init_value = nullptr;
 };
 
 struct Local {
   Decl decl = {};
-
-  bool is_constant = false;
-  const u8* constant = nullptr;
 
   IR::VariableId variable_id = {};
 };
@@ -50,9 +49,6 @@ struct DependencyChecker {
 
 struct Global {
   Decl decl = {};
-
-  bool is_constant = false;
-  const u8* constant_value;
   
   bool is_runtime_available = false;
   u32 dynamic_init_index = 0;
@@ -412,9 +408,9 @@ void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const 
 
 void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExport* imp) noexcept;
 
-void add_comp_unit_for_lambda(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTLambda* lambda) noexcept;
+void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLambda* lambda) noexcept;
 
-void add_comp_unit_for_global(CompilerGlobals* const comp, CompilerThread* const comp_thread, Namespace* ns, ASTDecl* global) noexcept;
+void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDecl* global) noexcept;
 
 void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;
 

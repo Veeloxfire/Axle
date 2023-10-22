@@ -1,12 +1,19 @@
-test :: () -> u64 {
-  one : u64 = 1;
-  minus_two : u64 = cast(u64, -2i64);
-  three : u64 = 3;
-  four : u64 = 4;
+hash :: (ptr: *u8, len: u64) -> u64 {
+  hash_v : u64 = 0xcbf29ce484222325;
 
-  return one + minus_two * three / four;
+  while(len > 0) {
+    hash_v = hash_v * 0x100000001b3;
+    hash_v = hash_v ^ cast(u64, *ptr);
+
+    ptr = ptr + 1;
+    len = len - 1;
+  }
+
+  return hash_v;
 }
 
-main :: ()-> u64 {
-  return test();
+main :: () -> u64 {
+  arr :=  "hello";
+
+  return hash(cast(*u8, arr.ptr), 5);
 }

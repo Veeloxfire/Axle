@@ -3031,7 +3031,7 @@ namespace Helpers {
     }
 
     //Base case
-    void operator()(const Structure* s1, const Structure* s2) const {
+    void operator()(const Structure*, const Structure*) const {
       invalid();
     }
 
@@ -3171,7 +3171,7 @@ namespace Helpers {
                               const MemoryView& from, const Structure* f_type,
                               const MemoryView& to, const Structure* t_type,
                               X64::R temp) {
-    return dispatch_pair(MemMemDispatch{ program, from, to }, f_type, t_type);
+    return dispatch_pair(MemMemDispatch{ program, from, to, temp }, f_type, t_type);
   }
 
   struct AddDispatch {
@@ -3821,7 +3821,6 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           IR::Types::AddrOfGlobal addr;
           bc = IR::Read::AddrOfGlobal(bc, bc_end, addr);
           ASSERT(resolver->globals_used.size > addr.im32);
-          const IR::GlobalReference& g = resolver->globals_used[addr.im32];
 
           VisitRes im = visit_ordered_value(values, lifetimes, resolver, addr.val, expr_id);
 
@@ -4157,16 +4156,16 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         u32 b = edge_i->b;
 
         if (b >= values.size + intermediates.size) {
-          u32 i = static_cast<u32>(b - (values.size + intermediates.size));
-          ASSERT(mangled_registers.data[i].known_reg);
-          auto r = mangled_registers.data[i].reg;
+          u32 v_i = static_cast<u32>(b - (values.size + intermediates.size));
+          ASSERT(mangled_registers.data[v_i].known_reg);
+          auto r = mangled_registers.data[v_i].reg;
           ASSERT(r < 32);
           used_regs |= 1u << (u32)r;
         }
         else if (b >= values.size) {
-          u32 i = static_cast<u32>(b - values.size);
-          ASSERT(intermediates.data[i].known_reg);
-          auto r = intermediates.data[i].reg;
+          u32 i_i = static_cast<u32>(b - values.size);
+          ASSERT(intermediates.data[i_i].known_reg);
+          auto r = intermediates.data[i_i].reg;
           ASSERT(r < 32);
           used_regs |= 1u << (u32)r;
         }
@@ -4832,7 +4831,6 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             const auto* pt = from.t.unchecked_base<PointerStructure>();
 
             X64Value to = selector.get_val(copy.to);
-            const IR::Format to_format = to.t.struct_format();
 
             MemoryView view;
             switch (from.value_type) {
@@ -4986,9 +4984,9 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                   break;
                 }
               case ValueType::Memory: {
-                  X64::R temp = selector.get_next_intermediate_reg();
-                  IntHelpers::copy_mem_to_reg(program, from.mem, pt_f->ir_format, temp, pt_f->ir_format);
-                  from_mem = pointer_view(temp, pt_f->base);
+                  X64::R m_temp = selector.get_next_intermediate_reg();
+                  IntHelpers::copy_mem_to_reg(program, from.mem, pt_f->ir_format, m_temp, pt_f->ir_format);
+                  from_mem = pointer_view(m_temp, pt_f->base);
                   break;
                 }
             }
@@ -5006,7 +5004,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               case ValueType::Memory: {
                   X64::R m_temp = selector.get_next_intermediate_reg();
                   IntHelpers::copy_mem_to_reg(program, to.mem, pt_t->ir_format, m_temp, pt_t->ir_format);
-                  to_mem = pointer_view(temp, pt_t->base);
+                  to_mem = pointer_view(m_temp, pt_t->base);
                   break;
                 }
             }
@@ -5193,7 +5191,6 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
               X64::R r = selector.get_next_intermediate_reg();
 
               X64Value to = selector.get_val(arg);
-              IR::Format arg_format = to.t.struct_format();
               ASSERT(param == to.t);
 
               switch (to.value_type) {
@@ -5219,7 +5216,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
             const bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
 
-            u32 call_needed = convention->shadow_space_size;
+            ASSERT(call_space_used >= convention->shadow_space_size);
 
             for (usize i = 0; i < ((usize)call.n_values - has_return); ++i) {
               IR::V_ARG arg;
@@ -6049,8 +6046,8 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
     if (op == 0x0F) {
       //0x0F instructions
-      uint8_t op = start.read_byte();
-      switch (op) {
+      uint8_t op2 = start.read_byte();
+      switch (op2) {
         case X64::JE_NEAR: {
             int rel32 = x32_from_itr(&start);
 
@@ -6173,8 +6170,8 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             break;
           }
         default: {
-            printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx\n",
-                   maybe_rex, op);
+            printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
+                   maybe_rex, op, op2);
 
             return;
           }

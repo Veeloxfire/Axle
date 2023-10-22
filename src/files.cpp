@@ -701,17 +701,21 @@ static OwnedArr<const char> normalize_path(Range base_directory,
     const auto end = path.end();
 
     if (i < end) {
-      const size_t len = i->end - i->start;
-      str.insert_uninit(len);
-
-      memcpy_ts(str.data + str.size - len, len, i->start, len);
-      i += 1;
-      while (i < end) {
-        str.insert('\\');
+      {
         const size_t len = i->end - i->start;
         str.insert_uninit(len);
 
         memcpy_ts(str.data + str.size - len, len, i->start, len);
+      }
+      i += 1;
+      while (i < end) {
+        str.insert('\\');
+        {
+          const size_t len = i->end - i->start;
+          str.insert_uninit(len);
+
+          memcpy_ts(str.data + str.size - len, len, i->start, len);
+        }
         i += 1;
       }
     }

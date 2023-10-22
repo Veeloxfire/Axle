@@ -4,8 +4,6 @@
 #include "comp_utilities.h"
 
 struct GlobalName {
-  //Can be null in some cases
-  UnitID unit_id;
   const InternString* name;
   Global* global;
 };
@@ -23,7 +21,7 @@ struct NameFindItr {
 
 //Is a struct because its easier to multithread names this way
 struct NameManager {
-  GlobalName* add_global_name(CompilerThread* const comp, Namespace* ns, const InternString* name, UnitID unit_id, Global* g);
+  GlobalName* add_global_name(CompilerThread* const comp, Namespace* ns, const InternString* name, Global* g);
 
   void add_global_import(CompilerThread* const comp, Namespace* ns, Namespace* imp, const Span& s);
 

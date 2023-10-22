@@ -1,7 +1,7 @@
 #include "names.h"
 #include "compiler.h"
 
-GlobalName* NameManager::add_global_name(CompilerThread* comp_thread, Namespace* ns, const InternString* name, UnitID unit_id, Global* g) {
+GlobalName* NameManager::add_global_name(CompilerThread* comp_thread, Namespace* ns, const InternString* name, Global* g) {
   ASSERT(name != nullptr);
   //CAN BE NULL
   //ASSERT(unit != nullptr;
@@ -19,7 +19,6 @@ GlobalName* NameManager::add_global_name(CompilerThread* comp_thread, Namespace*
   ns->globals.insert_uninit(1);
   n = ns->globals.back();
   n->name = name;
-  n->unit_id = unit_id;
   n->global = g;
 
   return n;
