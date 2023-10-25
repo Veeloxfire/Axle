@@ -118,17 +118,17 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
 
   const bool has_constants = strings.used > 0 || lib;
 
-  const char* suffix;
+  ViewArr<const char> suffix;
   if (lib) {
-    suffix = "dll";
+    suffix = lit_view_arr("dll");
   }
   else {
-    suffix = "exe";
+    suffix = lit_view_arr("exe");
   }
 
-  AllocFilePath file_path = format_file_path(out_folder->string, out_name->string, suffix);
+  AllocFilePath file_path = format_file_path(view_arr(out_folder), view_arr(out_name), suffix);
 
-  FILES::OpenedFile file = FILES::replace(file_path.raw.data, FILES::OPEN_MODE::WRITE);
+  FILES::OpenedFile file = FILES::replace(view_arr(file_path.raw), FILES::OPEN_MODE::WRITE);
 
   if (file.error_code != FILES::ErrorCode::OK) {
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, Span{}, "Could not open output file \"{}\" to write", file_path.raw);
@@ -1081,7 +1081,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
                                         CompilerThread* const comp_thread,
                                         const Span& span,
                                         PEFile* pe_file,
-                                        const char* file_name) {
+                                        const ViewArr<const char>& file_name) {
 
   FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::READ);
 

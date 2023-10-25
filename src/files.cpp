@@ -44,10 +44,27 @@ FILES::FileData::FileData(HANDLE h) : handle(h) {
   in_sync = true;
 }
 
-FILES::OpenedFile FILES::open(const char* name,
+struct NativePath {
+  char path[MAX_PATH + 1] = {};
+
+  constexpr NativePath(const ViewArr<const char>& vr) {
+    usize len = vr.size > MAX_PATH ? MAX_PATH : vr.size;
+    for (usize i = 0; i < len; ++i) {
+      path[i] = vr[i];
+    }
+  }
+
+  const char* c_str() const {
+    return path;
+  }
+};
+
+FILES::OpenedFile FILES::open(const ViewArr<const char>& name,
                               OPEN_MODE open_mode) {
   TRACING_FUNCTION();
 
+  NativePath path = name;
+
   OpenedFile opened_file = {};
 
   DWORD access;
@@ -67,7 +84,7 @@ FILES::OpenedFile FILES::open(const char* name,
   }
 
 
-  HANDLE h = CreateFileA(name, access, share, 0, OPEN_EXISTING, 0, 0);
+  HANDLE h = CreateFileA(path.c_str(), access, share, 0, OPEN_EXISTING, 0, 0);
   if (h == INVALID_HANDLE_VALUE) {
     opened_file.error_code = ErrorCode::COULD_NOT_OPEN_FILE;
     opened_file.file = nullptr;
@@ -82,10 +99,12 @@ FILES::OpenedFile FILES::open(const char* name,
   }
 }
 
-FILES::OpenedFile FILES::create(const char* name,
+FILES::OpenedFile FILES::create(const ViewArr<const char>& name,
                                 OPEN_MODE open_mode) {
   TRACING_FUNCTION();
 
+  NativePath path = name;
+
   OpenedFile opened_file = {};
 
   DWORD access;
@@ -105,7 +124,7 @@ FILES::OpenedFile FILES::create(const char* name,
   }
 
 
-  HANDLE h = CreateFileA(name, access, share, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+  HANDLE h = CreateFileA(path.c_str(), access, share, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
   if (h == INVALID_HANDLE_VALUE) {
     opened_file.error_code = ErrorCode::COULD_NOT_OPEN_FILE;
     opened_file.file = nullptr;
@@ -120,10 +139,12 @@ FILES::OpenedFile FILES::create(const char* name,
   }
 }
 
-FILES::OpenedFile FILES::replace(const char* name,
+FILES::OpenedFile FILES::replace(const ViewArr<const char>& name,
                                  OPEN_MODE open_mode) {
   TRACING_FUNCTION();
 
+  NativePath path = name;
+
   OpenedFile opened_file = {};
 
   DWORD access;
@@ -142,7 +163,7 @@ FILES::OpenedFile FILES::replace(const char* name,
       }
   }
 
-  HANDLE h = CreateFileA(name, access, share, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+  HANDLE h = CreateFileA(path.c_str(), access, share, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
   if (h == INVALID_HANDLE_VALUE) {
     opened_file.error_code = ErrorCode::COULD_NOT_OPEN_FILE;
     opened_file.file = nullptr;
@@ -157,8 +178,10 @@ FILES::OpenedFile FILES::replace(const char* name,
   }
 }
 
-bool FILES::exist(const char* name) {
-  return GetFileAttributesA(name) != INVALID_FILE_ATTRIBUTES;
+bool FILES::exist(const ViewArr<const char>& name) {
+  NativePath path = name;
+
+  return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 void FILES::close(FileData* file) {
@@ -387,10 +410,11 @@ size_t FILES::size_of_file(FileData* file) {
   return file->abstract_file_size;
 }
 
-OwnedArr<const char> FILES::load_file_to_string(const char* file_name) {
+OwnedArr<const char> FILES::load_file_to_string(const ViewArr<const char>& file_name) {
   TRACING_FUNCTION();
 
-  HANDLE h = CreateFileA(file_name, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+  NativePath path = file_name;
+  HANDLE h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
   if (h == INVALID_HANDLE_VALUE) return {};
   LARGE_INTEGER li = {};
   GetFileSizeEx(h, &li);
@@ -496,46 +520,36 @@ size_t FILES::get_current_pos(FileData* file) {
   return (size_t)li.QuadPart;
 }
 
-struct Range {
-  const char* start;
-  const char* end;
-};
-
 constexpr static bool is_character(char c) {
   return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'z');
 }
 
-constexpr static bool is_absolute_path(const Range& r) {
-  return (r.end - r.start >= 3)
-    && is_character(r.start[0])
-    && r.start[1] == ':'
-    && (r.start[2] == '\\' || r.start[2] == '/');
+constexpr static bool is_absolute_path(const ViewArr<const char>& r) {
+  return (r.size >= 3)
+    && is_character(r.data[0])
+    && r.data[1] == ':'
+    && (r.data[2] == '\\' || r.data[2] == '/');
 }
 
 constexpr static bool logical_xor(bool a, bool b) {
   return (a || b) && !(a && b);
 }
 
-static void append_single_to_path(Array<Range>& path, const char* start, const char* end) {
-  if (start == end) {
+static void append_single_to_path(Array<ViewArr<const char>>& path, const ViewArr<const char>& dir) {
+  if (dir.size == 0) {
     return;
   }
 
-  Range dir = {};
-  dir.start = start;
-  dir.end = end;
-
-
-  if (dir.end - dir.start == 2 && memcmp(dir.start, "..", 2) == 0 && path.size > 0) {
+  if (dir.size == 2 && memeq_ts(dir.data, "..", 2) && path.size > 0) {
     //Is "go up a directory"
     //Pop last dir
 
-    Range* back_r = path.back();
-    if (back_r->end - back_r->start == 2 && memcmp(back_r->start, "..", 2) == 0) {
+    ViewArr<const char>* back_r = path.back();
+    if (back_r->size == 2 && memeq_ts(back_r->data, "..", 2)) {
       //Dont pop
       path.insert(dir);
     }
-    else if (back_r->end - back_r->start == 1 && back_r->start[0] == '.') {
+    else if (back_r->size == 1 && back_r->data[0] == '.') {
       path.pop();
       path.insert(dir);
     }
@@ -543,7 +557,7 @@ static void append_single_to_path(Array<Range>& path, const char* start, const c
       path.pop();
     }
   }
-  else if (dir.end - dir.start == 1 && dir.start[0] == '.') {
+  else if (dir.size == 1 && dir.data[0] == '.') {
     //Is "stay in same directory"
     //do nothing
   }
@@ -553,37 +567,23 @@ static void append_single_to_path(Array<Range>& path, const char* start, const c
   }
 }
 
-struct ParseInfo {
-  const char* final_start;
-  const char* final_end;
-};
+static ViewArr<const char> append_path_to_path(Array<ViewArr<const char>>& path, const ViewArr<const char>& dir) {
+  usize start = 0;
+  usize i = 0;
 
-static ParseInfo append_path_to_path(Array<Range>& path, const char* start, const char* end) {
-  const char* save = start;
+  while (i < dir.size) {
+    if (dir[i] == '/' || dir[i] == '\\') {
+      append_single_to_path(path, view_arr(dir, start, i - start));
 
-
-  while (true) {
-    if (start == end) {
-      break;
-    }
-
-    const char c = *start;
-    ASSERT(c != '\0');
-
-    if (c == '/' || c == '\\') {
-      append_single_to_path(path, save, start);
-
-      start++;
-      save = start;
+      i += 1;
+      start = i;
     }
     else {
-      start++;
+      i += 1;
     }
   }
 
-  return {
-    save, end,
-  };
+  return view_arr(dir, start, i - start);
 }
 
 static const char* find_dot_in_file_name(const char* start, const char* end) {
@@ -596,21 +596,19 @@ static const char* find_dot_in_file_name(const char* start, const char* end) {
   return nullptr;
 }
 
-static OwnedArr<const char> normalize_path(Range base_directory) {
-  Range& path_str = base_directory;
-
-  ASSERT(path_str.start != nullptr);
-  ASSERT(path_str.start < path_str.end);
+OwnedArr<const char> normalize_path(const ViewArr<const char>& path_str) {
+  ASSERT(path_str.data != nullptr);
+  ASSERT(path_str.size > 0);
 
   const bool absolute_path = is_absolute_path(path_str);
 
-  Array<Range> path = {};
+  Array<ViewArr<const char>> path = {};
 
   {
-    ParseInfo path_p_info = append_path_to_path(path, path_str.start, path_str.end);
+    ViewArr<const char> remaining = append_path_to_path(path, path_str);
 
-    if (path_p_info.final_start < path_p_info.final_end) {
-      append_single_to_path(path, path_p_info.final_start, path_p_info.final_end);
+    if (remaining.size > 0) {
+      append_single_to_path(path, remaining);
     }
   }
 
@@ -626,66 +624,45 @@ static OwnedArr<const char> normalize_path(Range base_directory) {
     const auto end = path.end();
 
     if (i < end) {
-      const size_t len = i->end - i->start;
-      str.insert_uninit(len);
-
-      memcpy_ts(str.data + str.size - len, len, i->start, len);
+      str.concat(*i);
       i += 1;
+
       while (i < end) {
         str.insert('\\');
-        const size_t len = i->end - i->start;
-        str.insert_uninit(len);
-
-        memcpy_ts(str.data + str.size - len, len, i->start, len);
+        str.concat(*i);
         i += 1;
       }
     }
   }
 
-  str.insert('\0');
-
-  auto arr = bake_const_arr(std::move(str));
-  arr.size -= 1;
-  return arr;
+  return bake_const_arr(std::move(str));
 }
 
-OwnedArr<const char> normalize_path(const char* current) {
-  ASSERT(current != nullptr);
+OwnedArr<const char> normalize_path(const ViewArr<const char>& path_str,
+                                    const ViewArr<const char>& file_str) {
+  ASSERT(path_str.data != nullptr);
+  ASSERT(path_str.size > 0);
 
-  const usize curr_size = strlen_ts(current);
-
-  return normalize_path({ current,  current + curr_size });
-}
-
-static OwnedArr<const char> normalize_path(Range base_directory,
-                                           Range relative) {
-
-  Range& path_str = base_directory;
-  Range& file_str = relative;
-
-  ASSERT(path_str.start != nullptr);
-  ASSERT(path_str.start < path_str.end);
-
-  ASSERT(file_str.start != nullptr);
-  ASSERT(file_str.start < file_str.end);
+  ASSERT(file_str.data != nullptr);
+  ASSERT(file_str.size > 0);
 
   const bool absolute_path = is_absolute_path(path_str);
   ASSERT(!is_absolute_path(file_str));
 
-  Array<Range> path = {};
+  Array<ViewArr<const char>> path = {};
 
   {
-    ParseInfo path_p_info = append_path_to_path(path, path_str.start, path_str.end);
+    ViewArr<const char> remaining = append_path_to_path(path, path_str);
 
-    if (path_p_info.final_start < path_p_info.final_end) {
-      append_single_to_path(path, path_p_info.final_start, path_p_info.final_end);
+    if (remaining.size > 0) {
+      append_single_to_path(path, remaining);
     }
   }
 
   {
-    ParseInfo file_p_info = append_path_to_path(path, file_str.start, file_str.end);
-    if (file_p_info.final_start < file_p_info.final_end) {
-      append_single_to_path(path, file_p_info.final_start, file_p_info.final_end);
+    ViewArr<const char> remaining = append_path_to_path(path, file_str);
+    if (remaining.size > 0) {
+      append_single_to_path(path, remaining);
     }
   }
 
@@ -701,75 +678,47 @@ static OwnedArr<const char> normalize_path(Range base_directory,
     const auto end = path.end();
 
     if (i < end) {
-      {
-        const size_t len = i->end - i->start;
-        str.insert_uninit(len);
-
-        memcpy_ts(str.data + str.size - len, len, i->start, len);
-      }
+      str.concat(*i);
       i += 1;
       while (i < end) {
         str.insert('\\');
-        {
-          const size_t len = i->end - i->start;
-          str.insert_uninit(len);
-
-          memcpy_ts(str.data + str.size - len, len, i->start, len);
-        }
+        str.concat(*i);
         i += 1;
       }
     }
   }
 
-  str.insert('\0');
-
-  auto arr = bake_const_arr(std::move(str));
-  arr.size -= 1;
-  return arr;
+  return bake_const_arr(std::move(str));
 }
 
-OwnedArr<const char> normalize_path(const char* current, const char* relative) {
-  ASSERT(current != nullptr);
-  ASSERT(relative != nullptr);
+AllocFilePath format_file_path(const ViewArr<const char>& path_str,
+                               const ViewArr<const char>& file_str,
+                               const ViewArr<const char>& extension) {
+  ASSERT(path_str.data != nullptr);
+  ASSERT(path_str.size > 0);
 
-  const usize curr_size = strlen_ts(current);
-  const usize rel_size = strlen_ts(relative);
-
-  return normalize_path({ current,  current + curr_size },
-                        { relative, relative + rel_size });
-}
-
-static AllocFilePath format_file_path(Range base_directory,
-                                      Range relative_file,
-                                      Range extension) {
-  Range& path_str = base_directory;
-  Range& file_str = relative_file;
-
-  ASSERT(path_str.start != nullptr);
-  ASSERT(path_str.start < path_str.end);
-
-  ASSERT(file_str.start != nullptr);
-  ASSERT(file_str.start < file_str.end);
+  ASSERT(file_str.data != nullptr);
+  ASSERT(file_str.size > 0);
 
   const bool absolute_path = is_absolute_path(path_str);
   ASSERT(!is_absolute_path(file_str));
 
-  Array<Range> path = {};
+  Array<ViewArr<const char>> path = {};
 
   {
-    ParseInfo path_p_info = append_path_to_path(path, path_str.start, path_str.end);
-    if (path_p_info.final_start < path_p_info.final_end) {
-      append_single_to_path(path, path_p_info.final_start, path_p_info.final_end);
+    ViewArr<const char> remaining = append_path_to_path(path, path_str);
+    if (remaining.size > 0) {
+      append_single_to_path(path, remaining);
     }
   }
 
 
-  ParseInfo file_p_info = append_path_to_path(path, file_str.start, file_str.end);
+  ViewArr<const char> file_p_info = append_path_to_path(path, file_str);
 
-  const char* dot = find_dot_in_file_name(file_p_info.final_start, file_p_info.final_end);
+  const char* dot = find_dot_in_file_name(file_p_info.begin(), file_p_info.end());
 
-  const bool inline_extension = dot != nullptr && (dot + 1) < file_p_info.final_end;
-  const bool has_extension = inline_extension || extension.start < extension.end;
+  const bool inline_extension = dot != nullptr && (dot + 1) < file_p_info.end();
+  const bool has_extension = inline_extension || extension.size > 0;
 
   //save is the start of the file
 
@@ -786,10 +735,7 @@ static AllocFilePath format_file_path(Range base_directory,
     const auto end = path.end();
 
     for (; i < end; i++) {
-      const size_t len = i->end - i->start;
-      str.insert_uninit(len);
-
-      memcpy_ts(str.data + str.size - len, len, i->start, len);
+      str.concat(*i);
       str.insert('\\');
     }
   }
@@ -802,15 +748,15 @@ static AllocFilePath format_file_path(Range base_directory,
     name_end = dot;
   }
   else {
-    name_end = file_p_info.final_end;
+    name_end = file_p_info.end();
   }
 
   //Load the file name
   {
-    const size_t len = (name_end - file_p_info.final_start);
+    const size_t len = (name_end - file_p_info.begin());
     str.insert_uninit(len);
 
-    memcpy_ts(str.data + str.size - len, len, file_p_info.final_start, len);
+    memcpy_ts(str.data + str.size - len, len, file_p_info.data, len);
   }
 
   const usize file_name_size = str.size - file_name_index;
@@ -818,22 +764,22 @@ static AllocFilePath format_file_path(Range base_directory,
   usize extension_size = 0;
 
   if (has_extension) {
-    ASSERT(!(inline_extension && extension.start < extension.end));
+    ASSERT(!(inline_extension && extension.size > 0));
     str.insert('.');
     extension_index = str.size;
 
-      //Load the extension if there isn't one already
+    //Load the extension if there isn't one already
     {
       const char* e_start;
       const char* e_end;
       if (inline_extension) {
-        ASSERT(extension.start == extension.end);
+        ASSERT(extension.size == 0);
         e_start = dot + 1;
-        e_end = file_p_info.final_end;
+        e_end = file_p_info.end();
       }
       else {
-        e_start = extension.start;
-        e_end = extension.end;
+        e_start = extension.begin();
+        e_end = extension.end();
       }
 
       ASSERT(e_end > e_start);
@@ -845,7 +791,7 @@ static AllocFilePath format_file_path(Range base_directory,
 
     extension_size = str.size - extension_index;
   }
-  
+
   str.insert('\0');
 
   auto arr = bake_const_arr(std::move(str));
@@ -861,45 +807,19 @@ static AllocFilePath format_file_path(Range base_directory,
   };
 }
 
-AllocFilePath format_file_path(const char* path_str,
-                               const char* file_str,
-                               const char* extension) {
-  ASSERT(path_str != nullptr);
-  ASSERT(file_str != nullptr);
-  ASSERT(extension != nullptr);
-
-  const usize path_size = strlen_ts(path_str);
-  const usize file_size = strlen_ts(file_str);
-  const usize extension_size = strlen_ts(extension);
-
-  return format_file_path({ path_str, path_str + path_size },
-                          { file_str, file_str + file_size },
-                          { extension, extension + extension_size });
-}
-
-AllocFilePath format_file_path(const char* path_str,
-                               const char* file_str) {
-  ASSERT(path_str != nullptr);
-  ASSERT(file_str != nullptr);
-
-  const usize path_size = strlen_ts(path_str);
-  const usize file_size = strlen_ts(file_str);
-
-  return format_file_path({ path_str, path_str + path_size },
-                          { file_str, file_str + file_size },
-                          { nullptr, nullptr });
+AllocFilePath format_file_path(const ViewArr<const char>& path_str,
+                               const ViewArr<const char>& file_str) {
+  return format_file_path(path_str, file_str, {});
 }
 
 FileLocation parse_file_location(const AllocFilePath& path,
                                  StringInterner* const strings) {
-  const char* raw = path.raw.data;
-
   FileLocation loc = {};
 
-  loc.full_name = strings->intern(raw, path.raw.size);
-  loc.directory = strings->intern(raw, path.directory_size);
+  loc.full_name = strings->intern(path.raw);
+  loc.directory = strings->intern(const_view_arr(path.raw, 0, path.directory_size));
   if (path.extension_size > 0) {
-    loc.extension = strings->intern(raw + path.extension_start, path.extension_size);
+    loc.extension = strings->intern(const_view_arr(path.raw, path.extension_start, path.extension_size));
   }
   else {
     loc.extension = nullptr;
@@ -908,15 +828,8 @@ FileLocation parse_file_location(const AllocFilePath& path,
   return loc;
 }
 
-FileLocation parse_file_location(const char* const path_str_in,
-                                 const char* const file_str_in,
+FileLocation parse_file_location(const ViewArr<const char>& path_str_in,
+                                 const ViewArr<const char>& file_str_in,
                                  StringInterner* const strings) {
-  const usize path_size = strlen_ts(path_str_in);
-  const usize file_size = strlen_ts(file_str_in);
-
-  const auto p = format_file_path({ path_str_in, path_str_in + path_size },
-                                  { file_str_in, file_str_in + file_size },
-                                  { nullptr, nullptr });
-
-  return parse_file_location(p, strings);
+  return parse_file_location(format_file_path(path_str_in, file_str_in, {}), strings);
 }

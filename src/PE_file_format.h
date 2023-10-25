@@ -341,7 +341,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
                                         CompilerThread* const comp_thread,
                                         const Span& span,
                                         PEFile* pe_file,
-                                        const char* file_name);
+                                        const ViewArr<const char>& file_name);
 
 constexpr Backend::ExecutableFormatInterface pe_plus_file_interface() {
   Backend::ExecutableFormatInterface in = {};

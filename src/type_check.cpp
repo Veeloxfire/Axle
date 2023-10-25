@@ -860,7 +860,7 @@ TC_STAGE(ASCII_STRING, 1) {
   EXPAND_THIS(ASTAsciiString, ascii);
   ascii->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   
-  const size_t len = ascii->string->len + 1;
+  const size_t len = ascii->string->len;
 
   const Structure* s;
   {

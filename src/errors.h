@@ -15,7 +15,7 @@ struct Span {
   size_t line_end = 0;
 };
 
-OwnedArr<char> load_span_from_source(const Span& span, const char* source);
+OwnedArr<char> load_span_from_source(const Span& span, const ViewArr<const char>& source);
 
 struct ErrorMessage {
   ERROR_CODE type = ERROR_CODE::NO_ERRORS;

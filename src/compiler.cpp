@@ -1963,7 +1963,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
     return;
   }
 
-  const char* path = nullptr;
+  ViewArr<const char> path;
 
   if (p.type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
     const ArrayStructure* arr = p.type.unchecked_base<ArrayStructure>();
@@ -1972,8 +1972,8 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
       return;
     }
 
-    path = (const char*)p.data;
-  }
+    path = { (const char*)p.data, arr->size };
+  }/*
   else if (p.type.struct_type() == STRUCTURE_TYPE::POINTER) {
     const PointerStructure* ptr = p.type.unchecked_base<PointerStructure>();
     if (ptr->base != comp->builtin_types->t_ascii) {
@@ -1981,14 +1981,15 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
       return;
     }
 
-    path = (const char*)p.data;
-  }
+    path = { (const char*)p.data, arr->size };
+  }*/
   else {
     comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, root->node_span, "Invalid type for import \"{}\"", p.type.name);
     return;
   }
 
-  ASSERT(path != nullptr);
+  ASSERT(path.data != nullptr);
+  ASSERT(path.size > 0);
 
   FileLocation loc;
   bool found = false;
@@ -2000,9 +2001,9 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
   };
 
   for (const InternString* base : paths_to_try) {
-    AllocFilePath try_path = format_file_path(base->string, path);
+    AllocFilePath try_path = format_file_path(view_arr(base), path);
 
-    if (FILES::exist(try_path.raw.data)) {
+    if (FILES::exist(const_view_arr(try_path.raw))) {
       auto strings = comp->services.strings.get();
       loc = parse_file_location(try_path, strings._ptr);
       found = true;
@@ -2130,11 +2131,11 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
     }
 
     //Just a sanity check - should alread have been set
-    if (file_import->file_loc.extension == comp->important_names.axl
-        || file_import->file_loc.extension == nullptr) {
+    if (file_import->file_loc.extension == nullptr
+        || file_import->file_loc.extension == comp->important_names.axl) {
       //Load a source file
 
-      OwnedArr<const char> text_source = FILES::load_file_to_string(full_path->string);
+      OwnedArr<const char> text_source = FILES::load_file_to_string(const_view_arr(full_path));
 
       if (text_source.data == nullptr) {
         comp_thread->report_error(ERROR_CODE::FILE_ERROR, file_loader->unparsed_files.back()->span,
@@ -3214,7 +3215,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   comp->optimization_options = options.optimize;
 
   //File stuff
-  if (options.build.current_directory == nullptr) {
+  if (options.build.current_directory.size == 0) {
     comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                               "Current directory not specified");
     return;
@@ -3223,7 +3224,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   {
     OwnedArr cwd = normalize_path(options.build.current_directory);
 
-    if (!FILES::exist(cwd.data)) {
+    if (!FILES::exist(view_arr(cwd))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "Current directory was invalid: {}", cwd.data);
       return;
@@ -3234,16 +3235,16 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   comp->build_options.debug_break_on_entry = options.build.debug_break_on_entry;
 
-  if (options.build.file_name == nullptr) {
+  if (options.build.file_name.size == 0) {
     comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                               "Expected input file name");
     return;
   }
 
-  comp->build_options.file_name = strings->intern(options.build.file_name, strlen_ts(options.build.file_name));
+  comp->build_options.file_name = strings->intern(options.build.file_name);
 
   if (options.build.library) {
-    if (options.build.entry_point != nullptr) {
+    if (options.build.entry_point.size == 0) {
       comp_thread->report_error(ERROR_CODE::LINK_ERROR, Span{},
                                 "Cannot have an entry point and be a library (This is temporary)");
       return;
@@ -3253,44 +3254,44 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     comp->build_options.entry_point = nullptr;
   }
   else {
-    if (options.build.entry_point == nullptr) {
+    if (options.build.entry_point.size == 0) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "Expected entry point");
       return;
     }
 
     comp->build_options.is_library = false;
-    comp->build_options.entry_point = strings->intern(options.build.entry_point, strlen_ts(options.build.entry_point));
+    comp->build_options.entry_point = strings->intern(options.build.entry_point);
   }
 
-  if (options.build.output_name == nullptr) {
+  if (options.build.output_name.size == 0) {
     comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                               "Expected output file name");
     return;
 
   }
 
-  comp->build_options.output_name = strings->intern(options.build.output_name, strlen_ts(options.build.output_name));
+  comp->build_options.output_name = strings->intern(options.build.output_name);
 
-  if (options.build.output_folder == nullptr) {
+  if (options.build.output_folder.size == 0) {
     comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                               "Expected output folder name");
     return;
 
   }
 
-  comp->build_options.output_folder = strings->intern(options.build.output_folder, strlen_ts(options.build.output_folder));
+  comp->build_options.output_folder = strings->intern(options.build.output_folder);
 
 
-  if (options.build.std_lib_folder == nullptr) {
+  if (options.build.std_lib_folder.size == 0) {
     comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                               "Expected std lib folder");
     return;
   }
 
   {
-    OwnedArr stdlib = normalize_path(file_loader->cwd.directory->string, options.build.std_lib_folder);
-    if (!FILES::exist(stdlib.data)) {
+    OwnedArr stdlib = normalize_path(view_arr(file_loader->cwd.directory), options.build.std_lib_folder);
+    if (!FILES::exist(view_arr(stdlib))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "std lib folder was invalid: {}", stdlib.data);
       return;
@@ -3299,15 +3300,15 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     comp->build_options.std_lib_folder = strings->intern(stdlib.data, stdlib.size);
   }
 
-  if (options.build.lib_folder == nullptr) {
+  if (options.build.lib_folder.size == 0) {
     comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                               "Expected lib folder");
     return;
   }
 
   {
-    OwnedArr lib_folder = normalize_path(file_loader->cwd.directory->string, options.build.lib_folder);
-    if (!FILES::exist(lib_folder.data)) {
+    OwnedArr lib_folder = normalize_path(view_arr(file_loader->cwd.directory->string), options.build.lib_folder);
+    if (!FILES::exist(view_arr(lib_folder))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "lib folder was invalid: {}", lib_folder.data);
       return;

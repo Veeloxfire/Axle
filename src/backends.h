@@ -239,7 +239,7 @@ namespace Backend {
     u32 num_calling_conventions;
 
     System system;
-    const char* system_name;
+    ViewArr<const char> system_name;
 
     usize ptr_size;
 

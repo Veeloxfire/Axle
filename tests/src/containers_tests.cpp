@@ -318,13 +318,33 @@ TEST_FUNCTION(Util_ViewArr, view_Array) {
   }
 }
 
-TEST_FUNCTION(Util_ViewArr, literal_view) {
-  ViewArr<const char> view = lit_view_arr("hello world");
+TEST_FUNCTION(Util_ViewArr, c_array_views) {
+  {
+    ViewArr<const char> view = view_arr("hello world");
 
-  const char expected[] = { 'h', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', };
+    const char expected[] = { 'h', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '\0'};
 
-  TEST_ARR_EQ(expected, array_size(expected), view.data, view.size);
+    TEST_ARR_EQ(expected, array_size(expected), view.data, view.size);
+  }
+
+  {
+    ViewArr<const char> view = view_arr("hello world", 1, 9);
+
+    const char expected[] = { 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', };
+
+    TEST_ARR_EQ(expected, array_size(expected), view.data, view.size);
+  }
+
+  {
+    ViewArr<const char> view = lit_view_arr("hello world");
+
+    const char expected[] = { 'h', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', };
+
+    TEST_ARR_EQ(expected, array_size(expected), view.data, view.size);
+  }
 }
+
+
 
 TEST_FUNCTION(Util, freelist_block_allocator) {
 

@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include <iostream>
 #include <filesystem>
 #include <chrono>
 
@@ -153,9 +152,13 @@ struct Tester {
 };
 
 struct Test {
-  const char* test_name;
-  const char* base_name;
+  ViewArr<const char> test_name;
+  ViewArr<const char> base_name;
   uint64_t return_value;
+
+  template<usize N, usize M>
+  constexpr Test(const char(&t_name)[N], const char(&b_name)[M], uint64_t return_value_)
+    : test_name(lit_view_arr(t_name)), base_name(lit_view_arr(b_name)), return_value(return_value_) {}
 };
 
 static constexpr char TEST_DIR[] = "src/";
@@ -259,70 +262,74 @@ TestOutcome run_test(const APIOptions& opts, const char* expected_output_path, c
 
   const auto end = std::chrono::high_resolution_clock::now();
 
-  std::cout << "Test ran for: "
-    << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us (compiler ran for: "
-    << std::chrono::duration_cast<std::chrono::microseconds>(compiler_end - start).count() << "us)\n";
+  format_print("Test ran for: {} us (compiler ran for: {} us)\n",
+               std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(),
+               std::chrono::duration_cast<std::chrono::microseconds>(compiler_end - start).count());
 
   if (return_code != 0) {
-    std::cout << "Compiler Error. Return code: " << return_code << '\n';
+    format_print("Compiler Error. Return code: {}\n", return_code);
     return TestOutcome::CompilationError;
   }
   else {
     switch (output) {
       case ProgramOutput::INVALID_PROGRAM: {
-          std::cout << "Could not finish the test - program could not be opened\n";
+          IO::print("Could not finish the test - program could not be opened\n");
           return TestOutcome::CompilationError;
         }
       case ProgramOutput::TIMED_OUT: {
-          std::cout << "Could not finish the test - timed out before program could finish executing\n";
+          IO::print("Could not finish the test - timed out before program could finish executing\n");
           return TestOutcome::WrongAnswer;
         }
       case ProgramOutput::INCORRECT: {
-          std::cout << "Program produced incorrect result format - could not be correct value\n";
+          IO::print("Program produced incorrect result format - could not be correct value\n");
           return TestOutcome::WrongAnswer;
         }
       case ProgramOutput::CORRECT: {
           if (res != expected.val) {
-            std::cout << "Incorrect Results. Expected: " << expected.val << ". Actual: " << res << '\n';
+            format_print("Incorrect Results. Expected: {}. Actual: {}\n", expected.val, res);
             return TestOutcome::WrongAnswer;
           }
           else {
-            std::cout << "Test Passed!\n";
+            IO::print("Test Passed!\n");
             return TestOutcome::Pass;
           }
         }
       default: {
-          std::cout << "Unexpected Test State\n";
+          IO::print("Unexpected Test State\n");
           return TestOutcome::CompilationError;
         }
     }
   }
 }
 
-void print_test_collection(const char* system_name, const char* group_name, const char* group_list_name, const char** test_collection, size_t num_tests) {
-  const char* indicator = nullptr;
-  if (num_tests == 0) {
-    indicator = "No";
+void print_test_collection(ViewArr<const char> system_name,
+                           ViewArr<const char> group_name,
+                           ViewArr<const char> group_list_name,
+                           ViewArr<const ViewArr<const char>> test_collection) {
+  ViewArr<const char> indicator;
+  if (test_collection.size == 0) {
+    indicator = lit_view_arr("No");
   }
-  else if (num_tests == NUM_TESTS) {
-    indicator = "All";
+  else if (test_collection.size == NUM_TESTS) {
+    indicator = lit_view_arr("All");
   }
   else {
-    indicator = "Some";
+    indicator = lit_view_arr("Some");
   }
 
-  std::cout << '\n' << indicator << ' ' << system_name << ' ' << group_name << '!';
+  format_print("\n{} {} {}!", indicator, system_name, group_name);
 
-  if (num_tests > 0) {
-    std::cout << '\n' << group_list_name << ": ";
-    auto i = test_collection;
-    const auto end = test_collection + num_tests;
+  if (test_collection.size > 0) {
+    format_print("\n{}: ", group_list_name);
 
-    std::cout << " \"" << *i << '\"';
+    auto i = test_collection.begin();
+    const auto end = test_collection.end();
+
+    format_print(" \"{}\"", *i);
     i++;
 
     for (; i < end; i++) {
-      std::cout << ", \"" << *i << '\"';
+      format_print(", \"{}\"", *i);
     }
   }
 
@@ -350,16 +357,16 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
   }
 #endif
 
-  const char* comp_error_tests[NUM_TESTS] = {};
+  ViewArr<const char> comp_error_tests[NUM_TESTS] = {};
   size_t num_comp_errorr_tests = 0;
 
-  const char* wrong_answer_tests[NUM_TESTS] = {};
+  ViewArr<const char> wrong_answer_tests[NUM_TESTS] = {};
   size_t num_wrong_answer_tests = 0;
 
-  const char* passed_tests[NUM_TESTS] = {};
+  ViewArr<const char> passed_tests[NUM_TESTS] = {};
   size_t num_passed_tests = 0;
 
-  const char* system_name = tester.pi->system_name;
+  ViewArr<const char> system_name = tester.pi->system_name;
 
   for (size_t i = 0; i < NUM_TESTS; i++) {
     const auto& test = tests[i];
@@ -371,8 +378,8 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
 
     options.optimize = optimize;
 
-    const auto file_name_holder = format("{}.axl\0", test.base_name);
-    const auto exe_name_holder = format_file_path(EXE_DIR, test.base_name, "exe");
+    const auto file_name_holder = format("{}.axl", test.base_name);
+    const auto exe_name_holder = format_file_path(lit_view_arr(EXE_DIR), test.base_name, lit_view_arr("exe"));
 
 
     options.platform_interface = tester.pi;
@@ -381,14 +388,14 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
     assert(tester.pi->num_calling_conventions > 0);
     options.build.debug_break_on_entry = false;
     options.build.default_calling_convention = 0;
-    options.build.entry_point = "main";
-    options.build.current_directory = ".";//TODO: actually get this
-    options.build.file_name = file_name_holder.data;
+    options.build.entry_point = lit_view_arr("main");
+    options.build.current_directory = lit_view_arr(".");//TODO: actually get this
+    options.build.file_name = const_view_arr(file_name_holder);
     options.build.output_name = test.base_name;
-    options.build.output_folder = EXE_DIR;
+    options.build.output_folder = lit_view_arr(EXE_DIR);
     options.build.output_file_type = tester.efi->type;
-    options.build.std_lib_folder = "..\\stdlib";
-    options.build.lib_folder = TEST_DIR;
+    options.build.std_lib_folder = lit_view_arr("..\\stdlib");
+    options.build.lib_folder = lit_view_arr(TEST_DIR);
 
     options.build.extra_threads = tester.extra_threads;
 
@@ -403,7 +410,7 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
     options.print.comp_units = false;
     options.print.work = false;
 
-    std::cout << "\nStarting Test: " << test.test_name << "\n";
+    format_print("\nStarting Test: {}\n", test.test_name);
 
     Expected expected = {};
     expected.val = test.return_value;
@@ -433,20 +440,25 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
     }
   }
 
-  print_test_collection(system_name, "Tests passed", "Passed tests", passed_tests, num_passed_tests);
-  std::cout << "\n";
-  print_test_collection(system_name, "Tests produced wrong answers", "Wrong answer tests", wrong_answer_tests, num_wrong_answer_tests);
-  std::cout << "\n";
-  print_test_collection(system_name, "Tests had compile errors", "Compile errorr tests", comp_error_tests, num_comp_errorr_tests);
+  print_test_collection(system_name, lit_view_arr("Tests passed"), lit_view_arr("Passed tests"),
+                        view_arr(passed_tests, 0, num_passed_tests));
+  IO::print("\n");
+
+  print_test_collection(system_name, lit_view_arr("Tests produced wrong answers"), lit_view_arr("Wrong answer tests"),
+                        view_arr(wrong_answer_tests, 0, num_wrong_answer_tests));
+  IO::print("\n");
+
+  print_test_collection(system_name, lit_view_arr("Tests had compile errors"), lit_view_arr("Compile errorr tests"),
+                        view_arr(comp_error_tests, 0, num_comp_errorr_tests));
 
   return num_passed_tests < NUM_TESTS;
 }
 
 //Runs all the test with a specific calling convention and system
 bool run_all_tests(const Tester& tester) {
-  const char* system_name = tester.pi->system_name;
+  ViewArr<const char> system_name = tester.pi->system_name;
 
-  std::cout << "=== Running tests in: " << system_name << " === \n";
+  format_print("=== Running tests in: {} ===\n", system_name);
 
   bool any_failed = false;
 
@@ -455,12 +467,18 @@ bool run_all_tests(const Tester& tester) {
   //no optimizations
   any_failed |= run_all_tests_with_optimizations(tester, opts);
 
-  std::cout << "\n=== Finished tests in: " << system_name << " === \n\n";
+  format_print("\n=== Finished tests in: {} ===\n\n", system_name);
   return any_failed;
 }
 
 int main() {
-  std::cout << "Current Working Directory: " << std::filesystem::current_path() << '\n';
+  {
+    const auto curr = std::filesystem::current_path();
+    const std::string curr_str = curr.generic_string();
+    const ViewArr<const char> curr_view = { curr_str.c_str(), curr_str.size() };
+
+    format_print("Current Working Directory: {}\n", curr_view);
+  }
 
   constexpr Backend::PlatformInterface x64_pi = x86_64_platform_interface();
   constexpr Backend::ExecutableFormatInterface PE_efi = pe_plus_file_interface();
@@ -469,18 +487,18 @@ int main() {
 
   bool any_failed = false;
 
-  std::cout << "\n========== Started all tests ==========\n\n";
+  IO::print("\n========== Started all tests ==========\n\n");
   any_failed |= run_all_tests(tester);
-  std::cout << "==========  Ended all tests  ==========\n\n";
+  IO::print(  "==========  Ended all tests  ==========\n\n");
 
   if (any_failed) {
-    std::cerr << "Some tests failed!!!" << std::endl;
+    IO::print("Some tests failed!!!\n");
   }
   else {
-    std::cout << "All tests passed!!!" << std::endl;
+    IO::print("All tests passed!!!\n");
   }
 
-  std::cout << "\n\n";
+  IO::print("\n\n");
 
   return 0;
 }

@@ -45,14 +45,14 @@ return lit_view_arr(ErrorCodeString :: NAME);
     ErrorCode error_code;
   };
 
-  OpenedFile open(const char* name,
+  OpenedFile open(const ViewArr<const char>& name,
                   OPEN_MODE open_mode);
-  OpenedFile create(const char* name,
+  OpenedFile create(const ViewArr<const char>& name,
                     OPEN_MODE open_mode);
-  OpenedFile replace(const char* name,
+  OpenedFile replace(const ViewArr<const char>& name,
                      OPEN_MODE open_mode);
 
-  bool exist(const char* name);
+  bool exist(const ViewArr<const char>& name);
 
   void close(FileData* file);
 
@@ -68,7 +68,7 @@ return lit_view_arr(ErrorCodeString :: NAME);
   void seek_from_start(FileData* file, size_t offset);
   size_t get_current_pos(FileData* file);
 
-  OwnedArr<const char> load_file_to_string(const char* file_name);
+  OwnedArr<const char> load_file_to_string(const ViewArr<const char>& file_name);
 
   ErrorCode write(FileData* file, const uint8_t* arr, size_t length);
   ErrorCode write_padding_bytes(FileData* file, uint8_t byte, size_t num);
@@ -124,18 +124,19 @@ struct AllocFilePath {
   usize extension_size;
 };
 
-AllocFilePath format_file_path(const char* path_str,
-                               const char* file_str,
-                               const char* extension);
+AllocFilePath format_file_path(const ViewArr<const char>& path_str,
+                               const ViewArr<const char>& file_str,
+                               const ViewArr<const char>& extension);
 
-AllocFilePath format_file_path(const char* path_str,
-                               const char* file_str);
+AllocFilePath format_file_path(const ViewArr<const char>& path_str,
+                               const ViewArr<const char>& file_str);
 
-OwnedArr<const char> normalize_path(const char* current, const char* relative);
-OwnedArr<const char> normalize_path(const char* current);
+OwnedArr<const char> normalize_path(const ViewArr<const char>& base_directory);
+OwnedArr<const char> normalize_path(const ViewArr<const char>& current,
+                                    const ViewArr<const char>& relative);
 
-FileLocation parse_file_location(const char* path,
-                                 const char* file,
+FileLocation parse_file_location(const ViewArr<const char>& path,
+                                 const ViewArr<const char>& file,
                                  StringInterner* strings);
 
 FileLocation parse_file_location(const AllocFilePath& path,

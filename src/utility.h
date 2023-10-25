@@ -715,23 +715,40 @@ struct Array {
     return false;
   }
 
-  void concat(Array<T>&& arr) noexcept {
-    reserve_extra(arr.size);
+  void concat_move(T* arr, const size_t N) noexcept {
+    reserve_extra(N);
+
     T* start = data + size;
-    FOR_MUT(arr, it) {
-      *start = std::move(*it);
+    for(usize i = 0; i < N; ++i) {
+      *start = std::move(*arr);
       start += 1;
+      arr += 1;
     }
 
-    size += arr.size;
+    size += N;
+  }
+
+  void concat(Array<T>&& arr) noexcept {
+    concat_move(arr.data, arr.size);
     arr.free();
   }
 
-  void concat(const T* arr, size_t N) noexcept {
+  void concat(const T* arr, const size_t N) noexcept {
     reserve_extra(N);
-    memcpy_ts(data + size, (capacity - size), arr, N);
+
+    T* start = data + size;
+
+    for (usize i = 0; i < N; ++i) {
+      *start = *arr;
+      start += 1;
+      arr += 1;
+    }
 
     size += N;
+  }
+
+  void concat(const ViewArr<const T>& arr) noexcept {
+    concat(arr.data, arr.size);
   }
 };
 
@@ -1906,6 +1923,15 @@ constexpr ViewArr<T> view_arr(T (&arr)[N]) {
   return {
     arr,
     N,
+  };
+}
+
+template<typename T, usize N>
+constexpr ViewArr<T> view_arr(T(&arr)[N], usize start, usize count) {
+  ASSERT(N >= start + count);
+  return {
+    arr + start,
+    count,
   };
 }
 

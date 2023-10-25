@@ -79,8 +79,8 @@ int compile_and_write(const APIOptions& options) {
   }
 
   {
-    FileLocation loc = parse_file_location(compiler.build_options.lib_folder->string,
-                                           compiler.build_options.file_name->string,
+    FileLocation loc = parse_file_location(view_arr(compiler.build_options.lib_folder),
+                                           view_arr(compiler.build_options.file_name),
                                            compiler.services.strings.get()._ptr);
 
     compiler.build_file_namespace = compiler.new_namespace();

@@ -21,6 +21,14 @@ struct InternString {
   }
 };
 
+constexpr ViewArr<const char> view_arr(const InternString* str) {
+  return { str->string, str->len };
+}
+
+constexpr ViewArr<const char> const_view_arr(const InternString* str) {
+  return { str->string, str->len };
+}
+
 namespace Format {
   template<>
   struct FormatArg<const InternString*> {
@@ -79,22 +87,6 @@ struct StringInterner {
     Format::format_to_formatter(formatter, fmt, ts...);
 
     return intern(formatter.view());
-  }
-};
-
-struct TempUTF8String {
-  uint8_t* bytes = nullptr;
-  size_t size = 0;
-
-  TempUTF8String() = default;
-
-  TempUTF8String(TempUTF8String&& t_utf8) noexcept
-    : bytes(std::exchange(t_utf8.bytes, nullptr)), size(std::exchange(t_utf8.size, 0)) {
-
-  }
-
-  ~TempUTF8String() {
-    free_no_destruct(bytes);
   }
 };
 

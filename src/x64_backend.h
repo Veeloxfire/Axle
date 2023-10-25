@@ -226,7 +226,7 @@ constexpr Backend::PlatformInterface x86_64_platform_interface() {
   Backend::PlatformInterface in = {};
   in.valid_calling_conventions = X64::X64_CALLING_CONVENTIONS;
   in.num_calling_conventions = static_cast<u32>(array_size(X64::X64_CALLING_CONVENTIONS));
-  in.system_name = X64::SYSTEM_NAME;
+  in.system_name = lit_view_arr(X64::SYSTEM_NAME);
   in.ptr_size = 8;
 
   in.init = x64_init;

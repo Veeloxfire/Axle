@@ -1,5 +1,5 @@
 #pragma once
-#include "comp_utilities.h"
+#include "safe_lib.h"
 
 namespace Backend {
   struct GenericProgram;
@@ -15,21 +15,21 @@ struct APIOptimizationOptions {
 
 struct APIBuildOptions {
   bool debug_break_on_entry = false;
-  const char* current_directory = nullptr;
+  ViewArr<const char> current_directory = {};
 
-  const char* file_name     = nullptr;
-  const char* source_folder = nullptr;
+  ViewArr<const char> file_name = {};
+  ViewArr<const char> source_folder = {};
 
   bool library = false;
-  const char* entry_point = nullptr;
+  ViewArr<const char> entry_point = {};
 
-  const char* std_lib_folder = nullptr;
-  const char* lib_folder = nullptr;
+  ViewArr<const char> std_lib_folder = {};
+  ViewArr<const char> lib_folder = {};
 
   u32 default_calling_convention = 0;
 
-  const char* output_name = nullptr;
-  const char* output_folder = nullptr;
+  ViewArr<const char> output_name = {};
+  ViewArr<const char> output_folder = {};
   OutputFileType output_file_type;
 
   u32 extra_threads = 0;
