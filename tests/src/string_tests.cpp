@@ -1,6 +1,6 @@
 #include "strings.h"
 
-#include "tests.h"
+#include "unit_tests.h"
 
 
 TEST_FUNCTION(Interned_Strings, creation) {

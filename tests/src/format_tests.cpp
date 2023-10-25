@@ -1,4 +1,4 @@
-#include "tests.h"
+#include "unit_tests.h"
 #include "format.h"
 
 TEST_FUNCTION(ArrayFormat, strings) {
@@ -8,7 +8,7 @@ TEST_FUNCTION(ArrayFormat, strings) {
   TEST_STR_EQ(expected, arr);
 }
 
-void test_all_valid_signed_ints(TestErrors* test_errors, const ViewArr<const char>& expected, i64 i) {
+void test_all_valid_signed_ints(UNIT_TESTS::TestErrors* test_errors, const ViewArr<const char>& expected, i64 i) {
   if(SCHAR_MAX >= i && i >= SCHAR_MIN) {
     OwnedArr<const char> sc123 = format("{}", (signed char)i);
     TEST_STR_EQ(expected, sc123);
@@ -35,7 +35,7 @@ void test_all_valid_signed_ints(TestErrors* test_errors, const ViewArr<const cha
   }
 }
 
-void test_all_valid_unsigned_ints(TestErrors* test_errors, const ViewArr<const char>& expected, u64 i) {
+void test_all_valid_unsigned_ints(UNIT_TESTS::TestErrors* test_errors, const ViewArr<const char>& expected, u64 i) {
   if (UCHAR_MAX >= i) {
     OwnedArr<const char> sc123 = format("{}", (unsigned char)i);
     TEST_STR_EQ(expected, sc123);

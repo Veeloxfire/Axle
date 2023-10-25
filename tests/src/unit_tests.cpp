@@ -1,12 +1,12 @@
-#include "tests.h"
+#include "unit_tests.h"
 
 
-Array<UnitTest>& unit_tests_ref() {
-  static Array<UnitTest> t ={};
+Array<UNIT_TESTS::UnitTest>& UNIT_TESTS::unit_tests_ref() {
+  static Array<UNIT_TESTS::UnitTest> t ={};
   return t;
 }
 
-_TestAdder::_TestAdder(const ViewArr<const char>& test_name, TEST_FN fn) {
+UNIT_TESTS::_TestAdder::_TestAdder(const ViewArr<const char>& test_name, UNIT_TESTS::TEST_FN fn) {
   unit_tests_ref().insert({ test_name, fn });
 }
 
@@ -18,12 +18,12 @@ struct FailedTest {
 int main() {
   Array<FailedTest> failed_tests ={};
 
-  for (const auto& t : unit_tests_ref()) {
+  for (const auto& t : UNIT_TESTS::unit_tests_ref()) {
 
     IO::print("Starting test: ");
     IO::print(t.test_name);
 
-    TestErrors errors = {};
+    UNIT_TESTS::TestErrors errors = {};
     errors.test_name = t.test_name;
 
 #ifdef ASSERT_EXCEPTIONS

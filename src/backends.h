@@ -125,6 +125,8 @@ namespace Backend {
       top = std::exchange(b.top, nullptr);
       bottom = std::exchange(b.bottom, nullptr);
       total_size = std::exchange(b.total_size, 0);
+
+      return *this;
     }
 
     void push_zeros(usize count);

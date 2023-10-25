@@ -1,4 +1,4 @@
-#include "tests.h"
+#include "unit_tests.h"
 #include "utility.h"
 
 TEST_FUNCTION(Math, CEIL_TO_N) {

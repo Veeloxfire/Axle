@@ -1,4 +1,4 @@
-#include "tests.h"
+#include "unit_tests.h"
 
 constexpr int RANDOM_ARR[] = {
   65, 55, 71, 23, 92,

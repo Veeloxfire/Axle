@@ -1,4 +1,4 @@
-#include "tests.h"
+#include "unit_tests.h"
 
 #include "type.h"
 #include "ast.h"
@@ -8,7 +8,7 @@ struct Group {
   VALUE_CATEGORY low_start;
   VALUE_CATEGORY low_end;
 };
-static void test_reduce_vc(TestErrors* test_errors, AST_LOCAL low, AST_LOCAL high, const Group& g) {
+static void test_reduce_vc(UNIT_TESTS::TestErrors* test_errors, AST_LOCAL low, AST_LOCAL high, const Group& g) {
   low->value_category = g.low_start;
   high->value_category = g.high_start;
 

@@ -2077,32 +2077,15 @@ inline constexpr void x16_to_bytes(const uint16_t uint, uint8_t* const bytes) no
 }
 
 template<typename RET, typename ... PARAMS>
-struct FUNCTION_PTR_IMPL {
-  FUNCTION_PTR_IMPL() = delete;
-
-  using TYPE = RET(*)(PARAMS...);
-};
-
-template<typename RET, typename ... PARAMS>
-using FUNCTION_PTR = typename FUNCTION_PTR_IMPL<RET, PARAMS...>::TYPE;
-
-
+using FUNCTION_PTR = RET(*)(PARAMS...);
 
 template<typename T>
 struct MEMBER {
   MEMBER() = delete;
 
   template<typename RET, typename ... PARAMS>
-  struct FUNCTION_PTR_IMPL {
-    FUNCTION_PTR_IMPL() = delete;
-
-    using TYPE = RET(T::*)(PARAMS...);
-  };
-
-  template<typename RET, typename ... PARAMS>
-  using FUNCTION_PTR = typename FUNCTION_PTR_IMPL<RET, PARAMS...>::TYPE;
+  using FUNCTION_PTR = RET(T::*)(PARAMS...);
 };
-
 
 template<typename T>
 using DESTRUCTOR = FUNCTION_PTR<void, T>;
@@ -2111,7 +2094,6 @@ template<typename T>
 constexpr inline DESTRUCTOR<T> get_destructor() {
   return &destruct_single<T>;
 }
-
 
 template<typename T>
 constexpr inline T square(T t) { return t * t; }
