@@ -126,7 +126,7 @@ namespace IR {
     const InternString* name = nullptr;
   };
 
-  struct Builder {
+  struct IRStore {
     const SignatureStructure* signature = nullptr;
 
     GlobalLabel global_label = NULL_GLOBAL_LABEL;
@@ -384,7 +384,7 @@ MOD(Not, CODE_V_V)
   usize deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i);
   usize deserialize(const u8* data, usize remaining_size, CODE_NV& i);
 
-  void print_ir(const IR::Builder* builder);
+  void print_ir(const IR::IRStore* builder);
 
   namespace Types {
 #define MOD(n, layout, ...) struct n : layout { static constexpr OpCode OPCODE = OpCode:: n; };
@@ -491,7 +491,7 @@ namespace Eval {
   };
 
   struct IrBuilder {
-    IR::Builder* ir;
+    IR::IRStore* ir;
     Time eval_time;
 
     IR::LocalLabel parent = IR::NULL_LOCAL_LABEL;
@@ -511,44 +511,45 @@ namespace Eval {
     inline Array<u8>& current_bytecode() const { return ir->current_bytecode(); }
   };
 
+  IrBuilder start_builder(Eval::Time eval_time, IR::IRStore* ir);
+  IrBuilder start_builder(Eval::Time eval_time, IR::IRStore* ir, AST_ARR params);
   void end_builder(IrBuilder* builder);
 
-  RuntimeValue sub_object(Eval::IrBuilder* const builder,
+  RuntimeValue sub_object(IR::IRStore* const ir,
                           const RuntimeValue& val,
                           const RuntimeValue& offset,
                           const Type& ptr_type);
 
 
-  RuntimeValue addrof(Eval::IrBuilder* const builder, const RuntimeValue& val, const Type& ptr_type);
-  RuntimeValue deref(Eval::IrBuilder* const builder, const RuntimeValue& val, const Type& ptr_type);
+  RuntimeValue addrof(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type);
+  RuntimeValue deref(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type);
 
   RuntimeValue no_value();
   RuntimeValue as_direct(IR::ValueIndex val, const Type& type);
   RuntimeValue as_indirect(IR::ValueIndex val, const Type& ptr_type);
   RuntimeValue as_constant(const u8* constant, const Type& type);
 
-  IR::V_ARG load_v_arg(Eval::IrBuilder* builder, const RuntimeValue& rv);
+  IR::V_ARG load_v_arg(IR::IRStore* ir, const RuntimeValue& rv);
 
-  void assign(Eval::IrBuilder* builder, const RuntimeValue& to, const RuntimeValue& from);
+  void assign(IR::IRStore* const ir, const RuntimeValue& to, const RuntimeValue& from);
 
-
-  RuntimeValue arr_to_ptr(Eval::IrBuilder* const builder, const RuntimeValue& val, const Type& ptr_type);
+  RuntimeValue arr_to_ptr(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type);
 }
 
 namespace CASTS {
-  using CAST_FUNCTION = Eval::RuntimeValue(*) (Eval::IrBuilder* const builder,
+  using CAST_FUNCTION = Eval::RuntimeValue(*) (IR::IRStore* const ir,
                                             const Type& to,
                                             const Eval::RuntimeValue& val);
 
-  Eval::RuntimeValue int_to_int(Eval::IrBuilder* const builder,
+  Eval::RuntimeValue int_to_int(IR::IRStore* const ir,
                                 const Type& to,
                                 const Eval::RuntimeValue& val);
 
-  Eval::RuntimeValue no_op(Eval::IrBuilder* const builder,
+  Eval::RuntimeValue no_op(IR::IRStore* const ir,
                            const Type& to,
                            const Eval::RuntimeValue& val);
 
-  Eval::RuntimeValue take_address(Eval::IrBuilder* const builder,
+  Eval::RuntimeValue take_address(IR::IRStore* const ir,
                                   const Type& to,
                                   const Eval::RuntimeValue& val);
 }
@@ -564,12 +565,10 @@ namespace VM {
     OwnedArr<Value> temporaries = {};
     Value return_val;
 
-    const IR::Builder* ir;
-
+    const IR::IRStore* ir;
     const IR::ControlBlock* current_block;
     const u8* IP;
     const u8* IP_END;
-
 
     struct RealValue {
       u8* ptr;
@@ -580,7 +579,12 @@ namespace VM {
     RealValue get_indirect_value(const IR::V_ARG& arg);
   };
 
-  StackFrame new_stack_frame(const IR::Builder* ir);
+  struct Env {
+    Type t_bool;
+    Errors* errors;
+  };
 
-  void exec(CompilerThread* comp_thread, StackFrame* stack_frame);
+  StackFrame new_stack_frame(const IR::IRStore* ir);
+
+  void exec(const Env* env, StackFrame* stack_frame);
 }

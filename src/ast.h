@@ -7,46 +7,6 @@
 #include "parser.h"
 #include "comp_utilities.h"
 
-struct AST_LINKED {
-  AST_LOCAL curr = 0;
-  AST_LINKED* next = 0;
-};
-
-struct AST_ARR {
-  AST_LINKED* start = 0;
-  usize count = 0;
-};
-
-#define FOR_AST(arr, it) \
-for(auto [_l, it] = _start_ast_iterate(arr); _l; _step_ast_iterate(_l, it))
-
-struct _AST_ITERATE_HOLDER {
-  AST_LINKED* l;
-  AST_LOCAL loc;
-};
-
-constexpr inline _AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
-  if (a.start == nullptr) {
-    return { nullptr, 0 };
-  }
-  else {
-    ASSERT(a.start != nullptr);
-    ASSERT(a.start->curr != nullptr);
-    return {
-      a.start,
-      a.start->curr,
-    };
-  }
-}
-
-constexpr inline void _step_ast_iterate(AST_LINKED*& _l, AST_LOCAL& loc) {
-  _l = _l->next;
-  if (_l != nullptr) {
-    loc = _l->curr;
-    ASSERT(loc != nullptr);
-  }
-}
-
 #define AST_TYPE_MOD \
 MOD(NAMED_TYPE) \
 MOD(ARRAY_TYPE) \

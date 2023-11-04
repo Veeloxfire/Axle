@@ -38,15 +38,16 @@ struct PrintList {
 namespace Format {
   template<typename F>
   concept Formatter = requires(F & f, char c, const char* ptr, usize n,
-                               const char(&arr1)[1], const char(&arr2)[10], const char(&arr3)[100]) {
-                                 {f.load_char(c)};
-                                 {f.load_string(ptr, n)};
-                                 {f.load_string_lit(arr1)};
-                                 {f.load_string_exact(arr1)};
-                                 {f.load_string_lit(arr2)};
-                                 {f.load_string_exact(arr2)};
-                                 {f.load_string_lit(arr3)};
-                                 {f.load_string_exact(arr3)};
+                               const char(&arr1)[1], const char(&arr2)[10], const char(&arr3)[100])
+  {
+    {f.load_char(c)};
+    {f.load_string(ptr, n)};
+    {f.load_string_lit(arr1)};
+    {f.load_string_exact(arr1)};
+    {f.load_string_lit(arr2)};
+    {f.load_string_exact(arr2)};
+    {f.load_string_lit(arr3)};
+    {f.load_string_exact(arr3)};
   };
 
   template<typename T>
@@ -477,7 +478,7 @@ namespace Format {
 
     while (true) {
       if (f.format_string.len == 0 || f.format_string.arr[0] == '\0') {
-        INVALID_CODE_PATH("Invalid format");
+        INVALID_CODE_PATH("Found too many arguments in format");
       }
       else if (f.format_string.arr[0] == '{' && f.format_string.arr[1] == '}') {
         const size_t num_chars = f.format_string.arr - string;
@@ -513,7 +514,7 @@ namespace Format {
 
     while (true) {
       if (format.arr[0] == '{' && format.arr[1] == '}') {
-        INVALID_CODE_PATH("Invalid format");
+        INVALID_CODE_PATH("Expected extra arguments in format");
         break;
       }
       else if (format.len == 0 || format.arr[0] == '\0') {

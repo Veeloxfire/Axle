@@ -55,15 +55,15 @@ const SignatureStructure* CompilerGlobals::get_label_signature(IR::GlobalLabel l
   return sig;
 }
 
-IR::Builder* CompilerGlobals::new_ir(IR::GlobalLabel label, const SignatureStructure* sig) {
+IR::IRStore* CompilerGlobals::new_ir(IR::GlobalLabel label, const SignatureStructure* sig) {
   ir_mutex.acquire();
-  IR::Builder* builder = ir_builders_single_threaded.insert();
+  IR::IRStore* ir = ir_builders_single_threaded.insert();
   ir_mutex.release();
 
-  builder->global_label = label;
-  builder->signature = sig;
+  ir->global_label = label;
+  ir->signature = sig;
 
-  return builder;
+  return ir;
 }
 
 IR::Function* CompilerGlobals::new_function() {
@@ -195,12 +195,12 @@ const ArrayStructure* find_or_make_array_structure(Structures* const structures,
 }
 
 static u32 new_dynamic_init_object(CompilerGlobals* const comp, u32 size, u32 alignment,
-                                   IR::Builder* ir_builder) {
+                                   IR::IRStore* ir) {
   Backend::GlobalData holder = {};
   holder.size = size;
   holder.alignment = alignment;
   holder.constant_init = false;
-  holder.init_expr_label = ir_builder->global_label;
+  holder.init_expr_label = ir->global_label;
 
   comp->dynamic_inits.insert(holder);
   return (u32)comp->dynamic_inits.size;
@@ -735,6 +735,8 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
                                                 const NodeEval& eval) {
   TRACING_FUNCTION();
 
+  IR::IRStore* const ir = builder->ir;
+
   const ASTFunctionCallExpr* const call = downcast_ast<ASTFunctionCallExpr>(eval.expr);
 
   const auto* sig_struct = call->sig;
@@ -750,7 +752,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
       return Eval::no_value();
     }
 
-    IR::V_ARG v_arg = Eval::load_v_arg(builder, val);
+    IR::V_ARG v_arg = Eval::load_v_arg(ir, val);
     args.insert(v_arg);
   }
 
@@ -758,7 +760,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
 
 
   if (has_return) {
-    IR::ValueIndex v = builder->ir->new_temporary(sig_struct->return_type, eval.requirements);
+    IR::ValueIndex v = ir->new_temporary(sig_struct->return_type, eval.requirements);
 
     args.insert(IR::v_arg(v, 0, sig_struct->return_type));
   }
@@ -769,9 +771,9 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
     c.n_values = (u32)args.size;
     c.values = args.data;
 
-    IR::Emit::Call(builder->current_bytecode(), c);
+    IR::Emit::Call(ir->current_bytecode(), c);
 
-    builder->ir->current_control_block()->calls = true;
+    ir->current_control_block()->calls = true;
   }
 
   if (has_return) {
@@ -788,7 +790,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
 }
 
 
-Eval::RuntimeValue CASTS::int_to_int(Eval::IrBuilder* const builder,
+Eval::RuntimeValue CASTS::int_to_int(IR::IRStore* const ir,
                                      const Type& to,
                                      const Eval::RuntimeValue& val) {
   ASSERT(to.is_valid() && to.struct_type() == STRUCTURE_TYPE::INTEGER);
@@ -799,17 +801,17 @@ Eval::RuntimeValue CASTS::int_to_int(Eval::IrBuilder* const builder,
     return val;
   }
 
-  IR::ValueIndex temp = builder->ir->new_temporary(to, {});
+  IR::ValueIndex temp = ir->new_temporary(to, {});
 
   IR::Types::Copy cc = {};
-  cc.from = Eval::load_v_arg(builder, val);
+  cc.from = Eval::load_v_arg(ir, val);
   cc.to = IR::v_arg(temp, 0, to);
 
-  IR::Emit::Copy(builder->current_bytecode(), cc);
+  IR::Emit::Copy(ir->current_bytecode(), cc);
   return Eval::as_direct(temp, to);
 }
 
-Eval::RuntimeValue CASTS::no_op(Eval::IrBuilder* const,
+Eval::RuntimeValue CASTS::no_op(IR::IRStore* const,
                                 const Type& to,
                                 const Eval::RuntimeValue& val) {
   ASSERT(val.type.is_valid());
@@ -818,11 +820,11 @@ Eval::RuntimeValue CASTS::no_op(Eval::IrBuilder* const,
   return res;
 }
 
-Eval::RuntimeValue CASTS::take_address(Eval::IrBuilder* const builder,
+Eval::RuntimeValue CASTS::take_address(IR::IRStore* const ir,
                                        const Type& to,
                                        const Eval::RuntimeValue& val) {
   ASSERT(val.type.is_valid());
-  return Eval::addrof(builder, val, to);
+  return Eval::addrof(ir, val, to);
 }
 
 static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
@@ -842,6 +844,8 @@ Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* buil
                                     const IR::ValueRequirements reqs) {
   TRACING_FUNCTION();
 
+  IR::IRStore* const ir = builder->ir;
+
   if (!global->is_runtime_available) {
     global->dynamic_init_index = new_dynamic_init_object_const(comp,
                                                                global->decl.type.size(),
@@ -852,8 +856,8 @@ Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* buil
 
   u32 global_id = 0;
   {
-    IR::GlobalReference* grs = builder->ir->globals_used.data;
-    const usize count = builder->ir->globals_used.size;
+    IR::GlobalReference* grs = ir->globals_used.data;
+    const usize count = ir->globals_used.size;
 
     for (; global_id < count; ++global_id) {
       if (grs[global_id].data_member == global->dynamic_init_index) {
@@ -862,13 +866,11 @@ Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* buil
       }
     }
 
-    global_id = builder->ir->new_global_reference({ global->decl.type, reqs, global->dynamic_init_index });
+    global_id = ir->new_global_reference({ global->decl.type, reqs, global->dynamic_init_index });
   }
 
 FOUND:
   const Type ptr_type = generate_pointer_type(comp, global->decl.type);
-
-  IR::Builder* ir = builder->ir;
 
   IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
@@ -876,7 +878,7 @@ FOUND:
   args.val = IR::v_arg(v, 0, ptr_type);
   args.im32 = global_id;
 
-  IR::Emit::AddrOfGlobal(builder->current_bytecode(), args);
+  IR::Emit::AddrOfGlobal(ir->current_bytecode(), args);
 
   return Eval::as_indirect(v, ptr_type);
 }
@@ -992,7 +994,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
           const auto c = Eval::as_constant((const u8*)data, comp->builtin_types->t_u64);
 
-          return Eval::sub_object(builder, obj, c, ptr_type);
+          return Eval::sub_object(builder->ir, obj, c, ptr_type);
         }
         else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
           if (member_e->name == comp->important_names.ptr) {
@@ -1007,7 +1009,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             Type ptr = member_e->node_type;
             ASSERT(ptr.struct_type() == STRUCTURE_TYPE::POINTER);
 
-            return Eval::arr_to_ptr(builder, obj, ptr);
+            return Eval::arr_to_ptr(builder->ir, obj, ptr);
           }
           else if (member_e->name == comp->important_names.len) {
             ASSERT(!eval.requirements.has_address());
@@ -1069,7 +1071,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         BinOpArgs args = {
           &emit_info,
           comp,
-          builder,
+          builder->ir,
           index_val,
           c,
         };
@@ -1078,7 +1080,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         const Type t = generate_pointer_type(comp, base_type);
 
-        return Eval::sub_object(builder, arr, offset, t);
+        return Eval::sub_object(builder->ir, arr, offset, t);
       }
     case AST_TYPE::TUPLE_LIT: {
         ASSERT(expr->node_type.struct_type() == STRUCTURE_TYPE::COMPOSITE);
@@ -1124,7 +1126,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             member.value.offset = i_t->offset;
             member.type = i_t->type;
 
-            Eval::assign(builder, member, v);
+            Eval::assign(builder->ir, member, v);
           }
 
           ++i_t;
@@ -1179,7 +1181,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             element_ref.value.offset = (u32)offset;
             element_ref.type = base_type;
 
-            Eval::assign(builder, element_ref, el);
+            Eval::assign(builder->ir, element_ref, el);
           }
 
           count += 1;
@@ -1278,7 +1280,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           return Eval::no_value();
         }
 
-        const auto res = cast->emit(builder, cast->node_type, ref);
+        const auto res = cast->emit(builder->ir, cast->node_type, ref);
         ASSERT(res.effective_type() == cast->node_type);
         return res;
       }
@@ -1313,7 +1315,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         UnOpArgs args = {
           &un_op->emit_info,
           comp,
-          builder,
+          builder->ir,
           ref,
         };
 
@@ -1339,7 +1341,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         BinOpArgs args = {
           &bin_op->emit_info,
           comp,
-          builder,
+          builder->ir,
           temp_left,
           temp_right,
         };
@@ -1380,7 +1382,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           return;
         }
 
-        Eval::assign(builder, a, v);
+        Eval::assign(builder->ir, a, v);
         return;
       }
     case AST_TYPE::BLOCK: {
@@ -1413,7 +1415,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
 
           IR::ValueIndex ret_val = builder->ir->new_temporary(ret_type, {});
-          Eval::assign(builder, Eval::as_direct(ret_val, ret_type), r);
+          Eval::assign(builder->ir, Eval::as_direct(ret_val, ret_type), r);
 
           builder->ir->set_current_cf(IR::CFReturn{
             builder->parent,
@@ -1465,7 +1467,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           condition_vi = builder->ir->new_temporary(comp_thread->builtin_types->t_bool, {});
 
-          Eval::assign(builder, Eval::as_direct(condition_vi, comp_thread->builtin_types->t_bool), cond);
+          Eval::assign(builder->ir, Eval::as_direct(condition_vi, comp_thread->builtin_types->t_bool), cond);
 
           builder->ir->set_current_cf(IR::CFSplt{
             loop_merge_label,
@@ -1550,7 +1552,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           IR::ValueIndex cond_vi = builder->ir->new_temporary(comp_thread->builtin_types->t_bool, {});
 
 
-          Eval::assign(builder, Eval::as_direct(cond_vi, comp_thread->builtin_types->t_bool), cond);
+          Eval::assign(builder->ir, Eval::as_direct(cond_vi, comp_thread->builtin_types->t_bool), cond);
 
           builder->reset_variables();
           builder->ir->set_current_cf(IR::CFSplt{
@@ -1670,7 +1672,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           const auto var = builder->import_variable(local->variable_id, {});
 
-          Eval::assign(builder, var, Eval::as_constant(local->decl.init_value, local->decl.type));
+          Eval::assign(builder->ir, var, Eval::as_constant(local->decl.init_value, local->decl.type));
         }
         else {
           ASSERT(!decl->compile_time_const);
@@ -1684,7 +1686,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           local->variable_id = builder->new_variable(local->decl.type, {});
           const auto var = builder->import_variable(local->variable_id, {});
 
-          Eval::assign(builder, var, r);
+          Eval::assign(builder->ir, var, r);
         }
 
         return;
@@ -1696,77 +1698,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
   }
 }
 
-void start_ir(Eval::IrBuilder* builder) {
-  auto* ir = builder->ir;
-  ASSERT(ir != nullptr);
-  ASSERT(ir->signature != nullptr);
-  ASSERT(ir->signature->parameter_types.size == 0);
-
-  IR::LocalLabel startup = ir->new_control_block();
-  IR::LocalLabel first = ir->new_control_block();
-  ir->start_control_block(startup);
-  ir->set_current_cf(IR::CFStart{
-    first,
-  });
-
-  IR::Types::StartFunc sf = {};
-  sf.n_values = 0;
-  sf.values = nullptr;
-
-  IR::Emit::StartFunc(ir->current_bytecode(), sf);
-
-  builder->switch_control_block(first, startup);
-}
-
-void start_ir(Eval::IrBuilder* builder, AST_ARR params) {
-  auto* ir = builder->ir;
-  ASSERT(ir != nullptr);
-  ASSERT(ir->signature != nullptr);
-
-  IR::LocalLabel startup = ir->new_control_block();
-  IR::LocalLabel first = ir->new_control_block();
-  ir->start_control_block(startup);
-  ir->set_current_cf(IR::CFStart{
-    first,
-  });
-
-  {
-    OwnedArr<IR::V_ARG> args = new_arr<IR::V_ARG>(params.count);
-
-    {
-      const Type* parameters = ir->signature->parameter_types.begin();
-      const Type* const parameters_end = ir->signature->parameter_types.end();
-      IR::V_ARG* va = args.mut_begin();
-
-      FOR_AST(params, p) {
-        ASSERT(parameters < parameters_end);
-        ASSERT(p->node_type == *parameters);
-        ASSERT(p->ast_type == AST_TYPE::TYPED_NAME);
-        ASTTypedName* n = (ASTTypedName*)p;
-        Local* local_ptr = n->local_ptr;
-
-        auto id = builder->new_variable(*parameters, {});
-        local_ptr->variable_id = id;
-        *va = Eval::load_v_arg(builder, builder->import_variable(id, {}));
-        va += 1;
-        parameters += 1;
-      }
-
-      ASSERT(parameters == parameters_end);
-    }
-
-    IR::Types::StartFunc sf = {};
-    sf.n_values = (u32)args.size;
-    sf.values = args.data;
-
-    IR::Emit::StartFunc(ir->current_bytecode(), sf);
-  }
-
-  builder->reset_variables();
-  builder->switch_control_block(first, startup);
-}
-
-void submit_ir(CompilerGlobals* comp, IR::Builder* ir) {
+void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
   if (comp->print_options.finished_ir) {
     IR::print_ir(ir);
   }
@@ -1781,14 +1713,10 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
     return;
   }
 
-  IR::Builder expr_ir = {};
+  IR::IRStore expr_ir = {};
   expr_ir.signature = comp_thread->builtin_types->t_void_call.extract_base<SignatureStructure>();
 
-  Eval::IrBuilder builder = {};
-  builder.ir = &expr_ir;
-  builder.eval_time = Eval::Time::CompileTime;
-
-  start_ir(&builder);
+  Eval::IrBuilder builder = start_builder(Eval::Time::CompileTime, &expr_ir);
 
   Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(root));
   if (comp_thread->is_panic()) {
@@ -1817,18 +1745,21 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
     memcpy_ts(eval->data, type.size(), ref.constant, type.size());
   }
   else {
-    IR::V_ARG out = Eval::load_v_arg(&builder, ref);
+    IR::V_ARG out = Eval::load_v_arg(&expr_ir, ref);
 
-    VM::StackFrame vm = VM::new_stack_frame(&expr_ir);
-    VM::exec(comp_thread, &vm);
-    if (comp_thread->is_panic()) {
-      return;
+    {
+      VM::Env env = { comp_thread->builtin_types->t_bool, &comp_thread->errors };
+      VM::StackFrame vm = VM::new_stack_frame(&expr_ir);
+      VM::exec(&env, &vm);
+      if (comp_thread->is_panic()) {
+        return;
+      }
+
+      auto res = vm.get_value(out);
+      ASSERT(res.t == type);
+
+      memcpy_ts(eval->data, type.size(), res.ptr, type.size());
     }
-
-    auto res = vm.get_value(out);
-    ASSERT(res.t == type);
-
-    memcpy_ts(eval->data, type.size(), res.ptr, type.size());
   }
 }
 
@@ -1868,29 +1799,27 @@ static void compile_lambda_body(CompilerGlobals* comp,
   ASSERT(root->node_type.is_valid());
 
   {
-    IR::Builder* ir = comp->new_ir(l_comp->func->signature.label, l_comp->func->signature.sig_struct);
+    IR::IRStore* ir = comp->new_ir(l_comp->func->signature.label, l_comp->func->signature.sig_struct);
 
 
     ASSERT(root->sig->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
     ASTFuncSig* func_sig = static_cast<ASTFuncSig*>(root->sig);
 
-    Eval::IrBuilder builder = {};
-    builder.ir = ir;
-    builder.eval_time = Eval::Time::Runtime;
-
-    start_ir(&builder, func_sig->parameters);
-
     {
-      AST_ARR arr = ((ASTBlock*)root->body)->block;
-      FOR_AST(arr, i) {
-        compile_bytecode_of_statement(comp, comp_thread, &builder, i);
-        if (comp_thread->is_panic()) {
-          return;
+      Eval::IrBuilder builder = start_builder(Eval::Time::Runtime, ir, func_sig->parameters);
+
+      {
+        AST_ARR arr = ((ASTBlock*)root->body)->block;
+        FOR_AST(arr, i) {
+          compile_bytecode_of_statement(comp, comp_thread, &builder, i);
+          if (comp_thread->is_panic()) {
+            return;
+          }
         }
       }
-    }
 
-    Eval::end_builder(&builder);
+      Eval::end_builder(&builder);
+    }
     submit_ir(comp, ir);
   }
 }
@@ -2081,29 +2010,29 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
     const SignatureStructure* sig = (const SignatureStructure*)comp->builtin_types->t_void_call.structure;
     IR::GlobalLabel label = comp->next_function_label(sig);
 
-    IR::Builder* ir = comp->new_ir(label, sig);
+    IR::IRStore* ir = comp->new_ir(label, sig);
 
-    Eval::IrBuilder builder = {};
-    builder.ir = ir;
-    builder.eval_time = Eval::Time::Runtime;
-    start_ir(&builder);
+    {
+      Eval::IrBuilder builder = Eval::start_builder(Eval::Time::Runtime, ir);
 
-    global->is_runtime_available = true;
-    global->dynamic_init_index = new_dynamic_init_object(comp,
-                                                         global->decl.type.structure->size,
-                                                         global->decl.type.structure->alignment,
-                                                         ir);
+      global->is_runtime_available = true;
+      global->dynamic_init_index = new_dynamic_init_object(comp,
+                                                           global->decl.type.structure->size,
+                                                           global->decl.type.structure->alignment,
+                                                           ir);
 
-    Eval::RuntimeValue glob_ref = load_data_memory(comp, &builder, global, {});
+      Eval::RuntimeValue glob_ref = load_data_memory(comp, &builder, global, {});
 
-    Eval::RuntimeValue init_expr = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(decl->expr));
-    if (comp_thread->is_panic()) {
-      return;
+      Eval::RuntimeValue init_expr = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(decl->expr));
+      if (comp_thread->is_panic()) {
+        return;
+      }
+
+      Eval::assign(ir, glob_ref, init_expr);
+
+      Eval::end_builder(&builder);
     }
 
-    Eval::assign(&builder, glob_ref, init_expr);
-
-    Eval::end_builder(&builder);
     submit_ir(comp, ir);
   }
 
@@ -2471,7 +2400,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       };
       Backend::GenericProgram* p = comp->services.out_program._ptr;
 
-      const IR::Builder* ir = nullptr;
+      const IR::IRStore* ir = nullptr;
       if (comp->finished_irs.try_pop_front(&ir)) {
         TRACING_SCOPE("Emit IR");
         thead_doing_work(comp, comp_thread);
@@ -3158,7 +3087,6 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
                                                                  nullptr, std::move(params), builtin_types->t_void);
     builtin_types->t_void_call = register_builtin_type(s_void_call);
   }
-
 
   {
     EnumStructure* const s_bool = STRUCTS::new_enum_structure(structures._ptr, strings._ptr, builtin_types->t_u8);

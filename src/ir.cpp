@@ -2,7 +2,7 @@
 #include "compiler.h"
 
 namespace IR {
-  IR::ValueIndex Builder::new_temporary(const VariableId& v_id, ValueRequirements requirements) {
+  IR::ValueIndex IRStore::new_temporary(const VariableId& v_id, ValueRequirements requirements) {
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -19,7 +19,7 @@ namespace IR {
     return { static_cast<u32>(i) };
   }
 
-  IR::ValueIndex Builder::new_temporary(const Type& t, ValueRequirements requirements) {
+  IR::ValueIndex IRStore::new_temporary(const Type& t, ValueRequirements requirements) {
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -28,11 +28,11 @@ namespace IR {
     SSATemp* temp = cb->temporaries.back();
     temp->type = t;
     temp->requirements = requirements;
-    
+
     return { static_cast<u32>(i) };
   }
 
-  VariableId Builder::new_variable(const Type& t, ValueRequirements requirements) {
+  VariableId IRStore::new_variable(const Type& t, ValueRequirements requirements) {
     usize i = variables.size;
     variables.insert_uninit(1);
     IR::SSAVar* var = variables.back();
@@ -42,13 +42,13 @@ namespace IR {
     return VariableId{ static_cast<u32>(i) };
   }
 
-  u32 Builder::new_global_reference(const IR::GlobalReference& ref) {
+  u32 IRStore::new_global_reference(const IR::GlobalReference& ref) {
     u32 i = (u32)globals_used.size;
     globals_used.insert(ref);
     return i;
   }
 
-  LocalLabel Builder::new_control_block() {
+  LocalLabel IRStore::new_control_block() {
     ASSERT(control_blocks.size < 0xffffffff);
 
     control_blocks.insert_uninit(1);
@@ -58,26 +58,26 @@ namespace IR {
     return l;
   }
 
-  IR::ControlBlock* Builder::current_control_block() {
+  IR::ControlBlock* IRStore::current_control_block() {
     ASSERT(current_block != IR::NULL_LOCAL_LABEL);
     return control_blocks.data + (current_block.label - 1);
   }
 
-  Array<u8>& Builder::current_bytecode() {
+  Array<u8>& IRStore::current_bytecode() {
     return current_control_block()->bytecode;
   }
 
-  void Builder::start_control_block(LocalLabel label) {
+  void IRStore::start_control_block(LocalLabel label) {
     ASSERT(label != IR::NULL_LOCAL_LABEL);
     ASSERT(label.label <= control_blocks.size);
     current_block = label;
   }
 
-  void Builder::end_control_block() {
+  void IRStore::end_control_block() {
     //TODO: maybe remove this, currently does nothing
   }
 
-  void Builder::set_current_cf(const CFStart& st) {
+  void IRStore::set_current_cf(const CFStart& st) {
     ASSERT(st.child != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -85,21 +85,21 @@ namespace IR {
     cb->cf_start = st;
   }
 
-  void Builder::set_current_cf(const CFEnd& e) {
+  void IRStore::set_current_cf(const CFEnd& e) {
     ASSERT(e.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
     cb->cf_type = e.CF_TYPE;
     cb->cf_end = e;
   }
-  void Builder::set_current_cf(const CFReturn& r) {
+  void IRStore::set_current_cf(const CFReturn& r) {
     ASSERT(r.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
     cb->cf_type = r.CF_TYPE;
     cb->cf_return = r;
   }
-  void Builder::set_current_cf(const CFInline& i) {
+  void IRStore::set_current_cf(const CFInline& i) {
     ASSERT(i.parent != IR::NULL_LOCAL_LABEL);
     ASSERT(i.child != IR::NULL_LOCAL_LABEL);
 
@@ -107,7 +107,7 @@ namespace IR {
     cb->cf_type = i.CF_TYPE;
     cb->cf_inline = i;
   }
-  void Builder::set_current_cf(const CFSplt& s) {
+  void IRStore::set_current_cf(const CFSplt& s) {
     ASSERT(s.parent != IR::NULL_LOCAL_LABEL);
     ASSERT(s.true_branch != IR::NULL_LOCAL_LABEL);
     ASSERT(s.false_branch != IR::NULL_LOCAL_LABEL);
@@ -116,7 +116,7 @@ namespace IR {
     cb->cf_type = s.CF_TYPE;
     cb->cf_split = s;
   }
-  void Builder::set_current_cf(const CFMerge& m) {
+  void IRStore::set_current_cf(const CFMerge& m) {
     ASSERT(m.parents[0] != IR::NULL_LOCAL_LABEL);
     ASSERT(m.parents[1] != IR::NULL_LOCAL_LABEL);
     ASSERT(m.child != IR::NULL_LOCAL_LABEL);
@@ -148,7 +148,7 @@ struct Serializer {
     remaining_size -= 1;
   }
 
-  void write(u16 u){
+  void write(u16 u) {
     ASSERT(remaining_size >= 2);
     data_base[index] = u & 0xff;
     data_base[index + 1] = (u >> 8) & 0xff;
@@ -535,18 +535,84 @@ Eval::RuntimeValue Eval::as_constant(const u8* constant, const Type& type) {
   return r;
 }
 
+
+Eval::IrBuilder Eval::start_builder(Eval::Time eval_time, IR::IRStore* ir) {
+  return start_builder(eval_time, ir, {});
+}
+
+Eval::IrBuilder Eval::start_builder(Eval::Time eval_time, IR::IRStore* ir, AST_ARR params) {
+  ASSERT(ir != nullptr);
+  ASSERT(ir->signature != nullptr);
+  ASSERT(ir->signature->parameter_types.size == params.count);
+
+  Eval::IrBuilder builder = {};
+  builder.ir = ir;
+  builder.eval_time = eval_time;
+
+  IR::LocalLabel startup = ir->new_control_block();
+  IR::LocalLabel first = ir->new_control_block();
+  ir->start_control_block(startup);
+  ir->set_current_cf(IR::CFStart{
+    first,
+                     });
+
+  if (params.count > 0) {
+    OwnedArr<IR::V_ARG> args = new_arr<IR::V_ARG>(params.count);
+
+    {
+      const Type* parameters = ir->signature->parameter_types.begin();
+      const Type* const parameters_end = ir->signature->parameter_types.end();
+      IR::V_ARG* va = args.mut_begin();
+
+      FOR_AST(params, p) {
+        ASSERT(parameters < parameters_end);
+        ASSERT(p->node_type == *parameters);
+        ASSERT(p->ast_type == AST_TYPE::TYPED_NAME);
+        ASTTypedName* n = (ASTTypedName*)p;
+        Local* local_ptr = n->local_ptr;
+
+        auto id = builder.new_variable(*parameters, {});
+        local_ptr->variable_id = id;
+        *va = Eval::load_v_arg(ir, builder.import_variable(id, {}));
+        va += 1;
+        parameters += 1;
+      }
+
+      ASSERT(parameters == parameters_end);
+    }
+
+    IR::Types::StartFunc sf = {};
+    sf.n_values = (u32)args.size;
+    sf.values = args.data;
+
+    IR::Emit::StartFunc(ir->current_bytecode(), sf);
+  }
+  else {
+    IR::Types::StartFunc sf = {};
+    sf.n_values = 0;
+    sf.values = nullptr;
+
+    IR::Emit::StartFunc(ir->current_bytecode(), sf);
+  }
+
+  builder.reset_variables();
+  builder.switch_control_block(first, startup);
+
+  return builder;
+}
+
 void Eval::end_builder(Eval::IrBuilder* builder) {
-  IR::Builder* ir = builder->ir;
-  
+  IR::IRStore* ir = builder->ir;
+
   if (ir->current_block != IR::NULL_LOCAL_LABEL) {
     ASSERT(builder->parent != IR::NULL_LOCAL_LABEL);
     ir->set_current_cf(IR::CFEnd{
       builder->parent,
-    });
+                       });
   }
 }
 
-void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const Eval::RuntimeValue& from) {
+void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eval::RuntimeValue& from) {
   ASSERT(to.rvt != RVT::Constant);
 
   ASSERT(to.type.size() > 0);
@@ -557,33 +623,33 @@ void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const 
 
     case Eval::RVT::Direct: {
         switch (from.rvt) {
-        case Eval::RVT::Constant: {
+          case Eval::RVT::Constant: {
               IR::Types::Set set = {};
               set.data = IR::c_arg(from.constant, from.type);
               set.to = IR::v_arg(to.value.index, to.value.offset, to.type);
 
-              IR::Emit::Set(builder->current_bytecode(), set);
+              IR::Emit::Set(ir->current_bytecode(), set);
               return;
             }
-            case Eval::RVT::Direct: {
+          case Eval::RVT::Direct: {
               IR::Types::Copy ccd = {};
               ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
               ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
 
-              IR::Emit::Copy(builder->current_bytecode(), ccd);
+              IR::Emit::Copy(ir->current_bytecode(), ccd);
               return;
             }
-            case Eval::RVT::Indirect: {
-                IR::Types::CopyLoad ccd = {};
-                ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
-                ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
+          case Eval::RVT::Indirect: {
+              IR::Types::CopyLoad ccd = {};
+              ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
+              ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
 
-                IR::Emit::CopyLoad(builder->current_bytecode(), ccd);
-                return;
-              }
+              IR::Emit::CopyLoad(ir->current_bytecode(), ccd);
+              return;
+            }
         }
         break;
-    }
+      }
     case Eval::RVT::Indirect: {
         switch (from.rvt) {
           case Eval::RVT::Constant: {
@@ -591,7 +657,7 @@ void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const 
               set.data = IR::c_arg(from.constant, from.type);
               set.to = IR::v_arg(to.value.index, to.value.offset, to.type);
 
-              IR::Emit::SetStore(builder->current_bytecode(), set);
+              IR::Emit::SetStore(ir->current_bytecode(), set);
               return;
             }
           case Eval::RVT::Direct: {
@@ -599,7 +665,7 @@ void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const 
               ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
               ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
 
-              IR::Emit::CopyStore(builder->current_bytecode(), ccd);
+              IR::Emit::CopyStore(ir->current_bytecode(), ccd);
               return;
             }
           case Eval::RVT::Indirect: {
@@ -607,7 +673,7 @@ void Eval::assign(Eval::IrBuilder* builder, const Eval::RuntimeValue& to, const 
               ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
               ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
 
-              IR::Emit::CopyLoadStore(builder->current_bytecode(), ccd);
+              IR::Emit::CopyLoadStore(ir->current_bytecode(), ccd);
               return;
             }
         }
@@ -644,7 +710,7 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR
   ASSERT(id.variable < ir->variables.size);
   IR::SSAVar& sv = ir->variables.data[id.variable];
   sv.requirements |= reqs;
-  
+
   FOR_MUT(variables_state, it) {
     if (it->id.variable == id.variable) {
 
@@ -687,10 +753,9 @@ void Eval::IrBuilder::reset_variables() {
   }
 }
 
-IR::V_ARG Eval::load_v_arg(Eval::IrBuilder* builder, const Eval::RuntimeValue& rv) {
+IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
   switch (rv.rvt) {
     case RVT::Constant: {
-        auto* ir = builder->ir;
         IR::ValueIndex v = ir->new_temporary(rv.type, {});
 
         IR::Types::Set set = {};
@@ -706,7 +771,6 @@ IR::V_ARG Eval::load_v_arg(Eval::IrBuilder* builder, const Eval::RuntimeValue& r
         return IR::v_arg(rv.value.index, rv.value.offset, rv.type);
       }
     case RVT::Indirect: {
-        auto* ir = builder->ir;
         IR::ValueIndex v = ir->new_temporary(rv.type, {});
 
         IR::Types::CopyLoad cpy = {};
@@ -723,19 +787,18 @@ IR::V_ARG Eval::load_v_arg(Eval::IrBuilder* builder, const Eval::RuntimeValue& r
   return {};
 }
 
-Eval::RuntimeValue Eval::addrof(Eval::IrBuilder* const builder, const Eval::RuntimeValue& val, const Type& ptr_type) {
+Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue& val, const Type& ptr_type) {
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   switch (val.rvt) {
     case RVT::Constant: {
         INVALID_CODE_PATH("Cannot take the address of a constant");
         return Eval::no_value();
-    }
+      }
 
     case RVT::Direct: {
         ASSERT(val.type == ptr_type.unchecked_base<PointerStructure>()->base);
 
-        auto* ir = builder->ir;
         {
           const auto* cb = ir->current_control_block();
           ASSERT(cb->temporaries.size > val.value.index.index);
@@ -770,7 +833,7 @@ Eval::RuntimeValue Eval::addrof(Eval::IrBuilder* const builder, const Eval::Runt
   return Eval::no_value();
 }
 
-Eval::RuntimeValue Eval::arr_to_ptr(Eval::IrBuilder* const builder,
+Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Type& ptr_type) {
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
@@ -783,7 +846,6 @@ Eval::RuntimeValue Eval::arr_to_ptr(Eval::IrBuilder* const builder,
         ASSERT(val.type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY);
         ASSERT(val.type.unchecked_base<ArrayStructure>()->base == ptr_type.unchecked_base<PointerStructure>()->base);
 
-        auto* ir = builder->ir;
         {
           const auto* cb = ir->current_control_block();
           ASSERT(cb->temporaries.size > val.value.index.index);
@@ -824,7 +886,7 @@ Eval::RuntimeValue Eval::arr_to_ptr(Eval::IrBuilder* const builder,
 }
 
 
-Eval::RuntimeValue Eval::deref(Eval::IrBuilder* const builder,
+Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
                                const Eval::RuntimeValue& val, const Type& ptr_type) {
   ASSERT(val.type.struct_type() == STRUCTURE_TYPE::POINTER);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
@@ -845,8 +907,6 @@ Eval::RuntimeValue Eval::deref(Eval::IrBuilder* const builder,
     case RVT::Indirect: {
         ASSERT(val.type.unchecked_base<PointerStructure>()->base == ptr_type);
 
-        auto* ir = builder->ir;
-
         IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         IR::Types::AddrOfLoad addr = {};
@@ -863,7 +923,7 @@ Eval::RuntimeValue Eval::deref(Eval::IrBuilder* const builder,
   return Eval::no_value();
 }
 
-Eval::RuntimeValue Eval::sub_object(Eval::IrBuilder* const builder,
+Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Eval::RuntimeValue& offset, const Type& ptr_type) {
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
   const auto* pt = ptr_type.unchecked_base<PointerStructure>();
@@ -893,10 +953,8 @@ Eval::RuntimeValue Eval::sub_object(Eval::IrBuilder* const builder,
     }
   }
 
-  auto* ir = builder->ir;
-
   IR::V_ARG ptr_arg;
-  
+
   switch (val.rvt) {
     case RVT::Constant: {
         INVALID_CODE_PATH("Cannot dynamically index a constant");
@@ -928,7 +986,7 @@ Eval::RuntimeValue Eval::sub_object(Eval::IrBuilder* const builder,
 
   IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
-  IR::V_ARG offset_arg = Eval::load_v_arg(builder, offset);
+  IR::V_ARG offset_arg = Eval::load_v_arg(ir, offset);
 
   IR::Types::Add add = {};
   add.left = ptr_arg;
@@ -961,7 +1019,7 @@ void print_value(const IR::V_ARG& arg) {
   format_print_ST("T{} [{}..{}]", arg.val.index, arg.offset, arg.offset + arg.size);
 }
 
-void IR::print_ir(const IR::Builder* builder) {
+void IR::print_ir(const IR::IRStore* builder) {
   IO_Single::lock();
   DEFER() { IO_Single::unlock(); };
 
@@ -971,7 +1029,7 @@ void IR::print_ir(const IR::Builder* builder) {
 
   u32 num_params = (u32)builder->signature->parameter_types.size;
 
-  if(builder->variables.size > 0) {
+  if (builder->variables.size > 0) {
     u32 counter = 0;
     format_print_ST("Variables ({}):\n", builder->variables.size);
     FOR(builder->variables, it) {
@@ -985,7 +1043,7 @@ void IR::print_ir(const IR::Builder* builder) {
     }
   }
 
-  if(builder->globals_used.size > 0){
+  if (builder->globals_used.size > 0) {
     u32 counter = 0;
     format_print_ST("Captured Globals ({}):\n", builder->globals_used.size);
     FOR(builder->globals_used, it) {

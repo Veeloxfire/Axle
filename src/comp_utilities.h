@@ -22,6 +22,16 @@ struct Span;
 
 using AST_LOCAL = AST*;
 
+struct AST_LINKED {
+  AST_LOCAL curr = 0;
+  AST_LINKED* next = 0;
+};
+
+struct AST_ARR {
+  AST_LINKED* start = 0;
+  usize count = 0;
+};
+
 #define COMPCODEINC \
 MOD(NO_ERRORS)\
 MOD(ASSERT_ERROR)\

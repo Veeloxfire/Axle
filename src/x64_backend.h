@@ -86,7 +86,7 @@ namespace X64 {
 
   template<size_t all, size_t num_volatile, size_t num_non_volatile>
   constexpr CallingConvention
-    make_calling_convention(const char* name,
+    make_calling_convention(const ViewArr<const char>& name,
                             const uint8_t(&all_regs_unordered)[all],
                             const uint8_t* params,
                             size_t num_params,
@@ -155,7 +155,7 @@ namespace X64 {
 
 
   inline constexpr CallingConvention CONVENTION_microsoft_x64
-    = make_calling_convention("Microsoft x64",
+    = make_calling_convention(lit_view_arr("Microsoft x64"),
                               MICROSOFT_X64::all_regs_unordered.arr,
                               MICROSOFT_X64::parameters,
                               MICROSOFT_X64::num_parameters,
@@ -177,7 +177,7 @@ namespace X64 {
   }
 
   constexpr CallingConvention CONVENTION_stdcall
-    = make_calling_convention("stdcall",
+    = make_calling_convention(lit_view_arr("stdcall"),
                               STDCALL::all_regs_unordered.arr,
                               nullptr,
                               0,
@@ -211,7 +211,7 @@ void x64_emit_dyn_library_function(CompilerThread* comp_thread,
 
 void x64_emit_function(CompilerGlobals* comp,
                        CompilerThread* comp_thread,
-                       const IR::Builder* ir,
+                       const IR::IRStore* ir,
                        const CallingConvention* convention,
                        Backend::GenericProgram* program);
 

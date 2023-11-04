@@ -1,20 +1,10 @@
 #pragma once
 
-#include <stdint.h>
-#include <string.h>
 #include <utility>
 #include <new>
 
 #include "safe_lib.h"
 #include "threading.h"
-
-#define FOR(name, it) \
-for(auto it = (name).begin(), JOIN(__end, __LINE__) = (name).end(); \
-it < JOIN(__end, __LINE__); it++)
-
-#define FOR_MUT(name, it) \
-for(auto it = (name).mut_begin(), JOIN(__end, __LINE__) = (name).mut_end(); \
-it < JOIN(__end, __LINE__); it++)
 
 constexpr inline u64 MAX_DECIMAL_U64_DIGITS = sizeof("18446744073709551615") - 1;
 

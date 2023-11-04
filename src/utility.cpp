@@ -2,6 +2,8 @@
 #include "strings.h"
 #include "trace.h"
 
+#include <cstdio>
+
 void throw_testing_assertion(const char* message) {
   if (std::uncaught_exceptions() == 0) {
     throw std::exception(message);
@@ -460,13 +462,6 @@ void BitArray::clear() {
   }
 
   highest_set = 0;
-}
-
-
-void print_as_bytes(const uint8_t* bytes, size_t length) {
-  for (size_t i = 0; i < length; i++) {
-    printf("0x%hhx ", bytes[i]);
-  }
 }
 
 BumpAllocator::BumpAllocator()

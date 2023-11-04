@@ -1,10 +1,8 @@
 #pragma once
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
+#include <cstdlib>
+#include <cassert>
 #include <new>
 
-#include <memory>
 
 #include "comp_utilities.h"
 //#include "trace.h"
@@ -427,7 +425,6 @@ namespace BINARY_OP_STRING {
   }
 }
 
-
 namespace UNARY_OP_STRING {
 #define MODIFY(name, str) inline constexpr char name[] = str;
   UN_OP_INCS;
@@ -442,5 +439,44 @@ namespace UNARY_OP_STRING {
     }
 
     return lit_view_arr("UNKNOWN OPERATOR");
+  }
+}
+
+#define FOR(name, it) \
+for(auto it = (name).begin(), JOIN(__end, __LINE__) = (name).end(); \
+it < JOIN(__end, __LINE__); it++)
+
+#define FOR_MUT(name, it) \
+for(auto it = (name).mut_begin(), JOIN(__end, __LINE__) = (name).mut_end(); \
+it < JOIN(__end, __LINE__); it++)
+
+
+#define FOR_AST(arr, it) \
+for(auto [_l, it] = _start_ast_iterate(arr); _l; _step_ast_iterate(_l, it))
+
+struct AST_ITERATE_HOLDER {
+  AST_LINKED* l;
+  AST_LOCAL loc;
+};
+
+constexpr inline AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
+  if (a.start == nullptr) {
+    return { nullptr, 0 };
+  }
+  else {
+    ASSERT(a.start != nullptr);
+    ASSERT(a.start->curr != nullptr);
+    return {
+      a.start,
+      a.start->curr,
+    };
+  }
+}
+
+constexpr inline void _step_ast_iterate(AST_LINKED*& _l, AST_LOCAL& loc) {
+  _l = _l->next;
+  if (_l != nullptr) {
+    loc = _l->curr;
+    ASSERT(loc != nullptr);
   }
 }

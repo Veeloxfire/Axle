@@ -4510,7 +4510,7 @@ struct BlockResolveOutput {
   u32 temporary_offsets;
 };
 
-void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const IR::Builder* ir, const CallingConvention* convention,
+void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const IR::IRStore* ir, const CallingConvention* convention,
                        Backend::GenericProgram* program_in) {
   TRACING_FUNCTION();
 
@@ -5615,118 +5615,118 @@ struct RegisterNames {
   OwnedArr<char> rm;
 };
 
-static const char* b8_no_rex_reg_name(uint8_t reg) {
+static ViewArr<const char> b8_no_rex_reg_name(uint8_t reg) {
   switch (reg) {
-    case 0: return "al";
-    case 1: return "cl";
-    case 2: return "dl";
-    case 3: return "bl";
-    case 4: return "ah";
-    case 5: return "ch";
-    case 6: return "dh";
-    case 7: return "bh";
+    case 0: return lit_view_arr("al");
+    case 1: return lit_view_arr("cl");
+    case 2: return lit_view_arr("dl");
+    case 3: return lit_view_arr("bl");
+    case 4: return lit_view_arr("ah");
+    case 5: return lit_view_arr("ch");
+    case 6: return lit_view_arr("dh");
+    case 7: return lit_view_arr("bh");
   }
 
-  return "INVALID REGISTER";
+  return lit_view_arr("INVALID REGISTER");
 }
 
-static const char* b8_rex_reg_name(uint8_t reg) {
+static ViewArr<const char> b8_rex_reg_name(uint8_t reg) {
   switch (reg) {
-    case 0: return "al";
-    case 1: return "cl";
-    case 2: return "dl";
-    case 3: return "bl";
-    case 4: return "spl";
-    case 5: return "bpl";
-    case 6: return "sil";
-    case 7: return "dil";
-    case 8: return "r8b";
-    case 9: return "r9b";
-    case 10: return "r10b";
-    case 11: return "r11b";
-    case 12: return "r12b";
-    case 13: return "r13b";
-    case 14: return "r14b";
-    case 15: return "r15b";
+    case 0: return lit_view_arr("al");
+    case 1: return lit_view_arr("cl");
+    case 2: return lit_view_arr("dl");
+    case 3: return lit_view_arr("bl");
+    case 4: return lit_view_arr("spl");
+    case 5: return lit_view_arr("bpl");
+    case 6: return lit_view_arr("sil");
+    case 7: return lit_view_arr("dil");
+    case 8: return lit_view_arr("r8b");
+    case 9: return lit_view_arr("r9b");
+    case 10: return lit_view_arr("r10b");
+    case 11: return lit_view_arr("r11b");
+    case 12: return lit_view_arr("r12b");
+    case 13: return lit_view_arr("r13b");
+    case 14: return lit_view_arr("r14b");
+    case 15: return lit_view_arr("r15b");
   }
 
-  return "INVALID REGISTER";
+  return lit_view_arr("INVALID REGISTER");
 }
 
-static const char* b16_reg_name(uint8_t reg) {
+static ViewArr<const char> b16_reg_name(uint8_t reg) {
   switch (reg) {
-    case 0: return "ax";
-    case 1: return "cx";
-    case 2: return "dx";
-    case 3: return "bx";
-    case 4: return "sp";
-    case 5: return "bp";
-    case 6: return "si";
-    case 7: return "di";
-    case 8: return "r8w";
-    case 9: return "r9w";
-    case 10: return "r10w";
-    case 11: return "r11w";
-    case 12: return "r12w";
-    case 13: return "r13w";
-    case 14: return "r14w";
-    case 15: return "r15w";
+    case 0: return lit_view_arr("ax");
+    case 1: return lit_view_arr("cx");
+    case 2: return lit_view_arr("dx");
+    case 3: return lit_view_arr("bx");
+    case 4: return lit_view_arr("sp");
+    case 5: return lit_view_arr("bp");
+    case 6: return lit_view_arr("si");
+    case 7: return lit_view_arr("di");
+    case 8: return lit_view_arr("r8w");
+    case 9: return lit_view_arr("r9w");
+    case 10: return lit_view_arr("r10w");
+    case 11: return lit_view_arr("r11w");
+    case 12: return lit_view_arr("r12w");
+    case 13: return lit_view_arr("r13w");
+    case 14: return lit_view_arr("r14w");
+    case 15: return lit_view_arr("r15w");
   }
 
-  return "INVALID REGISTER";
+  return lit_view_arr("INVALID REGISTER");
 }
 
-static const char* b32_reg_name(uint8_t reg) {
+static ViewArr<const char> b32_reg_name(uint8_t reg) {
   switch (reg) {
-    case 0: return "eax";
-    case 1: return "ecx";
-    case 2: return "edx";
-    case 3: return "ebx";
-    case 4: return "esp";
-    case 5: return "ebp";
-    case 6: return "esi";
-    case 7: return "edi";
-    case 8: return "r8d";
-    case 9: return "r9d";
-    case 10: return "r10d";
-    case 11: return "r11d";
-    case 12: return "r12d";
-    case 13: return "r13d";
-    case 14: return "r14d";
-    case 15: return "r15d";
+    case 0: return lit_view_arr("eax");
+    case 1: return lit_view_arr("ecx");
+    case 2: return lit_view_arr("edx");
+    case 3: return lit_view_arr("ebx");
+    case 4: return lit_view_arr("esp");
+    case 5: return lit_view_arr("ebp");
+    case 6: return lit_view_arr("esi");
+    case 7: return lit_view_arr("edi");
+    case 8: return lit_view_arr("r8d");
+    case 9: return lit_view_arr("r9d");
+    case 10: return lit_view_arr("r10d");
+    case 11: return lit_view_arr("r11d");
+    case 12: return lit_view_arr("r12d");
+    case 13: return lit_view_arr("r13d");
+    case 14: return lit_view_arr("r14d");
+    case 15: return lit_view_arr("r15d");
   }
 
-  return "INVALID REGISTER";
+  return lit_view_arr("INVALID REGISTER");
 }
 
-static const char* b64_reg_name(uint8_t reg) {
+static ViewArr<const char> b64_reg_name(uint8_t reg) {
   switch (reg) {
-    case 0: return "rax";
-    case 1: return "rcx";
-    case 2: return "rdx";
-    case 3: return "rbx";
-    case 4: return "rsp";
-    case 5: return "rbp";
-    case 6: return "rsi";
-    case 7: return "rdi";
-    case 8: return "r8";
-    case 9: return "r9";
-    case 10: return "r10";
-    case 11: return "r11";
-    case 12: return "r12";
-    case 13: return "r13";
-    case 14: return "r14";
-    case 15: return "r15";
+    case 0: return lit_view_arr("rax");
+    case 1: return lit_view_arr("rcx");
+    case 2: return lit_view_arr("rdx");
+    case 3: return lit_view_arr("rbx");
+    case 4: return lit_view_arr("rsp");
+    case 5: return lit_view_arr("rbp");
+    case 6: return lit_view_arr("rsi");
+    case 7: return lit_view_arr("rdi");
+    case 8: return lit_view_arr("r8");
+    case 9: return lit_view_arr("r9");
+    case 10: return lit_view_arr("r10");
+    case 11: return lit_view_arr("r11");
+    case 12: return lit_view_arr("r12");
+    case 13: return lit_view_arr("r13");
+    case 14: return lit_view_arr("r14");
+    case 15: return lit_view_arr("r15");
   }
 
-  return "INVALID REGISTER";
+  return lit_view_arr("INVALID REGISTER");
 }
 
 struct x86PrintOptions {
-  FUNCTION_PTR<const char*, uint8_t> r_name = nullptr;
-  FUNCTION_PTR<const char*, uint8_t> rm_name = nullptr;
-  FUNCTION_PTR<const char*, uint8_t> mem_r_name = nullptr;
-  const char* mem_size = nullptr;
+  FUNCTION_PTR<ViewArr<const char>, uint8_t> r_name = nullptr;
+  FUNCTION_PTR<ViewArr<const char>, uint8_t> rm_name = nullptr;
+  FUNCTION_PTR<ViewArr<const char>, uint8_t> mem_r_name = nullptr;
+  ViewArr<const char> mem_size = {};
 };
 
 u16 x16_from_itr(Backend::DataBucketIterator* itr) {
@@ -5956,12 +5956,12 @@ static void load_8_sizes(x86PrintOptions* ops, bool rex, bool short_address) {
   if (rex) {
     ops->r_name = b8_rex_reg_name;
     ops->rm_name = b8_rex_reg_name;
-    ops->mem_size = "BYTE PTR";
+    ops->mem_size = lit_view_arr("BYTE PTR");
   }
   else {
     ops->r_name = b8_no_rex_reg_name;
     ops->rm_name = b8_no_rex_reg_name;
-    ops->mem_size = "BYTE PTR";
+    ops->mem_size = lit_view_arr("BYTE PTR");
   }
 }
 
@@ -5976,20 +5976,69 @@ static void load_default_sizes(x86PrintOptions* ops, bool rex_w, bool short_addr
   if (rex_w) {
     ops->r_name = b64_reg_name;
     ops->rm_name = b64_reg_name;
-    ops->mem_size = "QWORD PTR";
+    ops->mem_size = lit_view_arr("QWORD PTR");
   }
   else {
     if (short_operand) {
       ops->r_name = b16_reg_name;
       ops->rm_name = b16_reg_name;
-      ops->mem_size = "WORD PTR";
+      ops->mem_size = lit_view_arr("WORD PTR");
     }
     else {
       ops->r_name = b32_reg_name;
       ops->rm_name = b32_reg_name;
-      ops->mem_size = "DWORD PTR";
+      ops->mem_size = lit_view_arr("DWORD PTR");
     }
   }
+}
+
+struct HexOffset {
+  u64 n;
+};
+
+namespace Format {
+  template<>
+  struct FormatArg<HexOffset> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, HexOffset ho) {
+      u64 in = ho.n;
+
+      constexpr size_t LEN = 16;
+
+      char string_res[2 + LEN] = {
+        '0', '0',
+        '0', '0', '0', '0', '0', '0', '0', '0',
+        '0', '0', '0', '0', '0', '0', '0', '0'
+      };
+
+      for (u32 k = 0; k < 4; ++k) {
+        for (u32 i = k * 4; i < (k + 1) * 4; ++i) {
+          u8 digit = in & 0xF;
+          in >>= 4;
+
+          if (digit >= 10) {
+            ASSERT(digit < 16);
+            string_res[((LEN - 1) - i) + 2] = ('A' + (digit - 10));
+          }
+          else {
+            string_res[((LEN - 1) - i) + 2] = ('0' + digit);
+          }
+        }
+
+        if (in == 0) {
+          usize size = 2 + (k + 1) * 4;
+          usize start = (2 + LEN) - size;
+          string_res[start] = '0';
+          string_res[start + 1] = 'x';
+          res.load_string(string_res + start, size);
+          return;
+        }
+      }
+
+
+      INVALID_CODE_PATH("Read all the bytes but wasn't 0");
+    }
+  };
 }
 
 void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIterator end) {
@@ -6012,7 +6061,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
   usize start_idx = start.actual_location;
 
   while (start < end) {
-    printf("0x%-4llx: ", start.actual_location - start_idx);
+    format_print_ST("{}: ", HexOffset{ start.actual_location - start_idx });
 
     u8 op = start.read_byte();
 
@@ -6051,61 +6100,61 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case X64::JE_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("je 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("je {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNE_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jne 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jne {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JB_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jb 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jb {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNB_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jnb 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jnb {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JA_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("ja 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("ja {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNA_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jna 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jna {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JL_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jl 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jl {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNL_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jnl 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jnl {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JG_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jg 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jg {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNG_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jng 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jng {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::SETE_RM8: {
@@ -6114,7 +6163,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
-            printf("sete %s\n", r_string.data);
+            format_print_ST("sete {}\n", r_string);
             break;
           }
         case X64::SETL_RM8: {
@@ -6123,7 +6172,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
-            printf("setl %s\n", r_string.data);
+            format_print_ST("setl {}\n", r_string);
             break;
           }
         case X64::SETG_RM8: {
@@ -6132,7 +6181,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
-            printf("setg %s\n", r_string.data);
+            format_print_ST("setg {}\n", r_string);
             break;
           }
         case X64::IMUL_RM_TO_R: {
@@ -6142,7 +6191,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("imul %s, %s\n", names.r.data, names.rm.data);
+            format_print_ST("imul {}, {}\n", names.r, names.rm);
             break;
           }
         case X64::MOV_ZX_RM8_TO_R: {
@@ -6154,7 +6203,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("movzx %s, %s\n", names.r.data, names.rm.data);
+            format_print_ST("movzx {}, {}\n", names.r, names.rm);
             break;
           }
         case X64::MOV_SX_RM8_TO_R: {
@@ -6166,12 +6215,12 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("movsx %s, %s\n", names.r.data, names.rm.data);
+            format_print_ST("movsx {}, {}\n", names.r, names.rm);
             break;
           }
         default: {
-            printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
-                   maybe_rex, op, op2);
+            format_print_ST("UNKNOWN INSTRUCTION: {} {} {}\n",
+                            PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ op2 });
 
             return;
           }
@@ -6186,7 +6235,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("add %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("add {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::OR_R8_TO_RM8: {
@@ -6196,7 +6245,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("or  %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("or  {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::OR_R_TO_RM: {
@@ -6206,7 +6255,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("or  %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("or  {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::AND_R_TO_RM: {
@@ -6216,7 +6265,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("and %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("and {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::SUB_R_TO_RM: {
@@ -6226,7 +6275,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("sub %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("sub {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::XOR_R_TO_RM: {
@@ -6236,7 +6285,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("xor %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("xor {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::CMP_R_TO_RM: {
@@ -6246,13 +6295,13 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("cmp %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("cmp {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::CMP_IMM_TO_AL: {
             ASSERT(!rex);
             uint8_t b = start.read_byte();
-            printf("cmp al, %hhu\n", b);
+            format_print_ST("cmp al, {}\n");
             break;
           }
         case X64::PUSH_R:
@@ -6264,9 +6313,9 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case (X64::PUSH_R + 6):
         case (X64::PUSH_R + 7): {
             const uint8_t reg = (op - X64::PUSH_R) | ((maybe_rex & 0b00000100) << 1);
-            const char* r_string = b64_reg_name(reg);
+            ViewArr<const char> r_string = b64_reg_name(reg);
 
-            printf("push %s\n", r_string);
+            format_print_ST("push {}\n", r_string);
             break;
           }
         case X64::POP_R:
@@ -6278,9 +6327,9 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case (X64::POP_R + 6):
         case (X64::POP_R + 7): {
             const uint8_t reg = (op - X64::POP_R) | ((maybe_rex & 0b00000100) << 1);
-            const char* r_string = b64_reg_name(reg);
+            ViewArr<const char> r_string = b64_reg_name(reg);
 
-            printf("pop %s\n", r_string);
+            format_print_ST("pop {}\n", r_string);
             break;
           }
         case 0x80: {
@@ -6295,14 +6344,14 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             uint8_t r_val = (modrm & 0b0011'1000) >> 3;
 
             if (r_val == 5) {
-              printf("sub %s, 0x%hhx\n", rm_string.data, imm8);
+              format_print_ST("sub {}, {}\n", rm_string, imm8);
             }
             else if (r_val == 7) {
-              printf("cmp %s, 0x%hhx\n", rm_string.data, imm8);
+              format_print_ST("cmp {}, {}\n", rm_string, imm8);
             }
             else {
-              printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx.2 0x%.2hhx ...\n",
-                     maybe_rex, op, modrm);
+              format_print_ST("UNKNOWN INSTRUCTION: {} {} {} ...\n",
+                              PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ modrm });
 
               return;
             }
@@ -6320,14 +6369,14 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             uint8_t r_val = (modrm & 0b0011'1000) >> 3;
 
             if (r_val == 5) {
-              printf("sub %s, 0x%x\n", rm_string.data, imm32);
+              format_print_ST("sub {}, {}\n", rm_string, imm32);
             }
             else if (r_val == 7) {
-              printf("cmp %s, 0x%x\n", rm_string.data, imm32);
+              format_print_ST("cmp {}, {}\n", rm_string, imm32);
             }
             else {
-              printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx.2 0x%.2hhx ...\n",
-                     maybe_rex, op, modrm);
+              format_print_ST("UNKNOWN INSTRUCTION: {} {} {} ...\n",
+                              PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ modrm });
 
               return;
             }
@@ -6340,7 +6389,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("mov %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("mov {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::MOV_IMM8_RM: {
@@ -6352,7 +6401,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             uint8_t val = start.read_byte();
 
-            printf("mov %s, %hhu\n", rm.data, val);
+            format_print_ST("mov {}, {}\n", rm, val);
             break;
           }
         case X64::MOV_IMM32_RM: {
@@ -6364,7 +6413,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             uint32_t val = x32_from_itr(&start);
 
-            printf("mov %s, %u\n", rm.data, val);
+            format_print_ST("mov {}, {}\n", rm, val);
             break;
           }
         case X64::MOV_IMM_TO_R:
@@ -6379,22 +6428,22 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             load_default_sizes(&p_opts, rex_w, short_address, short_operand);
 
-            const char* name = p_opts.r_name(r);
+            ViewArr<const char> name = p_opts.r_name(r);
 
             if (short_operand) {
               uint16_t val = x16_from_itr(&start);
 
-              printf("mov %s, %hu\n", name, val);
+              format_print_ST("mov {}, {}\n", name, val);
             }
             else if (!rex_w) {
               uint32_t val = x32_from_itr(&start);
 
-              printf("mov %s, %u\n", name, val);
+              format_print_ST("mov {}, {}\n", name, val);
             }
             else {
               uint64_t val = x64_from_itr(&start);
 
-              printf("mov %s, %llu\n", name, val);
+              format_print_ST("mov {}, {}\n", name, val);
             }
             break;
           }
@@ -6405,7 +6454,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("mov %s, %s\n", names.r.data, names.rm.data);
+            format_print_ST("mov {}, {}\n", names.r, names.rm);
             break;
           }
         case X64::LEA_RM_TO_R: {
@@ -6415,11 +6464,11 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("lea %s, %s\n", names.r.data, names.rm.data);
+            format_print_ST("lea {}, {}\n", names.r, names.rm);
             break;
           }
         case X64::CQO: {
-            printf("cqo\n");
+            IO_Single::print("cqo\n");
             break;
           }
         case 0xF7: {
@@ -6431,20 +6480,20 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             OwnedArr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
 
             if (r == 3) {
-              printf("neg %s\n", rm_string.data);
+              format_print_ST("neg {}\n", rm_string);
             }
             else if (r == 4) {
-              printf("mul %s\n", rm_string.data);
+              format_print_ST("mul {}\n", rm_string);
             }
             else if (r == 6) {
-              printf("div %s\n", rm_string.data);
+              format_print_ST("div {}\n", rm_string);
             }
             else if (r == 7) {
-              printf("idiv %s\n", rm_string.data);
+              format_print_ST("idiv {}\n", rm_string);
             }
             else {
-              printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
-                     maybe_rex, op, modrm);
+              format_print_ST("UNKNOWN INSTRUCTION: {} {} {}\n",
+                              PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ modrm });
 
               return;
             }
@@ -6459,17 +6508,17 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             OwnedArr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
 
             if (r == 4) {
-              printf("sal %s, CL\n", rm_string.data);
+              format_print_ST("sal {}, CL\n", rm_string);
             }
             else if (r == 5) {
-              printf("shr %s, CL\n", rm_string.data);
+              format_print_ST("shr {}, CL\n", rm_string);
             }
             else if (r == 7) {
-              printf("sar %s, CL\n", rm_string.data);
+              format_print_ST("sar {}, CL\n", rm_string);
             }
             else {
-              printf("UNKNOWN INSTRUCTION: 0x%.2hhx 0x%.2hhx 0x%.2hhx\n",
-                     maybe_rex, op, modrm);
+              format_print_ST("UNKNOWN INSTRUCTION: {} {} {}\n",
+                              PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ modrm });
 
               return;
             }
@@ -6484,11 +6533,11 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case (X64::MOV_8_TO_R8 + 6):
         case (X64::MOV_8_TO_R8 + 7): {
             const uint8_t reg = (op - X64::MOV_8_TO_R8) | ((maybe_rex & 0b0000'0001) << 3);
-            const char* r_string = b8_rex_reg_name(reg);
+            ViewArr<const char> r_string = b8_rex_reg_name(reg);
 
             uint8_t imm8 = start.read_byte();
 
-            printf("mov %s, 0x%hhx\n", r_string, imm8);
+            format_print_ST("mov {}, {}\n", r_string, imm8);
             break;
           }
         case X64::MOV_R8_TO_RM8: {
@@ -6498,28 +6547,29 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            printf("mov %s, %s\n", names.rm.data, names.r.data);
+            format_print_ST("mov {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::JMP_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("jmp 0x%llx\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("jmp {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::RET_NEAR: {
-            printf("ret\n");
+            IO_Single::print("ret\n");
             break;
           }
         case X64::CALL_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            printf("call 0x%llx ; call will likely be incorrect\n", (start.actual_location - start_idx) + rel32);
+            format_print_ST("call {} ; call offset will be incorrect at this point\n",
+                            HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         default: {
-            printf("UNKNOWN INSTRUCTION: 0x%.2hhx\n",
-                   op);
+            format_print_ST("UNKNOWN INSTRUCTION: {}\n",
+                   PrintHexByte{ op });
 
             return;
           }

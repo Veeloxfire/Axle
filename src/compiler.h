@@ -301,7 +301,7 @@ struct CompilerGlobals : CompilerConstants {
   Services services;
 
   IR::GlobalLabel entry_point_label = IR::NULL_GLOBAL_LABEL;
-  AtomicQueue<const IR::Builder*> finished_irs;
+  AtomicQueue<const IR::IRStore*> finished_irs;
 
   CompPipes pipelines;
 
@@ -322,7 +322,7 @@ struct CompilerGlobals : CompilerConstants {
   BucketArray<Namespace> namespaces_single_threaded = {};
 
   SpinLockMutex ir_mutex;
-  BucketArray<IR::Builder> ir_builders_single_threaded = {};
+  BucketArray<IR::IRStore> ir_builders_single_threaded = {};
 
   SpinLockMutex label_mutex;
   Array<const SignatureStructure*> label_signature_table = {};
@@ -333,7 +333,7 @@ struct CompilerGlobals : CompilerConstants {
   IR::GlobalLabel next_function_label(const SignatureStructure* s);
   const SignatureStructure* get_label_signature(IR::GlobalLabel label);
 
-  IR::Builder* new_ir(IR::GlobalLabel label, const SignatureStructure* sig);
+  IR::IRStore* new_ir(IR::GlobalLabel label, const SignatureStructure* sig);
   IR::Function* new_function();
   Local* new_local();
   Global* new_global();

@@ -21,7 +21,7 @@ struct BinOpEmitInfo {
 struct BinOpArgs {
   const BinOpEmitInfo* info;
   CompilerGlobals* comp;
-  Eval::IrBuilder* builder;
+  IR::IRStore* ir;
 
   const Eval::RuntimeValue& left;
   const Eval::RuntimeValue& right;
@@ -62,7 +62,7 @@ struct UnOpEmitInfo {
 struct UnOpArgs {
   const UnOpEmitInfo* info;
   CompilerGlobals* comp;
-  Eval::IrBuilder* builder;
+  IR::IRStore* ir;
   const Eval::RuntimeValue& prim;
 
   inline Eval::RuntimeValue emit() {

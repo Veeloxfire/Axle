@@ -3,7 +3,7 @@
 
 //Forward decl
 namespace IR {
-  struct Builder;
+  struct IRStore;
   struct DynLibraryImport;
 }
 
@@ -22,7 +22,7 @@ enum struct CLEANUP : uint8_t {
 struct CallingConvention {
   static constexpr size_t OFFSET_TO_SHADOW = 8ull + 8ull;
 
-  const char* name;
+  ViewArr<const char> name;
 
   uint8_t return_register = 0;//Usually RAX or 0
   uint8_t stack_pointer_reg = 0;
@@ -221,7 +221,7 @@ namespace Backend {
 
   using EMIT_FUNCTION = void(*)(CompilerGlobals* comp,
                                 CompilerThread* comp_thread,
-                                const IR::Builder* ir,
+                                const IR::IRStore* ir,
                                 const CallingConvention* convention,
                                 GenericProgram* program);
 

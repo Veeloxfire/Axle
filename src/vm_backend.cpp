@@ -73,24 +73,24 @@ RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
 //  vm->registers[0].b64.reg = call_native_x64(func_ptr, param_registers, vm->SP, stack_required);
 //}
 
-VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
+VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
   TRACING_FUNCTION();
 
-  ASSERT(builder->control_blocks.size > 0);
+  ASSERT(ir->control_blocks.size > 0);
 
   u64 total_temporaries = 0;
-  FOR(builder->control_blocks, b) {
+  FOR(ir->control_blocks, b) {
     total_temporaries += b->temporaries.size;
   }
 
   OwnedArr temporaries = new_arr<VM::Value>(total_temporaries);
 
-  const u32 size_base = builder->max_stack;
+  const u32 size_base = ir->max_stack;
 
   u32 size_needed = size_base;
   u64 temporaries_counter = 0;
 
-  FOR(builder->control_blocks, it) {
+  FOR(ir->control_blocks, it) {
     u32 temp_size_needed = size_base;
     const usize num_temps = it->temporaries.size;
     for (usize i = 0; i < num_temps; ++i) {
@@ -98,7 +98,7 @@ VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
       auto& vm_temp = temporaries[i + temporaries_counter];
 
       if (temp.is_variable) {
-        const auto& var = builder->variables.data[temp.var_id.variable];
+        const auto& var = ir->variables.data[temp.var_id.variable];
         vm_temp.type = temp.type;
         vm_temp.data_offset = var.stack_offset;
       }
@@ -120,8 +120,8 @@ VM::StackFrame VM::new_stack_frame(const IR::Builder* builder) {
   VM::StackFrame vm = {};
   vm.bytes = new_arr<u8>(size_needed);
   vm.temporaries = std::move(temporaries);
-  vm.ir = builder;
-  vm.current_block = builder->control_blocks.data;
+  vm.ir = ir;
+  vm.current_block = ir->control_blocks.data;
   vm.IP = vm.current_block->bytecode.begin();
   vm.IP_END = vm.current_block->bytecode.end();
 
@@ -303,8 +303,10 @@ static void copy_values(u8* to, IR::Format t_format,
   }
 }
 
-void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
+void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
   TRACING_FUNCTION();
+
+  Errors* errors = env->errors;
 
   while (true) {
     while (stack_frame->IP < stack_frame->IP_END) {
@@ -392,7 +394,7 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
             stack_frame->IP = IR::Read::StartFunc(stack_frame->IP, stack_frame->IP_END, start);
 
             if (start.n_values != 0) {
-              comp_thread->report_error(ERROR_CODE::VM_ERROR, Span{}, "Functions do not support parameters in vm");
+              errors->report_error(ERROR_CODE::VM_ERROR, Span{}, "Functions do not support parameters in vm");
               return;
             }
             break;
@@ -461,7 +463,7 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
                 break; \
               } \
             default: { \
-            comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
+            errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
                 return; \
               } \
           } \
@@ -510,7 +512,7 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
                   break;
                 }
               default: {
-                  comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary negate (maybe we an unsigned integer)");
+                  errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary negate (maybe we an unsigned integer)");
                   return;
                 }
             }
@@ -528,11 +530,11 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
               *to.ptr = static_cast<u8>(!static_cast<bool>(*from.ptr));
             }
             else {
-              comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary logical not (only supported format is uint8)");
+              errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary logical not (only supported format is uint8)");
             }
           } break;
         default: {
-            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+            errors->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                       "Encountered invalid/unsupported instruction during ir execution\n"
                                       "Code: {}\nName: '{}'",
                                       (u8)opcode, IR::opcode_string(opcode));
@@ -543,7 +545,7 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
 
     const auto goto_block = [&](IR::LocalLabel l) {
       ASSERT(l != IR::NULL_LOCAL_LABEL);
-      const IR::Builder* ir = stack_frame->ir;
+      const IR::IRStore* ir = stack_frame->ir;
       const IR::ControlBlock* next = ir->control_blocks.data + (l.label - 1);
 
       stack_frame->current_block = next;
@@ -560,7 +562,7 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
           return;
         }
       case IR::ControlFlowType::Return: {
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Currently don't support returning values");
+          errors->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Currently don't support returning values");
           return;
         }
 
@@ -572,7 +574,7 @@ void VM::exec(CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
           auto val = stack_frame->get_value(
             IR::v_arg(stack_frame->current_block->cf_split.condition,
                       0,
-                      comp_thread->builtin_types->t_bool)
+                      env->t_bool)
           );
 
           ASSERT(val.t.struct_format() == IR::Format::uint8);
