@@ -1,6 +1,7 @@
 #include "ir.h"
 #include "compiler.h"
-#include "io.h"
+
+#include <AxleUtil/io.h>
 
 namespace IR {
   IR::ValueIndex IRStore::new_temporary(const VariableId& v_id, ValueRequirements requirements) {

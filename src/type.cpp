@@ -1,8 +1,9 @@
-#include "compiler.h"
-#include "format.h"
+#include <AxleUtil/format.h>
 
+#include "compiler.h"
 #include "type.h"
-#include "trace.h"
+
+#include <Tracer/trace.h>
 
 TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInterner* strings, Array<Type>&& types) {
   TRACING_FUNCTION();

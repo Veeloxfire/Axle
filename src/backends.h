@@ -1,8 +1,9 @@
 #pragma once
-#include "utility.h"
-#include "comp_utilities.h"
-#include "api.h"
-#include "calling_convention.h"
+#include <AxleUtil/utility.h>
+
+#include <Axle/comp_utilities.h>
+#include <Axle/api.h>
+#include <Axle/calling_convention.h>
 
 //Forward decl
 namespace IR {

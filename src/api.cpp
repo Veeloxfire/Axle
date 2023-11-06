@@ -1,24 +1,19 @@
 
 static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 
-#include "PE_file_format.h"
+#include <Axle/api.h>
 
-#include "api.h"
+#include <AxleUtil/io.h>
+#include <AxleUtil/strings.h>
+#include <AxleUtil/files.h>
+#include <Tracer/trace.h>
 
+#include "ast.h"
 #include "parser.h"
 
 #include "compiler.h"
-#include "strings.h"
-#include "ast.h"
 
-#include "windows_specifics.h"
-#include "files.h"
 #include "backends.h"
-#include "io.h"
-
-#include "trace.h"
-
-#include <utility>
 
 #include <chrono>
 

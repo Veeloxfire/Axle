@@ -1,5 +1,5 @@
 #include "unit_tests.h"
-#include "io.h"
+#include <AxleUtil/io.h>
 
 Array<UNIT_TESTS::UnitTest>& UNIT_TESTS::unit_tests_ref() {
   static Array<UNIT_TESTS::UnitTest> t ={};
@@ -145,7 +145,7 @@ int main() {
     IO::err_print("\nSome tests failed!\n");
 
     for (const auto& t : failed_tests) {
-      IO::err_print("\n===========\n\n", t.test_name, " failed with errors : \n");
+      IO::err_format("\n===========\n\n{} failed with errors : \n", t.test_name);
 
       t.errors.print_all();
       IO::err_print('\n');

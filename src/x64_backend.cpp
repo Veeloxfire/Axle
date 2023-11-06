@@ -1,8 +1,11 @@
+#include <AxleUtil/io.h>
+
+#include <Axle/backends/x64_backend.h>
+
 #include "ir.h"
 #include "compiler.h"
-#include "x64_backend.h"
-#include "io.h"
-#include "trace.h"
+
+#include <Tracer/trace.h>
 
 namespace X64 {
   struct JumpRelocation {

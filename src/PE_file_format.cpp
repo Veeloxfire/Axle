@@ -1,9 +1,11 @@
-#include "PE_file_format.h"
-#include "files.h"
+#include <AxleUtil/files.h>
+#include <AxleUtil/io.h>
+
+#include <Axle/backends/PE_file_format.h>
 #include "compiler.h"
-#include "io.h"
 #include "backends.h"
-#include "trace.h"
+
+#include <Tracer/trace.h>
 #include <ctime>
 
 //// Sizes ////

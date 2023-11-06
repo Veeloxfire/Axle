@@ -1,10 +1,12 @@
-#include "api.h"
-#include "windows_specifics.h"
-#include "x64_backend.h"
-#include "io.h"
-#include "PE_file_format.h"
-#include "trace.h"
-#include "args.h"
+#include <AxleUtil/args.h>
+#include <AxleUtil/io.h>
+#include <AxleUtil/os/os_windows.h>
+
+#include <Axle/api.h>
+#include <Axle/backends/x64_backend.h>
+#include <Axle/backends/PE_file_format.h>
+
+#include <Tracer/trace.h>
 
 struct ArgErrors {
   bool errored;
@@ -61,9 +63,8 @@ int main(int argc, const char** args) {
   ASSERT(stdlib.data != nullptr);
   ASSERT(lib.data != nullptr);
 
-  Windows::MAX_PATH_STR cwd = Windows::get_current_directory();
-  IO::err_format("CWD: {}\n", cwd.view());
-
+  Windows::NativePath cwd = Windows::get_current_directory();
+  IO::format("CWD: {}\n", cwd.view());
 
   constexpr Backend::PlatformInterface pi = x86_64_platform_interface();
   constexpr Backend::ExecutableFormatInterface efi = pe_plus_file_interface();

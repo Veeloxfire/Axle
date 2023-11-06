@@ -1,10 +1,11 @@
 #pragma once
-#include "utility.h"
-#include "strings.h"
-#include "comp_utilities.h"
+#include <AxleUtil/utility.h>
+#include <AxleUtil/strings.h>
+#include <AxleUtil/formattable.h>
+
+#include <Axle/comp_utilities.h>
 #include "names.h"
 #include "errors.h"
-#include "formattable.h"
 
 struct CompilationUnit;
 struct CallingConvention;

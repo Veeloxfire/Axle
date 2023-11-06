@@ -1,14 +1,16 @@
 #pragma once
-#include "utility.h"
-#include "strings.h"
-#include "comp_utilities.h"
-#include "formattable.h"
+#include <AxleUtil/utility.h>
+#include <AxleUtil/strings.h>
+#include <AxleUtil/formattable.h>
+#include <AxleUtil/files.h>
+
+#include <Axle/comp_utilities.h>
+#include <Axle/api.h>
+
 #include "parser.h"
-#include "files.h"
 #include "ast.h"
 #include "names.h"
 
-#include "api.h"
 #include "type.h"
 #include "ir.h"
 #include "backends.h"

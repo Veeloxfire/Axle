@@ -1,11 +1,13 @@
 #pragma once
-#include "utility.h"
-#include "strings.h"
+#include <AxleUtil/utility.h>
+#include <AxleUtil/strings.h>
+
+#include <Axle/comp_utilities.h>
+
 #include "operators.h"
 #include "type.h"
 #include "ir.h"
 #include "parser.h"
-#include "comp_utilities.h"
 
 #define AST_TYPE_MOD \
 MOD(NAMED_TYPE) \

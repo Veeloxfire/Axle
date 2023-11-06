@@ -1,5 +1,5 @@
 #include "unit_tests.h"
-#include "utility.h"
+#include <AxleUtil/utility.h>
 
 TEST_FUNCTION(Math, CEIL_TO_N) {
   TEST_EQ(1234, ceil_to_n(1233, 1234));

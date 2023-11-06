@@ -1,7 +1,6 @@
-#include "strings.h"
-
 #include "unit_tests.h"
 
+#include <AxleUtil/strings.h>
 
 TEST_FUNCTION(Interned_Strings, creation) {
   StringInterner interner = {};

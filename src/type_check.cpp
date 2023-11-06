@@ -2,7 +2,7 @@
 #include "ir.h"
 #include "compiler.h"
 
-#include "trace.h"
+#include <Tracer/trace.h>
 
 struct Typer;
 struct TypeCheckNode;

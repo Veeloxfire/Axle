@@ -1,6 +1,6 @@
 #pragma once
-#include "safe_lib.h"
-#include "formattable.h"
+#include <AxleUtil/safe_lib.h>
+#include <AxleUtil/formattable.h>
 
 //Important forward declarations
 struct CompilerGlobals;

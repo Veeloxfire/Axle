@@ -1,6 +1,6 @@
 #pragma once
-#include "api.h"
-#include "calling_convention.h"
+#include <Axle/api.h>
+#include <Axle/calling_convention.h>
 
 namespace X64 {
   struct REGISTER_CONSTANT { uint8_t REG; ViewArr<const char> name; };

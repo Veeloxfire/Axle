@@ -1,7 +1,7 @@
 #pragma once
 
-#include "utility.h"
-#include "comp_utilities.h"
+#include <AxleUtil/utility.h>
+#include <Axle/comp_utilities.h>
 
 struct GlobalName {
   const InternString* name;

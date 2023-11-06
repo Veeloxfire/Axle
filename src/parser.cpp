@@ -1,10 +1,11 @@
 #include "ast.h"
 #include "parser.h"
-#include "format.h"
 #include "compiler.h"
-#include "memory.h"
-#include "trace.h"
-#include "io.h"
+
+#include <AxleUtil/memory.h>
+#include <AxleUtil/io.h>
+
+#include <Tracer/trace.h>
 
 struct KeywordPair {
   ViewArr<const char> keyword;
@@ -2516,7 +2517,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         ASTBinaryOperatorExpr* bin_op = (ASTBinaryOperatorExpr*)a;
 
         print_ast(printer, bin_op->left);
-        IO_Single::print(' ', BINARY_OP_STRING::get(bin_op->op), ' ');
+        IO_Single::format(" {} ", BINARY_OP_STRING::get(bin_op->op));
         print_ast(printer, bin_op->right);
         return;
       }
@@ -2605,7 +2606,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
       }
     case AST_TYPE::ASCII_CHAR: {
         ASTAsciiChar* ac = (ASTAsciiChar*)a;
-        IO_Single::print('"', ac->character, '"');
+        IO_Single::format("'{}'", ac->character);
         return;
       }
     case AST_TYPE::INDEX_EXPR: {

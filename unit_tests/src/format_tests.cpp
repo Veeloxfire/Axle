@@ -1,5 +1,5 @@
 #include "unit_tests.h"
-#include "format.h"
+#include <AxleUtil/format.h>
 
 TEST_FUNCTION(ArrayFormat, strings) {
   const ViewArr<const char> expected = lit_view_arr("hello world");

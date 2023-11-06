@@ -1,6 +1,6 @@
 #include "ir.h"
 #include "type.h"
-#include "trace.h"
+#include <Tracer/trace.h>
 
 #include "compiler.h"
 
