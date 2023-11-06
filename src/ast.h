@@ -49,12 +49,12 @@ enum struct AST_TYPE : u8 {
 #undef MOD
 };
 
-constexpr const char* ast_type_string(AST_TYPE ty) {
+constexpr ViewArr<const char> ast_type_string(AST_TYPE ty) {
   switch (ty) {
-#define MOD(n) case AST_TYPE :: n : return #n ;
+#define MOD(n) case AST_TYPE :: n : return lit_view_arr(#n);
     AST_TYPE_MOD;
 #undef MOD
-    default: return "invalid-ast-type";
+    default: return lit_view_arr("invalid-ast-type");
   }
 }
 
@@ -77,7 +77,7 @@ struct ASTNamedType : public AST {
 
   Type actual_type = {};
   const InternString* name = nullptr;
-  const Global* global;
+  const Global* global = nullptr;
 };
 
 struct ASTArrayType : public AST {

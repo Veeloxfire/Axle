@@ -2,7 +2,7 @@
 #include "utility.h"
 #include "strings.h"
 #include "comp_utilities.h"
-#include "format.h"
+#include "formattable.h"
 #include "parser.h"
 #include "files.h"
 #include "ast.h"
@@ -30,7 +30,7 @@ struct Local {
 };
 
 struct Pipe : AtomicQueue<CompilationUnit*> {
-  const char* _debug_name;
+  ViewArr<const char> _debug_name;
 };
 
 struct ComptimeExec {
@@ -240,7 +240,7 @@ struct Compilation {
 struct Services {
   //Must always be acquired in order!
   AtomicPtr<FileLoader> file_loader;
-  AtomicPtr<Backend::GenericProgram> out_program;
+  AtomicPtr<Backend::ProgramData> out_program;
   AtomicPtr<Compilation> compilation;
   AtomicPtr<NameManager> names;
 

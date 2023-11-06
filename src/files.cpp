@@ -1,7 +1,7 @@
 #include "files.h"
 #include "strings.h"
 #include "trace.h"
-#include <Windows.h>
+#include "windows_specifics.h"
 
 static constexpr usize BUFFER_SIZE = 1024;
 
@@ -44,26 +44,11 @@ FILES::FileData::FileData(HANDLE h) : handle(h) {
   in_sync = true;
 }
 
-struct NativePath {
-  char path[MAX_PATH + 1] = {};
-
-  constexpr NativePath(const ViewArr<const char>& vr) {
-    usize len = vr.size > MAX_PATH ? MAX_PATH : vr.size;
-    for (usize i = 0; i < len; ++i) {
-      path[i] = vr[i];
-    }
-  }
-
-  const char* c_str() const {
-    return path;
-  }
-};
-
 FILES::OpenedFile FILES::open(const ViewArr<const char>& name,
                               OPEN_MODE open_mode) {
   TRACING_FUNCTION();
 
-  NativePath path = name;
+  Windows::NativePath path = name;
 
   OpenedFile opened_file = {};
 
@@ -103,7 +88,7 @@ FILES::OpenedFile FILES::create(const ViewArr<const char>& name,
                                 OPEN_MODE open_mode) {
   TRACING_FUNCTION();
 
-  NativePath path = name;
+  Windows::NativePath path = name;
 
   OpenedFile opened_file = {};
 
@@ -143,7 +128,7 @@ FILES::OpenedFile FILES::replace(const ViewArr<const char>& name,
                                  OPEN_MODE open_mode) {
   TRACING_FUNCTION();
 
-  NativePath path = name;
+  Windows::NativePath path = name;
 
   OpenedFile opened_file = {};
 
@@ -179,7 +164,7 @@ FILES::OpenedFile FILES::replace(const ViewArr<const char>& name,
 }
 
 bool FILES::exist(const ViewArr<const char>& name) {
-  NativePath path = name;
+  Windows::NativePath path = name;
 
   return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
@@ -413,7 +398,7 @@ size_t FILES::size_of_file(FileData* file) {
 OwnedArr<const char> FILES::load_file_to_string(const ViewArr<const char>& file_name) {
   TRACING_FUNCTION();
 
-  NativePath path = file_name;
+  Windows::NativePath path = file_name;
   HANDLE h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
   if (h == INVALID_HANDLE_VALUE) return {};
   LARGE_INTEGER li = {};

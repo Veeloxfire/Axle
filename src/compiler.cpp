@@ -8,6 +8,7 @@
 #include "backends.h"
 #include "ir.h"
 #include "type_check.h"
+#include "io.h"
 
 #include "trace.h"
 
@@ -49,7 +50,7 @@ IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s
 
 const SignatureStructure* CompilerGlobals::get_label_signature(IR::GlobalLabel label) {
   label_mutex.acquire();
-  const SignatureStructure* sig = label_signature_table.data[label.label - 1];
+  const SignatureStructure* sig = label_signature_table[label.label - 1];
   label_mutex.release();
 
   return sig;
@@ -120,7 +121,7 @@ CompilationUnit* new_compilation_unit(Compilation* const comp,
   comp->dependencies.in_flight_units += 1;
 
   if (print) {
-    format_print("Started Comp Unit {}       | Active = {}, In flight = {}\n",
+    IO::format("Started Comp Unit {}       | Active = {}, In flight = {}\n",
                  unit->id, comp->store.active_units.size, comp->dependencies.in_flight_units);
   }
 
@@ -856,7 +857,7 @@ Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* buil
 
   u32 global_id = 0;
   {
-    IR::GlobalReference* grs = ir->globals_used.data;
+    ViewArr<IR::GlobalReference> grs = view_arr(ir->globals_used);
     const usize count = ir->globals_used.size;
 
     for (; global_id < count; ++global_id) {
@@ -1228,7 +1229,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           Local* local = ident->local;
           ASSERT(local != nullptr);
 
-          builder->ir->variables.data[local->variable_id.variable].requirements |= eval.requirements;
+          builder->ir->variables[local->variable_id.variable].requirements |= eval.requirements;
 
           const Type t = local->decl.type;
 
@@ -1261,10 +1262,10 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         const ASTLink* li = (ASTLink*)expr;
         ASSERT(!eval.requirements.has_address());
 
-        IR::DynLibraryImport* imp = comp->dyn_lib_imports.data + (li->import_index - 1);
+        const IR::DynLibraryImport& imp = comp->dyn_lib_imports[li->import_index - 1];
 
         IR::GlobalLabel* label_holder = comp->new_constant<IR::GlobalLabel>();
-        *label_holder = imp->label;
+        *label_holder = imp.label;
 
         ASSERT(li->node_type.struct_type() == STRUCTURE_TYPE::LAMBDA);
 
@@ -2056,7 +2057,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
     const InternString* full_path = file_import->file_loc.full_name;
 
     if (comp->print_options.file_loads) {
-      IO::print("Loading file \"", full_path->string, "\" ...\n");
+      IO::format("Loading file \"{}\" ...\n", full_path);
     }
 
     //Just a sanity check - should alread have been set
@@ -2082,7 +2083,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       file_loader->unparsed_files.pop();
 
       //Reset the parser for this file
-      reset_parser(comp, comp_thread, &parser, full_path, text_source.data);
+      reset_parser(comp, comp_thread, &parser, full_path, const_view_arr(text_source));
 
       // ^ Can error (in the lexing)
       if (comp_thread->is_panic()) {
@@ -2249,7 +2250,7 @@ void DependencyManager::remove_dependency_from(CompilationUnit* unit, bool print
 
   if (unit->waiting_on_count == 0) {
     if (print) {
-      format_print("Remove Dependency from unit {} -> starting again\n", unit->id);
+      IO::format("Remove Dependency from unit {} -> starting again\n", unit->id);
     }
 
     ASSERT(depend_check_pipe != nullptr);
@@ -2259,7 +2260,7 @@ void DependencyManager::remove_dependency_from(CompilationUnit* unit, bool print
   }
   else {
     if (print) {
-      format_print("Remove Dependency from unit {}\n", unit->id);
+      IO::format("Remove Dependency from unit {}\n", unit->id);
     }
   }
 }
@@ -2311,7 +2312,7 @@ bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_threa
     CompilationUnit* u = compilation->store.get_unit_if_exists(*id);
     if (u != nullptr) {
       if (comp_thread->print_options.comp_units) {
-        format_print("Comp unit {} waiting on {}\n",
+        IO::format("Comp unit {} waiting on {}\n",
                      unit->id, u->id);
       }
 
@@ -2336,7 +2337,7 @@ bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_threa
   if (depended) {
     compilation->dependencies.in_flight_units -= 1;
     if (comp_thread->print_options.comp_units) {
-      format_print("Comp unit {} now waiting   | Active = {}, In flight = {}\n",
+      IO::format("Comp unit {} now waiting   | Active = {}, In flight = {}\n",
                    unit->id, compilation->store.active_units.size, compilation->dependencies.in_flight_units);
     }
   }
@@ -2355,7 +2356,7 @@ void close_compilation_unit(CompilerThread* comp_thread, Compilation* compilatio
   compilation->store.free_unit(unit);
 
   if (comp_thread->print_options.comp_units) {
-    format_print("Close Comp unit {}         | Active = {}, In flight = {}\n",
+    IO::format("Close Comp unit {}         | Active = {}, In flight = {}\n",
                  id, compilation->store.active_units.size, compilation->dependencies.in_flight_units);
   }
 }
@@ -2377,7 +2378,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         thead_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
-          format_print("Work | Parsing {} Files \n", file_loader->unparsed_files.size);
+          IO::format("Work | Parsing {} Files \n", file_loader->unparsed_files.size);
         }
 
         compile_current_unparsed_files(comp, comp_thread, file_loader);
@@ -2398,7 +2399,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       DEFER(comp) {
         comp->services.out_program._mutex.release();
       };
-      Backend::GenericProgram* p = comp->services.out_program._ptr;
+      Backend::ProgramData* p = comp->services.out_program._ptr;
 
       const IR::IRStore* ir = nullptr;
       if (comp->finished_irs.try_pop_front(&ir)) {
@@ -2406,7 +2407,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         thead_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
-          format_print("Work | Output Finished IR\n");
+          IO::format("Work | Output Finished IR\n");
         }
 
         comp_thread->platform_interface.emit_function(comp,
@@ -2429,7 +2430,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     TRACING_SCOPE("Import");
     thead_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
-      format_print("Work | Import {}\n", unit->id);
+      IO::format("Work | Import {}\n", unit->id);
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
@@ -2460,7 +2461,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     thead_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
-      format_print("Work | Work {}\n", unit->id);
+      IO::format("Work | Work {}\n", unit->id);
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
@@ -2488,7 +2489,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     TRACING_SCOPE("Emit Global");
     thead_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
-      format_print("Work | Global {}\n", unit->id);
+      IO::format("Work | Global {}\n", unit->id);
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
@@ -2517,7 +2518,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     TRACING_SCOPE("Compile Structure");
     thead_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
-      format_print("Work | Structure {}\n", unit->id);
+      IO::format("Work | Structure {}\n", unit->id);
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
@@ -2547,7 +2548,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     thead_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
-      format_print("Work | Signature {}\n", unit->id);
+      IO::format("Work | Signature {}\n", unit->id);
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
@@ -2591,7 +2592,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     thead_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
-      format_print("Work | Export {}\n", unit->id);
+      IO::format("Work | Export {}\n", unit->id);
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
@@ -2620,7 +2621,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     thead_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
-      format_print("Work | Depend Check {}\n", unit->id);
+      IO::format("Work | Depend Check {}\n", unit->id);
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
@@ -2681,7 +2682,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
 
-  //format_print("---- DEBUG: Did nothing in pass\n");
+  //IO::format("---- DEBUG: Did nothing in pass\n");
 
   if (comp_thread->doing_work) {
     comp_thread->doing_work = false;
@@ -2706,7 +2707,9 @@ void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_threa
 #ifdef ASSERT_EXCEPTIONS
     }
     catch (const std::exception& e) {
-      comp_thread->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Assertion Failed with message: {}", e.what());
+      const char* message = e.what();
+      const ViewArr<const char> message_view = { message, strlen_ts(message) };
+      comp_thread->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Assertion Failed with message: {}", message_view);
     }
 #endif
     if (comp_thread->is_panic()) {
@@ -2860,9 +2863,9 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
         CompilationUnit* unit = *i;
         ASSERT(unit != nullptr);
         ASSERT(unit->main_pipe != nullptr);
-        const char* debug_name = "Type unsupported in this mode";
-        if (unit->main_pipe->_debug_name != nullptr) {
-          debug_name = unit->main_pipe->_debug_name;
+        ViewArr<const char> debug_name = unit->main_pipe->_debug_name;
+        if (debug_name.data == nullptr) {
+          debug_name = lit_view_arr("Type unsupported in this mode");
         }
 
         Format::format_to_formatter(error, "- Id: {} | Type: {} | Waiting on count: {}\n", unit->id, debug_name, unit->waiting_on_count);
@@ -3154,11 +3157,11 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
     if (!FILES::exist(view_arr(cwd))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
-                                "Current directory was invalid: {}", cwd.data);
+                                "Current directory was invalid: {}", cwd);
       return;
     }
 
-    file_loader->cwd.directory = strings->intern(cwd.data, cwd.size);
+    file_loader->cwd.directory = strings->intern(cwd);
   }
 
   comp->build_options.debug_break_on_entry = options.build.debug_break_on_entry;
@@ -3221,11 +3224,11 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     OwnedArr stdlib = normalize_path(view_arr(file_loader->cwd.directory), options.build.std_lib_folder);
     if (!FILES::exist(view_arr(stdlib))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
-                                "std lib folder was invalid: {}", stdlib.data);
+                                "std lib folder was invalid: {}", stdlib);
       return;
     }
 
-    comp->build_options.std_lib_folder = strings->intern(stdlib.data, stdlib.size);
+    comp->build_options.std_lib_folder = strings->intern(stdlib);
   }
 
   if (options.build.lib_folder.size == 0) {
@@ -3235,14 +3238,14 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   {
-    OwnedArr lib_folder = normalize_path(view_arr(file_loader->cwd.directory->string), options.build.lib_folder);
+    OwnedArr lib_folder = normalize_path(view_arr(file_loader->cwd.directory), options.build.lib_folder);
     if (!FILES::exist(view_arr(lib_folder))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
-                                "lib folder was invalid: {}", lib_folder.data);
+                                "lib folder was invalid: {}", lib_folder);
       return;
     }
 
-    comp->build_options.lib_folder = strings->intern(lib_folder.data, lib_folder.size);
+    comp->build_options.lib_folder = strings->intern(lib_folder);
   }
 
   {
@@ -3274,7 +3277,5 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     else {
       comp->build_options.default_calling_convention = list[options.build.default_calling_convention];
     }
-
-
   }
 }

@@ -3,7 +3,6 @@
 #include "errors.h"
 
 namespace UNIT_TESTS {
-
   struct TestErrors : Errors {
     ViewArr<const char> test_name;
   };
@@ -16,12 +15,14 @@ namespace UNIT_TESTS {
 
   Array<UnitTest>& unit_tests_ref();
 
-  struct _TestAdder {
-    _TestAdder(const ViewArr<const char>& test_name, TEST_FN fn);
+  struct _testAdder {
+    _testAdder(const ViewArr<const char>& test_name, TEST_FN fn);
   };
 
   template<typename T>
-  void test_eq(TestErrors* errors, usize line, const char* expected_str, const T& expected, const char* actual_str, const T& actual) {
+  void test_eq(TestErrors* errors, usize line,
+               const ViewArr<const char>& expected_str, const T& expected,
+               const ViewArr<const char>& actual_str, const T& actual) {
     if (expected != actual) {
       errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\nExpected: {} = {}\nActual: {} = {}",
                            line, errors->test_name, expected_str, expected, actual_str, actual);
@@ -31,7 +32,9 @@ namespace UNIT_TESTS {
 
 
   template<typename T>
-  void test_eq(TestErrors* errors, usize line, const char* expected_str, T* expected, const char* actual_str, T* actual) {
+  void test_eq(TestErrors* errors, usize line,
+               const ViewArr<const char>& expected_str, T* expected,
+               const ViewArr<const char>& actual_str, T* actual) {
     if (expected != actual) {
       errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\nExpected: {} = {}\nActual: {} = {}",
                            line, errors->test_name, expected_str, PrintPtr{ expected }, actual_str, PrintPtr{ actual });
@@ -40,7 +43,9 @@ namespace UNIT_TESTS {
   }
 
   template<typename T>
-  void test_neq(TestErrors* errors, usize line, const char* expected_str, const T& expected, const char* actual_str, const T& actual) {
+  void test_neq(TestErrors* errors, usize line, 
+                const ViewArr<const char>& expected_str, const T& expected,
+                const ViewArr<const char>& actual_str, const T& actual) {
     if (expected == actual) {
       errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\n{} = {}\n{} = {}\nThese should not be equal",
                            line, errors->test_name, expected_str, expected, actual_str, actual);
@@ -50,7 +55,9 @@ namespace UNIT_TESTS {
 
 
   template<typename T>
-  void test_neq(TestErrors* errors, usize line, const char* expected_str, T* expected, const char* actual_str, T* actual) {
+  void test_neq(TestErrors* errors, usize line,
+                const ViewArr<const char>& expected_str, T* expected,
+                const ViewArr<const char>& actual_str, T* actual) {
     if (expected == actual) {
       errors->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Test assert failed!\nLine: {}, Test: {}\n{} = {}\n{} = {}\nThese should not be equal",
                            line, errors->test_name, expected_str, PrintPtr{ expected }, actual_str, PrintPtr{ actual });
@@ -61,8 +68,10 @@ namespace UNIT_TESTS {
 
   template<typename T>
   void test_eq_arr(TestErrors* errors, usize line,
-                   const char* expected_str, const T* expected, const char* esize_str, usize e_size,
-                   const char* actual_str, const T* actual, const char* asize_str, usize a_size) {
+                   const ViewArr<const char>& expected_str, const T* expected,
+                   const ViewArr<const char>& esize_str, usize e_size,
+                   const ViewArr<const char>& actual_str, const T* actual,
+                   const ViewArr<const char>& asize_str, usize a_size) {
     if (e_size != a_size) {
       goto ERROR;
     }
@@ -90,8 +99,8 @@ namespace UNIT_TESTS {
   }
 
   inline void test_eq_str_impl(TestErrors* errors, usize line,
-                          const char* expected_str, const ViewArr<const char>& expected,
-                          const char* actual_str, const ViewArr<const char>& actual) {
+                               const ViewArr<const char>& expected_str, const ViewArr<const char>& expected,
+                               const ViewArr<const char>& actual_str, const ViewArr<const char>& actual) {
     const size_t e_size = expected.size;
     const size_t a_size = actual.size;
     if (e_size != a_size) {
@@ -127,11 +136,11 @@ namespace UNIT_TESTS {
     return c;
   }
 
-  inline const ViewArr<const char> test_str(const OwnedArr<char>& c) {
+  constexpr const ViewArr<const char> test_str(const OwnedArr<char>& c) {
     return const_view_arr(c);
   }
 
-  inline const ViewArr<const char> test_str(const OwnedArr<const char>& c) {
+  constexpr const ViewArr<const char> test_str(const OwnedArr<const char>& c) {
     return view_arr(c);
   }
 
@@ -141,8 +150,8 @@ namespace UNIT_TESTS {
 
   template<typename L, typename R>
   inline void test_eq_str(TestErrors* errors, usize line,
-                          const char* expected_str, const L& expected,
-                          const char* actual_str, const R& actual) {
+                          const ViewArr<const char>& expected_str, const L& expected,
+                          const ViewArr<const char>& actual_str, const R& actual) {
     return test_eq_str_impl(errors, line,
                             expected_str, test_str(expected),
                             actual_str, test_str(actual));
@@ -150,21 +159,21 @@ namespace UNIT_TESTS {
 }
 
 #define TEST_EQ(expected, actual) do {\
-UNIT_TESTS::test_eq(test_errors, __LINE__, #expected, expected, #actual, actual);\
+UNIT_TESTS::test_eq(test_errors, __LINE__, lit_view_arr(#expected), expected, lit_view_arr(#actual), actual);\
 if (test_errors->is_panic()) return; } while (false)
 
 #define TEST_NEQ(expected, actual) do {\
-UNIT_TESTS::test_neq(test_errors, __LINE__, #expected, expected, #actual, actual);\
+UNIT_TESTS::test_neq(test_errors, __LINE__, lit_view_arr(#expected), expected, lit_view_arr(#actual), actual);\
 if (test_errors->is_panic()) return; } while (false)
 
 #define TEST_ARR_EQ(expected, e_size, actual, a_size) do { \
-UNIT_TESTS::test_eq_arr(test_errors, __LINE__, #expected, expected, #e_size, e_size, #actual, actual, #a_size, a_size);\
+UNIT_TESTS::test_eq_arr(test_errors, __LINE__, lit_view_arr(#expected), expected, lit_view_arr(#e_size), e_size, lit_view_arr(#actual), actual, lit_view_arr(#a_size), a_size);\
 if (test_errors->is_panic()) return; } while (false)
 
 #define TEST_STR_EQ(expected, actual) do { \
-UNIT_TESTS::test_eq_str(test_errors, __LINE__, #expected, expected, #actual, actual);\
+UNIT_TESTS::test_eq_str(test_errors, __LINE__, lit_view_arr(#expected), expected, lit_view_arr(#actual), actual);\
 if (test_errors->is_panic()) return; } while (false)
 
-#define TEST_FUNCTION(space, name) namespace JOIN( _anon_ns_ ## space, __LINE__) { static void JOIN(_anon_tf_ ## name, __LINE__) (UNIT_TESTS::TestErrors*); } static UNIT_TESTS::_TestAdder JOIN(_test_adder_, __LINE__) = {lit_view_arr(#space "::" #name), JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) }; static void JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) (UNIT_TESTS::TestErrors* test_errors)
+#define TEST_FUNCTION(space, name) namespace UNIT_TESTS:: JOIN(_anon_ns_ ## space, __LINE__) { static void JOIN(_anon_tf_ ## name, __LINE__) (UNIT_TESTS::TestErrors*); } static UNIT_TESTS::_testAdder JOIN(_test_adder_, __LINE__) = {lit_view_arr(#space "::" #name), UNIT_TESTS:: JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) }; static void UNIT_TESTS:: JOIN( _anon_ns_ ## space, __LINE__) :: JOIN(_anon_tf_ ## name, __LINE__) (UNIT_TESTS::TestErrors* test_errors)
 
 #define TEST_CHECK_ERRORS() do { if(test_errors->is_panic()) return; } while(false)

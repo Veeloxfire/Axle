@@ -1,6 +1,7 @@
 #include "ir.h"
 #include "compiler.h"
 #include "x64_backend.h"
+#include "io.h"
 #include "trace.h"
 
 namespace X64 {
@@ -1492,7 +1493,7 @@ namespace X64 {
                | X64::modrm_r_rm(from.r, to.r));
   }
 
-  static void append_instruction(X64::Program* program, const Instruction& i) {
+  static void append_instruction(Backend::ProgramData* program, const Instruction& i) {
     program->code_store.push_arr(i.bytes, i.count);
   }
 }
@@ -1534,13 +1535,13 @@ enum struct ValueType : u8 {
 };
 
 namespace IntHelpers {
-  static void zero_register(X64::Program* program, X64::R r) {
+  static void zero_register(Backend::ProgramData* program, X64::R r) {
     X64::Instruction i = {};
     X64::xor_(i, X64::R32{r}, X64::R32{r});
     X64::append_instruction(program, i);
   }
 
-  static void sign_extend_rax_rdx(X64::Program* program, IR::Format f) {
+  static void sign_extend_rax_rdx(Backend::ProgramData* program, IR::Format f) {
     ASSERT(f == IR::Format::sint16 || f == IR::Format::sint32 || f == IR::Format::sint64);
 
     X64::Instruction i = {};
@@ -1555,7 +1556,7 @@ namespace IntHelpers {
     X64::append_instruction(program, i);
   }
 
-  static void copy_reg_to_reg(X64::Program* program,
+  static void copy_reg_to_reg(Backend::ProgramData* program,
                               X64::R from, IR::Format f_format,
                               X64::R to, IR::Format t_format) {
     ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
@@ -1733,7 +1734,7 @@ namespace IntHelpers {
     X64::append_instruction(program, inst);
   }
 
-  static void copy_mem_to_reg(X64::Program* program,
+  static void copy_mem_to_reg(Backend::ProgramData* program,
                               const MemoryView& from, IR::Format f_format,
                               X64::R to, IR::Format t_format) {
     ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
@@ -1888,7 +1889,7 @@ namespace IntHelpers {
     X64::append_instruction(program, inst);
   }
 
-  static void copy_reg_to_mem(X64::Program* program,
+  static void copy_reg_to_mem(Backend::ProgramData* program,
                               X64::R from, IR::Format f_format,
                               const MemoryView& to, IR::Format t_format) {
     ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
@@ -2177,7 +2178,7 @@ namespace IntHelpers {
     }
   }
 
-  static void load_const_to_reg(X64::Program* program, IR::Format f, X64::R reg, const u8* data) {
+  static void load_const_to_reg(Backend::ProgramData* program, IR::Format f, X64::R reg, const u8* data) {
     ASSERT(f != IR::Format::opaque);
 
     X64::Instruction i = {};
@@ -2210,7 +2211,7 @@ namespace IntHelpers {
     X64::append_instruction(program, i);
   }
 
-  static void load_const_to_mem(X64::Program* program, IR::Format f, MemoryView view, const u8* data) {
+  static void load_const_to_mem(Backend::ProgramData* program, IR::Format f, MemoryView view, const u8* data) {
     ASSERT(f != IR::Format::opaque);
 
     ASSERT(x64_types_info.get_size(f) == view.size);
@@ -2270,7 +2271,7 @@ namespace IntHelpers {
     }
   }
 
-  static void copy_mem_to_mem(X64::Program* program,
+  static void copy_mem_to_mem(Backend::ProgramData* program,
                               const MemoryView& from, IR::Format f_format,
                               const MemoryView& to, IR::Format t_format,
                               X64::R temp) {
@@ -2479,7 +2480,7 @@ namespace IntHelpers {
   }
 
 #define EMIT_SYMMETRICAL_HELPER(name)\
-  static void emit_ ## name(X64::Program* program,\
+  static void emit_ ## name(Backend::ProgramData* program,\
                 X64::R left, IR::Format l_format,\
                 X64::R right, IR::Format r_format) {\
     ASSERT(l_format == r_format);\
@@ -2518,7 +2519,7 @@ namespace IntHelpers {
 
 #undef EMIT_SYMMETRICAL_HELPER
 
-  static void emit_mul(X64::Program* program,
+  static void emit_mul(Backend::ProgramData* program,
                        X64::R left, IR::Format l_format,
                        X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
@@ -2570,7 +2571,7 @@ namespace IntHelpers {
     X64::append_instruction(program, i);
   }
 
-  static void emit_div(X64::Program* program,
+  static void emit_div(Backend::ProgramData* program,
                        X64::R left, IR::Format l_format,
                        X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
@@ -2628,7 +2629,7 @@ namespace IntHelpers {
     X64::append_instruction(program, i);
   }
 
-  static void emit_cmp(X64::Program* program,
+  static void emit_cmp(Backend::ProgramData* program,
                        X64::R left, IR::Format l_format,
                        X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
@@ -2660,7 +2661,7 @@ namespace IntHelpers {
     X64::append_instruction(program, i);
   }
 
-  static void emit_great(X64::Program* program,
+  static void emit_great(Backend::ProgramData* program,
                          X64::R left, IR::Format l_format,
                          X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
@@ -2669,7 +2670,7 @@ namespace IntHelpers {
     X64::append_instruction(program, i);
   }
 
-  static void emit_less(X64::Program* program,
+  static void emit_less(Backend::ProgramData* program,
                         X64::R left, IR::Format l_format,
                         X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
@@ -2678,7 +2679,7 @@ namespace IntHelpers {
     X64::append_instruction(program, i);
   }
 
-  static void emit_eq(X64::Program* program,
+  static void emit_eq(Backend::ProgramData* program,
                       X64::R left, IR::Format l_format,
                       X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
@@ -2687,7 +2688,7 @@ namespace IntHelpers {
     X64::append_instruction(program, i);
   }
 
-  static void emit_neq(X64::Program* program,
+  static void emit_neq(Backend::ProgramData* program,
                        X64::R left, IR::Format l_format,
                        X64::R right, IR::Format r_format) {
     emit_cmp(program, left, l_format, right, r_format);
@@ -2698,15 +2699,15 @@ namespace IntHelpers {
 }
 
 namespace Helpers {
-  static void copy_address_to_reg(X64::Program* program, const MemoryView& mem, X64::R r) {
+  static void copy_address_to_reg(Backend::ProgramData* program, const MemoryView& mem, X64::R r) {
     X64::Instruction i = {};
     X64::lea(i, mem.rm, r);
 
     X64::append_instruction(program, i);
   }
 
-  static void copy_mem_to_mem_opaque(X64::Program* program, MemoryView from, MemoryView to, X64::R temp_reg) {
-    constexpr static auto COPY8 = [](X64::Program* program,
+  static void copy_mem_to_mem_opaque(Backend::ProgramData* program, MemoryView from, MemoryView to, X64::R temp_reg) {
+    constexpr static auto COPY8 = [](Backend::ProgramData* program,
                                      MemoryView& from, X64::R temp, MemoryView& to) {
       X64::Instruction first = {};
       X64::Instruction second = {};
@@ -2722,7 +2723,7 @@ namespace Helpers {
       X64::append_instruction(program, second);
     };
 
-    constexpr static auto COPY16 = [](X64::Program* program,
+    constexpr static auto COPY16 = [](Backend::ProgramData* program,
                                       MemoryView& from, X64::R temp, MemoryView& to) {
       X64::Instruction first = {};
       X64::Instruction second = {};
@@ -2739,7 +2740,7 @@ namespace Helpers {
       X64::append_instruction(program, second);
     };
 
-    constexpr static auto COPY32 = [](X64::Program* program,
+    constexpr static auto COPY32 = [](Backend::ProgramData* program,
                                       MemoryView& from, X64::R temp, MemoryView& to) {
       X64::Instruction first = {};
       X64::Instruction second = {};
@@ -2756,7 +2757,7 @@ namespace Helpers {
       X64::append_instruction(program, second);
     };
 
-    constexpr static auto COPY64 = [](X64::Program* program,
+    constexpr static auto COPY64 = [](Backend::ProgramData* program,
                                       MemoryView& from, X64::R temp, MemoryView& to) {
       X64::Instruction first = {};
       X64::Instruction second = {};
@@ -2813,10 +2814,10 @@ namespace Helpers {
     ASSERT(to.size == 0);
   }
 
-  static void load_const_to_mem_opaque(X64::Program* program, MemoryView view, const u8* data) {
+  static void load_const_to_mem_opaque(Backend::ProgramData* program, MemoryView view, const u8* data) {
     using PTR = const u8*;
 
-    constexpr static auto COPY8 = [](X64::Program* program, MemoryView& view, PTR& data) {
+    constexpr static auto COPY8 = [](Backend::ProgramData* program, MemoryView& view, PTR& data) {
       X64::Instruction i = {};
       X64::mov(i, view.rm, X64::IMM8{ data[0] });
       view.rm.disp += 1;
@@ -2826,7 +2827,7 @@ namespace Helpers {
       X64::append_instruction(program, i);
     };
 
-    constexpr static auto COPY16 = [](X64::Program* program, MemoryView& view, PTR& data) {
+    constexpr static auto COPY16 = [](Backend::ProgramData* program, MemoryView& view, PTR& data) {
       X64::Instruction i = {};
       X64::mov(i, view.rm, X64::IMM16{ x16_from_bytes(data) });
       view.rm.disp += 2;
@@ -2836,7 +2837,7 @@ namespace Helpers {
       X64::append_instruction(program, i);
     };
 
-    constexpr static auto COPY32 = [](X64::Program* program, MemoryView& view, PTR& data) {
+    constexpr static auto COPY32 = [](Backend::ProgramData* program, MemoryView& view, PTR& data) {
       X64::Instruction i = {};
       X64::mov(i, view.rm, X64::IMM32{ x32_from_bytes(data) });
       view.rm.disp += 4;
@@ -2846,7 +2847,7 @@ namespace Helpers {
       X64::append_instruction(program, i);
     };
 
-    constexpr static auto COPY64 = [](X64::Program* program, MemoryView& view, PTR& data) {
+    constexpr static auto COPY64 = [](Backend::ProgramData* program, MemoryView& view, PTR& data) {
       i64 val = x64_from_bytes(data);
       data += 8;
 
@@ -3022,7 +3023,7 @@ namespace Helpers {
   }
 
   struct RegRegDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3041,14 +3042,14 @@ namespace Helpers {
     }
   };
 
-  static void copy_reg_to_reg(X64::Program* program,
+  static void copy_reg_to_reg(Backend::ProgramData* program,
                               X64::R from, const Structure* f_type,
                               X64::R to, const Structure* t_type) {
     dispatch_pair(RegRegDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct ConstMemDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     const u8* from;
     const MemoryView& to;
 
@@ -3066,12 +3067,12 @@ namespace Helpers {
     }
   };
 
-  static void load_const_to_mem(X64::Program* program, const Structure* ty, const MemoryView& view, const u8* data) {
+  static void load_const_to_mem(Backend::ProgramData* program, const Structure* ty, const MemoryView& view, const u8* data) {
     return dispatch_single(ConstMemDispatch{ program, data, view }, ty);
   }
 
   struct ConstRegDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     const u8* from;
     X64::R to;
 
@@ -3089,12 +3090,12 @@ namespace Helpers {
     }
   };
 
-  static void load_const_to_reg(X64::Program* program, const Structure* ty, X64::R reg, const u8* data) {
+  static void load_const_to_reg(Backend::ProgramData* program, const Structure* ty, X64::R reg, const u8* data) {
     return dispatch_single(ConstRegDispatch{ program, data, reg }, ty);
   }
 
   struct MemRegDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     const MemoryView& from;
     X64::R to;
 
@@ -3113,14 +3114,14 @@ namespace Helpers {
     }
   };
 
-  static void copy_mem_to_reg(X64::Program* program,
+  static void copy_mem_to_reg(Backend::ProgramData* program,
                               const MemoryView& from, const Structure* f_type,
                               X64::R to, const Structure* t_type) {
     return dispatch_pair(MemRegDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct RegMemDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     const MemoryView& to;
 
@@ -3139,14 +3140,14 @@ namespace Helpers {
     }
   };
 
-  static void copy_reg_to_mem(X64::Program* program,
+  static void copy_reg_to_mem(Backend::ProgramData* program,
                               X64::R from, const Structure* f_type,
                               const MemoryView& to, const Structure* t_type) {
     return dispatch_pair(RegMemDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct MemMemDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     const MemoryView& from;
     const MemoryView& to;
     X64::R temp;
@@ -3167,7 +3168,7 @@ namespace Helpers {
   };
 
 
-  static void copy_mem_to_mem(X64::Program* program,
+  static void copy_mem_to_mem(Backend::ProgramData* program,
                               const MemoryView& from, const Structure* f_type,
                               const MemoryView& to, const Structure* t_type,
                               X64::R temp) {
@@ -3175,7 +3176,7 @@ namespace Helpers {
   }
 
   struct AddDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3194,14 +3195,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_add(X64::Program* program,
+  static void emit_add(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(AddDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct SubDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3220,14 +3221,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_sub(X64::Program* program,
+  static void emit_sub(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(SubDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct MulDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3246,14 +3247,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_mul(X64::Program* program,
+  static void emit_mul(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(MulDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct DivDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3272,14 +3273,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_div(X64::Program* program,
+  static void emit_div(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(DivDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct AndDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3298,14 +3299,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_and(X64::Program* program,
+  static void emit_and(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(AndDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct OrDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3324,14 +3325,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_or(X64::Program* program,
+  static void emit_or(Backend::ProgramData* program,
                       X64::R from, const Structure* f_type,
                       X64::R to, const Structure* t_type) {
     return dispatch_pair(OrDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct XorDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3350,14 +3351,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_xor(X64::Program* program,
+  static void emit_xor(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(XorDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct GreatDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3376,14 +3377,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_great(X64::Program* program,
+  static void emit_great(Backend::ProgramData* program,
                          X64::R from, const Structure* f_type,
                          X64::R to, const Structure* t_type) {
     return dispatch_pair(GreatDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct LessDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3402,14 +3403,14 @@ namespace Helpers {
     }
   };
 
-  static void emit_less(X64::Program* program,
+  static void emit_less(Backend::ProgramData* program,
                         X64::R from, const Structure* f_type,
                         X64::R to, const Structure* t_type) {
     return dispatch_pair(LessDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct EqDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3428,7 +3429,7 @@ namespace Helpers {
     }
   };
 
-  static void emit_eq(X64::Program* program,
+  static void emit_eq(Backend::ProgramData* program,
                       X64::R from, const Structure* f_type,
                       X64::R to, const Structure* t_type) {
     return dispatch_pair(EqDispatch{ program, from, to }, f_type, t_type);
@@ -3436,7 +3437,7 @@ namespace Helpers {
 
 
   struct NeqDispatch {
-    X64::Program* program;
+    Backend::ProgramData* program;
     X64::R from;
     X64::R to;
 
@@ -3455,7 +3456,7 @@ namespace Helpers {
     }
   };
 
-  static void emit_neq(X64::Program* program,
+  static void emit_neq(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(NeqDispatch{ program, from, to }, f_type, t_type);
@@ -4125,7 +4126,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
   {
     if (comp_thread->print_options.register_select) {
       IO_Single::lock();
-      format_print_ST("L{}:\n", resolver->current_block->label.label - 1);
+      IO_Single::format("L{}:\n", resolver->current_block->label.label - 1);
     }
 
     DEFER(&) {
@@ -4201,7 +4202,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
       used_registers |= (1llu << reg_id);
 
       if (comp_thread->print_options.register_select) {
-        format_print_ST("  T{} = {}\n", i, X64::all_x64_regs[reg_id].name);
+        IO_Single::format("  T{} = {}\n", i, X64::all_x64_regs[reg_id].name);
       }
 
       v.known_reg = true;
@@ -4324,10 +4325,9 @@ namespace X64 {
 }
 
 void x64_emit_dyn_library_function(CompilerThread* comp_thread, const IR::DynLibraryImport* lib_import, const CallingConvention* convention,
-                                   Backend::GenericProgram* program_in) {
+                                   Backend::ProgramData* program) {
   TRACING_FUNCTION();
-
-  X64::Program* program = static_cast<X64::Program*>(program_in);
+  X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   Backend::FunctionMetadata func = {};
   func.code_start = program->code_store.current_location().actual_location;
@@ -4367,8 +4367,9 @@ void x64_emit_dyn_library_function(CompilerThread* comp_thread, const IR::DynLib
 
 }
 
-void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread, Backend::GenericProgram* program_in) {
-  X64::Program* program = static_cast<X64::Program*>(program_in);
+void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
+              Backend::ProgramData* program) {
+  X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
 
   const SignatureStructure* type;
@@ -4398,19 +4399,19 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread, Backend::Gener
   lib.label = comp->next_function_label(type);
 
 
-  x64_emit_dyn_library_function(comp_thread, &lib, type->calling_convention, program_in);
+  x64_emit_dyn_library_function(comp_thread, &lib, type->calling_convention, program);
   if (comp_thread->is_panic()) {
     return;
   }
 
-  program->exit_process = lib.label;
+  extra->exit_process = lib.label;
 }
 
 void x64_emit_start(CompilerGlobals* comp,
                     IR::GlobalLabel entry,
-                    Backend::GenericProgram* program_in) {
+                    Backend::ProgramData* program) {
   TRACING_FUNCTION();
-  X64::Program* program = static_cast<X64::Program*>(program_in);
+  X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   program->entry_point = entry;
   program->start_code.code_start = program->code_store.current_location().actual_location;
@@ -4483,7 +4484,7 @@ void x64_emit_start(CompilerGlobals* comp,
   {
     Backend::Relocation relocation = {};
     relocation.type = Backend::RelocationType::Label;
-    relocation.label = program->exit_process;
+    relocation.label = extra->exit_process;
     relocation.location = program->code_store.total_size + X64::CALL_NEAR_OFFSET;
     program->relocations.insert(std::move(relocation));
 
@@ -4511,13 +4512,13 @@ struct BlockResolveOutput {
 };
 
 void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const IR::IRStore* ir, const CallingConvention* convention,
-                       Backend::GenericProgram* program_in) {
+                       Backend::ProgramData* program) {
   TRACING_FUNCTION();
+  X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   ASSERT(ir->global_label != IR::NULL_GLOBAL_LABEL);
   ASSERT(ir->control_blocks.size > 0);//means we did nothing
 
-  X64::Program* program = static_cast<X64::Program*>(program_in);
   const u8* const non_volatile_registers = convention->all_regs_unordered + convention->num_volatile_registers;
 
   //TODO: allow variables in registers
@@ -6050,7 +6051,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
     Backend::DataBucketIterator copy = start;
     while (copy < end) {
-      format_print_ST("{} ", PrintHexByte{ copy.read_byte() });
+      IO_Single::format("{} ", PrintHexByte{ copy.read_byte() });
     }
 
     IO_Single::print("\n");
@@ -6061,7 +6062,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
   usize start_idx = start.actual_location;
 
   while (start < end) {
-    format_print_ST("{}: ", HexOffset{ start.actual_location - start_idx });
+    IO_Single::format("{}: ", HexOffset{ start.actual_location - start_idx });
 
     u8 op = start.read_byte();
 
@@ -6100,61 +6101,61 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case X64::JE_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("je {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("je {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNE_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jne {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jne {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JB_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jb {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jb {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNB_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jnb {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jnb {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JA_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("ja {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("ja {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNA_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jna {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jna {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JL_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jl {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jl {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNL_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jnl {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jnl {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JG_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jg {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jg {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::JNG_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jng {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jng {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::SETE_RM8: {
@@ -6163,7 +6164,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
-            format_print_ST("sete {}\n", r_string);
+            IO_Single::format("sete {}\n", r_string);
             break;
           }
         case X64::SETL_RM8: {
@@ -6172,7 +6173,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
-            format_print_ST("setl {}\n", r_string);
+            IO_Single::format("setl {}\n", r_string);
             break;
           }
         case X64::SETG_RM8: {
@@ -6181,7 +6182,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             load_8_sizes(&p_opts, rex, short_address);
 
             OwnedArr<char> r_string = rm_reg_string(&p_opts, 0, modrm, &start);
-            format_print_ST("setg {}\n", r_string);
+            IO_Single::format("setg {}\n", r_string);
             break;
           }
         case X64::IMUL_RM_TO_R: {
@@ -6191,7 +6192,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("imul {}, {}\n", names.r, names.rm);
+            IO_Single::format("imul {}, {}\n", names.r, names.rm);
             break;
           }
         case X64::MOV_ZX_RM8_TO_R: {
@@ -6203,7 +6204,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("movzx {}, {}\n", names.r, names.rm);
+            IO_Single::format("movzx {}, {}\n", names.r, names.rm);
             break;
           }
         case X64::MOV_SX_RM8_TO_R: {
@@ -6215,11 +6216,11 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("movsx {}, {}\n", names.r, names.rm);
+            IO_Single::format("movsx {}, {}\n", names.r, names.rm);
             break;
           }
         default: {
-            format_print_ST("UNKNOWN INSTRUCTION: {} {} {}\n",
+            IO_Single::format("UNKNOWN INSTRUCTION: {} {} {}\n",
                             PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ op2 });
 
             return;
@@ -6235,7 +6236,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("add {}, {}\n", names.rm, names.r);
+            IO_Single::format("add {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::OR_R8_TO_RM8: {
@@ -6245,7 +6246,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("or  {}, {}\n", names.rm, names.r);
+            IO_Single::format("or  {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::OR_R_TO_RM: {
@@ -6255,7 +6256,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("or  {}, {}\n", names.rm, names.r);
+            IO_Single::format("or  {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::AND_R_TO_RM: {
@@ -6265,7 +6266,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("and {}, {}\n", names.rm, names.r);
+            IO_Single::format("and {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::SUB_R_TO_RM: {
@@ -6275,7 +6276,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("sub {}, {}\n", names.rm, names.r);
+            IO_Single::format("sub {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::XOR_R_TO_RM: {
@@ -6285,7 +6286,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("xor {}, {}\n", names.rm, names.r);
+            IO_Single::format("xor {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::CMP_R_TO_RM: {
@@ -6295,13 +6296,13 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("cmp {}, {}\n", names.rm, names.r);
+            IO_Single::format("cmp {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::CMP_IMM_TO_AL: {
             ASSERT(!rex);
             uint8_t b = start.read_byte();
-            format_print_ST("cmp al, {}\n");
+            IO_Single::format("cmp al, {}\n");
             break;
           }
         case X64::PUSH_R:
@@ -6315,7 +6316,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             const uint8_t reg = (op - X64::PUSH_R) | ((maybe_rex & 0b00000100) << 1);
             ViewArr<const char> r_string = b64_reg_name(reg);
 
-            format_print_ST("push {}\n", r_string);
+            IO_Single::format("push {}\n", r_string);
             break;
           }
         case X64::POP_R:
@@ -6329,7 +6330,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             const uint8_t reg = (op - X64::POP_R) | ((maybe_rex & 0b00000100) << 1);
             ViewArr<const char> r_string = b64_reg_name(reg);
 
-            format_print_ST("pop {}\n", r_string);
+            IO_Single::format("pop {}\n", r_string);
             break;
           }
         case 0x80: {
@@ -6344,13 +6345,13 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             uint8_t r_val = (modrm & 0b0011'1000) >> 3;
 
             if (r_val == 5) {
-              format_print_ST("sub {}, {}\n", rm_string, imm8);
+              IO_Single::format("sub {}, {}\n", rm_string, imm8);
             }
             else if (r_val == 7) {
-              format_print_ST("cmp {}, {}\n", rm_string, imm8);
+              IO_Single::format("cmp {}, {}\n", rm_string, imm8);
             }
             else {
-              format_print_ST("UNKNOWN INSTRUCTION: {} {} {} ...\n",
+              IO_Single::format("UNKNOWN INSTRUCTION: {} {} {} ...\n",
                               PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ modrm });
 
               return;
@@ -6369,13 +6370,13 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             uint8_t r_val = (modrm & 0b0011'1000) >> 3;
 
             if (r_val == 5) {
-              format_print_ST("sub {}, {}\n", rm_string, imm32);
+              IO_Single::format("sub {}, {}\n", rm_string, imm32);
             }
             else if (r_val == 7) {
-              format_print_ST("cmp {}, {}\n", rm_string, imm32);
+              IO_Single::format("cmp {}, {}\n", rm_string, imm32);
             }
             else {
-              format_print_ST("UNKNOWN INSTRUCTION: {} {} {} ...\n",
+              IO_Single::format("UNKNOWN INSTRUCTION: {} {} {} ...\n",
                               PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ modrm });
 
               return;
@@ -6389,7 +6390,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("mov {}, {}\n", names.rm, names.r);
+            IO_Single::format("mov {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::MOV_IMM8_RM: {
@@ -6401,7 +6402,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             uint8_t val = start.read_byte();
 
-            format_print_ST("mov {}, {}\n", rm, val);
+            IO_Single::format("mov {}, {}\n", rm, val);
             break;
           }
         case X64::MOV_IMM32_RM: {
@@ -6413,7 +6414,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             uint32_t val = x32_from_itr(&start);
 
-            format_print_ST("mov {}, {}\n", rm, val);
+            IO_Single::format("mov {}, {}\n", rm, val);
             break;
           }
         case X64::MOV_IMM_TO_R:
@@ -6433,17 +6434,17 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             if (short_operand) {
               uint16_t val = x16_from_itr(&start);
 
-              format_print_ST("mov {}, {}\n", name, val);
+              IO_Single::format("mov {}, {}\n", name, val);
             }
             else if (!rex_w) {
               uint32_t val = x32_from_itr(&start);
 
-              format_print_ST("mov {}, {}\n", name, val);
+              IO_Single::format("mov {}, {}\n", name, val);
             }
             else {
               uint64_t val = x64_from_itr(&start);
 
-              format_print_ST("mov {}, {}\n", name, val);
+              IO_Single::format("mov {}, {}\n", name, val);
             }
             break;
           }
@@ -6454,7 +6455,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("mov {}, {}\n", names.r, names.rm);
+            IO_Single::format("mov {}, {}\n", names.r, names.rm);
             break;
           }
         case X64::LEA_RM_TO_R: {
@@ -6464,7 +6465,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("lea {}, {}\n", names.r, names.rm);
+            IO_Single::format("lea {}, {}\n", names.r, names.rm);
             break;
           }
         case X64::CQO: {
@@ -6480,19 +6481,19 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             OwnedArr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
 
             if (r == 3) {
-              format_print_ST("neg {}\n", rm_string);
+              IO_Single::format("neg {}\n", rm_string);
             }
             else if (r == 4) {
-              format_print_ST("mul {}\n", rm_string);
+              IO_Single::format("mul {}\n", rm_string);
             }
             else if (r == 6) {
-              format_print_ST("div {}\n", rm_string);
+              IO_Single::format("div {}\n", rm_string);
             }
             else if (r == 7) {
-              format_print_ST("idiv {}\n", rm_string);
+              IO_Single::format("idiv {}\n", rm_string);
             }
             else {
-              format_print_ST("UNKNOWN INSTRUCTION: {} {} {}\n",
+              IO_Single::format("UNKNOWN INSTRUCTION: {} {} {}\n",
                               PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ modrm });
 
               return;
@@ -6508,16 +6509,16 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
             OwnedArr<char> rm_string = rm_reg_string(&p_opts, maybe_rex, modrm, &start);
 
             if (r == 4) {
-              format_print_ST("sal {}, CL\n", rm_string);
+              IO_Single::format("sal {}, CL\n", rm_string);
             }
             else if (r == 5) {
-              format_print_ST("shr {}, CL\n", rm_string);
+              IO_Single::format("shr {}, CL\n", rm_string);
             }
             else if (r == 7) {
-              format_print_ST("sar {}, CL\n", rm_string);
+              IO_Single::format("sar {}, CL\n", rm_string);
             }
             else {
-              format_print_ST("UNKNOWN INSTRUCTION: {} {} {}\n",
+              IO_Single::format("UNKNOWN INSTRUCTION: {} {} {}\n",
                               PrintHexByte{ maybe_rex }, PrintHexByte{ op }, PrintHexByte{ modrm });
 
               return;
@@ -6537,7 +6538,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             uint8_t imm8 = start.read_byte();
 
-            format_print_ST("mov {}, {}\n", r_string, imm8);
+            IO_Single::format("mov {}, {}\n", r_string, imm8);
             break;
           }
         case X64::MOV_R8_TO_RM8: {
@@ -6547,13 +6548,13 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
 
             RegisterNames names = register_names(&p_opts, maybe_rex, modrm, &start);
 
-            format_print_ST("mov {}, {}\n", names.rm, names.r);
+            IO_Single::format("mov {}, {}\n", names.rm, names.r);
             break;
           }
         case X64::JMP_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("jmp {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
+            IO_Single::format("jmp {}\n", HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         case X64::RET_NEAR: {
@@ -6563,12 +6564,12 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case X64::CALL_NEAR: {
             int rel32 = x32_from_itr(&start);
 
-            format_print_ST("call {} ; call offset will be incorrect at this point\n",
+            IO_Single::format("call {} ; call offset will be incorrect at this point\n",
                             HexOffset{ (start.actual_location - start_idx) + rel32 });
             break;
           }
         default: {
-            format_print_ST("UNKNOWN INSTRUCTION: {}\n",
+            IO_Single::format("UNKNOWN INSTRUCTION: {}\n",
                    PrintHexByte{ op });
 
             return;

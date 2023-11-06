@@ -5,6 +5,7 @@
 
 #include "safe_lib.h"
 #include "threading.h"
+#include "formattable.h"
 
 constexpr inline u64 MAX_DECIMAL_U64_DIGITS = sizeof("18446744073709551615") - 1;
 
@@ -141,21 +142,6 @@ template<typename T, typename B>
 constexpr T bit_fill_upper(B bits) {
   return ~bit_fill_lower<T, B>((sizeof(T) * 8) - bits);
 }
-
-template<typename T, size_t N>
-constexpr size_t array_size(T(&)[N]) {
-  return N;
-}
-
-template<typename A>
-struct ArraySize;
-
-
-template<typename T, usize N>
-struct ArraySize<T[N]> {
-  constexpr static usize VAL = N;
-};
-
 
 constexpr size_t ceil_div(size_t x, size_t y) noexcept {
   return x / y + (x % y != 0);
@@ -320,54 +306,6 @@ constexpr T ceil_to_N(T val) {
 template<typename T>
 constexpr T ceil_to_8(T val) {
   return ceil_to_N<T, 8>(val);
-}
-
-constexpr uint8_t absolute(int8_t i) {
-  if (i == INT8_MIN) {
-    return static_cast<uint8_t>(INT8_MAX) + 1u;
-  }
-  else if (i < 0) {
-    return static_cast<uint8_t>(-i);
-  }
-  else {
-    return static_cast<uint8_t>(i);
-  }
-}
-
-constexpr uint16_t absolute(int16_t i) {
-  if (i == INT16_MIN) {
-    return static_cast<uint16_t>(INT16_MAX) + 1u;
-  }
-  else if (i < 0) {
-    return static_cast<uint16_t>(-i);
-  }
-  else {
-    return static_cast<uint16_t>(i);
-  }
-}
-
-constexpr uint32_t absolute(int32_t i) {
-  if (i == INT32_MIN) {
-    return static_cast<uint32_t>(INT32_MAX) + 1u;
-  }
-  else if (i < 0) {
-    return static_cast<uint32_t>(-i);
-  }
-  else {
-    return static_cast<uint32_t>(i);
-  }
-}
-
-constexpr uint64_t absolute(int64_t i) {
-  if (i == INT64_MIN) {
-    return 0x8000000000000000ull;
-  }
-  else if (i < 0) {
-    return static_cast<uint64_t>(-i);
-  }
-  else {
-    return static_cast<uint64_t>(i);
-  }
 }
 
 template<typename T, typename L>
@@ -742,6 +680,23 @@ struct Array {
   }
 };
 
+namespace Format {
+  template<>
+  struct FormatArg<Array<char>> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const Array<char>& str) {
+      res.load_string(str.data, str.size);
+    }
+  };
+
+  template<>
+  struct FormatArg<Array<const char>> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const Array<const char>& str) {
+      res.load_string(str.data, str.size);
+    }
+  };
+}
 
 template<typename T>
 void copy_array(const Array<T>& from, Array<T>& to) noexcept {
@@ -1782,6 +1737,24 @@ struct OwnedArr<const T> {
   constexpr const T* end() const { return data + size; }
 };
 
+namespace Format {
+  template<>
+  struct FormatArg<OwnedArr<const char>> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const OwnedArr<const char>& str) {
+      res.load_string(str.data, str.size);
+    }
+  };
+
+  template<>
+  struct FormatArg<OwnedArr<char>> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const OwnedArr<char>& str) {
+      res.load_string(str.data, str.size);
+    }
+  };
+}
+
 template<typename T>
 OwnedArr<T> new_arr(usize size) {
   T* arr = allocate_default<T>(size);
@@ -1924,36 +1897,6 @@ constexpr ViewArr<T> view_arr(T(&arr)[N], usize start, usize count) {
     count,
   };
 }
-
-template<typename T, size_t size>
-struct ConstArray {
-  struct Loader {
-    T* arr;
-
-    template<typename U>
-    constexpr Loader& operator<<(U&& u) {
-      arr[0] = std::forward<U>(u);
-      arr++;
-      return *this;
-    }
-  };
-
-
-  T arr[size];
-
-  template<typename ... U>
-  constexpr static auto fill_arr(U&& ... u) {
-    ConstArray<T, size> arr = {};
-
-    static_assert(sizeof...(U) == size, "Must be fully filled");
-
-
-    Loader load{ arr.arr };
-    (load << ... << std::forward<U>(u));
-
-    return arr;
-  }
-};
 
 template<typename T>
 void serialise_to_array(Array<uint8_t>& bytes, const T& t) {
@@ -2112,21 +2055,6 @@ constexpr inline DESTRUCTOR<T> get_destructor() {
 }
 
 template<typename T>
-constexpr inline T square(T t) { return t * t; }
-
-template<typename T>
-constexpr inline T larger(T t1, T t2) noexcept {
-  return t1 > t2 ? t1 : t2;
-}
-
-template<typename T>
-constexpr inline T smaller(T t1, T t2) noexcept {
-  return t1 < t2 ? t1 : t2;
-}
-
-void print_as_bytes(const uint8_t* bytes, size_t length);
-
-template<typename T>
 struct EXECUTE_AT_END {
   T t;
 
@@ -2141,61 +2069,6 @@ template<typename T>
 EXECUTE_AT_END(T&& t) -> EXECUTE_AT_END<T>;
 
 #define DEFER(...) EXECUTE_AT_END JOIN(defer, __LINE__) = [__VA_ARGS__]() mutable ->void 
-
-namespace IO_Single {
-  void print_impl(const char* string, usize N);
-  void print_impl(const OwnedArr<char>& string);
-  void print_impl(const OwnedArr<const char>& string);
-  void print_impl(const ViewArr<char>& string);
-  void print_impl(const ViewArr<const char>& string);
-  void print_impl(const char c);
-
-  template<usize N>
-  void print_impl(const char(&str)[N]) {
-    print_impl(str, N);
-  }
-
-  void err_print_impl(const char* string, usize N);
-  void err_print_impl(const OwnedArr<char>& string);
-  void err_print_impl(const OwnedArr<const char>& string);
-  void err_print_impl(const ViewArr<char>& string);
-  void err_print_impl(const ViewArr<const char>& string);
-  void err_print_impl(const char c);
-
-  template<usize N>
-  void err_print_impl(const char(&str)[N]) {
-    err_print_impl(str, N);
-  }
-
-  template<typename ... T>
-  void print(const T& ... t) {
-    (print_impl(t), ...);
-  }
-
-  template<typename ... T>
-  void err_print(const T& ... t) {
-    (err_print_impl(t), ...);
-  }
-
-  void lock();
-  void unlock();
-}
-
-namespace IO {
-  template<typename ... T>
-  void print(const T& ... t) {
-    IO_Single::lock();
-    DEFER() { IO_Single::unlock(); };
-    IO_Single::print(t...);
-  }
-
-  template<typename ... T>
-  void err_print(const T& ... t) {
-    IO_Single::lock();
-    DEFER() { IO_Single::unlock(); };
-    IO_Single::err_print(t...);
-  }
-}
 
 #define DO_NOTHING ((void)0)
 
@@ -2264,8 +2137,3 @@ constexpr bool A_can_cast_to_B = decltype(_iMPL_A_can_cast_to_B::test_overload<A
 
 template<typename T, typename ... Ops>
 concept OneOf = (IS_SAME_TYPE<T, Ops> || ...);
-
-template<typename T>
-struct TemplateFalse {
-  constexpr static bool VAL = false;
-};

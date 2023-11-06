@@ -1,15 +1,17 @@
-#include <stdint.h>
-#include <filesystem>
 #include <chrono>
+
+#include "io.h"
+#include "format.h"
+#include "files.h"
 
 #include "api.h"
 #include "utility.h"
-#include "type.h"
-#include "files.h"
 
 #include "windows_specifics.h"
 #include "x64_backend.h"
 #include "PE_file_format.h"
+
+#include "args.h"
 
 #include "tester.h"
 
@@ -262,12 +264,12 @@ TestOutcome run_test(const APIOptions& opts, const char* expected_output_path, c
 
   const auto end = std::chrono::high_resolution_clock::now();
 
-  format_print("Test ran for: {} us (compiler ran for: {} us)\n",
-               std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(),
-               std::chrono::duration_cast<std::chrono::microseconds>(compiler_end - start).count());
+  IO::format("Test ran for: {} us (compiler ran for: {} us)\n",
+             std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(),
+             std::chrono::duration_cast<std::chrono::microseconds>(compiler_end - start).count());
 
   if (return_code != 0) {
-    format_print("Compiler Error. Return code: {}\n", return_code);
+    IO::format("Compiler Error. Return code: {}\n", return_code);
     return TestOutcome::CompilationError;
   }
   else {
@@ -286,7 +288,7 @@ TestOutcome run_test(const APIOptions& opts, const char* expected_output_path, c
         }
       case ProgramOutput::CORRECT: {
           if (res != expected.val) {
-            format_print("Incorrect Results. Expected: {}. Actual: {}\n", expected.val, res);
+            IO::format("Incorrect Results. Expected: {}. Actual: {}\n", expected.val, res);
             return TestOutcome::WrongAnswer;
           }
           else {
@@ -317,46 +319,25 @@ void print_test_collection(ViewArr<const char> system_name,
     indicator = lit_view_arr("Some");
   }
 
-  format_print("\n{} {} {}!", indicator, system_name, group_name);
+  IO::format("\n{} {} {}!", indicator, system_name, group_name);
 
   if (test_collection.size > 0) {
-    format_print("\n{}: ", group_list_name);
+    IO::format("\n{}: ", group_list_name);
 
     auto i = test_collection.begin();
     const auto end = test_collection.end();
 
-    format_print(" \"{}\"", *i);
+    IO::format(" \"{}\"", *i);
     i++;
 
     for (; i < end; i++) {
-      format_print(", \"{}\"", *i);
+      IO::format(", \"{}\"", *i);
     }
   }
 
 }
 
 bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizationOptions& optimize) {
-
-#if 0
-  {
-    size_t num_optimizations = (size_t)optimize.non_stack_locals;
-
-    if (num_optimizations == 0) {
-      std::cout << "\n-----------------------------------\n";
-      std::cout << "-- Testing with no optimizations --\n";
-      std::cout << "-----------------------------------\n";
-    }
-    else {
-      std::cout << "\n--------------------------------\n";
-      std::cout << "-- Testing with optimizations --\n";
-      if (optimize.non_stack_locals) {
-        std::cout << "--      Non stack locals      --\n";
-      }
-      std::cout << "--------------------------------\n";
-    }
-  }
-#endif
-
   ViewArr<const char> comp_error_tests[NUM_TESTS] = {};
   size_t num_comp_errorr_tests = 0;
 
@@ -373,8 +354,8 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
 
     APIOptions options = {};
 
-    X64::Program program = {};
-    options.program = &program;
+    X64::ProgramExtra program_extra = {};
+    options.program_extra = &program_extra;
 
     options.optimize = optimize;
 
@@ -410,7 +391,7 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
     options.print.comp_units = false;
     options.print.work = false;
 
-    format_print("\nStarting Test: {}\n", test.test_name);
+    IO::format("\nStarting Test: {}\n", test.test_name);
 
     Expected expected = {};
     expected.val = test.return_value;
@@ -458,7 +439,7 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
 bool run_all_tests(const Tester& tester) {
   ViewArr<const char> system_name = tester.pi->system_name;
 
-  format_print("=== Running tests in: {} ===\n", system_name);
+  IO::format("=== Running tests in: {} ===\n", system_name);
 
   bool any_failed = false;
 
@@ -467,19 +448,18 @@ bool run_all_tests(const Tester& tester) {
   //no optimizations
   any_failed |= run_all_tests_with_optimizations(tester, opts);
 
-  format_print("\n=== Finished tests in: {} ===\n\n", system_name);
+  IO::format("\n=== Finished tests in: {} ===\n\n", system_name);
   return any_failed;
 }
 
 int main() {
+  Windows::set_current_directory(lit_view_arr(ROOT_DIR));
+  
   {
-    const auto curr = std::filesystem::current_path();
-    const std::string curr_str = curr.generic_string();
-    const ViewArr<const char> curr_view = { curr_str.c_str(), curr_str.size() };
+    auto current_dir = Windows::get_current_directory();
 
-    format_print("Current Working Directory: {}\n", curr_view);
+    IO::format("Current Working Directory: {}\n", current_dir.view());
   }
-
   constexpr Backend::PlatformInterface x64_pi = x86_64_platform_interface();
   constexpr Backend::ExecutableFormatInterface PE_efi = pe_plus_file_interface();
 
@@ -489,7 +469,7 @@ int main() {
 
   IO::print("\n========== Started all tests ==========\n\n");
   any_failed |= run_all_tests(tester);
-  IO::print(  "==========  Ended all tests  ==========\n\n");
+  IO::print("==========  Ended all tests  ==========\n\n");
 
   if (any_failed) {
     IO::print("Some tests failed!!!\n");

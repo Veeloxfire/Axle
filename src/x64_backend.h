@@ -1,10 +1,11 @@
 #pragma once
-#include "backends.h"
+#include "api.h"
+#include "calling_convention.h"
 
 namespace X64 {
-  struct REGISTER_CONSTANT { uint8_t REG; const char* name; };
+  struct REGISTER_CONSTANT { uint8_t REG; ViewArr<const char> name; };
 
-#define REGISTER_DEFINE(NAME, VAL) inline constexpr REGISTER_CONSTANT NAME = { VAL, #NAME }
+#define REGISTER_DEFINE(NAME, VAL) inline constexpr REGISTER_CONSTANT NAME = { VAL, lit_view_arr(#NAME) }
 
   REGISTER_DEFINE(rax, 0);
   REGISTER_DEFINE(rcx, 1);
@@ -42,11 +43,11 @@ namespace X64 {
     r14,
   };
 
-  constexpr const char* x86_64_reg_name_from_num(uint8_t reg) noexcept {
+  constexpr ViewArr<const char> x86_64_reg_name_from_num(uint8_t reg) noexcept {
     constexpr size_t num_registers = sizeof(all_x64_regs) / sizeof(REGISTER_CONSTANT);
 
     if (reg >= num_registers) {
-      return "<INVALID-REGISTER>";
+      return lit_view_arr("<INVALID-REGISTER>");
     }
     else {
       return all_x64_regs[reg].name;
@@ -63,21 +64,21 @@ namespace X64 {
 
     size_t i = 0;
     for (; i < num_volatile; i++) {
-      arr.arr[i] = volatiles[i];
+      arr.data[i] = volatiles[i];
     }
 
     i = 0;
     for (; i < num_non_volatile; i++) {
-      arr.arr[i + num_volatile] = non_volatiles[i];
+      arr.data[i + num_volatile] = non_volatiles[i];
     }
 
     if constexpr (sizeof...(T) > 0) {
       using EXTRA_ARR = ConstArray<const REGISTER_CONSTANT*, sizeof...(T)>;
-      const auto extras_arr = EXTRA_ARR::fill_arr((&extras)...);
+      const auto extras_arr = EXTRA_ARR::create((&extras)...);
 
       i = 0;
       for (; i < sizeof...(T); i++) {
-        arr.arr[i + num_volatile + num_non_volatile] = extras_arr.arr[i]->REG;
+        arr.data[i + num_volatile + num_non_volatile] = extras_arr.data[i]->REG;
       }
     }
 
@@ -156,7 +157,7 @@ namespace X64 {
 
   inline constexpr CallingConvention CONVENTION_microsoft_x64
     = make_calling_convention(lit_view_arr("Microsoft x64"),
-                              MICROSOFT_X64::all_regs_unordered.arr,
+                              MICROSOFT_X64::all_regs_unordered.data,
                               MICROSOFT_X64::parameters,
                               MICROSOFT_X64::num_parameters,
                               MICROSOFT_X64::volatiles,
@@ -178,7 +179,7 @@ namespace X64 {
 
   constexpr CallingConvention CONVENTION_stdcall
     = make_calling_convention(lit_view_arr("stdcall"),
-                              STDCALL::all_regs_unordered.arr,
+                              STDCALL::all_regs_unordered.data,
                               nullptr,
                               0,
                               STDCALL::volatiles,
@@ -199,7 +200,7 @@ namespace X64 {
 
   inline constexpr const char SYSTEM_NAME[] = "x86_64";
 
-  struct Program : Backend::GenericProgram {
+  struct ProgramExtra : Backend::ProgramExtra {
     IR::GlobalLabel exit_process;
   };
 }
@@ -207,20 +208,20 @@ namespace X64 {
 void x64_emit_dyn_library_function(CompilerThread* comp_thread,
                                    const IR::DynLibraryImport* lib_import,
                                    const CallingConvention* convention,
-                                   Backend::GenericProgram* program);
+                                   Backend::ProgramData* program);
 
 void x64_emit_function(CompilerGlobals* comp,
                        CompilerThread* comp_thread,
                        const IR::IRStore* ir,
                        const CallingConvention* convention,
-                       Backend::GenericProgram* program);
+                       Backend::ProgramData* program);
 
 void x64_emit_start(CompilerGlobals* comp,
                     IR::GlobalLabel entry_point,
-                    Backend::GenericProgram* program);
+                    Backend::ProgramData* program);
 
 void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
-              Backend::GenericProgram* program_in);
+              Backend::ProgramData* program_in);
 
 constexpr Backend::PlatformInterface x86_64_platform_interface() {
   Backend::PlatformInterface in = {};

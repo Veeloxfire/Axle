@@ -6,7 +6,7 @@
 #include "errors.h"
 #include "memory.h"
 
-#include "format.h"
+#include "formattable.h"
 
 #define AXLE_TOKEN_KEYWORDS \
 MODIFY(Return, "return") \
@@ -122,6 +122,7 @@ struct Lexer {
   Position curr_pos = {};
 
   const char* top = nullptr;
+  const char* end = nullptr;
 };
 
 Span span_of_lex(const Lexer* lex);
@@ -164,7 +165,7 @@ void reset_parser(CompilerGlobals* comp,
                   CompilerThread* const comp_thread,
                   Parser* const parser,
                   const InternString* file_name,
-                  const char* string);
+                  ViewArr<const char> string);
 
 struct FileAST;
 void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser, FileAST* const file);

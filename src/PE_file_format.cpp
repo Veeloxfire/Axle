@@ -1,8 +1,10 @@
 #include "PE_file_format.h"
 #include "files.h"
 #include "compiler.h"
+#include "io.h"
+#include "backends.h"
 #include "trace.h"
-#include <time.h>
+#include <ctime>
 
 //// Sizes ////
 
@@ -89,7 +91,8 @@ struct ProgramLocation {
   u32 file;
 };
 
-void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+void write_pe_file(CompilerThread* comp_thread,
+                   const Backend::ProgramData* program,
                    const InternString* out_name, const InternString* out_folder, bool lib) {
   TRACING_FUNCTION();
 
@@ -134,7 +137,7 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, Span{}, "Could not open output file \"{}\" to write", file_path.raw);
     return;
   }
-  IO::print("Writing to: ", file_path.raw, '\n');
+  IO::format("Writing to: {}\n", file_path.raw);
 
   auto* const out = file.file;
 
@@ -1041,17 +1044,20 @@ void write_pe_file(CompilerThread* comp_thread, const Backend::GenericProgram* p
   FILES::close(out);
   }
 
-void output_pe_exe(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+void output_pe_exe(CompilerThread* comp_thread,
+                   const Backend::ProgramData* program,
                    const InternString* out_name, const InternString* out_folder) {
   write_pe_file(comp_thread, program, out_name, out_folder, false);
 }
 
 
-void output_pe_dll(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+void output_pe_dll(CompilerThread* comp_thread,
+                   const Backend::ProgramData* program,
                    const InternString* out_name, const InternString* out_folder) {
   write_pe_file(comp_thread, program, out_name, out_folder, true);
 }
 
+#if 0
 struct RVA_Resolver {
   int32_t ptr_base = 0;
   size_t va_base = 0;
@@ -1280,4 +1286,5 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     }
   }
 }
+#endif
 

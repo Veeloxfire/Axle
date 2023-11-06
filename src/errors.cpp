@@ -1,5 +1,6 @@
 #include "errors.h"
 #include "files.h"
+#include "io.h"
 
 OwnedArr<char> load_span_from_source(const Span& span, const ViewArr<const char>& source) {
   Array<char> res = {};
@@ -154,7 +155,7 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
 
     OwnedArr<char> type_set_message = format_type_set(const_view_arr(i->message), 4, 70);
 
-    IO::err_print(type_set_message);
+    IO::err_print(view_arr(type_set_message));
     IO::err_print("\n\n");
 
     if (i->span.full_path != nullptr) {
@@ -168,13 +169,13 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
         files.insert(i->span.full_path, std::move(load_file));
       }
 
-      OwnedArr<const char>* src_ptr = files.get_val(i->span.full_path);
+      const OwnedArr<const char>* src_ptr = files.get_val(i->span.full_path);
       ASSERT(src_ptr != nullptr);
 
-      OwnedArr<char> string = load_span_from_source(span, view_arr(*src_ptr));
+      IO::err_format("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start);
 
-      format_err_print("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start);
-      IO::err_print(string);
+      OwnedArr<char> string = load_span_from_source(span, view_arr(*src_ptr));
+      IO::err_print(view_arr(string));
       IO::err_print('\n');
     }
   }

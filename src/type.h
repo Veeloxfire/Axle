@@ -4,7 +4,7 @@
 #include "comp_utilities.h"
 #include "names.h"
 #include "errors.h"
-#include "format.h"
+#include "formattable.h"
 
 struct CompilationUnit;
 struct CallingConvention;

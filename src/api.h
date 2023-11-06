@@ -1,10 +1,54 @@
 #pragma once
-#include "safe_lib.h"
+#include "comp_utilities.h"
 
 namespace Backend {
-  struct GenericProgram;
-  struct PlatformInterface;
-  struct ExecutableFormatInterface;
+  struct ProgramData;
+
+  using PROGRAM_INIT = void(*)(CompilerGlobals* comp,
+                               CompilerThread* comp_thread,
+                               ProgramData* program);
+
+  using EMIT_FUNCTION = void(*)(CompilerGlobals* comp,
+                                CompilerThread* comp_thread,
+                                const IR::IRStore* ir,
+                                const CallingConvention* convention,
+                                ProgramData* program);
+
+  using EMIT_START = void(*)(CompilerGlobals* comp,
+                             IR::GlobalLabel entry_point,
+                             ProgramData* program);
+
+  using EMIT_DYNAMIC_LIBRARY_FUNCTION = void(*) (CompilerThread* comp_thread,
+                                                 const IR::DynLibraryImport* lib_import,
+                                                 const CallingConvention* convention,
+                                                 ProgramData* program);
+
+  struct PlatformInterface {
+    CallingConvention const* const* valid_calling_conventions;
+    u32 num_calling_conventions;
+
+    System system;
+    ViewArr<const char> system_name;
+
+    usize ptr_size;
+
+    PROGRAM_INIT init;
+    EMIT_START emit_start;
+    EMIT_FUNCTION emit_function;
+    EMIT_DYNAMIC_LIBRARY_FUNCTION emit_dyn_library_function;
+  };
+
+  using OUTPUT_EXECUTABLE = void(*) (CompilerThread* comp_thread,
+                                     const ProgramData* program,
+                                     const InternString* out_name, const InternString* out_folder);
+
+  struct ExecutableFormatInterface {
+    OutputFileType type;
+    OUTPUT_EXECUTABLE output_executable;
+    OUTPUT_EXECUTABLE output_dynamic_library;
+  };
+
+  struct ProgramExtra {};
 }
 
 struct APIOptimizationOptions {
@@ -53,7 +97,7 @@ struct APIOptions {
   APIBuildOptions build;
   APIPrintOptions print;
 
-  Backend::GenericProgram* program;
+  Backend::ProgramExtra* program_extra;
   const Backend::PlatformInterface* platform_interface;
   const Backend::ExecutableFormatInterface* executable_format_interface;
 };

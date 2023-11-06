@@ -1,8 +1,5 @@
 #pragma once
-#include <stddef.h>
-#include "utility.h"
-#include "strings.h"
-#include "backends.h"
+#include "api.h"
 
 #define PE_SIGNATURE {'P', 'E', '\0', '\0'}
 #define DOS_STUB \
@@ -272,31 +269,6 @@ union ExportAddress {
   RVA forwarder_rva;
 };
 
-union ExportAddressInternal {
-  RVA export_rva;
-  const InternString* forwarder_rva;
-};
-
-struct ExportElement {
-  const InternString* str;
-  uint16_t ordinal;
-};
-
-struct ExportTable {
-  InternStringSet names = {};
-
-  ExportDirectoryTable directory_table = {};
-  Array<ExportAddressInternal> address_table = {};
-  Array<ExportElement> element_table = {};
-};
-
-struct PEFile {
-  PE_File_Header header;
-  Array<Section_Header> section_headers;
-
-  ExportTable export_table = {};
-};
-
 struct ImportDataDirectory {
   RVA import_lookup_table;
   uint32_t date_time_stamp;
@@ -331,17 +303,21 @@ struct CompilerGlobals;
 struct CompilerThread;
 struct Span;
 
-void output_pe_exe(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+void output_pe_exe(CompilerThread* comp_thread,
+                   const Backend::ProgramData* program,
                    const InternString* out_name, const InternString* out_folder);
 
-void output_pe_dll(CompilerThread* comp_thread, const Backend::GenericProgram* program,
+void output_pe_dll(CompilerThread* comp_thread,
+                   const Backend::ProgramData* program,
                    const InternString* out_name, const InternString* out_folder);
 
+#if 0
 void load_portable_executable_from_file(CompilerGlobals* const comp,
                                         CompilerThread* const comp_thread,
                                         const Span& span,
                                         PEFile* pe_file,
                                         const ViewArr<const char>& file_name);
+#endif
 
 constexpr Backend::ExecutableFormatInterface pe_plus_file_interface() {
   Backend::ExecutableFormatInterface in = {};

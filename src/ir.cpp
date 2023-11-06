@@ -1,5 +1,6 @@
 #include "ir.h"
 #include "compiler.h"
+#include "io.h"
 
 namespace IR {
   IR::ValueIndex IRStore::new_temporary(const VariableId& v_id, ValueRequirements requirements) {
@@ -1016,7 +1017,7 @@ const char* format_name(IR::Format f) {
 }
 
 void print_value(const IR::V_ARG& arg) {
-  format_print_ST("T{} [{}..{}]", arg.val.index, arg.offset, arg.offset + arg.size);
+  IO_Single::format("T{} [{}..{}]", arg.val.index, arg.offset, arg.offset + arg.size);
 }
 
 void IR::print_ir(const IR::IRStore* builder) {
@@ -1024,18 +1025,18 @@ void IR::print_ir(const IR::IRStore* builder) {
   DEFER() { IO_Single::unlock(); };
 
 
-  format_print_ST("== Function block GL{} ==\n", builder->global_label.label - 1);
-  format_print_ST("Signature =  {}\n", PrintSignatureType{ builder->signature });
+  IO_Single::format("== Function block GL{} ==\n", builder->global_label.label - 1);
+  IO_Single::format("Signature =  {}\n", PrintSignatureType{ builder->signature });
 
   u32 num_params = (u32)builder->signature->parameter_types.size;
 
   if (builder->variables.size > 0) {
     u32 counter = 0;
-    format_print_ST("Variables ({}):\n", builder->variables.size);
+    IO_Single::format("Variables ({}):\n", builder->variables.size);
     FOR(builder->variables, it) {
-      format_print_ST("  V{}: {}", counter, it->type.name);
+      IO_Single::format("  V{}: {}", counter, it->type.name);
       if (counter < num_params) {
-        format_print_ST(" = param({})", counter);
+        IO_Single::format(" = param({})", counter);
       }
 
       IO_Single::print('\n');
@@ -1045,9 +1046,9 @@ void IR::print_ir(const IR::IRStore* builder) {
 
   if (builder->globals_used.size > 0) {
     u32 counter = 0;
-    format_print_ST("Captured Globals ({}):\n", builder->globals_used.size);
+    IO_Single::format("Captured Globals ({}):\n", builder->globals_used.size);
     FOR(builder->globals_used, it) {
-      format_print_ST("  {}: {} -> Data Member {}\n", counter, it->type.name, it->data_member);
+      IO_Single::format("  {}: {} -> Data Member {}\n", counter, it->type.name, it->data_member);
 
       counter += 1;
     }
@@ -1060,27 +1061,27 @@ void IR::print_ir(const IR::IRStore* builder) {
     const u8* bc = block->bytecode.begin();
     const u8* bc_end = block->bytecode.end();
 
-    const char* name = "<invalid>";
+    ViewArr<const char> name = lit_view_arr("<invalid>");
     switch (block->cf_type) {
-      case ControlFlowType::Start: name = "Start"; break;
-      case ControlFlowType::End: name = "End"; break;
-      case ControlFlowType::Return: name = "Return"; break;
-      case ControlFlowType::Inline: name = "Inline"; break;
-      case ControlFlowType::Split: name = "Split"; break;
-      case ControlFlowType::Merge: name = "Merge"; break;
+      case ControlFlowType::Start: name = lit_view_arr("Start"); break;
+      case ControlFlowType::End: name = lit_view_arr("End"); break;
+      case ControlFlowType::Return: name = lit_view_arr("Return"); break;
+      case ControlFlowType::Inline: name = lit_view_arr("Inline"); break;
+      case ControlFlowType::Split: name = lit_view_arr("Split"); break;
+      case ControlFlowType::Merge: name = lit_view_arr("Merge"); break;
     }
 
-    format_print_ST("L{} (Type = \"{}\")\n", block->label.label - 1, name);
+    IO_Single::format("L{} (Type = \"{}\")\n", block->label.label - 1, name);
 
     if (block->temporaries.size > 0) {
-      format_print_ST("Temporaries ({}):\n", block->temporaries.size);
+      IO_Single::format("Temporaries ({}):\n", block->temporaries.size);
       for (u32 i = 0; i < block->temporaries.size; ++i) {
         const SSATemp& temp = block->temporaries.data[i];
         if (temp.is_variable) {
-          format_print_ST("  T{}: {} = V{}\n", i, temp.type.name, temp.var_id.variable);
+          IO_Single::format("  T{}: {} = V{}\n", i, temp.type.name, temp.var_id.variable);
         }
         else {
-          format_print_ST("  T{}: {}\n", i, temp.type.name);
+          IO_Single::format("  T{}: {}\n", i, temp.type.name);
         }
       }
     }
@@ -1091,7 +1092,7 @@ void IR::print_ir(const IR::IRStore* builder) {
       u8 op_byte = *bc;
       OpCode op = static_cast<OpCode>(op_byte);
 
-      format_print_ST("  {}:\t", op);
+      IO_Single::format("  {}:\t", op);
 
       switch (op) {
         case IR::OpCode::Set: {
@@ -1104,7 +1105,7 @@ void IR::print_ir(const IR::IRStore* builder) {
             arr.ptr = set.data.val;
             arr.size = set.data.size;
 
-            format_print_ST(" = raw [ {} ]\n", arr);
+            IO_Single::format(" = raw [ {} ]\n", arr);
 
             break;
           }
@@ -1120,7 +1121,7 @@ void IR::print_ir(const IR::IRStore* builder) {
             arr.ptr = set.data.val;
             arr.size = set.data.size;
 
-            format_print_ST(" = raw [ {} ]\n", arr);
+            IO_Single::format(" = raw [ {} ]\n", arr);
 
             break;
           }
@@ -1192,7 +1193,7 @@ void IR::print_ir(const IR::IRStore* builder) {
             bc = IR::Read::AddrOfGlobal(bc, bc_end, glob);
 
             print_value(glob.val);
-            format_print_ST(" = & G({})\n", glob.im32);
+            IO_Single::format(" = & G({})\n", glob.im32);
             break;
           }
         case IR::OpCode::StartFunc: {
@@ -1220,7 +1221,7 @@ void IR::print_ir(const IR::IRStore* builder) {
             IR::Types::Call cl;
             bc = IR::Read::Call(bc, bc_end, cl);
 
-            format_print_ST("Call GL{} [", cl.label.label - 1);
+            IO_Single::format("Call GL{} [", cl.label.label - 1);
             if (cl.n_values > 0) {
               IR::V_ARG sv;
               bc += deserialize(bc, bc_end - bc, sv);
@@ -1293,11 +1294,11 @@ void IR::print_ir(const IR::IRStore* builder) {
 
     switch (block->cf_type) {
       case ControlFlowType::Start: {
-          format_print_ST("goto L{}\n", block->cf_start.child.label - 1);
+          IO_Single::format("goto L{}\n", block->cf_start.child.label - 1);
           break;
         }
       case ControlFlowType::Inline: {
-          format_print_ST("goto L{}\n", block->cf_inline.child.label - 1);
+          IO_Single::format("goto L{}\n", block->cf_inline.child.label - 1);
           break;
         }
       case ControlFlowType::End: {
@@ -1305,7 +1306,7 @@ void IR::print_ir(const IR::IRStore* builder) {
           break;
         }
       case ControlFlowType::Return: {
-          format_print_ST("return T{}\n", block->cf_return.val.index);
+          IO_Single::format("return T{}\n", block->cf_return.val.index);
           IO_Single::print('\n');
           break;
         }
@@ -1314,11 +1315,11 @@ void IR::print_ir(const IR::IRStore* builder) {
           IR::LocalLabel true_label = block->cf_split.true_branch;
           IR::LocalLabel false_label = block->cf_split.false_branch;
 
-          format_print_ST("if T{} then goto L{} else goto L{}\n", cond.index, true_label.label - 1, false_label.label - 1);
+          IO_Single::format("if T{} then goto L{} else goto L{}\n", cond.index, true_label.label - 1, false_label.label - 1);
           break;
         }
       case ControlFlowType::Merge: {
-          format_print_ST("goto L{}\n", block->cf_merge.child.label - 1);
+          IO_Single::format("goto L{}\n", block->cf_merge.child.label - 1);
           break;
         }
     }

@@ -1,25 +1,26 @@
 #pragma once
-#include <stdint.h>
 #include <windows.h>
 #include <memoryapi.h>
 
-#include "utility.h"
+#include "safe_lib.h"
 
 namespace Windows {
   template<typename T> 
   struct VirtualPtr {
     T* ptr = nullptr;
-    size_t size = 0;
-    size_t entry = 0;
+    usize size = 0;
+    usize entry = 0;
 
     template<typename U, typename ... J>
     U call(J&& ... t) {
-      return ((FUNCTION_PTR<U, J...>)ptr)(std::forward<J>(t)...);
+      using PTR = U(*)(J...);
+      return ((PTR)ptr)(std::forward<J>(t)...);
     }
 
     template<typename U>
     U call() {
-      return ((FUNCTION_PTR<U>)(ptr + entry))();
+      using PTR = U(*)();
+      return ((U)(ptr + entry))();
     }
   };
 
@@ -48,9 +49,27 @@ namespace Windows {
     }
   };
 
-  struct MAX_PATH_STR {
-    char str[MAX_PATH + 1];
+  struct NativePath {
+    char path[MAX_PATH + 1] = {};
+
+    constexpr NativePath() = default;
+    constexpr NativePath(const ViewArr<const char>& vr) {
+      usize len = vr.size > MAX_PATH ? MAX_PATH : vr.size;
+      for (usize i = 0; i < len; ++i) {
+        path[i] = vr[i];
+      }
+    }
+
+    const char* c_str() const {
+      return path;
+    }
+
+    ViewArr<const char> view() const {
+      return { path, strlen_ts(path) };
+    }
   };
 
-  MAX_PATH_STR get_current_directory();
+
+  NativePath get_current_directory();
+  void set_current_directory(const ViewArr<const char>& str);
 }

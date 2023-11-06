@@ -1,15 +1,6 @@
 #pragma once
-#include <cstdint>
-
-using u8 = uint8_t;
-using u16 = uint16_t;
-using u32 = uint32_t;
-using u64 = uint64_t;
-using i8 = int8_t;
-using i16 = int16_t;
-using i32 = int32_t;
-using i64 = int64_t;
-using usize = size_t;
+#include "safe_lib.h"
+#include "formattable.h"
 
 //Important forward declarations
 struct CompilerGlobals;
@@ -19,6 +10,7 @@ struct Local;
 struct Global;
 struct InternString;
 struct Span;
+struct CallingConvention;
 
 using AST_LOCAL = AST*;
 
@@ -31,6 +23,37 @@ struct AST_ARR {
   AST_LINKED* start = 0;
   usize count = 0;
 };
+
+#define FOR_AST(arr, it) \
+for(auto [_l, it] = _start_ast_iterate(arr); _l; _step_ast_iterate(_l, it))
+
+struct AST_ITERATE_HOLDER {
+  AST_LINKED* l;
+  AST_LOCAL loc;
+};
+
+constexpr AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
+  if (a.start == nullptr) {
+    return { nullptr, 0 };
+  }
+  else {
+    ASSERT(a.start != nullptr);
+    ASSERT(a.start->curr != nullptr);
+    return {
+      a.start,
+      a.start->curr,
+    };
+  }
+}
+
+constexpr void _step_ast_iterate(AST_LINKED*& _l, AST_LOCAL& loc) {
+  _l = _l->next;
+  if (_l != nullptr) {
+    loc = _l->curr;
+    ASSERT(loc != nullptr);
+  }
+}
+
 
 #define COMPCODEINC \
 MOD(NO_ERRORS)\
@@ -54,6 +77,27 @@ enum struct ERROR_CODE : uint8_t {
 #undef MOD
 };
 
+constexpr ViewArr<const char> error_code_string(ERROR_CODE c) {
+  switch (c) {
+#define MOD(E) case ERROR_CODE ::  E : return lit_view_arr(#E);
+    COMPCODEINC
+#undef MOD
+  }
+
+  return lit_view_arr("Invalid code");
+}
+
+namespace Format {
+  template<>
+  struct FormatArg<ERROR_CODE> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, ERROR_CODE er) {
+      ViewArr<const char> err_str = error_code_string(er);
+      res.load_string(err_str.data, err_str.size);
+    }
+  };
+}
+
 #define BIN_OP_INCS \
 MODIFY(ADD, "+", 3)\
 MODIFY(SUB, "-", 3)\
@@ -76,6 +120,22 @@ enum struct BINARY_OPERATOR : uint8_t {
 #undef MODIFY
 };
 
+namespace BINARY_OP_STRING {
+#define MODIFY(name, str, prec) inline constexpr char name[] = str;
+  BIN_OP_INCS;
+#undef MODIFY
+
+  constexpr ViewArr<const char> get(BINARY_OPERATOR op) noexcept {
+    switch (op)
+    {
+#define MODIFY(name, str, prec) case BINARY_OPERATOR :: name : return lit_view_arr(name);
+      BIN_OP_INCS;
+#undef MODIFY
+    }
+
+    return lit_view_arr("UNKNOWN OPERATOR");
+  }
+}
 
 #define UN_OP_INCS \
 MODIFY(NEG, "-") \
@@ -87,6 +147,24 @@ enum struct UNARY_OPERATOR : uint8_t {
   UN_OP_INCS
 #undef MODIFY
 };
+
+namespace UNARY_OP_STRING {
+#define MODIFY(name, str) inline constexpr char name[] = str;
+  UN_OP_INCS;
+#undef MODIFY
+
+  constexpr ViewArr<const char> get(UNARY_OPERATOR op) noexcept {
+    switch (op)
+    {
+#define MODIFY(name, str) case UNARY_OPERATOR :: name :  return lit_view_arr(name);
+      UN_OP_INCS;
+#undef MODIFY
+    }
+
+    return lit_view_arr("UNKNOWN OPERATOR");
+  }
+}
+
 
 #define INTRINSIC_MODS \
 MOD(import) \
@@ -174,6 +252,8 @@ namespace IR {
     return ~prim.flags;
   }
 
+  struct DynLibraryImport;
+  struct IRStore;
 }
 
 enum struct System : u8 {

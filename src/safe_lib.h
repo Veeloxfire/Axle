@@ -3,9 +3,17 @@
 #include <cassert>
 #include <new>
 
+#include <cstdint>
 
-#include "comp_utilities.h"
-//#include "trace.h"
+using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using u64 = uint64_t;
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
+using i64 = int64_t;
+using usize = size_t;
 
 #define STR_REPLAC2(a) #a
 #define STR_REPLACE(a) STR_REPLAC2(a)
@@ -398,49 +406,22 @@ constexpr ViewArr<const char> lit_view_arr(const char(&arr)[N]) {
   };
 }
 
-constexpr ViewArr<const char> error_code_string(ERROR_CODE c) {
-  switch (c) {
-#define MOD(E) case ERROR_CODE ::  E : return lit_view_arr(#E);
-    COMPCODEINC
-#undef MOD
+
+template<typename T, size_t size>
+struct ConstArray {
+  T data[size];
+
+  template<typename ... U>
+  constexpr static auto create(U&& ... u) {
+    static_assert(sizeof...(U) == size, "Must be fully filled");
+
+    return { {std::forward<U>(u)...} };
   }
 
-  return lit_view_arr("Invalid code");
-}
+  constexpr const T* begin() const { return data; }
+  constexpr const T* end() const { return data + size; }
+};
 
-namespace BINARY_OP_STRING {
-#define MODIFY(name, str, prec) inline constexpr char name[] = str;
-  BIN_OP_INCS;
-#undef MODIFY
-
-  constexpr ViewArr<const char> get(BINARY_OPERATOR op) noexcept {
-    switch (op)
-    {
-#define MODIFY(name, str, prec) case BINARY_OPERATOR :: name : return lit_view_arr(name);
-      BIN_OP_INCS;
-#undef MODIFY
-    }
-
-    return lit_view_arr("UNKNOWN OPERATOR");
-  }
-}
-
-namespace UNARY_OP_STRING {
-#define MODIFY(name, str) inline constexpr char name[] = str;
-  UN_OP_INCS;
-#undef MODIFY
-
-  constexpr ViewArr<const char> get(UNARY_OPERATOR op) noexcept {
-    switch (op)
-    {
-#define MODIFY(name, str) case UNARY_OPERATOR :: name :  return lit_view_arr(name);
-      UN_OP_INCS;
-#undef MODIFY
-    }
-
-    return lit_view_arr("UNKNOWN OPERATOR");
-  }
-}
 
 #define FOR(name, it) \
 for(auto it = (name).begin(), JOIN(__end, __LINE__) = (name).end(); \
@@ -451,32 +432,77 @@ for(auto it = (name).mut_begin(), JOIN(__end, __LINE__) = (name).mut_end(); \
 it < JOIN(__end, __LINE__); it++)
 
 
-#define FOR_AST(arr, it) \
-for(auto [_l, it] = _start_ast_iterate(arr); _l; _step_ast_iterate(_l, it))
-
-struct AST_ITERATE_HOLDER {
-  AST_LINKED* l;
-  AST_LOCAL loc;
-};
-
-constexpr inline AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
-  if (a.start == nullptr) {
-    return { nullptr, 0 };
+constexpr uint8_t absolute(int8_t i) {
+  if (i == INT8_MIN) {
+    return static_cast<uint8_t>(INT8_MAX) + 1u;
+  }
+  else if (i < 0) {
+    return static_cast<uint8_t>(-i);
   }
   else {
-    ASSERT(a.start != nullptr);
-    ASSERT(a.start->curr != nullptr);
-    return {
-      a.start,
-      a.start->curr,
-    };
+    return static_cast<uint8_t>(i);
   }
 }
 
-constexpr inline void _step_ast_iterate(AST_LINKED*& _l, AST_LOCAL& loc) {
-  _l = _l->next;
-  if (_l != nullptr) {
-    loc = _l->curr;
-    ASSERT(loc != nullptr);
+constexpr uint16_t absolute(int16_t i) {
+  if (i == INT16_MIN) {
+    return static_cast<uint16_t>(INT16_MAX) + 1u;
+  }
+  else if (i < 0) {
+    return static_cast<uint16_t>(-i);
+  }
+  else {
+    return static_cast<uint16_t>(i);
   }
 }
+
+constexpr uint32_t absolute(int32_t i) {
+  if (i == INT32_MIN) {
+    return static_cast<uint32_t>(INT32_MAX) + 1u;
+  }
+  else if (i < 0) {
+    return static_cast<uint32_t>(-i);
+  }
+  else {
+    return static_cast<uint32_t>(i);
+  }
+}
+
+constexpr uint64_t absolute(int64_t i) {
+  if (i == INT64_MIN) {
+    return 0x8000000000000000ull;
+  }
+  else if (i < 0) {
+    return static_cast<uint64_t>(-i);
+  }
+  else {
+    return static_cast<uint64_t>(i);
+  }
+}
+
+template<typename T>
+constexpr inline T square(T t) { return t * t; }
+
+template<typename T>
+constexpr inline T larger(T t1, T t2) noexcept {
+  return t1 > t2 ? t1 : t2;
+}
+
+template<typename T>
+constexpr inline T smaller(T t1, T t2) noexcept {
+  return t1 < t2 ? t1 : t2;
+}
+
+template<typename T, size_t N>
+constexpr size_t array_size(T(&)[N]) {
+  return N;
+}
+
+template<typename A>
+struct ArraySize;
+
+template<typename T, usize N>
+struct ArraySize<T[N]> {
+  constexpr static usize VAL = N;
+};
+

@@ -4,24 +4,15 @@
 #include "compiler.h"
 #include "memory.h"
 #include "trace.h"
-
-#include <stdarg.h>
-#include <stdio.h>
+#include "io.h"
 
 struct KeywordPair {
-  const char* keyword = nullptr;
-  size_t size = 0;
-
+  ViewArr<const char> keyword;
   AxleTokenType type = AxleTokenType::End;
-
-  template<usize N>
-  constexpr KeywordPair(const char (&kw)[N], AxleTokenType t)
-    :keyword(kw), size(N - 1), type(t)
-  {}
 };
 
 constexpr KeywordPair keywords[] = {
-#define MODIFY(n, str) {str, AxleTokenType :: n},
+#define MODIFY(n, str) {lit_view_arr(str), AxleTokenType :: n},
   AXLE_TOKEN_KEYWORDS
 #undef MODIFY
 };
@@ -29,7 +20,7 @@ constexpr KeywordPair keywords[] = {
 constexpr size_t num_keywords = sizeof(keywords) / sizeof(KeywordPair);
 
 constexpr KeywordPair operators[] = {
-#define MODIFY(n, str) {str, AxleTokenType :: n},
+#define MODIFY(n, str) {lit_view_arr(str), AxleTokenType :: n},
   AXLE_TOKEN_OPERATORS
   AXLE_TOKEN_STRUCTURAL
 #undef MODIFY
@@ -155,58 +146,58 @@ constexpr static bool is_new_line(Lexer* const lex) {
 
 constexpr static void skip_whitespace(Lexer* const lex) {
   constexpr auto n_newline = [](Lexer* const lex) {
-    lex->curr_pos.line++;
+    lex->curr_pos.line += 1;
     lex->curr_pos.character = 0;
-    if ((++lex->top)[0] == '\r') {
-      ++lex->top;
+
+    lex->top += 1;
+    if (lex->top < lex->end && lex->top[0] == '\r') {
+      lex->top += 1;
     }
   };
 
   constexpr auto r_newline = [](Lexer* const lex) {
-    lex->curr_pos.line++;
+    lex->curr_pos.line += 1;
     lex->curr_pos.character = 0;
-    if ((++lex->top)[0] == '\n') {
-      ++lex->top;
+    lex->top += 1;
+
+    if (lex->top < lex->end && lex->top[0] == '\n') {
+      lex->top += 1;
     }
   };
 
-  while (true) {
+  while (lex->top < lex->end) {
     char c = lex->top[0];
 
     switch (c) {
       case ' ':
       case '\t':
       case '\f':
-        lex->top++;
-        lex->curr_pos.character++;
+        lex->top += 1;
+        lex->curr_pos.character += 1;
         break;
       case '/': {
-          if (lex->top[1] == '/') {
+          if (lex->top + 1 < lex->end && lex->top[1] == '/') {
             //Is a comment
             lex->top += 2;
             lex->curr_pos.character += 2;
 
-            c = lex->top[0];
-
-            //Loop till end of line
-            while (c != '\n' && c != '\r' && c != '\0') {
-              lex->top++;
-              lex->curr_pos.character++;
-
+            while (lex->top < lex->end) {
               c = lex->top[0];
-            }
 
-            if (c == '\n') {
-              n_newline(lex);
-            }
-            else if (c == '\r') {
-              r_newline(lex);
-            }
-            else if (c == '\0') {
-              //end of file
-              return;
-            }
+              if (c == '\n') {
+                n_newline(lex);
+                break;
+              }
+              else if (c == '\r') {
+                r_newline(lex);
+                break;
+              }
+              else if (c == '\0') {
+                return;
+              }
 
+              lex->top += 1;
+            }
             break;
           }
           else {
@@ -234,7 +225,7 @@ static Token lex_identifier(CompilerGlobals* comp, Lexer* const lex) {
   do {
     lex->top++;
     lex->curr_pos.character++;
-  } while (is_identifier_char(lex->top[0]) || is_any_digit(lex->top[0]));
+  } while (lex->top < lex->end && (is_identifier_char(lex->top[0]) || is_any_digit(lex->top[0])));
 
   const size_t ident_len = lex->top - name_base;
 
@@ -245,8 +236,8 @@ static Token lex_identifier(CompilerGlobals* comp, Lexer* const lex) {
   for (size_t i = 0; i < num_keywords; i++) {
     const KeywordPair& pair = keywords[i];
 
-    if (pair.size == ident_len
-        && memeq_ts<char>(pair.keyword, ident.string->string, ident_len)) {
+    if (pair.keyword.size == ident_len
+        && memeq_ts<char>(pair.keyword.data, ident.string->string, ident_len)) {
       //Is keyword
       ident.type = pair.type;
       //Exit early
@@ -261,21 +252,28 @@ static Token lex_identifier(CompilerGlobals* comp, Lexer* const lex) {
 static Token lex_number(CompilerGlobals* comp, CompilerThread* comp_thread, Lexer* const lex) {
   const char* const number_base = lex->top;
 
-  if (lex->top[0] == '0' && (lex->top[1] == 'x' || lex->top[1] == 'X')) {
-    lex->top += 2;
-    lex->curr_pos.character += 2;
+  lex->top++;
+  lex->curr_pos.character++;
 
-    if (!is_any_digit(lex->top[0])) {
+  if (lex->top < lex->end && (number_base[0] == '0' && (lex->top[0] == 'x' || lex->top[0] == 'X'))) {
+    lex->top += 1;
+    lex->curr_pos.character += 1;
+
+    if (!(lex->top < lex->end && is_any_digit(lex->top[0]))) {
       Span span = span_of_lex(lex);
       comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "0x/0X is not a valid integer");
       return {};
     }
+    else {
+      lex->top += 1;
+      lex->curr_pos.character += 1;
+    }
   }
 
-  do {
+  while (lex->top < lex->end && is_any_digit(lex->top[0])) {
     lex->top++;
     lex->curr_pos.character++;
-  } while (is_any_digit(lex->top[0]));
+  }
 
   const size_t ident_length = lex->top - number_base;
 
@@ -286,28 +284,29 @@ static Token lex_number(CompilerGlobals* comp, CompilerThread* comp_thread, Lexe
   return num;
 }
 
-static Token make_single_char_token(CompilerGlobals* comp, CompilerThread* comp_thread, Lexer* lex) {
-
+static Token make_operator_token(CompilerGlobals* comp, CompilerThread* comp_thread, Lexer* lex) {
   auto i = operators;
   auto end = operators + num_operators;
 
   for (; i < end; i++) {
     const KeywordPair& pair = *i;
 
+    ASSERT(pair.keyword.size == 1);
+
     if (pair.keyword[0] == lex->top[0]) {
       Token tok;
       tok.type = pair.type;
-      tok.string = comp->services.strings.get()->intern(pair.keyword, pair.size);
+      tok.string = comp->services.strings.get()->intern(pair.keyword);
 
-      lex->top += pair.size;
-      lex->curr_pos.character += pair.size;
+      lex->top += 1;
+      lex->curr_pos.character += 1;
 
       return tok;
     }
   }
 
   Span span = span_of_lex(lex);
-  comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "Unlexable character: '{}'", DisplayChar{ *lex->top });
+  comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "Unlexable character: '{}'", DisplayChar{ lex->top[0] });
   return {};
 }
 
@@ -315,12 +314,24 @@ static Token lex_char(CompilerGlobals* const comp, CompilerThread* const comp_th
   lex->top++;
   lex->curr_pos.character++;
 
+  if (lex->top >= lex->end) {
+    Span span = span_of_lex(lex);
+    comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "Invalid character");
+    return {};
+  }
+
   char out[2] = { lex->top[0], '\0' };
 
   lex->top++;
   lex->curr_pos.character++;
 
   if (out[0] == '\\') {
+    if (lex->top >= lex->end) {
+      Span span = span_of_lex(lex);
+      comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "Invalid character");
+      return {};
+    }
+
     switch (lex->top[0]) {
       case '0': out[0] = '\0'; break;
       case '\\': out[0] = '\\'; break;
@@ -339,7 +350,7 @@ static Token lex_char(CompilerGlobals* const comp, CompilerThread* const comp_th
     lex->curr_pos.character++;
   }
 
-  if (lex->top[0] == '\'') {
+  if (lex->top < lex->end && lex->top[0] == '\'') {
     lex->top++;
     lex->curr_pos.character++;
 
@@ -362,7 +373,7 @@ static Token lex_string(CompilerGlobals* const comp, CompilerThread* const comp_
 
   Array<char> out_str = {};
 
-  while (!is_new_line(lex) && lex->top[0] != '\0' && lex->top[0] != '"') {
+  while (lex->top < lex->end && !is_new_line(lex) && lex->top[0] != '\0' && lex->top[0] != '"') {
     out_str.insert(lex->top[0]);
     lex->top++;
     lex->curr_pos.character++;
@@ -391,7 +402,7 @@ static Token lex_string(CompilerGlobals* const comp, CompilerThread* const comp_
     }
   }
 
-  if (lex->top[0] == '"') {
+  if (lex->top < lex->end && lex->top[0] == '"') {
     lex->top++;
     lex->curr_pos.character++;
 
@@ -451,7 +462,15 @@ static Token lex_intrinsic(CompilerGlobals* const comp, CompilerThread* const co
 static Token lex_unpositioned_token(CompilerGlobals* const comp, CompilerThread* comp_thread, Lexer* const lex) {
   const char c = lex->top[0];
 
-  if (is_identifier_char(lex->top[0])) {
+  if (lex->top >= lex->end || c == '\0') {
+    // \0 is the end of file
+    Token eof = {};
+    eof.type = AxleTokenType::End;
+    eof.string = comp->services.strings.get()->intern(lit_view_arr("End of file"));
+
+    return eof;
+  }
+  else if (is_identifier_char(lex->top[0])) {
     return lex_identifier(comp, lex);
   }
   else if (is_dec_number(c)) {
@@ -466,16 +485,8 @@ static Token lex_unpositioned_token(CompilerGlobals* const comp, CompilerThread*
   else if (c == '#') {
     return lex_intrinsic(comp, comp_thread, lex);
   }
-  else if (c == '\0') {
-    // \0 is the end of file
-    Token eof = {};
-    eof.type = AxleTokenType::End;
-    eof.string = comp->services.strings.get()->intern(lit_view_arr("End of file"));
 
-    return eof;
-  }
-
-  return make_single_char_token(comp, comp_thread, lex);
+  return make_operator_token(comp, comp_thread, lex);
 }
 
 static Token lex_token(CompilerGlobals* const comp_globals, CompilerThread* const comp_thread, Lexer* const lex) {
@@ -602,7 +613,7 @@ void reset_parser(CompilerGlobals* const comp,
                   CompilerThread* const comp_thread,
                   Parser* const parser,
                   const InternString* file_name,
-                  const char* string) {
+                  ViewArr<const char> string) {
   Lexer* lex = &parser->lexer;
 
   //TEMP
@@ -610,7 +621,8 @@ void reset_parser(CompilerGlobals* const comp,
   parser->ast_store.top = 0;
   parser->ast_store.mem = new u8[parser->ast_store.total];
 
-  lex->top = string;
+  lex->top = string.begin();
+  lex->end = string.end();
 
   lex->file_path = file_name;
   lex->curr_pos.character = 0;
@@ -2432,7 +2444,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::INVALID: INVALID_CODE_PATH("Invalid Ast Node"); break;
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = (ASTNamedType*)a;
-        IO_Single::print(nt->name->string);
+        IO_Single::format("{}", nt->name);
         return;
       }
     case AST_TYPE::ARRAY_TYPE: {
@@ -2510,14 +2522,14 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* i = (ASTIdentifier*)a;
-        IO_Single::print(i->name->string);
+        IO_Single::format("{}", i->name);
         return;
       }
     case AST_TYPE::NUMBER: {
         ASTNumber* n = (ASTNumber*)a;
-        printf("%llu", n->num_value);
+        IO_Single::format("{}", n->num_value);
         if (n->suffix != nullptr) {
-          IO_Single::print(n->suffix->string);
+          IO_Single::format("{}", n->suffix);
         }
         return;
       }
@@ -2588,7 +2600,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
       }
     case AST_TYPE::ASCII_STRING: {
         ASTAsciiString* as = (ASTAsciiString*)a;
-        IO_Single::print('"', as->string->string, '"');
+        IO_Single::format("\"{}\"", as->string);
         return;
       }
     case AST_TYPE::ASCII_CHAR: {
@@ -2607,7 +2619,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::MEMBER_ACCESS: {
         ASTMemberAccessExpr* ma = (ASTMemberAccessExpr*)a;
         print_ast(printer, ma->expr);
-        IO_Single::print('.', ma->name->string);
+        IO_Single::format(".{}", ma->name);
         return;
       }
     case AST_TYPE::LAMBDA_EXPR: {
@@ -2654,10 +2666,10 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         ASTDecl* d = (ASTDecl*)a;
 
         if (d->type_ast == 0) {
-          IO_Single::print(d->name->string, " :");
+          IO_Single::format("{} :", d->name);
         }
         else {
-          IO_Single::print(d->name->string, ": ");
+          IO_Single::format("{} :", d->name);
           print_ast(printer, d->type_ast);
           IO_Single::print(" ");
         }
@@ -2675,7 +2687,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::TYPED_NAME: {
         ASTTypedName* d = (ASTTypedName*)a;
 
-        IO_Single::print(d->name->string, ": ");
+        IO_Single::format("{}:", d->name);
         print_ast(printer, d->type);
         return;
       }
@@ -2782,7 +2794,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         }
         print_ast(printer, imp->import_type);
 
-        IO_Single::print(", ", imp->lib_file->string, ", ", imp->name->string, ")");
+        IO_Single::format(", {}, {})", imp->lib_file, imp->name);
         return;
       }
   }

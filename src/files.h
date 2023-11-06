@@ -1,6 +1,6 @@
 #pragma once
 #include "utility.h"
-#include "format.h"
+#include "formattable.h"
 
 namespace FILES {
 #define FILE_ERROR_CODES_X \
