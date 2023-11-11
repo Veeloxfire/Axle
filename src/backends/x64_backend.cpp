@@ -2,6 +2,7 @@
 
 #include <Axle/backends/x64_backend.h>
 
+#include "AxleUtil/utility.h"
 #include "ir.h"
 #include "compiler.h"
 
@@ -4395,13 +4396,10 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
 
     lib.path = strings->intern(lit_view_arr("kernel32.dll"));
     lib.name = strings->intern(lit_view_arr("ExitProcess"));
+    
+    OwnedArr<Type> params = copy_arr<Type>({comp->builtin_types->t_u32});
 
-
-    Array<Type> params = {};
-    params.reserve_total(1);
-    params.insert(comp->builtin_types->t_u32);
-
-    type = find_or_make_lamdba_structure(structs._ptr, strings._ptr,
+    type = find_or_make_lambda_structure(structs._ptr, strings._ptr,
                                          &X64::CONVENTION_microsoft_x64,
                                          std::move(params), comp->builtin_types->t_void);
   }

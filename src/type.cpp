@@ -7,7 +7,8 @@
 #include <Tracer/trace.h>
 #endif
 
-TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInterner* strings, Array<Type>&& types) {
+TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInterner* strings,
+                                             const ViewArr<const Type>& types) {
 #ifdef AXLE_TRACING
   TRACING_FUNCTION();
 #endif
@@ -82,7 +83,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
 
 SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, StringInterner* strings,
                                                   const CallingConvention* conv,
-                                                  Array<Type>&& params,
+                                                  OwnedArr<Type>&& params,
                                                   Type ret_type) {
 #ifdef AXLE_TRACING
   TRACING_FUNCTION();
@@ -90,7 +91,7 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
   SignatureStructure* type = structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
   type->ir_format = IR::Format::opaque;
-  type->parameter_types = bake_arr(std::move(params));
+  type->parameter_types = std::move(params);
   type->return_type = ret_type;
   type->calling_convention = conv;
   type->size = (u32)structures->pointer_size;
@@ -230,6 +231,154 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
   return val;
 }
 
+const ArrayStructure* find_or_make_array_structure(Structures* const structures,
+                                                   StringInterner* strings,
+                                                   const Type& base, size_t length) {
+#ifdef AXLE_TRACING
+  TRACING_FUNCTION();
+#endif
+
+  {
+    auto i = structures->structures.begin();
+    const auto end = structures->structures.end();
+
+    for (; i < end; i++) {
+      const Structure* s = *i;
+      if (s->type == STRUCTURE_TYPE::FIXED_ARRAY) {
+        //Is array
+        const ArrayStructure* as = static_cast<const ArrayStructure*>(s);
+        if (as->base == base
+            && as->length == length) {
+          //Is same
+          return as;
+        }
+      }
+    }
+  }
+
+  //Doesnt exist - need to make new type
+  return STRUCTS::new_array_structure(structures, strings, base, length);
+}
+
+const PointerStructure* find_or_make_pointer_structure(Structures* const structures, StringInterner* strings,
+                                                       const Type& base) {
+#ifdef AXLE_TRACING
+  TRACING_FUNCTION();
+#endif
+
+  {
+    auto i = structures->structures.begin();
+    const auto end = structures->structures.end();
+
+    for (; i < end; i++) {
+      const Structure* s = *i;
+      if (s->type == STRUCTURE_TYPE::POINTER) {
+        //Is pointer
+        const PointerStructure* ps = static_cast<const PointerStructure*>(s);
+        if (ps->base == base) {
+          //Is same
+          return ps;
+        }
+      }
+    }
+  }
+
+  //Doesnt exist - need to make new type
+  return STRUCTS::new_pointer_structure(structures, strings, base);
+}
+
+const TupleStructure* find_or_make_tuple_structure(Structures* const structures, StringInterner* strings,
+                                                   const ViewArr<const Type>& els) {
+#ifdef AXLE_TRACING
+  TRACING_FUNCTION();
+#endif
+
+  {
+    auto i = structures->structures.begin();
+    const auto end = structures->structures.end();
+
+    for (; i < end; i++) {
+      const Structure* s = *i;
+      if (s->type == STRUCTURE_TYPE::TUPLE) {
+        const TupleStructure* tls = static_cast<const TupleStructure*>(s);
+
+        //Not same size
+        if (els.size != tls->elements.size) { continue; }
+
+        //empty
+        if (els.size == 0) { return tls; }
+
+        auto el_i = els.begin();
+        auto tl_i = tls->elements.begin();
+
+        const auto el_end = els.end();
+
+        for (; el_i < el_end; tl_i++, el_i++) {
+          if (*el_i != tl_i->type) {
+            goto NOT_SAME;
+          }
+        }
+
+        return tls;
+      }
+
+    NOT_SAME:
+      continue;
+    }
+  }
+
+
+  //Doesnt exist - need to make new type
+  return STRUCTS::new_tuple_structure(structures, strings, els);
+}
+
+const SignatureStructure* find_or_make_lambda_structure(Structures* const structures,
+                                                        StringInterner* strings,
+                                                        const CallingConvention* conv,
+                                                        OwnedArr<Type>&& params,
+                                                        Type ret_type) {
+#ifdef AXLE_TRACING
+  TRACING_FUNCTION();
+#endif
+
+  {
+    auto i = structures->structures.begin();
+    auto end = structures->structures.end();
+
+    for (; i < end; i++) {
+      const Structure* s = *i;
+      if (s->type != STRUCTURE_TYPE::LAMBDA) { continue; }
+
+      const SignatureStructure* sig_struct = (const SignatureStructure*)s;
+      if (sig_struct->calling_convention != conv) { continue; }
+      if (sig_struct->return_type != ret_type) { continue; }
+      if (sig_struct->parameter_types.size != params.size) { continue; }
+
+      {
+        auto p_i = sig_struct->parameter_types.begin();
+        auto p_end = sig_struct->parameter_types.end();
+        auto pin_i = params.begin();
+
+        for (; p_i < p_end; p_i++, pin_i++) {
+          if (*p_i != *pin_i) {
+            goto NOT_SAME;
+          }
+        }
+      }
+
+      //Is same!
+      return sig_struct;
+
+    NOT_SAME:
+      continue;
+    }
+  }
+
+  return STRUCTS::new_lambda_structure(structures, strings, conv, std::move(params), ret_type);
+}
+
+
+
 BuiltinTypes STRUCTS::create_builtins(Structures* structures, StringInterner* strings) {
   BuiltinTypes builtin_types = {};
 
@@ -285,10 +434,8 @@ BuiltinTypes STRUCTS::create_builtins(Structures* structures, StringInterner* st
   }
 
   {
-    Array<Type> params = {};
-
     Structure* const s_void_call = STRUCTS::new_lambda_structure(structures, strings,
-                                                                 nullptr, std::move(params), builtin_types.t_void);
+                                                                 nullptr, {}, builtin_types.t_void);
     builtin_types.t_void_call = to_type(s_void_call);
   }
 

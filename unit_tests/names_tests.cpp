@@ -294,6 +294,7 @@ TEST_FUNCTION(names, duplicate_names) {
     TEST_EQ(gn->name, n0_name);
     TEST_EQ(gn->global, &n0_g);
   }
+
   {
     GlobalName* gn = name_manager.add_global_name(&errors, &ns1, n0_name, &n1_g);
     if(errors.is_panic()) {

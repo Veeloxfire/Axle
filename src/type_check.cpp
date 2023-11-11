@@ -253,6 +253,7 @@ TC_STAGE(LAMBDA_TYPE, 2) {
 #endif
   EXPAND_THIS(ASTLambdaType, lt);
   Array<Type> args = {};
+  args.reserve_total(lt->args.count);
 
   FOR_AST(lt->args, i) {
     Type i_type = get_type_value(comp_thread, i);
@@ -273,10 +274,10 @@ TC_STAGE(LAMBDA_TYPE, 2) {
     AtomicLock<Structures> structures = {};
     AtomicLock<StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
-    s = find_or_make_lamdba_structure(structures._ptr,
+    s = find_or_make_lambda_structure(structures._ptr,
                                       strings._ptr,
                                       comp_thread->build_options.default_calling_convention,
-                                      std::move(args), ret);
+                                      bake_arr(std::move(args)), ret);
   }
 
   lt->actual_type = to_type(static_cast<const Structure*>(s));
@@ -307,6 +308,7 @@ TC_STAGE(TUPLE_TYPE, 2) {
 #endif
   EXPAND_THIS(ASTTupleType, tt);
   Array<Type> args = {};
+  args.reserve_total(tt->types.count);
 
   FOR_AST(tt->types, i) {
     Type i_type = get_type_value(comp_thread, i);
@@ -325,7 +327,7 @@ TC_STAGE(TUPLE_TYPE, 2) {
 
     s = find_or_make_tuple_structure(structures._ptr,
                                      strings._ptr,
-                                     std::move(args));
+                                     view_arr(args));
   }
 
   tt->actual_type = to_type(s);
@@ -409,10 +411,10 @@ TC_STAGE(FUNCTION_SIGNATURE, 2) {
     AtomicLock<StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
-    sig_struct = find_or_make_lamdba_structure(structures._ptr,
+    sig_struct = find_or_make_lambda_structure(structures._ptr,
                                                strings._ptr,
                                                ast_sig->convention,
-                                               std::move(params), ret_type);
+                                               bake_arr(std::move(params)), ret_type);
   }
 
   ast_sig->sig->label = comp->next_function_label(sig_struct);
@@ -618,6 +620,7 @@ TC_STAGE(TUPLE_LIT, new_type) {
 #endif
   EXPAND_THIS(ASTTupleLitExpr, tup);
   Array<Type> element_types = {};
+  element_types.reserve_total(tup->elements.count);
 
   FOR_AST(tup->elements, it) {
     reduce_category(tup, it);
@@ -631,7 +634,7 @@ TC_STAGE(TUPLE_LIT, new_type) {
     comp->services.get_multiple(&structures, &strings);
     ts = find_or_make_tuple_structure(structures._ptr,
                                       strings._ptr,
-                                      std::move(element_types));
+                                      view_arr(element_types));
   }
 
   tup->node_type = to_type(ts);

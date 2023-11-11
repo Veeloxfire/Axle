@@ -105,6 +105,28 @@ enum struct STRUCTURE_TYPE : u8 {
   LAMBDA,
 };
 
+namespace Format {
+  template<>
+  struct FormatArg<STRUCTURE_TYPE> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, STRUCTURE_TYPE st) {
+      switch(st) {
+        case STRUCTURE_TYPE::VOID: res.load_string_lit("STRUCTURE_TYPE::VOID"); return;
+        case STRUCTURE_TYPE::TYPE: res.load_string_lit("STRUCTURE_TYPE::TYPE"); return;
+        case STRUCTURE_TYPE::INTEGER: res.load_string_lit("STRUCTURE_TYPE::INTEGER"); return;
+        case STRUCTURE_TYPE::POINTER: res.load_string_lit("STRUCTURE_TYPE::POINTER"); return;
+        case STRUCTURE_TYPE::ENUM: res.load_string_lit("STRUCTURE_TYPE::ENUM"); return;
+        case STRUCTURE_TYPE::COMPOSITE: res.load_string_lit("STRUCTURE_TYPE::COMPOSITE"); return;
+        case STRUCTURE_TYPE::FIXED_ARRAY: res.load_string_lit("STRUCTURE_TYPE::FIXED_ARRAY"); return;
+        case STRUCTURE_TYPE::TUPLE: res.load_string_lit("STRUCTURE_TYPE::TUPLE"); return;
+        case STRUCTURE_TYPE::LAMBDA: res.load_string_lit("STRUCTURE_TYPE::LAMBDA"); return;
+      }
+
+      res.load_string_lit("STRUCTURE_TYPE::<unknown>");
+    }
+  };
+}
+
 struct Structure {
   STRUCTURE_TYPE type = STRUCTURE_TYPE::VOID;
   IR::Format ir_format;
@@ -172,7 +194,12 @@ namespace Format {
   struct FormatArg<Type> {
     template<Formatter F>
     constexpr static void load_string(F& res, const Type& ty) {
-      FormatArg<const InternString*>::load_string(res, ty.name);
+      if(ty.structure == nullptr) {
+        res.load_string_lit("<invalid-type>");
+      }
+      else {
+        FormatArg<const InternString*>::load_string(res, ty.name);
+      }
     }
   };
 }
@@ -333,7 +360,7 @@ struct Structures {
 };
 
 namespace STRUCTS {
-  TupleStructure* new_tuple_structure(Structures* comp, StringInterner* strings, Array<Type>&& types);
+  TupleStructure* new_tuple_structure(Structures* comp, StringInterner* strings, const ViewArr<const Type>& types);
   IntegerStructure* new_int_structure(Structures* comp, const InternString* name);
   CompositeStructure* new_composite_structure(Structures* comp, StringInterner* strings);
   Structure* new_base_structure(Structures* comp, const InternString* name);
@@ -343,7 +370,7 @@ namespace STRUCTS {
   PointerStructure* new_pointer_structure(Structures* comp, StringInterner* strings, const Type& base);
   SignatureStructure* new_lambda_structure(Structures* comp, StringInterner* strings,
                                            const CallingConvention* conv,
-                                           Array<Type>&& params,
+                                           OwnedArr<Type>&& params,
                                            Type ret_type);
   EnumStructure* new_enum_structure(Structures* comp, StringInterner* strings, const Type&);
   EnumValue* new_enum_value(Structures* comp,
@@ -358,12 +385,13 @@ const ArrayStructure* find_or_make_array_structure(Structures* comp, StringInter
 
 const PointerStructure* find_or_make_pointer_structure(Structures* comp, StringInterner* strings, const Type& base);
 
-const TupleStructure* find_or_make_tuple_structure(Structures* comp, StringInterner* strings, Array<Type>&& types);
+const TupleStructure* find_or_make_tuple_structure(Structures* comp, StringInterner* strings,
+                                                   const ViewArr<const Type>& types);
 
-const SignatureStructure* find_or_make_lamdba_structure(Structures* const structures,
+const SignatureStructure* find_or_make_lambda_structure(Structures* const structures,
                                                         StringInterner* strings,
                                                         const CallingConvention* conv,
-                                                        Array<Type>&& params,
+                                                        OwnedArr<Type>&& params,
                                                         Type ret_type);
 
 namespace TYPE_TESTS {

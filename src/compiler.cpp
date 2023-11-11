@@ -170,35 +170,6 @@ Local* DependencyChecker::get_local(const InternString* name) {
   return nullptr;
 }
 
-const ArrayStructure* find_or_make_array_structure(Structures* const structures,
-                                                   StringInterner* strings,
-                                                   const Type& base, size_t length) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
-
-  {
-    auto i = structures->structures.begin();
-    const auto end = structures->structures.end();
-
-    for (; i < end; i++) {
-      const Structure* s = *i;
-      if (s->type == STRUCTURE_TYPE::FIXED_ARRAY) {
-        //Is array
-        const ArrayStructure* as = static_cast<const ArrayStructure*>(s);
-        if (as->base == base
-            && as->length == length) {
-          //Is same
-          return as;
-        }
-      }
-    }
-  }
-
-  //Doesnt exist - need to make new type
-  return STRUCTS::new_array_structure(structures, strings, base, length);
-}
-
 static u32 new_dynamic_init_object(CompilerGlobals* const comp, u32 size, u32 alignment,
                                    IR::IRStore* ir) {
   Backend::GlobalData holder = {};
@@ -221,122 +192,6 @@ static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, u32 size, 
 
   comp->dynamic_inits.insert(holder);
   return (u32)comp->dynamic_inits.size;
-}
-
-const PointerStructure* find_or_make_pointer_structure(Structures* const structures, StringInterner* strings,
-                                                       const Type& base) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
-
-  {
-    auto i = structures->structures.begin();
-    const auto end = structures->structures.end();
-
-    for (; i < end; i++) {
-      const Structure* s = *i;
-      if (s->type == STRUCTURE_TYPE::POINTER) {
-        //Is pointer
-        const PointerStructure* ps = static_cast<const PointerStructure*>(s);
-        if (ps->base == base) {
-          //Is same
-          return ps;
-        }
-      }
-    }
-  }
-
-  //Doesnt exist - need to make new type
-  return STRUCTS::new_pointer_structure(structures, strings, base);
-}
-
-const TupleStructure* find_or_make_tuple_structure(Structures* const structures, StringInterner* strings, Array<Type>&& els) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
-
-  {
-    auto i = structures->structures.begin();
-    const auto end = structures->structures.end();
-
-    for (; i < end; i++) {
-      const Structure* s = *i;
-      if (s->type == STRUCTURE_TYPE::TUPLE) {
-        const TupleStructure* tls = static_cast<const TupleStructure*>(s);
-
-        //Not same size
-        if (els.size != tls->elements.size) { continue; }
-
-        //empty
-        if (els.size == 0) { return tls; }
-
-        auto el_i = els.begin();
-        auto tl_i = tls->elements.begin();
-
-        const auto el_end = els.end();
-
-        for (; el_i < el_end; tl_i++, el_i++) {
-          if (*el_i != tl_i->type) {
-            goto NOT_SAME;
-          }
-        }
-
-        return tls;
-      }
-
-    NOT_SAME:
-      continue;
-    }
-  }
-
-
-  //Doesnt exist - need to make new type
-  return STRUCTS::new_tuple_structure(structures, strings, std::move(els));
-}
-
-const SignatureStructure* find_or_make_lamdba_structure(Structures* const structures,
-                                                        StringInterner* strings,
-                                                        const CallingConvention* conv,
-                                                        Array<Type>&& params,
-                                                        Type ret_type) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
-
-  {
-    auto i = structures->structures.begin();
-    auto end = structures->structures.end();
-
-    for (; i < end; i++) {
-      const Structure* s = *i;
-      if (s->type != STRUCTURE_TYPE::LAMBDA) { continue; }
-
-      const SignatureStructure* sig_struct = (const SignatureStructure*)s;
-      if (sig_struct->calling_convention != conv) { continue; }
-      if (sig_struct->return_type != ret_type) { continue; }
-      if (sig_struct->parameter_types.size != params.size) { continue; }
-
-      {
-        auto p_i = sig_struct->parameter_types.begin();
-        auto p_end = sig_struct->parameter_types.end();
-        auto pin_i = params.begin();
-
-        for (; p_i < p_end; p_i++, pin_i++) {
-          if (*p_i != *pin_i) {
-            goto NOT_SAME;
-          }
-        }
-      }
-
-      //Is same!
-      return sig_struct;
-
-    NOT_SAME:
-      continue;
-    }
-  }
-
-  return STRUCTS::new_lambda_structure(structures, strings, conv, std::move(params), ret_type);
 }
 
 Global* test_global_dependency(CompilerGlobals* const comp, CompilerThread* const comp_thread, DependencyChecker* const state, const Span& span, const InternString* ident) {
@@ -1473,7 +1328,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             loop_merge_label,
         });
 
-        Array parent_variables = copy_array(builder->variables_state);
+        Array parent_variables = copy_arr(builder->variables_state);
 
         //Skip the merge part for now, do that later when we know what to merge
 
@@ -1500,7 +1355,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         }
         builder->reset_variables();
 
-        Array branch_variables = copy_array(builder->variables_state);
+        Array branch_variables = copy_arr(builder->variables_state);
         ASSERT(branch_variables.size == parent_variables.size);//Currently a waste of a copy, but might not be later on
 
         builder->switch_control_block(body_label, loop_split_label);
@@ -1584,7 +1439,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           });
         }
 
-        Array split_variables = copy_array(builder->variables_state);
+        Array split_variables = copy_arr(builder->variables_state);
         usize scope_size = split_variables.size;
 
         {
