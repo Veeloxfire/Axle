@@ -50,13 +50,13 @@ target_include_directories(AxleCompiler PUBLIC "${PROJECT_SOURCE_DIR}/src" ${Axl
 
 if(AxleTRACING)
   if(NOT DEFINED TracerINCLUDE)
-    message(FATAL_ERROR "Requires TracerINCLUDE to compile, even if you're not tracing")
+    message(FATAL_ERROR "Requires TracerINCLUDE to compile if you're tracing")
   endif()
 
   target_compile_definitions(AxleCompiler PRIVATE TRACING_ENABLE AXLE_TRAXING)
 
   if(NOT DEFINED TracerBIN)
-    message(FATAL_ERROR "Requires TracerBIN to compile, even if you're not tracing")
+    message(FATAL_ERROR "Requires TracerBIN to compile if you're tracing")
   endif()
 
   target_link_libraries(AxleCompiler "${TracerBIN}/Tracer.lib")

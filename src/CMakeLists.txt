@@ -13,11 +13,11 @@ set(CppFiles
   "${PROJECT_SOURCE_DIR}/names.cpp"
   "${PROJECT_SOURCE_DIR}/operators.cpp"
   "${PROJECT_SOURCE_DIR}/parser.cpp"
-  "${PROJECT_SOURCE_DIR}/PE_file_format.cpp"
+  "${PROJECT_SOURCE_DIR}/backends/PE_file_format.cpp"
   "${PROJECT_SOURCE_DIR}/type.cpp"
   "${PROJECT_SOURCE_DIR}/type_check.cpp"
-  "${PROJECT_SOURCE_DIR}/vm_backend.cpp"
-  "${PROJECT_SOURCE_DIR}/x64_backend.cpp")
+  "${PROJECT_SOURCE_DIR}/backends/vm_backend.cpp"
+  "${PROJECT_SOURCE_DIR}/backends/x64_backend.cpp")
 
 set(CppHeaders
   "${PROJECT_SOURCE_DIR}/ast.h"
