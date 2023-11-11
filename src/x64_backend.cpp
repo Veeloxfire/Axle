@@ -4402,7 +4402,7 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
     params.insert(comp->builtin_types->t_u32);
 
     type = find_or_make_lamdba_structure(structs._ptr, strings._ptr,
-                                         comp->platform_interface.ptr_size, &X64::CONVENTION_microsoft_x64,
+                                         &X64::CONVENTION_microsoft_x64,
                                          std::move(params), comp->builtin_types->t_void);
   }
   lib.label = comp->next_function_label(type);

@@ -93,7 +93,6 @@ namespace Format {
   };
 }
 
-
 enum struct STRUCTURE_TYPE : u8 {
   VOID = 0,
   TYPE,
@@ -167,6 +166,16 @@ struct Type {
     return structure != nullptr;
   }
 };
+
+namespace Format {
+  template<>
+  struct FormatArg<Type> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const Type& ty) {
+      FormatArg<const InternString*>::load_string(res, ty.name);
+    }
+  };
+}
 
 constexpr Type to_type(const Structure* s) {
   return { s->struct_name, s };
@@ -281,7 +290,8 @@ namespace Format {
 }
 
 struct BuiltinTypes {
-  Type t_bool ={};
+  Type t_type ={};
+  Type t_void ={};
 
   Type t_u8   ={};
   Type t_i8   ={};
@@ -292,17 +302,18 @@ struct BuiltinTypes {
   Type t_u64  ={};
   Type t_i64  ={};
 
-  Type t_type ={};
-  Type t_void ={};
   Type t_void_ptr ={};
   Type t_void_call = {};
   Type t_ascii ={};
 
-  const EnumValue* e_false = nullptr;
+  Type t_bool ={};
   const EnumValue* e_true  = nullptr;
+  const EnumValue* e_false = nullptr;
 };
 
 struct Structures {
+  usize pointer_size;
+
   VoidStructure s_void;
   TypeStructure s_type;
 
@@ -329,9 +340,9 @@ namespace STRUCTS {
   ArrayStructure* new_array_structure(Structures* comp, StringInterner* strings,
                                       const Type& base,
                                       size_t length);
-  PointerStructure* new_pointer_structure(Structures* comp, StringInterner* strings, usize ptr_size, const Type& base);
+  PointerStructure* new_pointer_structure(Structures* comp, StringInterner* strings, const Type& base);
   SignatureStructure* new_lambda_structure(Structures* comp, StringInterner* strings,
-                                           usize ptr_size, const CallingConvention* conv,
+                                           const CallingConvention* conv,
                                            Array<Type>&& params,
                                            Type ret_type);
   EnumStructure* new_enum_structure(Structures* comp, StringInterner* strings, const Type&);
@@ -339,13 +350,21 @@ namespace STRUCTS {
                             EnumStructure* enum_s,
                             const InternString* enum_name,
                             const InternString* value_name);
+
+  BuiltinTypes create_builtins(Structures* structures, StringInterner* strings);
 }
 
 const ArrayStructure* find_or_make_array_structure(Structures* comp, StringInterner* strings, const Type& base, size_t length);
 
-const PointerStructure* find_or_make_pointer_structure(Structures* comp, StringInterner* strings, usize ptr_size, const Type& base);
+const PointerStructure* find_or_make_pointer_structure(Structures* comp, StringInterner* strings, const Type& base);
 
 const TupleStructure* find_or_make_tuple_structure(Structures* comp, StringInterner* strings, Array<Type>&& types);
+
+const SignatureStructure* find_or_make_lamdba_structure(Structures* const structures,
+                                                        StringInterner* strings,
+                                                        const CallingConvention* conv,
+                                                        Array<Type>&& params,
+                                                        Type ret_type);
 
 namespace TYPE_TESTS {
   constexpr inline bool match_sizes(const Structure* a, const Structure* b) {

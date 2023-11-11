@@ -224,7 +224,7 @@ static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, u32 size, 
 }
 
 const PointerStructure* find_or_make_pointer_structure(Structures* const structures, StringInterner* strings,
-                                                       usize ptr_size, const Type& base) {
+                                                       const Type& base) {
 #ifdef AXLE_TRACING
   TRACING_FUNCTION();
 #endif
@@ -247,7 +247,7 @@ const PointerStructure* find_or_make_pointer_structure(Structures* const structu
   }
 
   //Doesnt exist - need to make new type
-  return STRUCTS::new_pointer_structure(structures, strings, ptr_size, base);
+  return STRUCTS::new_pointer_structure(structures, strings, base);
 }
 
 const TupleStructure* find_or_make_tuple_structure(Structures* const structures, StringInterner* strings, Array<Type>&& els) {
@@ -296,7 +296,6 @@ const TupleStructure* find_or_make_tuple_structure(Structures* const structures,
 
 const SignatureStructure* find_or_make_lamdba_structure(Structures* const structures,
                                                         StringInterner* strings,
-                                                        usize ptr_size,
                                                         const CallingConvention* conv,
                                                         Array<Type>&& params,
                                                         Type ret_type) {
@@ -337,7 +336,7 @@ const SignatureStructure* find_or_make_lamdba_structure(Structures* const struct
     }
   }
 
-  return STRUCTS::new_lambda_structure(structures, strings, ptr_size, conv, std::move(params), ret_type);
+  return STRUCTS::new_lambda_structure(structures, strings, conv, std::move(params), ret_type);
 }
 
 Global* test_global_dependency(CompilerGlobals* const comp, CompilerThread* const comp_thread, DependencyChecker* const state, const Span& span, const InternString* ident) {
@@ -849,7 +848,7 @@ static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
     AtomicLock<StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
-    ps = find_or_make_pointer_structure(structures._ptr, strings._ptr, comp->platform_interface.ptr_size, base);
+    ps = find_or_make_pointer_structure(structures._ptr, strings._ptr, base);
   }
 
   return to_type(ps);
@@ -1772,7 +1771,7 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
     IR::V_ARG out = Eval::load_v_arg(&expr_ir, ref);
 
     {
-      VM::Env env = { comp_thread->builtin_types->t_bool, &comp_thread->errors };
+      VM::Env env = { comp_thread->builtin_types, &comp_thread->errors };
       VM::StackFrame vm = VM::new_stack_frame(&expr_ir);
       VM::exec(&env, &vm);
       if (comp_thread->is_panic()) {
@@ -3040,29 +3039,30 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   }
 }
 
-Type create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread, NameManager* names, const Span& span, Namespace* ns,
-                       const InternString* name, const Structure* s) {
+void create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread,
+                       NameManager* names, const Span& span, Namespace* ns,
+                       const Type& type) {
   Global* g = comp->new_global();
+
+  ASSERT(type.is_valid());
 
   //Make sure that t_type is already created before this since we need it
   ASSERT(comp->builtin_types->t_type.is_valid());
 
-  Type type = { name, s };
-
   g->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
-  g->decl.name = name;
+  g->decl.name = type.name;
   g->decl.type = comp->builtin_types->t_type;
   g->decl.span = span;
   g->decl.init_value = (const u8*)comp->new_constant<Type>();
 
   memcpy_ts((Type*)g->decl.init_value, 1, &type, 1);
 
-  names->add_global_name(comp_thread, ns, name, g);
-
-  return type;
+  names->add_global_name(comp_thread, ns, type.name, g);
 }
 
-void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread, NameManager* names, const Span& span, Namespace* ns, const EnumValue* v) {
+void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
+                             NameManager* names, const Span& span, Namespace* ns,
+                             const EnumValue* v) {
   Global* g = comp->new_global();
 
   ASSERT(v->type.is_valid());
@@ -3097,10 +3097,9 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   auto strings = comp->services.strings.get();
   auto* builtin_types = comp->builtin_types;
 
-  const auto register_builtin_type = [names = names._ptr, comp_thread, comp, builtin_namespace](const Structure* s)->Type {
-    Type t = create_named_type(comp, comp_thread, names, Span{}, builtin_namespace, s->struct_name, s);
+  const auto register_builtin_type = [names = names._ptr, comp_thread, comp, builtin_namespace](const Type& t) {
+    create_named_type(comp, comp_thread, names, Span{}, builtin_namespace, t);
     ASSERT(!comp_thread->is_panic());
-    return t;
   };
 
   const auto register_builtin_enum_value = [names = names._ptr, comp_thread, comp, builtin_namespace](const EnumValue* v) {
@@ -3108,91 +3107,29 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     ASSERT(!comp_thread->is_panic());
   };
 
-  {
-    TypeStructure* const s_type = &structures->s_type;
-    s_type->type = s_type->expected_type_enum;
-    s_type->struct_name = strings->intern("type", 4);
+  structures->pointer_size = comp->platform_interface.ptr_size;
 
-    s_type->size = sizeof(Type);
-    s_type->alignment = alignof(Type);
+  *builtin_types = STRUCTS::create_builtins(structures._ptr, strings._ptr);
 
+  register_builtin_type(builtin_types->t_type);
+  register_builtin_type(builtin_types->t_void);
 
-    builtin_types->t_type = to_type(s_type);//Need to do this first because its required by register_builtin_type
-    register_builtin_type(s_type);
-  }
-
-  {
-    VoidStructure* s_void = &structures->s_void;
-    s_void->type = s_void->expected_type_enum;
-    s_void->struct_name = strings->intern("void", 4);
-    s_void->size = 0;
-    s_void->alignment = s_void->alignment;
-
-    builtin_types->t_void = register_builtin_type(s_void);
-  }
-
-  {
-    const auto int_type = [&](const auto& name, bool is_signed, u32 size, IR::Format ir_format, Type* t) {
-      IntegerStructure* s = STRUCTS::new_int_structure(structures._ptr, strings->intern(lit_view_arr(name)));
-      s->is_signed = is_signed;
-      s->size = size;
-      s->alignment = size;
-      s->ir_format = ir_format;
-
-      *t = register_builtin_type(s);
-    };
-
-    int_type("u8", false, 1, IR::Format::uint8, &builtin_types->t_u8);
-    int_type("ascii", false, 1, IR::Format::uint8, &builtin_types->t_ascii);
-
-    int_type("i8", true, 1, IR::Format::sint8, &builtin_types->t_i8);
-    int_type("u16", false, 2, IR::Format::uint8, &builtin_types->t_u16);
-    int_type("i16", true, 2, IR::Format::sint8, &builtin_types->t_i16);
-    int_type("u32", false, 4, IR::Format::uint32, &builtin_types->t_u32);
-    int_type("i32", true, 4, IR::Format::sint32, &builtin_types->t_i32);
-    int_type("u64", false, 8, IR::Format::uint64, &builtin_types->t_u64);
-    int_type("i64", true, 8, IR::Format::sint64, &builtin_types->t_i64);
-  }
-
-  {
-    Structure* const s_void_ptr = STRUCTS::new_pointer_structure(structures._ptr, strings._ptr, comp->platform_interface.ptr_size, builtin_types->t_void);
-    builtin_types->t_void_ptr = register_builtin_type(s_void_ptr);
-  }
-
-  {
-    Array<Type> params = {};
-
-    Structure* const s_void_call = STRUCTS::new_lambda_structure(structures._ptr, strings._ptr, comp->platform_interface.ptr_size,
-                                                                 nullptr, std::move(params), builtin_types->t_void);
-    builtin_types->t_void_call = register_builtin_type(s_void_call);
-  }
-
-  {
-    EnumStructure* const s_bool = STRUCTS::new_enum_structure(structures._ptr, strings._ptr, builtin_types->t_u8);
-    const InternString* bool_name = strings->intern("bool", 4);
-
-    builtin_types->t_bool = create_named_type(comp, comp_thread, names._ptr, Span{}, builtin_namespace, bool_name, s_bool);
-    ASSERT(!comp_thread->is_panic());
-
-    s_bool->enum_values.reserve_extra(2);
-    {
-      EnumValue* const e_true = STRUCTS::new_enum_value(structures._ptr, s_bool, bool_name,
-                                                        strings->intern("true", 4));
-      e_true->representation = 1;
-      builtin_types->e_true = e_true;
-      register_builtin_enum_value(e_true);
-
-
-      EnumValue* const e_false = STRUCTS::new_enum_value(structures._ptr, s_bool, bool_name,
-                                                         strings->intern("false", 5));
-
-      e_true->representation = 0;
-      builtin_types->e_false = e_false;
-      register_builtin_enum_value(e_false);
-
-    }
-    s_bool->enum_values.shrink();
-  }
+  register_builtin_type(builtin_types->t_u8);
+  register_builtin_type(builtin_types->t_i8);
+  register_builtin_type(builtin_types->t_u16);
+  register_builtin_type(builtin_types->t_i16);
+  register_builtin_type(builtin_types->t_u32);
+  register_builtin_type(builtin_types->t_i32);
+  register_builtin_type(builtin_types->t_u64);
+  register_builtin_type(builtin_types->t_i64);
+  
+  register_builtin_type(builtin_types->t_void_ptr);
+  register_builtin_type(builtin_types->t_void_call);
+  register_builtin_type(builtin_types->t_ascii);
+  
+  register_builtin_type(builtin_types->t_bool);
+  register_builtin_enum_value(builtin_types->e_true);
+  register_builtin_enum_value(builtin_types->e_false);
 
   {
     //Nullptr

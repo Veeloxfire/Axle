@@ -80,7 +80,8 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
 }
 
 
-SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, StringInterner* strings, usize ptr_size, const CallingConvention* conv,
+SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, StringInterner* strings,
+                                                  const CallingConvention* conv,
                                                   Array<Type>&& params,
                                                   Type ret_type) {
 #ifdef AXLE_TRACING
@@ -92,8 +93,8 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
   type->parameter_types = bake_arr(std::move(params));
   type->return_type = ret_type;
   type->calling_convention = conv;
-  type->size = (u32)ptr_size;
-  type->alignment = (u32)ptr_size;
+  type->size = (u32)structures->pointer_size;
+  type->alignment = (u32)structures->pointer_size;
 
   {
     Format::ArrayFormatter name = {};
@@ -191,7 +192,9 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
   return type;
 }
 
-PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringInterner* strings, usize ptr_size, const Type& base) {
+PointerStructure* STRUCTS::new_pointer_structure(Structures* structures,
+                                                 StringInterner* strings,
+                                                 const Type& base) {
 #ifdef AXLE_TRACING
   TRACING_FUNCTION();
 #endif
@@ -201,8 +204,8 @@ PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringI
   type->ir_format = IR::Format::uint64;
   type->base = base;
   type->struct_name = strings->format_intern("*{}", base.name);
-  type->size = (u32)ptr_size;
-  type->alignment = (u32)ptr_size;
+  type->size = (u32)structures->pointer_size;
+  type->alignment = (u32)structures->pointer_size;
 
   structures->structures.insert(type);
 
@@ -227,6 +230,91 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
   return val;
 }
 
+BuiltinTypes STRUCTS::create_builtins(Structures* structures, StringInterner* strings) {
+  BuiltinTypes builtin_types = {};
+
+  {
+    TypeStructure* const s_type = &structures->s_type;
+    s_type->type = s_type->expected_type_enum;
+    s_type->struct_name = strings->intern("type", 4);
+
+    s_type->size = sizeof(Type);
+    s_type->alignment = alignof(Type);
+
+
+    builtin_types.t_type = to_type(s_type);
+  }
+
+  {
+    VoidStructure* s_void = &structures->s_void;
+    s_void->type = s_void->expected_type_enum;
+    s_void->struct_name = strings->intern("void", 4);
+    s_void->size = 0;
+    s_void->alignment = s_void->alignment;
+
+    builtin_types.t_void = to_type(s_void);
+  }
+
+  {
+    const auto int_type = [&](const auto& name, bool is_signed, u32 size, IR::Format ir_format, Type* t) {
+      IntegerStructure* s = STRUCTS::new_int_structure(structures, strings->intern(lit_view_arr(name)));
+      s->is_signed = is_signed;
+      s->size = size;
+      s->alignment = size;
+      s->ir_format = ir_format;
+
+      *t = to_type(s);
+    };
+
+    int_type("u8", false, 1, IR::Format::uint8, &builtin_types.t_u8);
+    int_type("ascii", false, 1, IR::Format::uint8, &builtin_types.t_ascii);
+
+    int_type("i8", true, 1, IR::Format::sint8, &builtin_types.t_i8);
+    int_type("u16", false, 2, IR::Format::uint16, &builtin_types.t_u16);
+    int_type("i16", true, 2, IR::Format::sint16, &builtin_types.t_i16);
+    int_type("u32", false, 4, IR::Format::uint32, &builtin_types.t_u32);
+    int_type("i32", true, 4, IR::Format::sint32, &builtin_types.t_i32);
+    int_type("u64", false, 8, IR::Format::uint64, &builtin_types.t_u64);
+    int_type("i64", true, 8, IR::Format::sint64, &builtin_types.t_i64);
+  }
+
+  {
+    Structure* const s_void_ptr = STRUCTS::new_pointer_structure(structures, strings, 
+                                                                 builtin_types.t_void);
+    builtin_types.t_void_ptr = to_type(s_void_ptr);
+  }
+
+  {
+    Array<Type> params = {};
+
+    Structure* const s_void_call = STRUCTS::new_lambda_structure(structures, strings,
+                                                                 nullptr, std::move(params), builtin_types.t_void);
+    builtin_types.t_void_call = to_type(s_void_call);
+  }
+
+  {
+    EnumStructure* const s_bool = STRUCTS::new_enum_structure(structures, strings, builtin_types.t_u8);
+    const InternString* bool_name = strings->intern("bool", 4);
+
+    builtin_types.t_bool = to_type(s_bool);
+    s_bool->enum_values.reserve_extra(2);
+    {
+      EnumValue* const e_true = STRUCTS::new_enum_value(structures, s_bool, bool_name,
+                                                        strings->intern("true", 4));
+      e_true->representation = 1;
+      builtin_types.e_true = e_true;
+
+      EnumValue* const e_false = STRUCTS::new_enum_value(structures, s_bool, bool_name,
+                                                         strings->intern("false", 5));
+
+      e_true->representation = 0;
+      builtin_types.e_false = e_false;
+    }
+    s_bool->enum_values.shrink();
+  }
+
+  return builtin_types;
+}
 Structures::~Structures() {
   {
 #ifdef AXLE_TRACING

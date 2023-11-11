@@ -481,7 +481,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
                                       BIN_OP_CASE(Sub, -);
                                       BIN_OP_CASE(Mul, *);
                                       BIN_OP_CASE(Div, / );
-                                      BIN_OP_CASE(Mod, / );
+                                      BIN_OP_CASE(Mod, % );
                                       BIN_OP_CASE(Eq, == );
                                       BIN_OP_CASE(Neq, != );
                                       BIN_OP_CASE(Less, < );
@@ -581,7 +581,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
           auto val = stack_frame->get_value(
             IR::v_arg(stack_frame->current_block->cf_split.condition,
                       0,
-                      env->t_bool)
+                      env->builtin_types->t_bool)
           );
 
           ASSERT(val.t.struct_format() == IR::Format::uint8);

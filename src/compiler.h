@@ -418,9 +418,3 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDec
 
 void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept;
 
-const SignatureStructure* find_or_make_lamdba_structure(Structures* const structures,
-                                                        StringInterner* strings,
-                                                        usize ptr_size,
-                                                        const CallingConvention* conv,
-                                                        Array<Type>&& params,
-                                                        Type ret_type);

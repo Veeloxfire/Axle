@@ -226,7 +226,7 @@ TC_STAGE(PTR_TYPE, 2) {
 
     s = find_or_make_pointer_structure(structures._ptr,
                                        strings._ptr,
-                                       comp->platform_interface.ptr_size, base_type);
+                                       base_type);
   }
 
   ptr->actual_type = to_type(s);
@@ -275,7 +275,6 @@ TC_STAGE(LAMBDA_TYPE, 2) {
     comp->services.get_multiple(&structures, &strings);
     s = find_or_make_lamdba_structure(structures._ptr,
                                       strings._ptr,
-                                      comp->platform_interface.ptr_size,
                                       comp_thread->build_options.default_calling_convention,
                                       std::move(args), ret);
   }
@@ -412,7 +411,6 @@ TC_STAGE(FUNCTION_SIGNATURE, 2) {
 
     sig_struct = find_or_make_lamdba_structure(structures._ptr,
                                                strings._ptr,
-                                               comp->platform_interface.ptr_size,
                                                ast_sig->convention,
                                                std::move(params), ret_type);
   }
@@ -519,7 +517,7 @@ TC_STAGE(MEMBER_ACCESS, 2) {
         comp->services.get_multiple(&structures, &strings);
         member->node_type = to_type(find_or_make_pointer_structure(structures._ptr,
                                                                    strings._ptr,
-                                                                   comp->platform_interface.ptr_size, as->base));
+                                                                   as->base));
       }
 
       reduce_category(member, base);
@@ -1306,7 +1304,7 @@ TC_STAGE(UNARY_OPERATOR, addr_2) {
     comp->services.get_multiple(&structures, &strings);
 
     ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
-                                         comp->platform_interface.ptr_size, expr->expr->node_type);
+                                         expr->expr->node_type);
   }
 
   expr->node_type = to_type(ptr);

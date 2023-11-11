@@ -580,7 +580,7 @@ namespace VM {
   };
 
   struct Env {
-    Type t_bool;
+    const BuiltinTypes* builtin_types;
     Errors* errors;
   };
 
