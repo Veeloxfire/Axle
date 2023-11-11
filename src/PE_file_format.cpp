@@ -4,8 +4,9 @@
 #include <Axle/backends/PE_file_format.h>
 #include "compiler.h"
 #include "backends.h"
-
+#ifdef AXLE_TRACING
 #include <Tracer/trace.h>
+#endif
 #include <ctime>
 
 //// Sizes ////
@@ -96,7 +97,9 @@ struct ProgramLocation {
 void write_pe_file(CompilerThread* comp_thread,
                    const Backend::ProgramData* program,
                    const InternString* out_name, const InternString* out_folder, bool lib) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   ASSERT((lib && program->dyn_exports.size != 0) || program->dyn_exports.size == 0);
   ASSERT(lib || program->entry_point != IR::NULL_GLOBAL_LABEL);
@@ -328,7 +331,9 @@ void write_pe_file(CompilerThread* comp_thread,
   Array<usize> dyn_import_lookup = {};
   Array<DynImport> dyn_imports = {};
   if (has_dynamic_imports) {
+  #ifdef AXLE_TRACING
     TRACING_SCOPE("Write Dynamic Imports");
+  #endif
 
     {
       dyn_import_lookup.insert_uninit(program->dyn_imports.size);
@@ -554,7 +559,9 @@ void write_pe_file(CompilerThread* comp_thread,
   OwnedArr actual_function_locations = new_arr<ProgramLocation>(program->functions.size);
 
   {
+  #ifdef AXLE_TRACING
     TRACING_SCOPE("Write Machine Code");
+  #endif
     //Write all the code
 
     Backend::DataBucketIterator code = program->code_store.start();
@@ -685,7 +692,9 @@ void write_pe_file(CompilerThread* comp_thread,
   const usize exports_memory_start = memory_pointer;
 
   if (lib) {
+  #ifdef AXLE_TRACING
     TRACING_SCOPE("Write Dynamic Exports");
+  #endif
 
     OwnedArr name_offsets = new_arr<u32>(program->dyn_exports.size);
 

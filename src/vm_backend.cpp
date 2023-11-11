@@ -1,6 +1,9 @@
 #include "ir.h"
 #include "type.h"
+
+#ifdef AXLE_TRACING
 #include <Tracer/trace.h>
+#endif
 
 #include "compiler.h"
 
@@ -74,7 +77,9 @@ RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
 //}
 
 VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   ASSERT(ir->control_blocks.size > 0);
 
@@ -304,7 +309,9 @@ static void copy_values(u8* to, IR::Format t_format,
 }
 
 void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   Errors* errors = env->errors;
 

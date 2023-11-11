@@ -5,7 +5,9 @@
 #include <AxleUtil/memory.h>
 #include <AxleUtil/io.h>
 
+#ifdef AXLE_TRACING
 #include <Tracer/trace.h>
+#endif
 
 struct KeywordPair {
   ViewArr<const char> keyword;
@@ -2809,7 +2811,9 @@ void print_full_ast(AST_LOCAL expr) {
 }
 
 void print_full_ast(const FileAST* file) {
+#ifdef AXLE_TRACING
   TRACING_SCOPE("Print full ast");
+#endif
 
   Printer printer = {};
 

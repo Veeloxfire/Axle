@@ -6,7 +6,9 @@
 #include <Axle/backends/x64_backend.h>
 #include <Axle/backends/PE_file_format.h>
 
+#ifdef AXLE_TRACING
 #include <Tracer/trace.h>
+#endif
 
 struct ArgErrors {
   bool errored;
@@ -20,7 +22,7 @@ struct ArgErrors {
 };
 
 int main(int argc, const char** args) {
-#ifdef TRACING_ENABLE
+#if defined(TRACING_ENABLE) && defined(AXLE_TRACING)
   Tracing::start_default_tracing_thread("info.trace");
   DEFER() {
     Tracing::end_default_tracing_thread();
@@ -112,7 +114,9 @@ int main(int argc, const char** args) {
   //options.optimize.non_stack_locals = true;
   
   {
+  #ifdef AXLE_TRACING
     TRACING_SCOPE("Compiler");
+  #endif
     int out = compile_and_write(options);
 
     if (out != 0) {

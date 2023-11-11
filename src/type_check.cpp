@@ -2,7 +2,9 @@
 #include "ir.h"
 #include "compiler.h"
 
+#ifdef AXLE_TRACING
 #include <Tracer/trace.h>
+#endif
 
 struct Typer;
 struct TypeCheckNode;
@@ -117,7 +119,9 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
 #define TC_STAGE(name, stage) static CheckResult name ## _stage_ ## stage (CompilerGlobals* const comp, CompilerThread* const comp_thread, Typer* const typer, const TypeCheckNode* this_infer)
 
 TC_STAGE(NAMED_TYPE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTNamedType, nt);
 
   nt->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
@@ -144,7 +148,9 @@ TC_STAGE(NAMED_TYPE, 1) {
 }
 
 TC_STAGE(ARRAY_TYPE, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTArrayType, at);
 
   Type base_type = get_type_value(comp_thread, at->base);
@@ -188,7 +194,9 @@ TC_STAGE(ARRAY_TYPE, 2) {
 }
 
 TC_STAGE(ARRAY_TYPE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTArrayType, at);
 
   at->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -200,7 +208,9 @@ TC_STAGE(ARRAY_TYPE, 1) {
 }
 
 TC_STAGE(PTR_TYPE, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTPtrType, ptr);
 
   Type base_type = get_type_value(comp_thread, ptr->base);
@@ -225,7 +235,9 @@ TC_STAGE(PTR_TYPE, 2) {
 }
 
 TC_STAGE(PTR_TYPE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTPtrType, ptr);
 
   ptr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -236,7 +248,9 @@ TC_STAGE(PTR_TYPE, 1) {
 }
 
 TC_STAGE(LAMBDA_TYPE, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTLambdaType, lt);
   Array<Type> args = {};
 
@@ -272,7 +286,9 @@ TC_STAGE(LAMBDA_TYPE, 2) {
 }
 
 TC_STAGE(LAMBDA_TYPE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTLambdaType, lt);
 
   lt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -287,7 +303,9 @@ TC_STAGE(LAMBDA_TYPE, 1) {
 }
 
 TC_STAGE(TUPLE_TYPE, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTTupleType, tt);
   Array<Type> args = {};
 
@@ -317,7 +335,9 @@ TC_STAGE(TUPLE_TYPE, 2) {
 }
 
 TC_STAGE(TUPLE_TYPE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTTupleType, tt);
 
   tt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -334,7 +354,9 @@ TC_STAGE(TUPLE_TYPE, 1) {
 }
 
 TC_STAGE(STRUCT_EXPR, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTStructExpr, se);
 
   se->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -348,7 +370,9 @@ TC_STAGE(STRUCT_EXPR, 1) {
 }
 
 TC_STAGE(LAMBDA_EXPR, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTLambdaExpr, le);
 
   ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
@@ -364,7 +388,9 @@ TC_STAGE(LAMBDA_EXPR, 1) {
 }
 
 TC_STAGE(FUNCTION_SIGNATURE, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTFuncSig, ast_sig);
   Array<Type> params = {};
   params.reserve_total(ast_sig->parameters.count);
@@ -400,7 +426,9 @@ TC_STAGE(FUNCTION_SIGNATURE, 2) {
 }
 
 TC_STAGE(FUNCTION_SIGNATURE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTFuncSig, ast_sig);
 
   ast_sig->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -415,7 +443,9 @@ TC_STAGE(FUNCTION_SIGNATURE, 1) {
 }
 
 TC_STAGE(LAMBDA, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTLambda, lambda);
 
   lambda->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -434,7 +464,9 @@ TC_STAGE(LAMBDA, 1) {
 }
 
 TC_STAGE(MEMBER_ACCESS, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTMemberAccessExpr, member);
 
   AST_LOCAL base = member->expr;
@@ -516,7 +548,9 @@ TC_STAGE(MEMBER_ACCESS, 2) {
 }
 
 TC_STAGE(MEMBER_ACCESS, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTMemberAccessExpr, member);
   
   member->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -528,7 +562,9 @@ TC_STAGE(MEMBER_ACCESS, 1) {
 }
 
 TC_STAGE(INDEX_EXPR, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
   AST_LOCAL base = index_expr->expr;
@@ -550,7 +586,9 @@ TC_STAGE(INDEX_EXPR, 2) {
 }
 
 TC_STAGE(INDEX_EXPR, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
   index_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -565,7 +603,9 @@ TC_STAGE(INDEX_EXPR, 1) {
 }
 
 TC_STAGE(TUPLE_LIT, known_type) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   FOR_AST(tup->elements, it) {
@@ -575,7 +615,9 @@ TC_STAGE(TUPLE_LIT, known_type) {
 }
 
 TC_STAGE(TUPLE_LIT, new_type) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTTupleLitExpr, tup);
   Array<Type> element_types = {};
 
@@ -599,7 +641,9 @@ TC_STAGE(TUPLE_LIT, new_type) {
 }
 
 TC_STAGE(TUPLE_LIT, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   const Type infer_type = this_infer->infer;
@@ -706,7 +750,9 @@ TC_STAGE(TUPLE_LIT, 2) {
 }
 
 TC_STAGE(TUPLE_LIT, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   tup->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -720,7 +766,9 @@ TC_STAGE(TUPLE_LIT, 1) {
 }
 
 TC_STAGE(ARRAY_EXPR, infer_2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTArrayExpr, arr_expr);
   ASSERT(!this_infer->infer.is_valid());
 
@@ -756,7 +804,9 @@ TC_STAGE(ARRAY_EXPR, infer_2) {
 }
 
 TC_STAGE(ARRAY_EXPR, infer_1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTArrayExpr, arr_expr);
   ASSERT(!this_infer->infer.is_valid());
 
@@ -782,7 +832,9 @@ TC_STAGE(ARRAY_EXPR, infer_1) {
 }
 
 TC_STAGE(ARRAY_EXPR, known) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTArrayExpr, arr_expr);
   ASSERT(this_infer->infer.is_valid());
 
@@ -795,7 +847,9 @@ TC_STAGE(ARRAY_EXPR, known) {
 }
 
 TC_STAGE(ARRAY_EXPR, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTArrayExpr, arr_expr);
 
   arr_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -848,7 +902,9 @@ TC_STAGE(ARRAY_EXPR, 1) {
 }
 
 TC_STAGE(ASCII_CHAR, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTAsciiChar, a);
   a->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   a->node_type = comp_thread->builtin_types->t_ascii;
@@ -856,7 +912,9 @@ TC_STAGE(ASCII_CHAR, 1) {
 }
 
 TC_STAGE(ASCII_STRING, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTAsciiString, ascii);
   ascii->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   
@@ -878,7 +936,9 @@ TC_STAGE(ASCII_STRING, 1) {
 }
 
 TC_STAGE(NUMBER, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTNumber, num);
   num->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -942,7 +1002,9 @@ TC_STAGE(NUMBER, 1) {
 }
 
 TC_STAGE(EXPORT_SINGLE, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTExportSingle, es);
 
   if (es->value->node_type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
@@ -956,7 +1018,9 @@ TC_STAGE(EXPORT_SINGLE, 2) {
 }
 
 TC_STAGE(EXPORT_SINGLE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTExportSingle, es);
 
   es->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -966,7 +1030,9 @@ TC_STAGE(EXPORT_SINGLE, 1) {
 }
 
 TC_STAGE(EXPORT, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTExport, e);
   e->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -979,7 +1045,9 @@ TC_STAGE(EXPORT, 1) {
 }
 
 TC_STAGE(LINK, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTLink, imp);
 
   imp->node_type = get_type_value(comp_thread, imp->import_type);
@@ -1018,7 +1086,9 @@ TC_STAGE(LINK, 2) {
 }
 
 TC_STAGE(LINK, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTLink, imp);
   imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1028,7 +1098,9 @@ TC_STAGE(LINK, 1) {
 }
 
 TC_STAGE(IDENTIFIER_EXPR, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTIdentifier, ident);
 
   if (ident->id_type == ASTIdentifier::LOCAL) {
@@ -1058,7 +1130,9 @@ TC_STAGE(IDENTIFIER_EXPR, 1) {
 }
 
 TC_STAGE(CAST, 3) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
   reduce_category(cast, expr);
@@ -1154,7 +1228,9 @@ TC_STAGE(CAST, 3) {
 }
 
 TC_STAGE(CAST, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
 
@@ -1164,7 +1240,9 @@ TC_STAGE(CAST, 2) {
 }
 
 TC_STAGE(CAST, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTCastExpr, cast);
   cast->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1176,7 +1254,9 @@ TC_STAGE(CAST, 1) {
 }
 
 TC_STAGE(UNARY_OPERATOR, neg_2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::NEG);
 
@@ -1209,7 +1289,9 @@ TC_STAGE(UNARY_OPERATOR, neg_2) {
 }
 
 TC_STAGE(UNARY_OPERATOR, addr_2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::ADDRESS);
 
@@ -1233,7 +1315,9 @@ TC_STAGE(UNARY_OPERATOR, addr_2) {
 }
 
 TC_STAGE(UNARY_OPERATOR, deref_2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::DEREF);
 
@@ -1265,7 +1349,9 @@ TC_STAGE(UNARY_OPERATOR, deref_2) {
 }
 
 TC_STAGE(UNARY_OPERATOR, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1322,7 +1408,9 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
                                        CompilerThread* comp_thread,
                                        Typer* typer,
                                        const TypeCheckNode* this_infer) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTBinaryOperatorExpr, expr);
 
   AST_LOCAL left_ast = expr->left;
@@ -1886,7 +1974,9 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
 }
 
 TC_STAGE(BINARY_OPERATOR, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTBinaryOperatorExpr, bin_op);
   AST_LOCAL left = bin_op->left;
   AST_LOCAL right = bin_op->right;;
@@ -1900,7 +1990,9 @@ TC_STAGE(BINARY_OPERATOR, 2) {
 }
 
 TC_STAGE(BINARY_OPERATOR, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTBinaryOperatorExpr, bin_op);
 
   bin_op->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -1917,7 +2009,9 @@ TC_STAGE(BINARY_OPERATOR, 1) {
 }
 
 TC_STAGE(IMPORT, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTImport, imp);
   AST_LOCAL expr = imp->expr_location;
   ASSERT(expr->node_type.is_valid());
@@ -1953,7 +2047,9 @@ TC_STAGE(IMPORT, 2) {
 }
 
 TC_STAGE(IMPORT, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTImport, imp);
   imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   
@@ -1964,7 +2060,9 @@ TC_STAGE(IMPORT, 1) {
 }
 
 static bool test_function_overload(const CallSignature* sig, const SignatureStructure* sig_struct) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   //Correct name and number of args
   if (sig->arguments.size == sig_struct->parameter_types.size) {
@@ -1996,7 +2094,9 @@ static void check_call_arguments(CompilerGlobals* const comp,
                                  CompilerThread* const comp_thread,
                                  Typer* typer,
                                  ASTFunctionCallExpr* const call) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   ASSERT(call->sig != nullptr);
   const SignatureStructure* sig_struct = call->sig;
@@ -2020,7 +2120,9 @@ static void check_call_arguments(CompilerGlobals* const comp,
 }
 
 TC_STAGE(FUNCTION_CALL, 3) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
   const Type& func_type = call->function->node_type;
@@ -2070,7 +2172,9 @@ TC_STAGE(FUNCTION_CALL, 3) {
 }
 
 TC_STAGE(FUNCTION_CALL, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
   const Type& func_type = call->function->node_type;
@@ -2095,7 +2199,9 @@ TC_STAGE(FUNCTION_CALL, 2) {
 }
 
 TC_STAGE(FUNCTION_CALL, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
   call->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;//not constant yet
@@ -2106,7 +2212,9 @@ TC_STAGE(FUNCTION_CALL, 1) {
 }
 
 TC_STAGE(ASSIGN, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTAssign, assign);
 
   AST_LOCAL assign_to = assign->assign_to;
@@ -2124,7 +2232,9 @@ TC_STAGE(ASSIGN, 2) {
 }
 
 TC_STAGE(ASSIGN, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTAssign, assign);
   AST_LOCAL assign_to = assign->assign_to;
 
@@ -2134,7 +2244,9 @@ TC_STAGE(ASSIGN, 1) {
 }
 
 TC_STAGE(DECL, 3) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTDecl, ast_decl);
 
   AST_LOCAL decl_expr = ast_decl->expr;
@@ -2216,7 +2328,9 @@ TC_STAGE(DECL, 3) {
 }
 
 TC_STAGE(DECL, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTDecl, decl);
 
   Type expr_type = {};
@@ -2240,7 +2354,9 @@ TC_STAGE(DECL, 2) {
 }
 
 TC_STAGE(DECL, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTDecl, decl);
   AST_LOCAL decl_expr = decl->expr;
 
@@ -2254,7 +2370,9 @@ TC_STAGE(DECL, 1) {
 }
 
 TC_STAGE(IF_ELSE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTIfElse, if_else);
 
   typer->push_node(if_else->condition, comp_thread->builtin_types->t_bool);
@@ -2269,7 +2387,9 @@ TC_STAGE(IF_ELSE, 1) {
 }
 
 TC_STAGE(WHILE, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTWhile, while_loop);
 
   typer->push_node(while_loop->condition, comp_thread->builtin_types->t_bool);
@@ -2280,7 +2400,9 @@ TC_STAGE(WHILE, 1) {
 }
 
 TC_STAGE(BLOCK, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTBlock, block);
 
   FOR_AST(block->block, it) {
@@ -2292,7 +2414,9 @@ TC_STAGE(BLOCK, 1) {
 }
 
 TC_STAGE(RETURN, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTReturn, ret);
 
   ASSERT(typer->return_type.is_valid());
@@ -2316,7 +2440,9 @@ TC_STAGE(RETURN, 1) {
 }
 
 TC_STAGE(STRUCT, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTStructBody, body);
 
   //Build the new structure
@@ -2370,7 +2496,9 @@ TC_STAGE(STRUCT, 2) {
 }
 
 TC_STAGE(STRUCT, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTStructBody, body);
 
   FOR_AST(body->elements, it) {
@@ -2385,7 +2513,9 @@ TC_STAGE(STRUCT, 1) {
 }
 
 TC_STAGE(TYPED_NAME, 2) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTTypedName, name);
 
   name->node_type = get_type_value(comp_thread, name->type);
@@ -2406,7 +2536,9 @@ TC_STAGE(TYPED_NAME, 2) {
 }
 
 TC_STAGE(TYPED_NAME, 1) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   EXPAND_THIS(ASTTypedName, name);
 
   typer->push_node(name->type, comp_thread->builtin_types->t_type);
@@ -2415,7 +2547,9 @@ TC_STAGE(TYPED_NAME, 1) {
 }
 
 static TypeCheckStageFn get_first_stage(AST_TYPE type) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   switch (type) {
 #define MOD(ty) case AST_TYPE:: ty : return ty ## _stage_1;
@@ -2441,14 +2575,18 @@ void TC::type_check_ast(CompilerGlobals* comp,
                         CompilerThread* comp_thread,
                         Namespace* ns,
                         AST_LOCAL root, const Type& infer) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   Typer typer = {};
   typer.available_names = ns;
   typer.in_progress.insert({ root, infer, get_first_stage(root->ast_type) });
 
   constexpr auto sumbit_new_nodes = [](Typer& typer) {
+  #ifdef AXLE_TRACING
     TRACING_SCOPE("Submit New Nodes");
+  #endif
     ASSERT(typer.new_nodes.size > 0);
 
     usize count = typer.new_nodes.size;
@@ -2478,7 +2616,9 @@ void TC::type_check_ast(CompilerGlobals* comp,
       }
 
       if (res.finished) {
+      #ifdef AXLE_TRACING
         TRACING_SCOPE("Single TC Finished");
+      #endif
 
         ASSERT(n->node->node_type.is_valid());
 

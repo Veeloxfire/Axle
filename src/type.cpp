@@ -3,10 +3,14 @@
 #include "compiler.h"
 #include "type.h"
 
+#ifdef AXLE_TRACING
 #include <Tracer/trace.h>
+#endif
 
 TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInterner* strings, Array<Type>&& types) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   TupleStructure* const type = structures->tuple_structures.allocate();
 
@@ -67,7 +71,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
     type->size = current_size;
     type->alignment = current_align;
 
-    type->struct_name = strings->intern(name.view());
+    type->struct_name = strings->intern(view_arr(name));
   }
 
   structures->structures.insert(type);
@@ -79,8 +83,9 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
 SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, StringInterner* strings, usize ptr_size, const CallingConvention* conv,
                                                   Array<Type>&& params,
                                                   Type ret_type) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
-
+#endif
   SignatureStructure* type = structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
   type->ir_format = IR::Format::opaque;
@@ -109,7 +114,7 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
 
     Format::format_to_formatter(name, ") -> {}", type->return_type.name);
 
-    type->struct_name = strings->intern(name.view());
+    type->struct_name = strings->intern(view_arr(name));
   }
 
   structures->structures.insert(type);
@@ -119,7 +124,9 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
 
 
 IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const InternString* name) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   IntegerStructure* const type = structures->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
@@ -130,7 +137,9 @@ IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const Inter
 }
 
 CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, StringInterner* strings) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   CompositeStructure* const type = structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
@@ -143,7 +152,9 @@ CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Str
 }
 
 EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterner* strings, const Type& base) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
 
   EnumStructure* const type = structures->enum_structures.allocate();
@@ -162,8 +173,9 @@ EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterne
 
 ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInterner* strings, const Type& base,
                                              size_t length) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
-
+#endif
 
   ArrayStructure* const type = structures->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
@@ -180,7 +192,9 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
 }
 
 PointerStructure* STRUCTS::new_pointer_structure(Structures* structures, StringInterner* strings, usize ptr_size, const Type& base) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
   
   PointerStructure* const type = structures->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
@@ -199,7 +213,9 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
                                    EnumStructure* enum_s,
                                    const InternString* enum_name,
                                    const InternString* value_name) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
+#endif
 
   EnumValue* const val = structures->enum_values.allocate();
   val->type = Type{ enum_name, enum_s };
@@ -213,7 +229,9 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
 
 Structures::~Structures() {
   {
+#ifdef AXLE_TRACING
     TRACING_FUNCTION();
+#endif
 
     auto i = structures.begin();
     const auto end = structures.end();

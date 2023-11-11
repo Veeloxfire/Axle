@@ -15,6 +15,8 @@
 #include "ir.h"
 #include "backends.h"
 
+#include <atomic>
+
 struct Decl {
   Span span = {};
 

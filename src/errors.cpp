@@ -164,9 +164,9 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
       IO::err_print("Location: ");
 
       if (!files.contains(i->span.full_path)) {
-        auto load_file = FILES::load_file_to_string(view_arr(i->span.full_path));
+        auto load_file = FILES::read_full_file(view_arr(i->span.full_path));
 
-        files.insert(i->span.full_path, std::move(load_file));
+        files.insert(i->span.full_path, cast_arr<const char>(std::move(load_file)));
       }
 
       const OwnedArr<const char>* src_ptr = files.get_val(i->span.full_path);

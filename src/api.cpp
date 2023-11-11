@@ -6,7 +6,10 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 #include <AxleUtil/io.h>
 #include <AxleUtil/strings.h>
 #include <AxleUtil/files.h>
+
+#ifdef AXLE_TRACING
 #include <Tracer/trace.h>
+#endif
 
 #include "ast.h"
 #include "parser.h"
@@ -18,8 +21,9 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 #include <chrono>
 
 int compile_and_write(const APIOptions& options) {
+#ifdef AXLE_TRACING
   TRACING_FUNCTION();
-
+#endif
 
   //Setup
   Backend::ProgramData program = {};
@@ -98,7 +102,9 @@ int compile_and_write(const APIOptions& options) {
   }
 
   {
+#ifdef AXLE_TRACING
     TRACING_SCOPE("Write output file");
+#endif
 
 #ifdef ASSERT_EXCEPTIONS
     try {
