@@ -1988,7 +1988,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
   if (imported_file != nullptr) {
     auto names = comp->services.names.get();
 
-    names->add_global_import(comp_thread, available_names, imported_file->ns, root->node_span);
+    names->add_global_import(&comp_thread->errors, available_names, imported_file->ns, root->node_span);
   }
   else {
     FileImport file_import = {};
@@ -2000,7 +2000,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
       auto names = comp->services.names.get();
 
       //Might error but its probs fine to just leave it as the error will be caught at some point
-      names->add_global_import(comp_thread, available_names, file_import.ns, root->node_span);
+      names->add_global_import(&comp_thread->errors, available_names, file_import.ns, root->node_span);
     }
 
     comp->services.file_loader.get()->unparsed_files.insert(std::move(file_import));
@@ -2073,7 +2073,7 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
   {
     auto names = comp->services.names.get();
 
-    names->add_global_name(comp_thread, available_names, global->decl.name, global);
+    names->add_global_name(&comp_thread->errors, available_names, global->decl.name, global);
   }
 }
 
@@ -3057,7 +3057,7 @@ void create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread,
 
   memcpy_ts((Type*)g->decl.init_value, 1, &type, 1);
 
-  names->add_global_name(comp_thread, ns, type.name, g);
+  names->add_global_name(&comp_thread->errors, ns, type.name, g);
 }
 
 void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
@@ -3075,7 +3075,7 @@ void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
 
   memcpy_ts((const EnumValue**)g->decl.init_value, 1, &v, 1);
 
-  names->add_global_name(comp_thread, ns, v->name, g);
+  names->add_global_name(&comp_thread->errors, ns, v->name, g);
 }
 
 void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThread* comp_thread) {
@@ -3142,7 +3142,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     g->decl.init_value = (const u8*)comp->new_constant<const u8*>();
     *(const u8**)g->decl.init_value = 0;//This is disgusting
 
-    names->add_global_name(comp_thread, builtin_namespace, g->decl.name, g);
+    names->add_global_name(&comp_thread->errors, builtin_namespace, g->decl.name, g);
   }
 
   //Intrinsics

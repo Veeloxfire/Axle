@@ -52,6 +52,7 @@ target_sources(AxleUnitTests PRIVATE
   "${PROJECT_SOURCE_DIR}/tests_main.cpp"
 
   "${PROJECT_SOURCE_DIR}/errors_tests.cpp"
+  "${PROJECT_SOURCE_DIR}/names_tests.cpp"
   "${PROJECT_SOURCE_DIR}/type_tests.cpp"
   "${PROJECT_SOURCE_DIR}/vm_tests.cpp"
 )
