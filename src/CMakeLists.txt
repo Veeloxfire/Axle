@@ -37,16 +37,3 @@ target_sources(AxleCompiler PRIVATE
   FILES ${CppHeaders}
 )
 
-if(AxleTRACING)
-  target_compile_definitions(AxleCompiler PRIVATE TRACING_ENABLE)
-
-  if(NOT DEFINED TracerBIN)
-    message(FATAL_ERROR "Requires TracerINCLUDE to compile, even if you're not tracing")
-  endif()
-
-  target_link_libraries(AxleCompiler "${TracerBIN}/Tracer.lib")
-endif()
-
-if(AxleTHROWING_ASSERTS)
-  target_compile_definitions(AxleCompiler PRIVATE ASSERT_EXCEPTIONS)
-endif()

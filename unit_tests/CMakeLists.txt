@@ -4,52 +4,55 @@ project(AxleUnitTests)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-if(NOT DEFINED AxleINCLUDE)
-  message(FATAL_ERROR "Require AxleINCLUDE (axle compiler include path) to be provided")
-endif()
-
-if(NOT DEFINED AxleSRC)
-  message(FATAL_ERROR "Require AxleSRC (axle compiler src path) to be provided")
-endif()
+foreach(config_type ${CMAKE_CONFIGURATION_TYPES})
+  string(TOUPPER ${config_type} config_upper)
+  if(NOT DEFINED "CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper}")
+    set("CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
+  endif()
+  if(NOT DEFINED "CMAKE_LIBRARY_OUTPUT_DIRECTORY_${config_upper}")
+    set("CMAKE_LIBRARY_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
+  endif()
+  if(NOT DEFINED "CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper}")
+    set("CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
+  endif()
+endforeach()
 
 if(NOT DEFINED AxleUtilINCLUDE)
   message(FATAL_ERROR "Require AxleUtilINCLUDE (axle util include path) to be provided")
-endif()
-
-if(NOT DEFINED TracerINCLUDE)
-  message(FATAL_ERROR "Require TracerINCLUDE (tracer include path) to be provided, even if not tracing")
-endif()
-
-if(NOT DEFINED AxleBIN)
-  message(FATAL_ERROR "Require AxleBIN (axle compiler library path) to be provided")
 endif()
 
 if(NOT DEFINED AxleUtilBIN)
   message(FATAL_ERROR "Require AxleUtilBIN (axle util library path) to be provided")
 endif()
 
-set(AxleTRACING OFF CACHE BOOL "Enables Tracing (not advised)" FORCE)
-set(AxleTHROWING_ASSERTS ON CACHE BOOL "Enables Throwing Asserts" FORCE)
+if(NOT DEFINED AxleINCLUDE)
+  message(FATAL_ERROR "Require AxleINCLUDE (axle include path) to be provided")
+endif()
+
+if(NOT DEFINED AxleSRC)
+  message(FATAL_ERROR "Require AxleSRC (axle src include path) to be provided")
+endif()
+
+if(AxleTRACING)
+  message(FATAL_ERROR "Cannot trace the unit tests")
+endif()
+
+option(AxleTHROWING_ASSERTS, "Enable throwing asserts (for better testing)" OFF)
 
 add_executable(AxleUnitTests)
+set_target_properties(AxleUnitTests PROPERTIES OUTPUT_NAME "AxleUnitTests$<CONFIG>")
 
-target_include_directories(AxleUnitTests PRIVATE "${PROJECT_SOURCE_DIR}/src" ${AxleINCLUDE} ${AxleSRC} ${AxleUtilINCLUDE})
+if(AxleTHROWING_ASSERTS)
+  target_compile_definitions(AxleUnitTests PRIVATE ASSERT_EXCEPTIONS)
+endif()
+
+target_include_directories(AxleUnitTests PRIVATE "${PROJECT_SOURCE_DIR}/../src" $"${PROJECT_SOURCE_DIR}/../include" ${AxleUtilINCLUDE})
 
 target_sources(AxleUnitTests PRIVATE
-  "${PROJECT_SOURCE_DIR}/src/unit_tests.cpp"
-  "${PROJECT_SOURCE_DIR}/src/containers_tests.cpp"
-  "${PROJECT_SOURCE_DIR}/src/files_tests.cpp"
-  "${PROJECT_SOURCE_DIR}/src/format_tests.cpp"
-  "${PROJECT_SOURCE_DIR}/src/math_tests.cpp"
-  "${PROJECT_SOURCE_DIR}/src/string_tests.cpp"
-  "${PROJECT_SOURCE_DIR}/src/type_tests.cpp"
-  "${PROJECT_SOURCE_DIR}/src/vm_tests.cpp"
-)
-target_sources(AxleUnitTests PRIVATE FILE_SET HEADERS 
-  BASE_DIRS ${PROJECT_SOURCE_DIR}
-  FILES "${PROJECT_SOURCE_DIR}/src/unit_tests.h"
-)
+  "${PROJECT_SOURCE_DIR}/tests_main.cpp"
 
-add_subdirectory("${PROJECT_SOURCE_DIR}/.." "${CMAKE_BINARY_DIR}/comp_build")
-
-target_link_libraries(AxleUnitTests AxleCompiler)
+  "${PROJECT_SOURCE_DIR}/errors_tests.cpp"
+  "${PROJECT_SOURCE_DIR}/type_tests.cpp"
+  "${PROJECT_SOURCE_DIR}/vm_tests.cpp"
+)
+target_link_libraries(AxleUnitTests AxleCompiler "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
