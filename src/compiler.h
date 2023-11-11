@@ -85,14 +85,16 @@ struct DependencyManager {
   u64 in_flight_units = 0;//Units that are not waiting somewhere
 
   void close_dependency(CompilationUnit* ptr, bool print);
-  void remove_dependency_from(CompilationUnit* ptr, bool print);
+  void try_restart(CompilationUnit* ptr, bool print);
   void add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on);
 };
 
 struct CompilationUnit {
   UnitID id;
 
-  u32 waiting_on_count;
+  u32 unit_wait_on_count;
+  u32 unfound_wait_on_count;
+
   u32 depend_list_size;
   DependencyListSingle* dependency_list;
   Pipe* main_pipe;
@@ -102,6 +104,8 @@ struct CompilationUnit {
   AST_LOCAL ast;
 
   void* detail;
+
+  constexpr bool waiting() const { return unit_wait_on_count > 0 || unfound_wait_on_count > 0; }
 };
 
 struct GlobalCompilation {
@@ -294,6 +298,11 @@ constexpr void copy_compiler_constants(const CompilerConstants* from, CompilerCo
   *to = *from;
 }
 
+struct GlobalLabelInfo {
+  const SignatureStructure* signature;
+  Span span = {};
+};
+
 //Things that may be modified by multiple threads
 struct CompilerGlobals : CompilerConstants {
   std::atomic_uint32_t work_counter = 0;
@@ -329,13 +338,13 @@ struct CompilerGlobals : CompilerConstants {
   BucketArray<IR::IRStore> ir_builders_single_threaded = {};
 
   SpinLockMutex label_mutex;
-  Array<const SignatureStructure*> label_signature_table = {};
+  Array<GlobalLabelInfo> label_signature_table = {};
 
   SpinLockMutex constants_mutex;
   ArenaAllocator constants_single_threaded = {};
 
-  IR::GlobalLabel next_function_label(const SignatureStructure* s);
-  const SignatureStructure* get_label_signature(IR::GlobalLabel label);
+  IR::GlobalLabel next_function_label(const SignatureStructure* s, const Span& span);
+  GlobalLabelInfo get_label_info(IR::GlobalLabel label);
 
   IR::IRStore* new_ir(IR::GlobalLabel label, const SignatureStructure* sig);
   IR::Function* new_function();

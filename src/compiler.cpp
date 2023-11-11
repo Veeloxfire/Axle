@@ -41,21 +41,21 @@ CompilationUnit* CompilationUnitStore::get_unit_if_exists(u64 id) const {
   return nullptr;
 }
 
-IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s) {
+IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s, const Span& span) {
   label_mutex.acquire();
   IR::GlobalLabel label = { label_signature_table.size + 1 };
-  label_signature_table.insert(s);
+  label_signature_table.insert({s, span});
   label_mutex.release();
 
   return label;
 }
 
-const SignatureStructure* CompilerGlobals::get_label_signature(IR::GlobalLabel label) {
+GlobalLabelInfo CompilerGlobals::get_label_info(IR::GlobalLabel label) {
   label_mutex.acquire();
-  const SignatureStructure* sig = label_signature_table[label.label - 1];
+  GlobalLabelInfo info = label_signature_table[label.label - 1];
   label_mutex.release();
 
-  return sig;
+  return info;
 }
 
 IR::IRStore* CompilerGlobals::new_ir(IR::GlobalLabel label, const SignatureStructure* sig) {
@@ -111,7 +111,8 @@ CompilationUnit* new_compilation_unit(Compilation* const comp,
   ASSERT(main_pipe != nullptr);
 
   CompilationUnit* unit = comp->store.allocate_unit();
-  unit->waiting_on_count = 0;
+  unit->unit_wait_on_count = 0;
+  unit->unfound_wait_on_count = 0;
   unit->dependency_list = nullptr;
   unit->main_pipe = main_pipe;
 
@@ -1466,11 +1467,11 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
         Array if_variables = std::exchange(builder->variables_state, std::move(split_variables));
 
-        IR::LocalLabel else_end_parent = IR::NULL_LOCAL_LABEL;
-        IR::LocalLabel else_end = IR::NULL_LOCAL_LABEL;
+        IR::LocalLabel else_end_parent = split_label;
+        IR::LocalLabel else_end = else_label;
 
         if (if_else->else_statement != 0) {
-          builder->switch_control_block(else_label, split_label);
+          builder->switch_control_block(else_end, else_end_parent);
 
           compile_bytecode_of_statement(comp, comp_thread, builder, if_else->else_statement);
           if (comp_thread->is_panic()) {
@@ -1533,8 +1534,6 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
           builder->switch_control_block(final_label, merge_label);
         }
-
-
         return;
       }
     case AST_TYPE::DECL: {
@@ -1576,7 +1575,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
 void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
   if (comp->print_options.finished_ir) {
-    IR::print_ir(ir);
+    IR::print_ir(comp, ir);
   }
   comp->finished_irs.push_back(ir);
 }
@@ -1897,7 +1896,7 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
   }
   else if (global->decl.init_value == nullptr) {
     const SignatureStructure* sig = (const SignatureStructure*)comp->builtin_types->t_void_call.structure;
-    IR::GlobalLabel label = comp->next_function_label(sig);
+    IR::GlobalLabel label = comp->next_function_label(sig, global->decl.span);
 
     IR::IRStore* ir = comp->new_ir(label, sig);
 
@@ -2137,12 +2136,10 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
   comp->pipelines.depend_check.push_back(unit);
 }
 
-void DependencyManager::remove_dependency_from(CompilationUnit* unit, bool print) {
+void DependencyManager::try_restart(CompilationUnit* unit, bool print) {
   ASSERT(unit != nullptr);
 
-  unit->waiting_on_count -= 1;
-
-  if (unit->waiting_on_count == 0) {
+  if (!unit->waiting()) {
     if (print) {
       IO::format("Remove Dependency from unit {} -> starting again\n", unit->id);
     }
@@ -2152,18 +2149,13 @@ void DependencyManager::remove_dependency_from(CompilationUnit* unit, bool print
     depend_check_pipe->push_back(unit);//has to re-run through depend check
     in_flight_units += 1;
   }
-  else {
-    if (print) {
-      IO::format("Remove Dependency from unit {}\n", unit->id);
-    }
-  }
 }
 
 void DependencyManager::add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on) {
   ASSERT(now_waiting != nullptr);
   ASSERT(waiting_on != nullptr);
 
-  now_waiting->waiting_on_count += 1;
+  now_waiting->unit_wait_on_count += 1;
   waiting_on->depend_list_size += 1;
 
   DependencyListSingle* old_top = waiting_on->dependency_list;
@@ -2185,7 +2177,8 @@ void DependencyManager::close_dependency(CompilationUnit* ptr, bool print) {
     dependency_list_entry.free(dep_single);
     dep_single = next;
 
-    remove_dependency_from(waiting, print);
+    waiting->unit_wait_on_count -= 1;
+    try_restart(waiting, print);
   }
 
   ASSERT(i == ptr->depend_list_size);
@@ -2223,9 +2216,18 @@ bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_threa
 
     FOR_MUT(comp_thread->local_unfound_names.names, it) {
       it->dependency = unit;
-      unit->waiting_on_count += 1;
+      unit->unfound_wait_on_count += 1;
     }
 
+    if (comp_thread->print_options.comp_units) {
+      const ViewArr<UnfoundNameHolder> names = view_arr(comp_thread->local_unfound_names.names);
+      IO::format("Comp unit {} waiting on {}\n", unit->id, PrintListCF{names.data, names.size, 
+                 [](Format::Formatter auto& res, const UnfoundNameHolder& nh) {
+        res.load_char('"');
+        Format::FormatArg<const InternString*>::load_string(res, nh.name.ident);
+        res.load_char('"');
+      }});
+    }
     compilation->unfound_names.names.concat(std::move(comp_thread->local_unfound_names.names));
     comp_thread->local_unfound_names.names.clear();
   }
@@ -2339,7 +2341,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
-    ASSERT(unit->waiting_on_count == 0);
+    ASSERT(!unit->waiting());
 
     ASSERT(unit->detail != nullptr);
     ImportCompilation* imp = (ImportCompilation*)unit->detail;
@@ -2371,7 +2373,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-    ASSERT(unit->waiting_on_count == 0);
+    ASSERT(!unit->waiting());
 
     LambdaBodyCompilation* lbc = (LambdaBodyCompilation*)unit->detail;
 
@@ -2402,7 +2404,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
-    ASSERT(unit->waiting_on_count == 0);
+    ASSERT(!unit->waiting());
 
     ASSERT(unit->ast != nullptr);
 
@@ -2433,7 +2435,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
-    ASSERT(unit->waiting_on_count == 0);
+    ASSERT(!unit->waiting());
 
     ASSERT(unit->ast != nullptr);
 
@@ -2510,7 +2512,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-    ASSERT(unit->waiting_on_count == 0);
+    ASSERT(!unit->waiting());
 
     ExportCompilation* ec = (ExportCompilation*)unit->detail;
 
@@ -2542,7 +2544,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
-    ASSERT(unit->waiting_on_count == 0);
+    ASSERT(!unit->waiting());
 
     DependencyChecker st = {};
     st.available_names = unit->available_names;
@@ -2582,7 +2584,8 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         const GlobalName* gn = names->find_global_name(dep.name.ns, dep.name.ident);
 
         if (gn != nullptr) {
-          dep_ptr->remove_dependency_from(dep.dependency, comp_thread->print_options.comp_units);
+          dep.dependency->unfound_wait_on_count -= 1;
+          dep_ptr->try_restart(dep.dependency, comp_thread->print_options.comp_units);
           return true;
         }
         else {
@@ -2759,16 +2762,38 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   ASSERT(comp->active_threads >= 1);
 
   compiler_loop_threaded(comp, comp_thread);
+  DEFER(comp) {
+    free_remaining_compilation_units(comp->services.compilation.get()._ptr);
+  };
+
   if (comp->is_global_panic()) {
-    auto compilation = comp->services.compilation.get();
-    free_remaining_compilation_units(compilation._ptr);
     return;
   }
+
 
   {
     AtomicLock<Compilation> compilation;
     AtomicLock<FileLoader> files;
     comp->services.get_multiple(&files, &compilation);
+
+    if (compilation->unfound_names.names.size > 0) {
+      auto& names = compilation->unfound_names.names;
+
+      //All names are still unfound
+      auto i = names.mut_begin();
+      auto end = names.mut_end();
+
+      comp->global_errors.reserve_extra(names.size);
+
+      for (; i < end; ++i) {
+        comp->global_errors.insert(std::move(i->as_error));
+      }
+
+      names.clear();
+
+      comp->global_panic.set();
+      return;
+    }
 
     if (comp->work_counter == 0
         && (compilation->dependencies.in_flight_units > 0
@@ -2792,7 +2817,9 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
           debug_name = lit_view_arr("Type unsupported in this mode");
         }
 
-        Format::format_to_formatter(error, "- Id: {} | Type: {} | Waiting on count: {}\n", unit->id, debug_name, unit->waiting_on_count);
+        Format::format_to_formatter(error, "- Id: {} | Type: {}\n"
+                                    "  Waiting on Units: {} | Waiting on Names: {}\n", 
+                                    unit->id, debug_name, unit->unit_wait_on_count, unit->unfound_wait_on_count);
       }
 
       Format::format_to_formatter(error, "Pipeline states:\n");
@@ -2830,36 +2857,10 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       comp->global_errors_mutex.acquire();
       comp->global_errors.concat(std::move(comp_thread->errors.error_messages));
       comp->global_errors_mutex.release();
-
-      free_remaining_compilation_units(compilation._ptr);
       return;
     }
   }
 
-  {
-    auto compilation = comp->services.compilation.get();
-
-    if (compilation->unfound_names.names.size > 0) {
-      auto& names = compilation->unfound_names.names;
-
-      //All names are still unfound
-      auto i = names.mut_begin();
-      auto end = names.mut_end();
-
-      comp->global_errors.reserve_extra(names.size);
-
-      for (; i < end; ++i) {
-        comp->global_errors.insert(std::move(i->as_error));
-      }
-
-      names.clear();
-
-      comp->global_panic.set();
-
-      free_remaining_compilation_units(compilation._ptr);
-      return;
-    }
-  }
 
   ASSERT(comp->services.compilation.get()->dependencies.in_flight_units == 0);
   ASSERT(comp->services.compilation.get()->store.active_units.size == 0);
@@ -2940,17 +2941,18 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   comp_thread->thread_id = 0;//first thread is thread 0
 
-  //Setup the built in namespace
-  Namespace* builtin_namespace = comp->new_namespace();
-  comp->builtin_namespace = builtin_namespace;
-  comp->platform_interface = *options.platform_interface;
-
   //Init the types
   auto file_loader = comp->services.file_loader.get();
   auto names = comp->services.names.get();
   auto structures = comp->services.structures.get();
   auto strings = comp->services.strings.get();
   auto* builtin_types = comp->builtin_types;
+
+
+  //Setup the built in namespace
+  Namespace* builtin_namespace = comp->new_namespace();
+  comp->builtin_namespace = builtin_namespace;
+  comp->platform_interface = *options.platform_interface;
 
   const auto register_builtin_type = [names = names._ptr, comp_thread, comp, builtin_namespace](const Type& t) {
     create_named_type(comp, comp_thread, names, Span{}, builtin_namespace, t);

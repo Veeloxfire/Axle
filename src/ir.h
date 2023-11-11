@@ -384,7 +384,7 @@ MOD(Not, CODE_V_V)
   usize deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i);
   usize deserialize(const u8* data, usize remaining_size, CODE_NV& i);
 
-  void print_ir(const IR::IRStore* builder);
+  void print_ir(CompilerGlobals* comp, const IR::IRStore* builder);
 
   namespace Types {
 #define MOD(n, layout, ...) struct n : layout { static constexpr OpCode OPCODE = OpCode:: n; };

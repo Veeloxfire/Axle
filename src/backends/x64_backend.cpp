@@ -3864,7 +3864,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           bc = IR::Read::Call(bc, bc_end, call);
           ASSERT(call.values == nullptr);
 
-          const SignatureStructure* sig_struct = comp->get_label_signature(call.label);
+          const GlobalLabelInfo l_info = comp->get_label_info(call.label);
+          const SignatureStructure* sig_struct = l_info.signature;
           ASSERT(sig_struct != nullptr);
 
           bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
@@ -4403,7 +4404,7 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
                                          &X64::CONVENTION_microsoft_x64,
                                          std::move(params), comp->builtin_types->t_void);
   }
-  lib.label = comp->next_function_label(type);
+  lib.label = comp->next_function_label(type, Span{});
 
 
   x64_emit_dyn_library_function(comp_thread, &lib, type->calling_convention, program);
@@ -5224,8 +5225,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             bc = IR::Read::Call(bc, bc_end, call);
             ASSERT(call.values == nullptr);
 
-            const SignatureStructure* sig_struct = comp->get_label_signature(call.label);
-
+            const GlobalLabelInfo l_info = comp->get_label_info(call.label);
+            const SignatureStructure* sig_struct = l_info.signature;
             const bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
 
             ASSERT(call_space_used >= convention->shadow_space_size);

@@ -417,7 +417,7 @@ TC_STAGE(FUNCTION_SIGNATURE, 2) {
                                                bake_arr(std::move(params)), ret_type);
   }
 
-  ast_sig->sig->label = comp->next_function_label(sig_struct);
+  ast_sig->sig->label = comp->next_function_label(sig_struct, ast_sig->node_span);
 
   ast_sig->node_type = comp_thread->builtin_types->t_void;
   ast_sig->sig->sig_struct = sig_struct;
@@ -1073,7 +1073,7 @@ TC_STAGE(LINK, 2) {
       IR::DynLibraryImport import_lib = {};
       import_lib.name = imp->name;
       import_lib.path = imp->lib_file;
-      import_lib.label = comp->next_function_label(t.extract_base<SignatureStructure>());
+      import_lib.label = comp->next_function_label(t.extract_base<SignatureStructure>(), imp->node_span);
 
       comp->dyn_lib_imports.insert(std::move(import_lib));
       imp->import_index = comp->dyn_lib_imports.size;
