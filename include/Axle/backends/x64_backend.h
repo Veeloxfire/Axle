@@ -23,6 +23,8 @@ namespace X64 {
   REGISTER_DEFINE(r13, 13);
   REGISTER_DEFINE(r14, 14);
 
+  REGISTER_DEFINE(rINVALID, 255);
+
 #undef REGISTER_DEFINE
 
   inline constexpr REGISTER_CONSTANT all_x64_regs[] = {

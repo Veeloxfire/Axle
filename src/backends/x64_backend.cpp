@@ -2,6 +2,8 @@
 
 #include <Axle/backends/x64_backend.h>
 
+#include "AxleUtil/formattable.h"
+#include "AxleUtil/safe_lib.h"
 #include "AxleUtil/utility.h"
 #include "ir.h"
 #include "compiler.h"
@@ -2486,7 +2488,7 @@ namespace IntHelpers {
   }
 
 #define EMIT_SYMMETRICAL_HELPER(name)\
-  static void emit_ ## name(Backend::ProgramData* program,\
+  static X64::R emit_ ## name(Backend::ProgramData* program,\
                 X64::R left, IR::Format l_format,\
                 X64::R right, IR::Format r_format) {\
     ASSERT(l_format == r_format);\
@@ -2515,6 +2517,7 @@ namespace IntHelpers {
       default: INVALID_CODE_PATH("Invalid " #name " format");\
     }\
     X64::append_instruction(program, i);\
+    return left;\
   }
 
   EMIT_SYMMETRICAL_HELPER(add);
@@ -2525,7 +2528,7 @@ namespace IntHelpers {
 
 #undef EMIT_SYMMETRICAL_HELPER
 
-  static void emit_mul(Backend::ProgramData* program,
+  static X64::R emit_mul(Backend::ProgramData* program,
                        X64::R left, IR::Format l_format,
                        X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
@@ -2575,57 +2578,50 @@ namespace IntHelpers {
     }
 
     X64::append_instruction(program, i);
+    return left;
   }
 
-  static void emit_div(Backend::ProgramData* program,
-                       X64::R left, IR::Format l_format,
+  static X64::R emit_div(Backend::ProgramData* program,
+                       IR::Format l_format,
                        X64::R right, IR::Format r_format) {
     ASSERT(l_format == r_format);
     X64::Instruction i = {};
     switch (l_format) {
       case  IR::Format::uint8: {
-          ASSERT(left.r == X64::rax.REG);
           X64::div(i, X64::R8{right}, X64::RAX{});
           break;
         }
       case  IR::Format::sint8: {
-          ASSERT(left.r == X64::rax.REG);
           X64::idiv(i, X64::R8{right}, X64::RAX{});
           break;
         }
       case  IR::Format::uint16: {
           zero_register(program, X64::R{X64::rdx.REG});
-          ASSERT(left.r == X64::rax.REG);
           X64::div(i, X64::R16{right}, X64::RAX{});
           break;
         }
       case  IR::Format::sint16: {
           sign_extend_rax_rdx(program, l_format);
-          ASSERT(left.r == X64::rax.REG);
           X64::idiv(i, X64::R16{right}, X64::RAX{});
           break;
         }
       case  IR::Format::uint32: {
           zero_register(program, X64::R{X64::rdx.REG});
-          ASSERT(left.r == X64::rax.REG);
           X64::div(i, X64::R32{right}, X64::RAX{});
           break;
         }
       case  IR::Format::sint32: {
           sign_extend_rax_rdx(program, l_format);
-          ASSERT(left.r == X64::rax.REG);
           X64::idiv(i, X64::R32{right}, X64::RAX{});
           break;
         }
       case  IR::Format::uint64: {
           zero_register(program, X64::R{X64::rdx.REG});
-          ASSERT(left.r == X64::rax.REG);
           X64::div(i, X64::R64{right}, X64::RAX{});
           break;
         }
       case  IR::Format::sint64: {
           sign_extend_rax_rdx(program, l_format);
-          ASSERT(left.r == X64::rax.REG);
           X64::idiv(i, X64::R64{right}, X64::RAX{});
           break;
         }
@@ -2633,6 +2629,58 @@ namespace IntHelpers {
     }
 
     X64::append_instruction(program, i);
+    return X64::R{X64::rax.REG};
+  }
+
+  static X64::R emit_mod(Backend::ProgramData* program,
+                       IR::Format l_format,
+                       X64::R right, IR::Format r_format) {
+    ASSERT(l_format == r_format);
+    X64::Instruction i = {};
+    switch (l_format) {
+      case  IR::Format::uint8: {
+          X64::div(i, X64::R8{right}, X64::RAX{});
+          break;
+        }
+      case  IR::Format::sint8: {
+          X64::idiv(i, X64::R8{right}, X64::RAX{});
+          break;
+        }
+      case  IR::Format::uint16: {
+          zero_register(program, X64::R{X64::rdx.REG});
+          X64::div(i, X64::R16{right}, X64::RAX{});
+          break;
+        }
+      case  IR::Format::sint16: {
+          sign_extend_rax_rdx(program, l_format);
+          X64::idiv(i, X64::R16{right}, X64::RAX{});
+          break;
+        }
+      case  IR::Format::uint32: {
+          zero_register(program, X64::R{X64::rdx.REG});
+          X64::div(i, X64::R32{right}, X64::RAX{});
+          break;
+        }
+      case  IR::Format::sint32: {
+          sign_extend_rax_rdx(program, l_format);
+          X64::idiv(i, X64::R32{right}, X64::RAX{});
+          break;
+        }
+      case  IR::Format::uint64: {
+          zero_register(program, X64::R{X64::rdx.REG});
+          X64::div(i, X64::R64{right}, X64::RAX{});
+          break;
+        }
+      case  IR::Format::sint64: {
+          sign_extend_rax_rdx(program, l_format);
+          X64::idiv(i, X64::R64{right}, X64::RAX{});
+          break;
+        }
+      default: INVALID_CODE_PATH("Invalid comparable format");
+    }
+
+    X64::append_instruction(program, i);
+    return X64::R{X64::rdx.REG};
   }
 
   static void emit_cmp(Backend::ProgramData* program,
@@ -3186,22 +3234,23 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void invalid() const {
+    X64::R invalid() const {
       INVALID_CODE_PATH("Invalid add types");
+      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
-    void operator()(const Structure*, const Structure*) const {
+    X64::R operator()(const Structure*, const Structure*) const {
       return invalid();
     }
 
-    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+    X64::R operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
                     const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
       return IntHelpers::emit_add(program, from, s1->ir_format, to, s2->ir_format);
     }
   };
 
-  static void emit_add(Backend::ProgramData* program,
+  static X64::R emit_add(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(AddDispatch{ program, from, to }, f_type, t_type);
@@ -3212,22 +3261,23 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void invalid() const {
+    X64::R invalid() const {
       INVALID_CODE_PATH("Invalid sub types");
+      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
-    void operator()(const Structure*, const Structure*) const {
+    X64::R operator()(const Structure*, const Structure*) const {
       return invalid();
     }
 
-    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+    X64::R operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
                     const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
       return IntHelpers::emit_sub(program, from, s1->ir_format, to, s2->ir_format);
     }
   };
 
-  static void emit_sub(Backend::ProgramData* program,
+  static X64::R emit_sub(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(SubDispatch{ program, from, to }, f_type, t_type);
@@ -3238,22 +3288,23 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void invalid() const {
+    X64::R invalid() const {
       INVALID_CODE_PATH("Invalid mul types");
+      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
-    void operator()(const Structure*, const Structure*) const {
+    X64::R operator()(const Structure*, const Structure*) const {
       return invalid();
     }
 
-    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+    X64::R operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
                     const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
       return IntHelpers::emit_mul(program, from, s1->ir_format, to, s2->ir_format);
     }
   };
 
-  static void emit_mul(Backend::ProgramData* program,
+  static X64::R emit_mul(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(MulDispatch{ program, from, to }, f_type, t_type);
@@ -3264,25 +3315,55 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void invalid() const {
+    X64::R invalid() const {
       INVALID_CODE_PATH("Invalid div types");
+      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
-    void operator()(const Structure*, const Structure*) const {
+    X64::R operator()(const Structure*, const Structure*) const {
       return invalid();
     }
 
-    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+    X64::R operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
                     const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
-      return IntHelpers::emit_div(program, from, s1->ir_format, to, s2->ir_format);
+      ASSERT(from.r == X64::rax.REG);
+      return IntHelpers::emit_div(program, s1->ir_format, to, s2->ir_format);
     }
   };
 
-  static void emit_div(Backend::ProgramData* program,
+  static X64::R emit_div(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(DivDispatch{ program, from, to }, f_type, t_type);
+  }
+
+  struct ModDispatch {
+    Backend::ProgramData* program;
+    X64::R from;
+    X64::R to;
+
+    X64::R invalid() const {
+      INVALID_CODE_PATH("Invalid div types");
+      return X64::R{X64::rINVALID.REG};
+    }
+
+    //Base case
+    X64::R operator()(const Structure*, const Structure*) const {
+      return invalid();
+    }
+
+    X64::R operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+                    const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
+      ASSERT(from.r == X64::rax.REG);
+      return IntHelpers::emit_mod(program, s1->ir_format, to, s2->ir_format);
+    }
+  };
+
+  static X64::R emit_mod(Backend::ProgramData* program,
+                       X64::R from, const Structure* f_type,
+                       X64::R to, const Structure* t_type) {
+    return dispatch_pair(ModDispatch{ program, from, to }, f_type, t_type);
   }
 
   struct AndDispatch {
@@ -3290,22 +3371,23 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void invalid() const {
+    X64::R invalid() const {
       INVALID_CODE_PATH("Invalid and types");
+      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
-    void operator()(const Structure*, const Structure*) const {
+    X64::R operator()(const Structure*, const Structure*) const {
       return invalid();
     }
 
-    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+    X64::R operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
                     const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
       return IntHelpers::emit_and_(program, from, s1->ir_format, to, s2->ir_format);
     }
   };
 
-  static void emit_and(Backend::ProgramData* program,
+  static X64::R emit_and(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(AndDispatch{ program, from, to }, f_type, t_type);
@@ -3316,22 +3398,23 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void invalid() const {
+    X64::R invalid() const {
       INVALID_CODE_PATH("Invalid or types");
+      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
-    void operator()(const Structure*, const Structure*) const {
+    X64::R operator()(const Structure*, const Structure*) const {
       return invalid();
     }
 
-    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+    X64::R operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
                     const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
       return IntHelpers::emit_or_(program, from, s1->ir_format, to, s2->ir_format);
     }
   };
 
-  static void emit_or(Backend::ProgramData* program,
+  static X64::R emit_or(Backend::ProgramData* program,
                       X64::R from, const Structure* f_type,
                       X64::R to, const Structure* t_type) {
     return dispatch_pair(OrDispatch{ program, from, to }, f_type, t_type);
@@ -3342,22 +3425,23 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void invalid() const {
+    X64::R invalid() const {
       INVALID_CODE_PATH("Invalid xor types");
+      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
-    void operator()(const Structure*, const Structure*) const {
+    X64::R operator()(const Structure*, const Structure*) const {
       return invalid();
     }
 
-    void operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
+    X64::R operator()(const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
                     const OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s2) const {
       return IntHelpers::emit_xor_(program, from, s1->ir_format, to, s2->ir_format);
     }
   };
 
-  static void emit_xor(Backend::ProgramData* program,
+  static X64::R emit_xor(Backend::ProgramData* program,
                        X64::R from, const Structure* f_type,
                        X64::R to, const Structure* t_type) {
     return dispatch_pair(XorDispatch{ program, from, to }, f_type, t_type);
@@ -3981,6 +4065,9 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           VisitRes left = visit_ordered_value(values, lifetimes, resolver, bin_op.left, expr_id);
           VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
           VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id + 1);
+
+          ASSERT(left.t.struct_format() == right.t.struct_format());
+          ASSERT(to.t.struct_format() == right.t.struct_format());
           /*always a left register needed*/
           switch (left.t.struct_format()) {
             case IR::Format::uint8:
@@ -3999,8 +4086,53 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
                 break;
               }
             default: {
-                new_intermediate(intermediates, expr_id);
+                comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                                      "Invalid Div/Mod operands\n"
+                                      "Left: {}, Right: {}",
+                                      left.t, right.t);
+                return {};
+              }
+          }
+
+          if (right.ni == NeedIntermediate::Yes) {
+            new_intermediate(intermediates, expr_id);
+          }
+          expr_id += 1;
+          break;
+        }
+
+      case IR::OpCode::Mod: {
+          IR::Types::Mod bin_op;
+          bc = IR::Read::Mod(bc, bc_end, bin_op);
+          VisitRes left = visit_ordered_value(values, lifetimes, resolver, bin_op.left, expr_id);
+          VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
+          VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id + 1);
+
+          ASSERT(left.t.struct_format() == right.t.struct_format());
+          ASSERT(to.t.struct_format() == right.t.struct_format());
+          /*always a left register needed*/
+          switch (left.t.struct_format()) {
+            case IR::Format::uint8:
+            case IR::Format::sint8: {
+                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
                 break;
+              }
+            case IR::Format::sint16:
+            case IR::Format::uint16:
+            case IR::Format::sint32:
+            case IR::Format::uint32:
+            case IR::Format::sint64:
+            case IR::Format::uint64: {
+                new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
+                new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
+                break;
+              }
+            default: {
+                comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                                      "Invalid Div/Mod operands\n"
+                                      "Left: {}, Right: {}",
+                                      left.t, right.t);
+                return {};
               }
           }
 
@@ -5340,10 +5472,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                   right_reg = right.reg; break;\
                 }\
             }\
-            helper (program, left_reg, left.t.structure, right_reg, right.t.structure);\
+            X64::R out_reg = helper (program, left_reg, left.t.structure, right_reg, right.t.structure);\
             switch (to.value_type) {\
-              case ValueType::Register: Helpers::copy_reg_to_reg(program, left_reg, left.t.structure, to.reg, to.t.structure); break;\
-              case ValueType::Memory: Helpers::copy_reg_to_mem(program, left_reg, left.t.structure, to.mem, to.t.structure); break;\
+              case ValueType::Register: Helpers::copy_reg_to_reg(program, out_reg, left.t.structure, to.reg, to.t.structure); break;\
+              case ValueType::Memory: Helpers::copy_reg_to_mem(program, out_reg, left.t.structure, to.mem, to.t.structure); break;\
             }\
             break;\
           }\
@@ -5351,8 +5483,9 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
                              EMIT_BIN_OP(Add, Helpers::emit_add);
                              EMIT_BIN_OP(Sub, Helpers::emit_sub);
                              EMIT_BIN_OP(Mul, Helpers::emit_mul);
-                             EMIT_BIN_OP(Div, Helpers::emit_div);
                              EMIT_BIN_OP(And, Helpers::emit_and);
+                             EMIT_BIN_OP(Div, Helpers::emit_div);
+                             EMIT_BIN_OP(Mod, Helpers::emit_mod);
                              EMIT_BIN_OP(Or, Helpers::emit_or);
                              EMIT_BIN_OP(Xor, Helpers::emit_xor);
 #undef EMIT_BIN_OP
@@ -5617,9 +5750,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
   ASSERT(code_itr.actual_location <= program->code_store.total_size);
 
-  void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIterator end);
+  void print_x86_64(const GlobalLabelInfo& l_info, Backend::DataBucketIterator start, const Backend::DataBucketIterator end);
   if (comp_thread->print_options.finished_mc) {
-    print_x86_64(start_itr, program->code_store.current_location());
+    GlobalLabelInfo l_info = comp->get_label_info(ir->global_label);
+    print_x86_64(l_info, start_itr, program->code_store.current_location());
   }
 }
 
@@ -6054,9 +6188,12 @@ namespace Format {
   };
 }
 
-void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIterator end) {
+void print_x86_64(const GlobalLabelInfo& l_info, Backend::DataBucketIterator start, const Backend::DataBucketIterator end) {
   IO_Single::lock();
   DEFER() { IO_Single::unlock(); };
+
+  IO_Single::format("== Machine for code for {}({}:{}) ==\n",
+                    l_info.span.full_path, l_info.span.line_start, l_info.span.char_start);
 
   {
     IO_Single::print("raw = ");
@@ -6314,7 +6451,7 @@ void print_x86_64(Backend::DataBucketIterator start, const Backend::DataBucketIt
         case X64::CMP_IMM_TO_AL: {
             ASSERT(!rex);
             uint8_t b = start.read_byte();
-            IO_Single::format("cmp al, {}\n");
+            IO_Single::format("cmp al, {}\n", b);
             break;
           }
         case X64::PUSH_R:
