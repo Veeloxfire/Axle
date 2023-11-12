@@ -81,8 +81,8 @@ int main(int argc, const char** args) {
   options.executable_format_interface = &efi;
 
   options.build.default_calling_convention = 0;
-  options.build.debug_break_on_entry = true;
-
+  options.build.debug_break_on_entry = false;
+  
   options.build.current_directory = cwd.view();
   options.build.file_name = in;
 

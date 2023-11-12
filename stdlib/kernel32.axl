@@ -1,11 +1,11 @@
-HANDLE :: #type u64;
-DWORD  :: #type u32;
-BOOL   :: #type i32;
+HANDLE :: u64;
+DWORD  :: u32;
+BOOL   :: i32;
 
 GetStdHandle :: (i: i32)-> u64 {
   return #dynamic_import((i32) -> u64, "kernel32.dll", "GetStdHandle")(i);
 }
-WriteConsoleA :: (handle: HANDLE, string: *void, count: DWORD, out_count: *DWORD) -> BOOL {
-  return #dynamic_import((HANDLE, *void, DWORD, *DWORD, *void) -> u32,
+WriteConsoleA :: (handle: HANDLE, string: *void, count: DWORD, out_count: *DWORD) -> BOOL  {
+  return #dynamic_import((HANDLE, *void, DWORD, *DWORD, *void) -> BOOL,
                          "kernel32.dll", "WriteConsoleA") (handle, string, count, out_count, nullptr);
 }

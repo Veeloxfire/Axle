@@ -5,7 +5,7 @@ stdout_handle : u64 = GetStdHandle(WIN_STD_OUT_REF);
 
 
 print :: (string: *ascii, len: u64) -> void {
-  WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*u32, nullptr), nullptr);
+  WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*u32, nullptr));
 }
 
 print_newline :: () -> void {
@@ -20,27 +20,20 @@ print_u64 :: (val: u64) -> void {
     return;
   }
   
-  arr := "00000000000000000000";
+  arr: [ascii; 20] = [
+    0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0
+  ];
 
-  digit : u64 = 10000000000000000000;
-  index : u64 = 0;
+  i: u64 = 0;
 
-  while((digit > 0) & ((val / digit) == 0)) {
-    index = index + 1;
-    digit = digit / 10;
+  while(val > 0) {
+    d := val % 10;
+    arr[i - 1] = cast(ascii, cast(u8, '0') + cast(u8, d));
+
+    i = i - 1;
+    val = val / 10;
   }
 
-  first_index := index;
-
-
-  while(digit > 0) {
-    d := val / digit;
-    arr[index] = cast(ascii, cast(u8, '0') + cast(u8, d));
-
-    val = val - (d * digit);
-    index = index + 1;
-    digit = digit / 10;
-  }
-
-  print(arr.ptr + first_index, arr.len - first_index);
+  print(arr.ptr + i, arr.len - i);
 }
