@@ -2771,7 +2771,13 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       comp->work_counter += 1;
 
       Format::ArrayFormatter error = {};
-      Format::format_to(error, "Work still exists but is not accessable\n");
+      Format::format_to(error, "Work still exists but is not accessable according to these counters:\n");
+      Format::format_to(error, "- In flight units: {}\n", compilation->dependencies.in_flight_units);
+      Format::format_to(error, "- Active units: {}\n", compilation->store.active_units.size);
+      Format::format_to(error, "- Finished IRs: {}\n", comp->finished_irs.size);
+      Format::format_to(error, "- Unparsed files: {}\n", files->unparsed_files.size);
+
+      error.load_string_lit("\n");
 
       auto i = compilation->store.active_units.begin();
       const auto end = compilation->store.active_units.end();
@@ -2794,7 +2800,6 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       }
 
       Format::format_to(error, "Pipeline states:\n");
-      Format::format_to(error, "- Unparsed files: {}\n", files->unparsed_files.size);
 
       comp->pipelines.depend_check.mutex.acquire();
       Format::format_to(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
