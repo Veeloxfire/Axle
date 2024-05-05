@@ -2805,10 +2805,6 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       Format::format_to(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
       comp->pipelines.depend_check.mutex.release();
 
-      comp->pipelines.depend_check.mutex.acquire();
-      Format::format_to(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
-      comp->pipelines.depend_check.mutex.release();
-
       comp->pipelines.comp_structure.mutex.acquire();
       Format::format_to(error, "- Compile Structure: {}\n", comp->pipelines.comp_structure.size);
       comp->pipelines.comp_structure.mutex.release();
