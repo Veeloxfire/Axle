@@ -20,7 +20,7 @@
 struct Decl {
   Span span = {};
 
-  const InternString* name = {};
+  const Axle::InternString* name = {};
   VALUE_CATEGORY value_category;
   Type type = {};
 
@@ -33,8 +33,8 @@ struct Local {
   IR::VariableId variable_id = {};
 };
 
-struct Pipe : AtomicQueue<CompilationUnit*> {
-  ViewArr<const char> _debug_name;
+struct Pipe : Axle::AtomicQueue<CompilationUnit*> {
+  Axle::ViewArr<const char> _debug_name;
 };
 
 struct ComptimeExec {
@@ -46,9 +46,9 @@ struct ComptimeExec {
 struct DependencyChecker {
   Namespace* available_names;
   u32 num_locals;
-  Array<Local*> locals;
+  Axle::Array<Local*> locals;
 
-  Local* get_local(const InternString* name);
+  Local* get_local(const Axle::InternString* name);
 };
 
 struct Global {
@@ -80,7 +80,7 @@ struct DependencyListSingle {
 
 struct DependencyManager {
   Pipe* depend_check_pipe;
-  FreelistBlockAllocator<DependencyListSingle> dependency_list_entry;
+  Axle::FreelistBlockAllocator<DependencyListSingle> dependency_list_entry;
 
   u64 in_flight_units = 0;//Units that are not waiting somewhere
 
@@ -124,16 +124,16 @@ struct LambdaSigCompilation {
 struct StructCompilation {};
 
 struct ImportCompilation {
-  FileLocation src_loc;
+  Axle::FileLocation src_loc;
 };
 
 struct ExportCompilation {};
 
 struct CallSignature {
-  Array<Type> arguments = {};
+  Axle::Array<Type> arguments = {};
 };
 
-namespace Format {
+namespace Axle::Format {
   template<>
   struct FormatArg<CallSignature> {
     template<Formatter F>
@@ -145,11 +145,11 @@ namespace Format {
 
       if (i < end) {
         for (; i < (end - 1); i++) {
-          FormatArg<const InternString*>::load_string(res, i->name);
+          FormatArg<const Axle::InternString*>::load_string(res, i->name);
           res.load_string_lit(", ");
         }
 
-        FormatArg<const InternString*>::load_string(res, i->name);
+        FormatArg<const Axle::InternString*>::load_string(res, i->name);
       }
 
       res.load_char(')');
@@ -157,12 +157,10 @@ namespace Format {
   };
 }
 
-
 struct UnknownName {
-  const InternString* ident = nullptr;
+  const Axle::InternString* ident = nullptr;
   Namespace* ns = {};
 };
-
 
 struct UnfoundNameHolder {
   UnknownName name = {};
@@ -173,37 +171,37 @@ struct UnfoundNameHolder {
 };
 
 struct UnfoundNames {
-  Array<UnfoundNameHolder> names = {};
+  Axle::Array<UnfoundNameHolder> names = {};
 };
 
 struct FileImport {
-  FileLocation file_loc = {};
+  Axle::FileLocation file_loc = {};
   Namespace* ns = nullptr;
   Span span = {};
 };
 
 struct FileLoader {
-  Directory cwd = {};
-  Directory source_diretory = {};
-  Directory std_lib_directory = {};
+  Axle::Directory cwd = {};
+  Axle::Directory source_diretory = {};
+  Axle::Directory std_lib_directory = {};
 
-  Array<FileImport> unparsed_files = {};
+  Axle::Array<FileImport> unparsed_files = {};
 };
 
 struct BuildOptions {
   bool debug_break_on_entry = false;
 
-  const InternString* file_name = nullptr;
-  const InternString* source_folder = nullptr;
+  const Axle::InternString* file_name = nullptr;
+  const Axle::InternString* source_folder = nullptr;
 
   bool is_library = false;
-  const InternString* entry_point = nullptr;
+  const Axle::InternString* entry_point = nullptr;
 
-  const InternString* output_folder = nullptr;
-  const InternString* output_name = nullptr;
+  const Axle::InternString* output_folder = nullptr;
+  const Axle::InternString* output_name = nullptr;
 
-  const InternString* lib_folder = nullptr;
-  const InternString* std_lib_folder = nullptr;
+  const Axle::InternString* lib_folder = nullptr;
+  const Axle::InternString* std_lib_folder = nullptr;
 
   const CallingConvention* default_calling_convention = nullptr;
 };
@@ -214,7 +212,7 @@ MOD(len) \
 MOD(axl) \
 
 struct ImportantNames {
-#define MOD(n) const InternString* n;
+#define MOD(n) const Axle::InternString* n;
   IMPORTANT_NAMES_INC;
 #undef MOD
 };
@@ -222,8 +220,8 @@ struct ImportantNames {
 struct CompilationUnitStore {
   UnitID comp_unit_counter = NULL_ID;
 
-  FreelistBlockAllocator<CompilationUnit> compilation_units = {};
-  Array<CompilationUnit*> active_units;
+  Axle::FreelistBlockAllocator<CompilationUnit> compilation_units = {};
+  Axle::Array<CompilationUnit*> active_units;
 
   CompilationUnit* allocate_unit();
   void free_unit(CompilationUnit* unit);
@@ -236,27 +234,27 @@ struct Compilation {
 
   CompilationUnitStore store = {};
 
-  FreelistBlockAllocator<StructCompilation> struct_compilation = {};
-  FreelistBlockAllocator<LambdaBodyCompilation> lambda_body_compilation = {};
-  FreelistBlockAllocator<LambdaSigCompilation> lambda_sig_compilation = {};
-  FreelistBlockAllocator<GlobalCompilation> global_compilation = {};
-  FreelistBlockAllocator<ExportCompilation> export_compilation = {};
-  FreelistBlockAllocator<ImportCompilation> import_compilation = {};
+  Axle::FreelistBlockAllocator<StructCompilation> struct_compilation = {};
+  Axle::FreelistBlockAllocator<LambdaBodyCompilation> lambda_body_compilation = {};
+  Axle::FreelistBlockAllocator<LambdaSigCompilation> lambda_sig_compilation = {};
+  Axle::FreelistBlockAllocator<GlobalCompilation> global_compilation = {};
+  Axle::FreelistBlockAllocator<ExportCompilation> export_compilation = {};
+  Axle::FreelistBlockAllocator<ImportCompilation> import_compilation = {};
 };
 
 
 struct Services {
   //Must always be acquired in order!
-  AtomicPtr<FileLoader> file_loader;
-  AtomicPtr<Backend::ProgramData> out_program;
-  AtomicPtr<Compilation> compilation;
-  AtomicPtr<NameManager> names;
+  Axle::AtomicPtr<FileLoader> file_loader;
+  Axle::AtomicPtr<Backend::ProgramData> out_program;
+  Axle::AtomicPtr<Compilation> compilation;
+  Axle::AtomicPtr<NameManager> names;
 
-  AtomicPtr<Structures> structures;
-  AtomicPtr<StringInterner> strings;
+  Axle::AtomicPtr<Structures> structures;
+  Axle::AtomicPtr<Axle::StringInterner> strings;
 
-  void get_multiple(AtomicLock<FileLoader>* files,
-                    AtomicLock<Compilation>* comp) {
+  void get_multiple(Axle::AtomicLock<FileLoader>* files,
+                    Axle::AtomicLock<Compilation>* comp) {
     file_loader._mutex.acquire();
     compilation._mutex.acquire();
 
@@ -267,8 +265,8 @@ struct Services {
     comp->_ptr = compilation._ptr;
   }
 
-  void get_multiple(AtomicLock<Structures>* structs,
-                    AtomicLock<StringInterner>* string_int) {
+  void get_multiple(Axle::AtomicLock<Structures>* structs,
+                    Axle::AtomicLock<Axle::StringInterner>* string_int) {
     structures._mutex.acquire();
     strings._mutex.acquire();
 
@@ -307,41 +305,41 @@ struct GlobalLabelInfo {
 struct CompilerGlobals : CompilerConstants {
   std::atomic_uint32_t work_counter = 0;
 
-  Signal global_panic;
-  SpinLockMutex global_errors_mutex;
-  Array<ErrorMessage> global_errors;
+  Axle::Signal global_panic;
+  Axle::SpinLockMutex global_errors_mutex;
+  Axle::Array<ErrorMessage> global_errors;
 
   Services services;
 
   IR::GlobalLabel entry_point_label = IR::NULL_GLOBAL_LABEL;
-  AtomicQueue<const IR::IRStore*> finished_irs;
+  Axle::AtomicQueue<const IR::IRStore*> finished_irs;
 
   CompPipes pipelines;
 
   Namespace* build_file_namespace = {};//needs to be saved for finding main
   Namespace* builtin_namespace = {};
 
-  Array<IR::DynLibraryImport> dyn_lib_imports = {};
-  Array<FileAST> parsed_files = {};
-  Array<Backend::GlobalData> dynamic_inits = {};
+  Axle::Array<IR::DynLibraryImport> dyn_lib_imports = {};
+  Axle::Array<FileAST> parsed_files = {};
+  Axle::Array<Backend::GlobalData> dynamic_inits = {};
 
-  SpinLockMutex locals_mutex;
-  BucketArray<Local> locals_single_threaded = {};
-  SpinLockMutex globals_mutex;
-  BucketArray<Global> globals_single_threaded = {};
-  SpinLockMutex functions_mutex;
-  BucketArray<IR::Function> functions_single_threaded = {};
-  SpinLockMutex namespaces_mutex;
-  BucketArray<Namespace> namespaces_single_threaded = {};
+  Axle::SpinLockMutex locals_mutex;
+  Axle::BucketArray<Local> locals_single_threaded = {};
+  Axle::SpinLockMutex globals_mutex;
+  Axle::BucketArray<Global> globals_single_threaded = {};
+  Axle::SpinLockMutex functions_mutex;
+  Axle::BucketArray<IR::Function> functions_single_threaded = {};
+  Axle::SpinLockMutex namespaces_mutex;
+  Axle::BucketArray<Namespace> namespaces_single_threaded = {};
 
-  SpinLockMutex ir_mutex;
-  BucketArray<IR::IRStore> ir_builders_single_threaded = {};
+  Axle::SpinLockMutex ir_mutex;
+  Axle::BucketArray<IR::IRStore> ir_builders_single_threaded = {};
 
-  SpinLockMutex label_mutex;
-  Array<GlobalLabelInfo> label_signature_table = {};
+  Axle::SpinLockMutex label_mutex;
+  Axle::Array<GlobalLabelInfo> label_signature_table = {};
 
-  SpinLockMutex constants_mutex;
-  ArenaAllocator constants_single_threaded = {};
+  Axle::SpinLockMutex constants_mutex;
+  Axle::ArenaAllocator constants_single_threaded = {};
 
   IR::GlobalLabel next_function_label(const SignatureStructure* s, const Span& span);
   GlobalLabelInfo get_label_info(IR::GlobalLabel label);
@@ -384,12 +382,12 @@ struct CompilerThread : CompilerConstants {
   bool doing_work = true;
   u32 thread_id;
 
-  Array<Token> current_stream = {};
+  Axle::Array<Token> current_stream = {};
   Errors errors = {};
 
   UnfoundNames local_unfound_names;
-  Array<UnitID> new_depends;
-  Array<CompilationUnit*> new_units;
+  Axle::Array<UnitID> new_depends;
+  Axle::Array<CompilationUnit*> new_units;
 
   inline constexpr bool is_panic() const { return errors.is_panic(); }
   inline bool is_depends() const {
@@ -397,11 +395,11 @@ struct CompilerThread : CompilerConstants {
   }
 
   template<typename ... T>
-  void report_error(ERROR_CODE code, const Span& span, const Format::FormatString& f_message, const T& ... ts) {
+  void report_error(ERROR_CODE code, const Span& span, const Axle::Format::FormatString& f_message, const T& ... ts) {
     return errors.report_error(code, span, f_message, ts...);
   }
 
-  inline void report_error(ERROR_CODE code, const Span& span, OwnedArr<const char>&& msg) {
+  inline void report_error(ERROR_CODE code, const Span& span, Axle::OwnedArr<const char>&& msg) {
     return errors.report_error(code, span, std::move(msg));
   }
 };
@@ -417,7 +415,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
 
 void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThread* comp_thread);
 
-void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const FileLocation& src_loc, ASTImport* imp) noexcept;
+void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const Axle::FileLocation& src_loc, ASTImport* imp) noexcept;
 
 void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExport* imp) noexcept;
 

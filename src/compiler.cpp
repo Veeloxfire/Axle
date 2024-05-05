@@ -14,6 +14,9 @@
 #include <Tracer/trace.h>
 #endif
 
+namespace IO = Axle::IO;
+namespace Format = Axle::Format;
+
 CompilationUnit* CompilationUnitStore::allocate_unit() {
   CompilationUnit* unit = compilation_units.allocate();
 
@@ -156,7 +159,7 @@ void set_unfound_name(CompilerThread* const comp_thread,
   dep->as_error.message = format(f_message, std::forward<T>(ts)...);
 }
 
-Local* DependencyChecker::get_local(const InternString* name) {
+Local* DependencyChecker::get_local(const Axle::InternString* name) {
   auto i = locals.begin();
   const auto end = locals.end();
 
@@ -195,7 +198,7 @@ static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, u32 size, 
   return (u32)comp->dynamic_inits.size;
 }
 
-Global* test_global_dependency(CompilerGlobals* const comp, CompilerThread* const comp_thread, DependencyChecker* const state, const Span& span, const InternString* ident) {
+Global* test_global_dependency(CompilerGlobals* const comp, CompilerThread* const comp_thread, DependencyChecker* const state, const Span& span, const Axle::InternString* ident) {
   auto names = comp->services.names.get();
   const GlobalName* name = names->find_global_name(state->available_names, ident);
 
@@ -222,9 +225,7 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
                                CompilerThread* const comp_thread,
                                DependencyChecker* const state,
                                AST_LOCAL a) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   ASSERT(a != nullptr);
 
@@ -245,6 +246,13 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
       }
     case AST_TYPE::PTR_TYPE: {
         ASTPtrType* ptr = (ASTPtrType*)a;
+
+        dependency_check_ast_node(comp, comp_thread, state, ptr->base);
+
+        return;
+      }
+    case AST_TYPE::SLICE_TYPE: {
+        ASTSliceType* ptr = (ASTSliceType*)a;
 
         dependency_check_ast_node(comp, comp_thread, state, ptr->base);
 
@@ -293,7 +301,7 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* ident = (ASTIdentifier*)a;
 
-        const InternString* name = ident->name;
+        const Axle::InternString* name = ident->name;
 
         {
           Local* local = state->get_local(name);
@@ -341,12 +349,19 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
         }
         return;
       }
-
     case AST_TYPE::INDEX_EXPR: {
         ASTIndexExpr* index = (ASTIndexExpr*)a;
 
         dependency_check_ast_node(comp, comp_thread, state, index->expr);
         dependency_check_ast_node(comp, comp_thread, state, index->index);
+        return;
+      }
+    case AST_TYPE::SLICE_INDEX: {
+        ASTSliceIndex* index = (ASTSliceIndex*)a;
+
+        dependency_check_ast_node(comp, comp_thread, state, index->expr);
+        dependency_check_ast_node(comp, comp_thread, state, index->index_first);
+        dependency_check_ast_node(comp, comp_thread, state, index->index_second);
         return;
       }
     case AST_TYPE::MEMBER_ACCESS: {
@@ -459,7 +474,7 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
           dependency_check_ast_node(comp, comp_thread, state, it);
         }
 
-        state->locals.pop(state->locals.size - count);
+        state->locals.pop_n(state->locals.size - count);
 
         return;
       }
@@ -472,11 +487,11 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
 
         dependency_check_ast_node(comp, comp_thread, state, if_else->if_statement);
 
-        state->locals.pop(state->locals.size - count);
+        state->locals.pop_n(state->locals.size - count);
 
         if (if_else->else_statement != 0) {
           dependency_check_ast_node(comp, comp_thread, state, if_else->else_statement);
-          state->locals.pop(state->locals.size - count);
+          state->locals.pop_n(state->locals.size - count);
         }
 
         return;
@@ -488,7 +503,7 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
 
         const usize count = state->locals.size;
         dependency_check_ast_node(comp, comp_thread, state, while_s->statement);
-        state->locals.pop(state->locals.size - count);
+        state->locals.pop_n(state->locals.size - count);
         return;
       }
     case AST_TYPE::RETURN: {
@@ -601,9 +616,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
                                                 CompilerThread* const comp_thread,
                                                 Eval::IrBuilder* const builder,
                                                 const NodeEval& eval) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   IR::IRStore* const ir = builder->ir;
 
@@ -613,7 +626,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
 
   bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
 
-  Array<IR::V_ARG> args;
+  Axle::Array<IR::V_ARG> args;
   args.reserve_total(call->arguments.count + (usize)has_return);
 
   FOR_AST(call->arguments, it) {
@@ -700,8 +713,8 @@ Eval::RuntimeValue CASTS::take_address(IR::IRStore* const ir,
 static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
   const PointerStructure* ps;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
     ps = find_or_make_pointer_structure(structures._ptr, strings._ptr, base);
@@ -712,9 +725,7 @@ static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
 
 Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* builder, Global* global,
                                     const IR::ValueRequirements reqs) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   IR::IRStore* const ir = builder->ir;
 
@@ -728,7 +739,7 @@ Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* buil
 
   u32 global_id = 0;
   {
-    ViewArr<IR::GlobalReference> grs = view_arr(ir->globals_used);
+    Axle::ViewArr<IR::GlobalReference> grs = view_arr(ir->globals_used);
     const usize count = ir->globals_used.size;
 
     for (; global_id < count; ++global_id) {
@@ -760,9 +771,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                     CompilerThread* const comp_thread,
                                     Eval::IrBuilder* const builder,
                                     const NodeEval& eval) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   AST_LOCAL expr = eval.expr;
   ASSERT(expr->node_type.is_valid());
@@ -775,7 +784,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
-        memcpy_ts(struct_c, 1, &nt->actual_type, 1);
+        Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
@@ -786,7 +795,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
-        memcpy_ts(struct_c, 1, &nt->actual_type, 1);
+        Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
@@ -797,7 +806,18 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
-        memcpy_ts(struct_c, 1, &nt->actual_type, 1);
+        Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
+
+        return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
+      }
+    case AST_TYPE::SLICE_TYPE: {
+        ASTSliceType* nt = (ASTSliceType*)expr;
+
+        ASSERT(builder->eval_time == Eval::Time::CompileTime);
+        ASSERT(!eval.requirements.has_address());
+
+        Type* struct_c = comp->new_constant<Type>();
+        Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
@@ -808,7 +828,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
-        memcpy_ts(struct_c, 1, &nt->actual_type, 1);
+        Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
@@ -819,7 +839,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
-        memcpy_ts(struct_c, 1, &nt->actual_type, 1);
+        Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
@@ -831,7 +851,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(!eval.requirements.has_address());
 
         Type* struct_c = comp->new_constant<Type>();
-        memcpy_ts(struct_c, 1, &s->actual_type, 1);
+        Axle::memcpy_ts(struct_c, 1, &s->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
@@ -865,7 +885,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
           u64* data = comp->new_constant<u64>();
           u64 val = member_e->offset;
-          memcpy_ts(data, 1, &val, 1);
+          Axle::memcpy_ts(data, 1, &val, 1);
 
           const auto c = Eval::as_constant((const u8*)data, comp->builtin_types->t_u64);
 
@@ -895,7 +915,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             const size_t size = sizeof(val);
 
             uint8_t* val_c = comp->new_constant(size);
-            memcpy_ts(val_c, size, (uint8_t*)&val, size);
+            Axle::memcpy_ts(val_c, size, (uint8_t*)&val, size);
 
             return Eval::as_constant(val_c, comp_thread->builtin_types->t_u64);
           }
@@ -957,6 +977,12 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         return Eval::sub_object(builder->ir, arr, offset, t);
       }
+    case AST_TYPE::SLICE_INDEX: {
+      //static_assert(false, "TODO");
+      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                                "Slices not implemented yet");
+      return Eval::no_value();
+    }
     case AST_TYPE::TUPLE_LIT: {
         ASSERT(expr->node_type.struct_type() == STRUCTURE_TYPE::COMPOSITE);
 
@@ -1081,7 +1107,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         const size_t size = arr_type->size;
         char* string_c = (char*)comp->new_constant(size);
-        memcpy_ts(string_c, size, st->string->string, size);
+        Axle::memcpy_ts(string_c, size, st->string->string, size);
 
         return Eval::as_constant((const u8*)string_c, st->node_type);
       }
@@ -1092,7 +1118,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         const size_t size = expr->node_type.structure->size;
 
         uint8_t* val_c = comp->new_constant(size);
-        memcpy_ts(val_c, size, (uint8_t*)&num->num_value, size);
+        Axle::memcpy_ts(val_c, size, (uint8_t*)&num->num_value, size);
 
         return Eval::as_constant(val_c, num->node_type);
       }
@@ -1240,9 +1266,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
                                    CompilerThread* const comp_thread,
                                    Eval::IrBuilder* const builder,
                                    AST_LOCAL const statement) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   //TODD: warnings for inaccessible statements
 
@@ -1329,7 +1353,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             loop_merge_label,
         });
 
-        Array parent_variables = copy_arr(builder->variables_state);
+        Axle::Array parent_variables = copy_arr(builder->variables_state);
 
         //Skip the merge part for now, do that later when we know what to merge
 
@@ -1356,7 +1380,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         }
         builder->reset_variables();
 
-        Array branch_variables = copy_arr(builder->variables_state);
+        Axle::Array branch_variables = copy_arr(builder->variables_state);
         ASSERT(branch_variables.size == parent_variables.size);//Currently a waste of a copy, but might not be later on
 
         builder->switch_control_block(body_label, loop_split_label);
@@ -1440,7 +1464,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           });
         }
 
-        Array split_variables = copy_arr(builder->variables_state);
+        Axle::Array split_variables = copy_arr(builder->variables_state);
         usize scope_size = split_variables.size;
 
         {
@@ -1465,7 +1489,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         IR::LocalLabel if_end_parent = builder->parent;
         IR::LocalLabel if_end = builder->ir->current_block;
 
-        Array if_variables = std::exchange(builder->variables_state, std::move(split_variables));
+        Axle::Array if_variables = std::exchange(builder->variables_state, std::move(split_variables));
 
         IR::LocalLabel else_end_parent = split_label;
         IR::LocalLabel else_end = else_label;
@@ -1581,9 +1605,7 @@ void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
 }
 
 void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, IR::EvalPromise* eval) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   if (!VC::is_comptime(root->value_category)) {
     comp_thread->report_error(ERROR_CODE::VM_ERROR, root->node_span, "Cannot evaluate a non-comptime expression");
@@ -1619,7 +1641,7 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
   }
 
   if (ref.rvt == Eval::RVT::Constant) {
-    memcpy_ts(eval->data, type.size(), ref.constant, type.size());
+    Axle::memcpy_ts(eval->data, type.size(), ref.constant, type.size());
   }
   else {
     IR::V_ARG out = Eval::load_v_arg(&expr_ir, ref);
@@ -1635,7 +1657,7 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
       auto res = vm.get_value(out);
       ASSERT(res.t == type);
 
-      memcpy_ts(eval->data, type.size(), res.ptr, type.size());
+      Axle::memcpy_ts(eval->data, type.size(), res.ptr, type.size());
     }
   }
 }
@@ -1645,9 +1667,7 @@ static void compile_structure(CompilerGlobals* comp,
                               Namespace* names,
                               ASTStructBody* body,
                               const StructCompilation*) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   TC::type_check_ast(comp, comp_thread, names, body, comp_thread->builtin_types->t_type);
 }
@@ -1657,9 +1677,7 @@ static void compile_lambda_signature(CompilerGlobals* comp,
                                      Namespace* names,
                                      ASTFuncSig* root,
                                      const LambdaSigCompilation*) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   TC::type_check_ast(comp, comp_thread, names, root, {});
 }
@@ -1670,9 +1688,7 @@ static void compile_lambda_body(CompilerGlobals* comp,
                                 Namespace* names,
                                 ASTLambda* root,
                                 const LambdaBodyCompilation* l_comp) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   TC::type_check_ast(comp, comp_thread, names, root, {});
   if (comp_thread->is_panic()) {
@@ -1710,9 +1726,7 @@ static void compile_lambda_body(CompilerGlobals* comp,
 
 static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
                            ASTExport* root, const ExportCompilation*) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   if (!comp_thread->build_options.is_library) {
     comp_thread->report_error(ERROR_CODE::LINK_ERROR, root->node_span,
@@ -1726,7 +1740,7 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, N
     return;
   }
 
-  Array<Backend::DynExport> exports = {};
+  Axle::Array<Backend::DynExport> exports = {};
 
   FOR_AST(root->export_list, it) {
     ASSERT(it->ast_type == AST_TYPE::EXPORT_SINGLE);
@@ -1764,9 +1778,7 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, N
 
 static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
                            ASTImport* root, const ImportCompilation* imp) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   TC::type_check_ast(comp, comp_thread, available_names, root, {});
   if (comp_thread->is_panic()) {
     return;
@@ -1778,7 +1790,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
     return;
   }
 
-  ViewArr<const char> path;
+  Axle::ViewArr<const char> path;
 
   if (p.type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
     const ArrayStructure* arr = p.type.unchecked_base<ArrayStructure>();
@@ -1806,19 +1818,19 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
   ASSERT(path.data != nullptr);
   ASSERT(path.size > 0);
 
-  FileLocation loc;
+  Axle::FileLocation loc;
   bool found = false;
 
-  const InternString* const paths_to_try[] = {
+  const Axle::InternString* const paths_to_try[] = {
     imp->src_loc.directory,
     comp->build_options.lib_folder,
     comp->build_options.std_lib_folder,
   };
 
-  for (const InternString* base : paths_to_try) {
-    AllocFilePath try_path = format_file_path(view_arr(base), path);
+  for (const Axle::InternString* base : paths_to_try) {
+    Axle::AllocFilePath try_path = format_file_path(view_arr(base), path);
 
-    if (FILES::exist(const_view_arr(try_path.raw))) {
+    if (Axle::FILES::exist(const_view_arr(try_path.raw))) {
       auto strings = comp->services.strings.get();
       loc = parse_file_location(try_path, strings._ptr);
       found = true;
@@ -1829,7 +1841,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
   //Didn't find
   if (!found) {
     comp_thread->report_error(ERROR_CODE::FILE_ERROR, root->node_span, "Couldn't find the file specified.\nTried paths: {}",
-                              PrintList<const InternString*>{paths_to_try, array_size(paths_to_try)});
+                              Axle::PrintList<const Axle::InternString*>{paths_to_try, array_size(paths_to_try)});
     return;
   }
 
@@ -1864,9 +1876,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
 void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
                     Namespace* available_names,
                     ASTDecl* decl, GlobalCompilation* global_comp) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   Global* global = global_comp->global;
 
@@ -1934,16 +1944,14 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
 void compile_current_unparsed_files(CompilerGlobals* const comp,
                                     CompilerThread* const comp_thread,
                                     FileLoader* file_loader) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   while (file_loader->unparsed_files.size > 0) {
     //still have files to parse
 
     //parse the last file
     const FileImport* file_import = file_loader->unparsed_files.back();
-    const InternString* full_path = file_import->file_loc.full_name;
+    const Axle::InternString* full_path = file_import->file_loc.full_name;
 
     if (comp->print_options.file_loads) {
       IO::format("Loading file \"{}\" ...\n", full_path);
@@ -1954,7 +1962,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
         || file_import->file_loc.extension == comp->important_names.axl) {
       //Load a source file
 
-      OwnedArr<const u8> text_source = FILES::read_full_file(const_view_arr(full_path));
+      Axle::OwnedArr<const u8> text_source = Axle::FILES::read_full_file(const_view_arr(full_path));
 
       if (text_source.data == nullptr) {
         comp_thread->report_error(ERROR_CODE::FILE_ERROR, file_loader->unparsed_files.back()->span,
@@ -1988,9 +1996,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       ast_file->ns->imported.insert(comp->builtin_namespace);
 
       {
-#ifdef AXLE_TRACING
-        TRACING_SCOPE("Parsing");
-#endif
+        TELEMETRY_SCOPE("Parsing");
 
         parser.current_namespace = file_import->ns;
 
@@ -2001,13 +2007,13 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       }
 
       if (comp->print_options.ast) {
-        IO_Single::lock();
+        Axle::IO_Single::lock();
         DEFER() {
-          IO_Single::unlock();
+          Axle::IO_Single::unlock();
         };
-        IO_Single::print("\n=== Print Parsed AST ===\n\n");
+        Axle::IO_Single::print("\n=== Print Parsed AST ===\n\n");
         print_full_ast(ast_file);
-        IO_Single::print("\n========================\n\n");
+        Axle::IO_Single::print("\n========================\n\n");
       }
 
       if (comp_thread->is_panic()) {
@@ -2023,7 +2029,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
   }
 }
 
-void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const FileLocation& src_loc, ASTImport* imp) noexcept {
+void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const Axle::FileLocation& src_loc, ASTImport* imp) noexcept {
 
   CompilationUnit* imp_unit;
   {
@@ -2084,9 +2090,7 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDec
 }
 
 void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLambda* lambda) noexcept {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   //Setup the function object
   IR::Function* const func = comp->new_function();
@@ -2188,9 +2192,7 @@ void DependencyManager::close_dependency(CompilationUnit* ptr, bool print) {
 //Might be that dependencies were already dispatched
 //Return true if depended
 bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, CompilationUnit* unit) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   ASSERT(unit != nullptr);
 
@@ -2220,11 +2222,11 @@ bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_threa
     }
 
     if (comp_thread->print_options.comp_units) {
-      const ViewArr<UnfoundNameHolder> names = view_arr(comp_thread->local_unfound_names.names);
-      IO::format("Comp unit {} waiting on {}\n", unit->id, PrintListCF{names.data, names.size, 
+      const Axle::ViewArr<UnfoundNameHolder> names = view_arr(comp_thread->local_unfound_names.names);
+      IO::format("Comp unit {} waiting on {}\n", unit->id, Axle::PrintListCF{names.data, names.size, 
                  [](Format::Formatter auto& res, const UnfoundNameHolder& nh) {
         res.load_char('"');
-        Format::FormatArg<const InternString*>::load_string(res, nh.name.ident);
+        Format::FormatArg<const Axle::InternString*>::load_string(res, nh.name.ident);
         res.load_char('"');
       }});
     }
@@ -2244,9 +2246,7 @@ bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_threa
 }
 
 void close_compilation_unit(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   UnitID id = unit->id;
 
@@ -2274,9 +2274,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       };
 
       if (file_loader->unparsed_files.size > 0) {
-      #ifdef AXLE_TRACING
-        TRACING_SCOPE("Parse Files");
-      #endif
+        TELEMETRY_SCOPE("Parse Files");
         thead_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
@@ -2305,9 +2303,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
       const IR::IRStore* ir = nullptr;
       if (comp->finished_irs.try_pop_front(&ir)) {
-      #ifdef AXLE_TRACING
-        TRACING_SCOPE("Emit IR");
-      #endif
+        TELEMETRY_SCOPE("Emit IR");
         thead_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
@@ -2331,9 +2327,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   CompilationUnit* unit = nullptr;
 
   if (comp->pipelines.comp_import.try_pop_front(&unit)) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Import");
-  #endif
+    TELEMETRY_SCOPE("Import");
     thead_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Import {}\n", unit->id);
@@ -2363,9 +2357,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_body.try_pop_front(&unit)) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Compile Lambda Body");
-  #endif
+    TELEMETRY_SCOPE("Compile Lambda Body");
     thead_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
@@ -2394,9 +2386,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_global.try_pop_front(&unit)) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Emit Global");
-  #endif
+    TELEMETRY_SCOPE("Emit Global");
     thead_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Global {}\n", unit->id);
@@ -2425,9 +2415,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_structure.try_pop_front(&unit)) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Compile Structure");
-  #endif
+    TELEMETRY_SCOPE("Compile Structure");
     thead_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Structure {}\n", unit->id);
@@ -2456,9 +2444,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_signature.try_pop_front(&unit)) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Compile Lambda Signature");
-  #endif
+    TELEMETRY_SCOPE("Compile Lambda Signature");
     thead_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
@@ -2502,9 +2488,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_export.try_pop_front(&unit)) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Compile Export");
-  #endif
+    TELEMETRY_SCOPE("Compile Export");
     thead_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
@@ -2533,9 +2517,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.depend_check.try_pop_front(&unit)) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Depend check");
-  #endif
+    TELEMETRY_SCOPE("Depend check");
     thead_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
@@ -2572,9 +2554,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     //Wait for there to be no compiling to check unfound deps - best chance they exist
     if (compilation->unfound_names.names.size > 0) {
-    #ifdef AXLE_TRACING
-      TRACING_SCOPE("Check Unfound Names");
-    #endif
+      TELEMETRY_SCOPE("Check Unfound Names");
 
       usize num_unfound = compilation->unfound_names.names.size;
 
@@ -2613,9 +2593,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 }
 
 void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   {//force reset
     comp_thread->doing_work = false;
@@ -2623,18 +2601,15 @@ void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_threa
   }
 
   while (!comp->is_global_panic() && (comp_thread->doing_work || comp->work_counter > 0)) {
-#ifdef ASSERT_EXCEPTIONS
     try {
-#endif
       run_compiler_pipes(comp, comp_thread);
-#ifdef ASSERT_EXCEPTIONS
     }
     catch (const std::exception& e) {
       const char* message = e.what();
-      const ViewArr<const char> message_view = { message, strlen_ts(message) };
+      const Axle::ViewArr<const char> message_view = { message, Axle::strlen_ts(message) };
       comp_thread->report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Assertion Failed with message: {}", message_view);
     }
-#endif
+
     if (comp_thread->is_panic()) {
       comp->global_panic.set();
     }
@@ -2654,7 +2629,7 @@ struct ThreadData {
   CompilerThread* comp_thread;
 };
 
-void compiler_loop_thread_proc(const ThreadHandle*, void* data) {
+void compiler_loop_thread_proc(const Axle::ThreadHandle*, void* data) {
   ASSERT(data != nullptr);
   ThreadData* t_data = (ThreadData*)data;
   CompilerGlobals* comp = t_data->comp;
@@ -2674,20 +2649,20 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
 #if defined(AXLE_TRACING) && defined(TRACING_ENABLE)
     Tracing::Event tracing_start_threads = Tracing::start_event("Start Threads");
 #endif
-    ThreadData* datas = allocate_default<ThreadData>(extra_threads);
-    CompilerThread* comp_threads = allocate_default<CompilerThread>(extra_threads);
-    const ThreadHandle** handles = allocate_default<const ThreadHandle*>(extra_threads);
+    Axle::OwnedArr<ThreadData> thread_datas = Axle::new_arr<ThreadData>(extra_threads);
+    Axle::OwnedArr<CompilerThread> comp_threads = Axle::new_arr<CompilerThread>(extra_threads);
+    Axle::OwnedArr<const Axle::ThreadHandle*> handles = Axle::new_arr<const Axle::ThreadHandle*>(extra_threads);
 
     for (usize i = 0; i < extra_threads; i++) {
-      datas[i].comp = comp;
-      datas[i].comp_thread = comp_threads + i;
+      thread_datas[i].comp = comp;
+      thread_datas[i].comp_thread = comp_threads.data + i;
       comp_threads[i].thread_id = (u32)(i + 1);
-      copy_compiler_constants(comp, comp_threads + i);
+      copy_compiler_constants(comp, comp_threads.data + i);
     }
 
     //Start the threads
     for (usize i = 0; i < extra_threads; i++) {
-      handles[i] = start_thread(compiler_loop_thread_proc, datas + i);
+      handles[i] = start_thread(compiler_loop_thread_proc, thread_datas.data + i);
     }
 
 #if defined(AXLE_TRACING) && defined(TRACING_ENABLE)
@@ -2697,22 +2672,17 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
     compiler_loop(comp, comp_thread);
 
     {
-    #ifdef AXLE_TRACING
-      TRACING_SCOPE("Close Threads");
-    #endif
+      TELEMETRY_SCOPE("Close Threads");
       for (usize i = 0; i < extra_threads; i++) {
         wait_for_thread_end(handles[i]);
       }
 
-      free_destruct_n(handles, extra_threads);
-      free_destruct_n(datas, extra_threads);
-      free_destruct_n(comp_threads, extra_threads);
     }
-    }
+  }
   else {
     compiler_loop(comp, comp_thread);
   }
-  }
+}
 
 static void free_remaining_compilation_units(Compilation* compilation) {
   for (CompilationUnit* unit : compilation->store.active_units) {
@@ -2755,9 +2725,7 @@ static void free_remaining_compilation_units(Compilation* compilation) {
 }
 
 void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   ASSERT(comp->active_threads >= 1);
 
@@ -2772,8 +2740,8 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
 
 
   {
-    AtomicLock<Compilation> compilation;
-    AtomicLock<FileLoader> files;
+    Axle::AtomicLock<Compilation> compilation;
+    Axle::AtomicLock<FileLoader> files;
     comp->services.get_multiple(&files, &compilation);
 
     if (compilation->unfound_names.names.size > 0) {
@@ -2806,50 +2774,50 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       const auto end = compilation->store.active_units.end();
 
       Format::ArrayFormatter error = {};
-      Format::format_to_formatter(error, "Work still exists but is not accessable\nThe following compilation units are inaccessable:\n");
+      Format::format_to(error, "Work still exists but is not accessable\nThe following compilation units are inaccessable:\n");
 
       for (; i < end; ++i) {
         CompilationUnit* unit = *i;
         ASSERT(unit != nullptr);
         ASSERT(unit->main_pipe != nullptr);
-        ViewArr<const char> debug_name = unit->main_pipe->_debug_name;
+        Axle::ViewArr<const char> debug_name = unit->main_pipe->_debug_name;
         if (debug_name.data == nullptr) {
-          debug_name = lit_view_arr("Type unsupported in this mode");
+          debug_name = Axle::lit_view_arr("Type unsupported in this mode");
         }
 
-        Format::format_to_formatter(error, "- Id: {} | Type: {}\n"
-                                    "  Waiting on Units: {} | Waiting on Names: {}\n", 
-                                    unit->id, debug_name, unit->unit_wait_on_count, unit->unfound_wait_on_count);
+        Format::format_to(error, "- Id: {} | Type: {}\n"
+                                 "  Waiting on Units: {} | Waiting on Names: {}\n", 
+                                 unit->id, debug_name, unit->unit_wait_on_count, unit->unfound_wait_on_count);
       }
 
-      Format::format_to_formatter(error, "Pipeline states:\n");
+      Format::format_to(error, "Pipeline states:\n");
 
       comp->pipelines.depend_check.mutex.acquire();
-      Format::format_to_formatter(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
+      Format::format_to(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
       comp->pipelines.depend_check.mutex.release();
 
       comp->pipelines.comp_structure.mutex.acquire();
-      Format::format_to_formatter(error, "- Compile Structure: {}\n", comp->pipelines.comp_structure.size);
+      Format::format_to(error, "- Compile Structure: {}\n", comp->pipelines.comp_structure.size);
       comp->pipelines.comp_structure.mutex.release();
 
       comp->pipelines.comp_body.mutex.acquire();
-      Format::format_to_formatter(error, "- Compile Lambda Body: {}\n", comp->pipelines.comp_body.size);
+      Format::format_to(error, "- Compile Lambda Body: {}\n", comp->pipelines.comp_body.size);
       comp->pipelines.comp_body.mutex.release();
 
       comp->pipelines.comp_signature.mutex.acquire();
-      Format::format_to_formatter(error, "- Compile Lambda Signature: {}\n", comp->pipelines.comp_signature.size);
+      Format::format_to(error, "- Compile Lambda Signature: {}\n", comp->pipelines.comp_signature.size);
       comp->pipelines.comp_signature.mutex.release();
 
       comp->pipelines.comp_global.mutex.acquire();
-      Format::format_to_formatter(error, "- Compile Global: {}\n", comp->pipelines.comp_global.size);
+      Format::format_to(error, "- Compile Global: {}\n", comp->pipelines.comp_global.size);
       comp->pipelines.comp_global.mutex.release();
 
       comp->pipelines.comp_import.mutex.acquire();
-      Format::format_to_formatter(error, "- Compile Import: {}\n", comp->pipelines.comp_import.size);
+      Format::format_to(error, "- Compile Import: {}\n", comp->pipelines.comp_import.size);
       comp->pipelines.comp_import.mutex.release();
 
       comp->pipelines.comp_export.mutex.acquire();
-      Format::format_to_formatter(error, "- Compile Export: {}\n", comp->pipelines.comp_export.size);
+      Format::format_to(error, "- Compile Export: {}\n", comp->pipelines.comp_export.size);
       comp->pipelines.comp_export.mutex.release();
 
       comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, error.take());
@@ -2861,14 +2829,12 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
     }
   }
 
-
   ASSERT(comp->services.compilation.get()->dependencies.in_flight_units == 0);
   ASSERT(comp->services.compilation.get()->store.active_units.size == 0);
 
   {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Load Imports");
-  #endif
+    TELEMETRY_SCOPE("Load Imports");
+
     auto p = comp->services.out_program.get();
 
     FOR(comp->dyn_lib_imports, it) {
@@ -2882,9 +2848,8 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   }
 
   if (!comp->build_options.is_library) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Create Entry Point");
-  #endif
+    TELEMETRY_SCOPE("Create Entry Point");
+    
     if (comp->entry_point_label == IR::NULL_GLOBAL_LABEL) {
       comp_thread->report_error(ERROR_CODE::LINK_ERROR, Span{}, "Did not find entry point (expected name = \"{}\")",
                                 comp->build_options.entry_point);
@@ -2911,7 +2876,7 @@ void create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread,
   g->decl.span = span;
   g->decl.init_value = (const u8*)comp->new_constant<Type>();
 
-  memcpy_ts((Type*)g->decl.init_value, 1, &type, 1);
+  Axle::memcpy_ts((Type*)g->decl.init_value, 1, &type, 1);
 
   names->add_global_name(&comp_thread->errors, ns, type.name, g);
 }
@@ -2929,15 +2894,13 @@ void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
   g->decl.span = span;
   g->decl.init_value = (const u8*)comp->new_constant<const EnumValue*>();
 
-  memcpy_ts((const EnumValue**)g->decl.init_value, 1, &v, 1);
+  Axle::memcpy_ts((const EnumValue**)g->decl.init_value, 1, &v, 1);
 
   names->add_global_name(&comp_thread->errors, ns, v->name, g);
 }
 
 void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThread* comp_thread) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   comp_thread->thread_id = 0;//first thread is thread 0
 
@@ -3003,12 +2966,12 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   //Intrinsics
-#define MOD(n) comp->intrinsics . n = strings->intern(lit_view_arr(#n));
+#define MOD(n) comp->intrinsics . n = strings->intern(Axle::lit_view_arr(#n));
   INTRINSIC_MODS;
 #undef MOD
 
   //Other important names
-#define MOD(n) comp->important_names . n = strings->intern(lit_view_arr(#n));
+#define MOD(n) comp->important_names . n = strings->intern(Axle::lit_view_arr(#n));
   IMPORTANT_NAMES_INC;
 #undef MOD
 
@@ -3023,9 +2986,9 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   {
-    OwnedArr cwd = normalize_path(options.build.current_directory);
+    Axle::OwnedArr cwd = normalize_path(options.build.current_directory);
 
-    if (!FILES::exist(view_arr(cwd))) {
+    if (!Axle::FILES::exist(view_arr(cwd))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "Current directory was invalid: {}", cwd);
       return;
@@ -3091,8 +3054,8 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   {
-    OwnedArr stdlib = normalize_path(view_arr(file_loader->cwd.directory), options.build.std_lib_folder);
-    if (!FILES::exist(view_arr(stdlib))) {
+    Axle::OwnedArr stdlib = normalize_path(view_arr(file_loader->cwd.directory), options.build.std_lib_folder);
+    if (!Axle::FILES::exist(view_arr(stdlib))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "std lib folder was invalid: {}", stdlib);
       return;
@@ -3108,8 +3071,8 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   {
-    OwnedArr lib_folder = normalize_path(view_arr(file_loader->cwd.directory), options.build.lib_folder);
-    if (!FILES::exist(view_arr(lib_folder))) {
+    Axle::OwnedArr lib_folder = normalize_path(view_arr(file_loader->cwd.directory), options.build.lib_folder);
+    if (!Axle::FILES::exist(view_arr(lib_folder))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "lib folder was invalid: {}", lib_folder);
       return;
@@ -3124,21 +3087,21 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
     if (options.build.default_calling_convention >= num) {
       Format::ArrayFormatter error_message = {};
-      Format::format_to_formatter(error_message, "\"[{}]\" was not a valid calling convention for system \"{}\"\n",
+      Format::format_to(error_message, "\"[{}]\" was not a valid calling convention for system \"{}\"\n",
                       options.build.default_calling_convention,
                       comp->platform_interface.system_name);
 
       if (num > 0) {
-        Format::format_to_formatter(error_message, "{} options are available:", num);
+        Format::format_to(error_message, "{} options are available:", num);
 
         for (usize i = 0; i < num; ++i) {
           const CallingConvention* cc = list[i];
           ASSERT(cc != nullptr);
-          Format::format_to_formatter(error_message, "\n[{}] = \"{}\"", i, cc->name);
+          Format::format_to(error_message, "\n[{}] = \"{}\"", i, cc->name);
         }
       }
       else {
-        Format::format_to_formatter(error_message, "No calling conventions available");
+        Format::format_to(error_message, "No calling conventions available");
       }
 
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, error_message.take());

@@ -6,15 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 foreach(config_type ${CMAKE_CONFIGURATION_TYPES})
   string(TOUPPER ${config_type} config_upper)
-  if(NOT DEFINED "CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper}")
-    set("CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
-  endif()
-  if(NOT DEFINED "CMAKE_LIBRARY_OUTPUT_DIRECTORY_${config_upper}")
-    set("CMAKE_LIBRARY_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
-  endif()
-  if(NOT DEFINED "CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper}")
-    set("CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
-  endif()
+  set("CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
+  set("CMAKE_LIBRARY_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
+  set("CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
 endforeach()
 
 if(NOT DEFINED AxleUtilINCLUDE)
@@ -37,23 +31,30 @@ if(AxleTRACING)
   message(FATAL_ERROR "Cannot trace the unit tests")
 endif()
 
-option(AxleTHROWING_ASSERTS, "Enable throwing asserts (for better testing)" OFF)
+add_executable(UnitTestsServer)
+add_executable(UnitTestsClient)
+set_target_properties(UnitTestsServer PROPERTIES OUTPUT_NAME "UnitTestsServer$<CONFIG>")
+set_target_properties(UnitTestsClient PROPERTIES OUTPUT_NAME "UnitTestsClient$<CONFIG>")
 
-add_executable(AxleUnitTests)
-set_target_properties(AxleUnitTests PROPERTIES OUTPUT_NAME "AxleUnitTests$<CONFIG>")
+add_dependencies(UnitTestsServer UnitTestsClient)
 
-if(AxleTHROWING_ASSERTS)
-  target_compile_definitions(AxleUnitTests PRIVATE ASSERT_EXCEPTIONS)
-endif()
+target_compile_definitions(UnitTestsServer PRIVATE UNIT_TEST_CLIENT_EXE="UnitTestsClient$<CONFIG>.exe")
+target_compile_definitions(UnitTestsClient PRIVATE STACKTRACE_ENABLE)
 
-target_include_directories(AxleUnitTests PRIVATE "${PROJECT_SOURCE_DIR}/../src" $"${PROJECT_SOURCE_DIR}/../include" ${AxleUtilINCLUDE})
+target_include_directories(UnitTestsClient PRIVATE "${PROJECT_SOURCE_DIR}/../src" $"${PROJECT_SOURCE_DIR}/../include" ${AxleUtilINCLUDE})
+target_include_directories(UnitTestsServer PRIVATE ${AxleUtilINCLUDE})
 
-target_sources(AxleUnitTests PRIVATE
-  "${PROJECT_SOURCE_DIR}/tests_main.cpp"
+target_sources(UnitTestsServer PRIVATE
+  "${PROJECT_SOURCE_DIR}/test_server_main.cpp"
+)
+
+target_sources(UnitTestsClient PRIVATE
+  "${PROJECT_SOURCE_DIR}/test_client_main.cpp"
 
   "${PROJECT_SOURCE_DIR}/errors_tests.cpp"
   "${PROJECT_SOURCE_DIR}/names_tests.cpp"
   "${PROJECT_SOURCE_DIR}/type_tests.cpp"
   "${PROJECT_SOURCE_DIR}/vm_tests.cpp"
 )
-target_link_libraries(AxleUnitTests AxleCompiler "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
+target_link_libraries(UnitTestsServer "${AxleUtilBIN}/AxleTestServer$<CONFIG>.lib" "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
+target_link_libraries(UnitTestsClient AxleCompiler "${AxleUtilBIN}/AxleTestClient$<CONFIG>.lib")

@@ -5,10 +5,10 @@
 #include "backends.h"
 #include "type.h"
 
-template<typename T, typename S>
-void run_test_for_integer(UNIT_TESTS::TestErrors* test_errors,
+template<typename T>
+void run_test_for_integer(AxleTest::TestErrors* test_errors,
                           const BuiltinTypes* builtin_types,
-                          const Type& int_t, const S& serializer) {
+                          const Type& int_t) {
   IR::IRStore ir = {};
   ir.signature = builtin_types->t_void_call.unchecked_base<SignatureStructure>();
   ir.global_label = { 1 };
@@ -23,10 +23,10 @@ void run_test_for_integer(UNIT_TESTS::TestErrors* test_errors,
   Eval::RuntimeValue v0 = Eval::as_direct(ir.new_temporary(int_t, {}), int_t);
   {
     u8 c0_data[sizeof(T)] = {};
-    serializer(T{8}, c0_data);
+    Axle::serialize_le<T>(c0_data, T{8});
 
     u8 c1_data[sizeof(T)] = {};
-    serializer(T{16}, c1_data);
+    Axle::serialize_le<T>(c1_data, T{16});
 
     Eval::RuntimeValue c0 = Eval::as_constant(c0_data, int_t);
     Eval::RuntimeValue c1 = Eval::as_constant(c1_data, int_t);
@@ -42,7 +42,7 @@ void run_test_for_integer(UNIT_TESTS::TestErrors* test_errors,
   Eval::RuntimeValue v1 = Eval::as_direct(ir.new_temporary(int_t, {}), int_t);
   {
     u8 c0_data[sizeof(T)] = {};
-    serializer(T{3}, c0_data);
+    Axle::serialize_le<T>(c0_data, T{3});
 
     Eval::RuntimeValue c0 = Eval::as_constant(c0_data, int_t);
 
@@ -57,7 +57,7 @@ void run_test_for_integer(UNIT_TESTS::TestErrors* test_errors,
   Eval::RuntimeValue v2 = Eval::as_direct(ir.new_temporary(int_t, {}), int_t);
   {
     u8 c0_data[sizeof(T)] = {};
-    serializer(T{15}, c0_data);
+    Axle::serialize_le<T>(c0_data, T{15});
 
     Eval::RuntimeValue c0 = Eval::as_constant(c0_data, int_t);
 
@@ -72,7 +72,7 @@ void run_test_for_integer(UNIT_TESTS::TestErrors* test_errors,
   Eval::RuntimeValue v3 = Eval::as_direct(ir.new_temporary(int_t, {}), int_t);
   {
     u8 c0_data[sizeof(T)] = {};
-    serializer(T{93}, c0_data);
+    Axle::serialize_le<T>(c0_data, T{93});
 
     Eval::RuntimeValue c0 = Eval::as_constant(c0_data, int_t);
 
@@ -87,7 +87,7 @@ void run_test_for_integer(UNIT_TESTS::TestErrors* test_errors,
   Eval::RuntimeValue v4 = Eval::as_direct(ir.new_temporary(int_t, {}), int_t);
   {
     u8 c0_data[sizeof(T)] = {};
-    serializer(T{13}, c0_data);
+    Axle::serialize_le<T>(c0_data, T{13});
 
     Eval::RuntimeValue c0 = Eval::as_constant(c0_data, int_t);
 
@@ -123,7 +123,7 @@ void run_test_for_integer(UNIT_TESTS::TestErrors* test_errors,
 
     u8 final_data[sizeof(T)] = {};
     const T final_v = static_cast<T>(static_cast<T>(static_cast<T>(T{ 3 } * static_cast<T>(T{8} + T{16})) / T{ 15 }) - T{ 93 }) % T{ 13 };
-    serializer(final_v, final_data);
+    Axle::serialize_le(final_data, final_v);
 
     TEST_ARR_EQ(final_data, sizeof(T), res_val.ptr, res_val.t.size());
   }
@@ -131,59 +131,42 @@ void run_test_for_integer(UNIT_TESTS::TestErrors* test_errors,
 
 TEST_FUNCTION(IR, basic_math) {
   //Setup
-  StringInterner strings = {};
-  Structures structures = {};
-  structures.pointer_size = 8;
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
 
   BuiltinTypes builtin_types = STRUCTS::create_builtins(&structures, &strings);
 
   //Check for all integer types
   run_test_for_integer<u8>(test_errors, &builtin_types,
-                           builtin_types.t_u8, [](u8 v, u8* buffer) {
-                              buffer[0] = v;
-                           });
+                           builtin_types.t_u8);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<i8>(test_errors, &builtin_types,
-                           builtin_types.t_i8, [](i8 v, u8* buffer) {
-                             buffer[0] = static_cast<i8>(v);
-                           });
+                           builtin_types.t_i8);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<u16>(test_errors, &builtin_types,
-                           builtin_types.t_u16, [](u16 v, u8* buffer) {
-                             x16_to_bytes(v, buffer);
-                           });
+                           builtin_types.t_u16);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<i16>(test_errors, &builtin_types,
-                           builtin_types.t_i16, [](i16 v, u8* buffer) {
-                             x16_to_bytes(static_cast<u16>(v), buffer);
-                           });
+                           builtin_types.t_i16);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<u32>(test_errors, &builtin_types,
-                           builtin_types.t_u32, [](u32 v, u8* buffer) {
-                             x32_to_bytes(static_cast<u32>(v), buffer);
-                           });
+                           builtin_types.t_u32);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<i32>(test_errors, &builtin_types,
-                           builtin_types.t_i32, [](i32 v, u8* buffer) {
-                             x32_to_bytes(static_cast<u32>(v), buffer);
-                           });
+                           builtin_types.t_i32);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<u64>(test_errors, &builtin_types,
-                           builtin_types.t_u64, [](u64 v, u8* buffer) {
-                             x64_to_bytes(v, buffer);
-                           });
+                           builtin_types.t_u64);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<i64>(test_errors, &builtin_types,
-                           builtin_types.t_i64, [](i64 v, u8* buffer) {
-                             x64_to_bytes(v, buffer);
-                           });
+                           builtin_types.t_i64);
   TEST_CHECK_ERRORS();
 }
 

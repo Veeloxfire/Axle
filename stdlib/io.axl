@@ -1,22 +1,21 @@
 #import "kernel32.axl";
 
-WIN_STD_OUT_REF :: cast(i32, -11i64);
-stdout_handle : u64 = GetStdHandle(WIN_STD_OUT_REF);
+WIN_STD_OUT_REF :: cast(DWORD, -11i32);
+stdout_handle : HANDLE = GetStdHandle(WIN_STD_OUT_REF);
 
-
-print :: (string: *ascii, len: u64) -> void {
-  WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*u32, nullptr));
+print :: (string: []ascii) -> void {
+  WriteConsoleA(stdout_handle, cast(*void, string.ptr), cast(u32, string.len), cast(*u32, nullptr));
 }
 
 print_newline :: () -> void {
   nl :: "\n";
-  print(nl.ptr, nl.len);
+  print(nl[,]);
 }
 
 print_u64 :: (val: u64) -> void {
   if(val == 0) {
     zero :: "0";
-    print(zero.ptr, zero.len);
+    print(zero[,]);
     return;
   }
   
@@ -35,5 +34,5 @@ print_u64 :: (val: u64) -> void {
     val = val / 10;
   }
 
-  print(arr.ptr + i, arr.len - i);
+  print(arr[i, arr.len - i]);
 }

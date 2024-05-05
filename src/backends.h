@@ -130,12 +130,12 @@ namespace Backend {
   };
 
   struct DynImport {
-    const InternString* function;
-    const InternString* library;
+    const Axle::InternString* function;
+    const Axle::InternString* library;
   };
 
   struct DynExport {
-    const InternString* name;
+    const Axle::InternString* name;
     IR::GlobalLabel label;
   };
   
@@ -161,11 +161,26 @@ namespace Backend {
     IR::GlobalLabel entry_point = IR::NULL_GLOBAL_LABEL;
     FunctionMetadata start_code;
 
-    Array<FunctionMetadata> functions;
-    Array<GlobalData> globals;
+    Axle::Array<FunctionMetadata> functions;
+    Axle::Array<GlobalData> globals;
 
-    Array<Relocation> relocations;
-    Array<DynImport> dyn_imports;
-    Array<DynExport> dyn_exports;
+    Axle::Array<Relocation> relocations;
+    Axle::Array<DynImport> dyn_imports;
+    Axle::Array<DynExport> dyn_exports;
   };
-};
+}
+
+namespace Axle {
+  template<ByteOrder Ord>
+  struct Serializer<Backend::DataBucketIterator, Ord> {
+    Backend::DataBucketIterator* itr;
+    constexpr Serializer(Backend::DataBucketIterator& itr_ref) : itr(&itr_ref) {}
+
+    constexpr bool read_bytes(const ViewArr<u8>& data) {
+      FOR_MUT(data, it) {
+        *it = itr->read_byte();
+      }
+      return true;
+    }
+  };
+}

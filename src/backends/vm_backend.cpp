@@ -7,6 +7,26 @@
 
 #include "compiler.h"
 
+namespace {
+  struct NegVisitor {
+    Errors* errors;
+    Axle::ViewArr<u8> out;
+
+    template<typename T>
+    void operator()(const auto&...) const {
+      errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary negate (maybe was an unsigned integer)");
+    }
+
+    template<Axle::OneOf<i8, i16, i32, i64> T>
+    void operator()(const Axle::ViewArr<const u8> data) const {
+      T i;
+      bool res = Axle::deserialize_le<T>(data, i);
+      ASSERT(res);
+      Axle::serialize_le<T>(out, -i);
+    }
+  };
+}
+
 constexpr auto load_types_info() {
   struct FormatData {
     usize sizes[9];
@@ -77,9 +97,7 @@ RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
 //}
 
 VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   ASSERT(ir->control_blocks.size > 0);
 
@@ -88,7 +106,7 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
     total_temporaries += b->temporaries.size;
   }
 
-  OwnedArr temporaries = new_arr<VM::Value>(total_temporaries);
+  Axle::OwnedArr temporaries = Axle::new_arr<VM::Value>(total_temporaries);
 
   const u32 size_base = ir->max_stack;
 
@@ -108,7 +126,7 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
         vm_temp.data_offset = var.stack_offset;
       }
       else {
-        temp_size_needed = ceil_to_n(temp_size_needed, temp.type.structure->alignment);
+        temp_size_needed = Axle::ceil_to_n(temp_size_needed, temp.type.structure->alignment);
         vm_temp.data_offset = temp_size_needed;
         vm_temp.type = temp.type;
         temp_size_needed += temp.type.size();
@@ -123,7 +141,7 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
   ASSERT(temporaries_counter == total_temporaries);
 
   VM::StackFrame vm = {};
-  vm.bytes = new_arr<u8>(size_needed);
+  vm.bytes = Axle::new_arr<u8>(size_needed);
   vm.temporaries = std::move(temporaries);
   vm.ir = ir;
   vm.current_block = ir->control_blocks.data;
@@ -133,185 +151,43 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
   return vm;
 }
 
-static void copy_values(u8* to, IR::Format t_format,
-                        const u8* from, IR::Format f_format) {
+static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
+                        Axle::ViewArr<const u8> from, IR::Format f_format) {
   ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
+  
+  constexpr auto int_dispatch = []<typename T>(Axle::ViewArr<u8> to, IR::Format t_format, Axle::ViewArr<const u8> from) {
+    T i;
+    bool res = Axle::deserialize_le<T>(from, i);
+    ASSERT(res);
 
-  switch (f_format) {
-    case IR::Format::uint8: {
-        switch (t_format) {
-          case IR::Format::uint8:
-          case IR::Format::sint8:
-            *to = *from;
-            break;
-          case IR::Format::uint16:
-          case IR::Format::sint16:
-            x16_to_bytes((u16)*from, to);
-            break;
-          case IR::Format::uint32:
-          case IR::Format::sint32:
-            x32_to_bytes((u32)*from, to);
-            break;
-          case IR::Format::uint64:
-          case IR::Format::sint64:
-            x64_to_bytes((u64)*from, to);
-            break;
-          default: INVALID_CODE_PATH("Unsupported copy");
-        }
-        break;
-      }
-    case IR::Format::sint8: {
-        switch (t_format) {
-          case IR::Format::uint8:
-          case IR::Format::sint8:
-            *to = *from;
-            break;
-          case IR::Format::uint16:
-          case IR::Format::sint16:
-            x16_to_bytes((i16)*from, to);
-            break;
-          case IR::Format::uint32:
-          case IR::Format::sint32:
-            x32_to_bytes((i32)*from, to);
-            break;
-          case IR::Format::uint64:
-          case IR::Format::sint64:
-            x64_to_bytes((i64)*from, to);
-            break;
-          default: INVALID_CODE_PATH("Unsupported copy");
-        }
-        break;
-      }
-    case IR::Format::uint16: {
-        switch (t_format) {
-          case IR::Format::uint8:
-          case IR::Format::sint8: {
-              u16 u = x16_from_bytes(from);
-              *to = u & 0xff;
-              break;
-            }
-          case IR::Format::uint16:
-          case IR::Format::sint16:
-            x16_to_bytes(x16_from_bytes(from), to);
-            break;
-          case IR::Format::uint32:
-          case IR::Format::sint32:
-            x32_to_bytes((u32)x16_from_bytes(from), to);
-            break;
-          case IR::Format::uint64:
-          case IR::Format::sint64:
-            x64_to_bytes((u64)x16_from_bytes(from), to);
-            break;
-          default: INVALID_CODE_PATH("Unsupported copy");
-        }
-        break;
-      }
-    case IR::Format::sint16: {
-        switch (t_format) {
-          case IR::Format::uint8:
-          case IR::Format::sint8: {
-              i16 u = x16_from_bytes(from);
-              *to = u & 0xff;
-              break;
-            }
-          case IR::Format::uint16:
-          case IR::Format::sint16:
-            x16_to_bytes(x16_from_bytes(from), to);
-            break;
-          case IR::Format::uint32:
-          case IR::Format::sint32:
-            x32_to_bytes((i32)x16_from_bytes(from), to);
-            break;
-          case IR::Format::uint64:
-          case IR::Format::sint64:
-            x64_to_bytes((i64)x16_from_bytes(from), to);
-            break;
-          default: INVALID_CODE_PATH("Unsupported copy");
-        }
-        break;
-      }
-    case IR::Format::uint32: {
-        switch (t_format) {
-          case IR::Format::uint8:
-          case IR::Format::sint8: {
-              u32 u = x32_from_bytes(from);
-              *to = u & 0xff;
-              break;
-            }
-          case IR::Format::uint16:
-          case IR::Format::sint16:
-            x16_to_bytes(x32_from_bytes(from) & 0xffff, to);
-            break;
-          case IR::Format::uint32:
-          case IR::Format::sint32:
-            x32_to_bytes(x32_from_bytes(from), to);
-            break;
-          case IR::Format::uint64:
-          case IR::Format::sint64:
-            x64_to_bytes((u64)x32_from_bytes(from), to);
-            break;
-          default: INVALID_CODE_PATH("Unsupported copy");
-        }
-        break;
-      }
-    case IR::Format::sint32: {
-        switch (t_format) {
-          case IR::Format::uint8:
-          case IR::Format::sint8: {
-              i32 u = x32_from_bytes(from);
-              *to = u & 0xff;
-              break;
-            }
-          case IR::Format::uint16:
-          case IR::Format::sint16:
-            x16_to_bytes(x32_from_bytes(from) & 0xffff, to);
-            break;
-          case IR::Format::uint32:
-          case IR::Format::sint32:
-            x32_to_bytes(x32_from_bytes(from), to);
-            break;
-          case IR::Format::uint64:
-          case IR::Format::sint64:
-            x64_to_bytes((i64)x32_from_bytes(from), to);
-            break;
-          default: INVALID_CODE_PATH("Unsupported copy");
-        }
-        break;
-      }
-    case IR::Format::uint64:
-    case IR::Format::sint64: {
-        switch (t_format) {
-          case IR::Format::uint8:
-          case IR::Format::sint8: {
-              u64 u = x32_from_bytes(from);
-              *to = u & 0xff;
-              break;
-            }
-          case IR::Format::uint16:
-          case IR::Format::sint16:
-            x16_to_bytes((u64)x64_from_bytes(from) & 0xffff, to);
-            break;
-          case IR::Format::uint32:
-          case IR::Format::sint32:
-            x32_to_bytes((u64)x64_from_bytes(from) & 0xffffffff, to);
-            break;
-          case IR::Format::uint64:
-          case IR::Format::sint64:
-            x64_to_bytes(x64_from_bytes(from), to);
-            break;
-          default: INVALID_CODE_PATH("Unsupported copy");
-        }
-        break;
-      }
-    default:
-      INVALID_CODE_PATH("Cant handle other data formats");
+    switch(t_format) {
+      case IR::Format::uint8: return Axle::serialize_le<u8>(to, static_cast<u8>(i));
+      case IR::Format::sint8: return Axle::serialize_le<i8>(to, static_cast<i8>(i));
+      case IR::Format::uint16: return Axle::serialize_le<u16>(to, static_cast<u16>(i));
+      case IR::Format::sint16: return Axle::serialize_le<i16>(to, static_cast<i16>(i));
+      case IR::Format::uint32: return Axle::serialize_le<u32>(to, static_cast<u32>(i));
+      case IR::Format::sint32: return Axle::serialize_le<i32>(to, static_cast<i32>(i));
+      case IR::Format::uint64: return Axle::serialize_le<u64>(to, static_cast<u64>(i));
+      case IR::Format::sint64: return Axle::serialize_le<i64>(to, static_cast<i64>(i));
+      default: INVALID_CODE_PATH("Unsupported copy");
+    }
+  };
+
+  switch(f_format) {
+    case IR::Format::uint8: return int_dispatch.operator()<u8>(to, t_format, from);
+    case IR::Format::sint8: return int_dispatch.operator()<i8>(to, t_format, from);
+    case IR::Format::uint16: return int_dispatch.operator()<u16>(to, t_format, from);
+    case IR::Format::sint16: return int_dispatch.operator()<i16>(to, t_format, from);
+    case IR::Format::uint32: return int_dispatch.operator()<u32>(to, t_format, from);
+    case IR::Format::sint32: return int_dispatch.operator()<i32>(to, t_format, from);
+    case IR::Format::uint64: return int_dispatch.operator()<u64>(to, t_format, from);
+    case IR::Format::sint64: return int_dispatch.operator()<i64>(to, t_format, from);
+    default: INVALID_CODE_PATH("Unsupported copy");
   }
 }
 
 void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   Errors* errors = env->errors;
 
@@ -330,7 +206,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             const IR::Format f = to.t.struct_format();
             ASSERT(set.data.size == vm_types_info.get_size(f));
 
-            copy_values(to.ptr, f, set.data.val, f);
+            copy_values(Axle::view_arr(to), f, Axle::view_arr(set.data), f);
             break;
           }
         case IR::OpCode::SetStore: {
@@ -343,7 +219,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             const IR::Format f = to.t.struct_format();
             ASSERT(set.data.size == vm_types_info.get_size(f));
 
-            copy_values(to.ptr, f, set.data.val, f);
+            copy_values(Axle::view_arr(to), f, Axle::view_arr(set.data), f);
             break;
           }
 
@@ -356,7 +232,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             const IR::Format t_format = to.t.struct_format();
             const IR::Format f_format = from.t.struct_format();
 
-            copy_values(to.ptr, t_format, from.ptr, f_format);
+            copy_values(Axle::view_arr(to), t_format, Axle::view_arr(from), f_format);
             break;
           }
         case IR::OpCode::CopyLoad: {
@@ -368,7 +244,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             const IR::Format t_format = to.t.struct_format();
             const IR::Format f_format = from.t.struct_format();
 
-            copy_values(to.ptr, t_format, from.ptr, f_format);
+            copy_values(Axle::view_arr(to), t_format, Axle::view_arr(from), f_format);
             break;
           }
         case IR::OpCode::CopyStore: {
@@ -380,7 +256,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             const IR::Format t_format = to.t.struct_format();
             const IR::Format f_format = from.t.struct_format();
 
-            copy_values(to.ptr, t_format, from.ptr, f_format);
+            copy_values(Axle::view_arr(to), t_format, Axle::view_arr(from), f_format);
             break;
           }
         case IR::OpCode::CopyLoadStore: {
@@ -392,7 +268,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             const IR::Format t_format = to.t.struct_format();
             const IR::Format f_format = from.t.struct_format();
 
-            copy_values(to.ptr, t_format, from.ptr, f_format);
+            copy_values(Axle::view_arr(to), t_format, Axle::view_arr(from), f_format);
             break;
           }
 
@@ -419,76 +295,45 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
           const IR::Format r_format = right.t.struct_format(); \
           ASSERT(r_format == t_format); \
           ASSERT(l_format == t_format); \
+          Axle::ViewArr<u8> to_ser = Axle::view_arr(to); \
+          constexpr auto do_op = []<typename T>(auto& ser, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right) { \
+            T l, r;\
+            bool res_l = Axle::deserialize_le<T>(left, l); \
+            ASSERT(res_l); \
+            bool res_r = Axle::deserialize_le<T>(right, r); \
+            ASSERT(res_r); \
+            Axle::serialize_le<T>(ser, static_cast<T>(l op_symbol r)); \
+          }; \
           switch (t_format) \
           { \
-            case IR::Format::uint8: { \
-                u8 l = *left.ptr; \
-                u8 r = *right.ptr; \
-                *to.ptr = static_cast<u8>(l op_symbol r); \
-                break; \
-              } \
-            case IR::Format::sint8: { \
-                i8 l = *left.ptr; \
-                i8 r = *right.ptr; \
-                *to.ptr = static_cast<i8>(l op_symbol r); \
-                break; \
-              } \
-            case IR::Format::uint16: { \
-                u16 l = x16_from_bytes(left.ptr); \
-                u16 r = x16_from_bytes(right.ptr); \
-                x16_to_bytes(static_cast<u16>(l op_symbol r), to.ptr); \
-                break; \
-              } \
-            case IR::Format::sint16: { \
-                i16 l = x16_from_bytes(left.ptr); \
-                i16 r = x16_from_bytes(right.ptr); \
-                x16_to_bytes(static_cast<i16>(l op_symbol r), to.ptr); \
-                break; \
-              } \
-            case IR::Format::uint32: { \
-                u32 l = x32_from_bytes(left.ptr); \
-                u32 r = x32_from_bytes(right.ptr); \
-                x32_to_bytes(static_cast<u32>(l op_symbol r), to.ptr); \
-                break; \
-              } \
-            case IR::Format::sint32: { \
-                i32 l = x32_from_bytes(left.ptr); \
-                i32 r = x32_from_bytes(right.ptr); \
-                x32_to_bytes(static_cast<i32>(l op_symbol r), to.ptr); \
-                break; \
-              } \
-            case IR::Format::uint64: { \
-                u64 l = x64_from_bytes(left.ptr); \
-                u64 r = x64_from_bytes(right.ptr); \
-                x64_to_bytes(static_cast<u64>(l op_symbol r), to.ptr); \
-                break; \
-              } \
-            case IR::Format::sint64: { \
-                i64 l = x64_from_bytes(left.ptr); \
-                i64 r = x64_from_bytes(right.ptr); \
-                x64_to_bytes(static_cast<i64>(l op_symbol r), to.ptr); \
-                break; \
-              } \
+            case IR::Format::uint8: do_op.operator()<u8>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
+            case IR::Format::sint8: do_op.operator()<i8>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
+            case IR::Format::uint16: do_op.operator()<u16>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
+            case IR::Format::sint16: do_op.operator()<i16>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
+            case IR::Format::uint32: do_op.operator()<u32>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
+            case IR::Format::sint32: do_op.operator()<i32>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
+            case IR::Format::uint64: do_op.operator()<u64>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
+            case IR::Format::sint64: do_op.operator()<i64>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
             default: { \
-            errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
-                return; \
-              } \
+              errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
+              return; \
+            } \
           } \
         } break
 
-                                      //Binary Operators
-                                      BIN_OP_CASE(Add, +);
-                                      BIN_OP_CASE(Sub, -);
-                                      BIN_OP_CASE(Mul, *);
-                                      BIN_OP_CASE(Div, / );
-                                      BIN_OP_CASE(Mod, % );
-                                      BIN_OP_CASE(Eq, == );
-                                      BIN_OP_CASE(Neq, != );
-                                      BIN_OP_CASE(Less, < );
-                                      BIN_OP_CASE(Great, > );
-                                      BIN_OP_CASE(And, &);
-                                      BIN_OP_CASE(Or, | );
-                                      BIN_OP_CASE(Xor, ^);
+          //Binary Operators
+          BIN_OP_CASE(Add, +);
+          BIN_OP_CASE(Sub, -);
+          BIN_OP_CASE(Mul, *);
+          BIN_OP_CASE(Div, / );
+          BIN_OP_CASE(Mod, % );
+          BIN_OP_CASE(Eq, == );
+          BIN_OP_CASE(Neq, != );
+          BIN_OP_CASE(Less, < );
+          BIN_OP_CASE(Great, > );
+          BIN_OP_CASE(And, &);
+          BIN_OP_CASE(Or, | );
+          BIN_OP_CASE(Xor, ^);
 
 #undef BIN_OP_CASE
 
@@ -500,30 +345,13 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             const IR::Format t_format = to.t.struct_format();
             const IR::Format f_format = from.t.struct_format();
             ASSERT(t_format == f_format);
-            switch (f_format)
-            {
-              case IR::Format::sint8: {
-                  *to.ptr = -static_cast<i8>(*from.ptr);
-                  break;
-                }
-              case IR::Format::sint16: {
-                  x16_to_bytes(-static_cast<i16>(x16_from_bytes(from.ptr)), to.ptr);
-                  break;
-                }
-              case IR::Format::sint32: {
-                  x32_to_bytes(-static_cast<i32>(x32_from_bytes(from.ptr)), to.ptr);
-                  break;
-                }
-              case IR::Format::sint64: {
-                  x64_to_bytes(static_cast<u64>(-static_cast<i64>(static_cast<u64>(x64_from_bytes(from.ptr)))), to.ptr);
-                  break;
-                }
-              default: {
-                  errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary negate (maybe we an unsigned integer)");
-                  return;
-                }
+            Axle::ViewArr<u8> to_ser = Axle::view_arr(to);
+
+            visit_ir_type(NegVisitor{errors, to_ser}, f_format, Axle::view_arr(from));
+            if(errors->is_panic()) {
+              return;
             }
-          } break;
+        } break;
 
         case IR::OpCode::Not: {
             IR::Types::Not op;
@@ -533,8 +361,12 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             const IR::Format t_format = to.t.struct_format();
             const IR::Format f_format = from.t.struct_format();
             ASSERT(t_format == f_format);
+            Axle::ViewArr<u8> to_ser = Axle::view_arr(to);
             if (t_format == IR::Format::uint8) {
-              *to.ptr = static_cast<u8>(!static_cast<bool>(*from.ptr));
+              u8 raw;
+              bool res = Axle::deserialize_le<u8>(Axle::view_arr(from), raw);
+              ASSERT(res);
+              Axle::serialize_le<i8>(to_ser, static_cast<u8>(!static_cast<bool>(raw)));
             }
             else {
               errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary logical not (only supported format is uint8)");

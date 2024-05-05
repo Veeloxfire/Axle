@@ -110,8 +110,8 @@ namespace IR {
       CFMerge cf_merge;
     };
 
-    Array<u8> bytecode = {};
-    Array<SSATemp> temporaries = {};
+    Axle::Array<u8> bytecode = {};
+    Axle::Array<SSATemp> temporaries = {};
   };
 
   struct GlobalReference {
@@ -122,8 +122,8 @@ namespace IR {
 
   struct DynLibraryImport {
     GlobalLabel label = NULL_GLOBAL_LABEL;
-    const InternString* path = nullptr;
-    const InternString* name = nullptr;
+    const Axle::InternString* path = nullptr;
+    const Axle::InternString* name = nullptr;
   };
 
   struct IRStore {
@@ -132,13 +132,13 @@ namespace IR {
     GlobalLabel global_label = NULL_GLOBAL_LABEL;
     LocalLabel current_block = NULL_LOCAL_LABEL;
 
-    Array<SSAVar> variables = {};
+    Axle::Array<SSAVar> variables = {};
     u32 max_stack;
 
-    Array<GlobalReference> globals_used = {};
-    Array<LocalLabel> control_flow_labels = {};
+    Axle::Array<GlobalReference> globals_used = {};
+    Axle::Array<LocalLabel> control_flow_labels = {};
     
-    Array<ControlBlock> control_blocks = {};
+    Axle::Array<ControlBlock> control_blocks = {};
 
     VariableId new_variable(const Type& t, ValueRequirements requirements);
     ValueIndex new_temporary(const Type& t, ValueRequirements requirements);
@@ -152,7 +152,7 @@ namespace IR {
     void start_control_block(LocalLabel label);
     void end_control_block();
 
-    Array<u8>& current_bytecode();
+    Axle::Array<u8>& current_bytecode();
 
     void set_current_cf(const CFStart&);
     void set_current_cf(const CFEnd&);
@@ -166,7 +166,7 @@ namespace IR {
     const ASTFuncSig* declaration = nullptr;
     const SignatureStructure* sig_struct = nullptr;
 
-    const InternString* name = {};
+    const Axle::InternString* name = {};
 
     IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
   };
@@ -212,9 +212,9 @@ MOD(Not, CODE_V_V)
 #undef MOD
   };
 
-  constexpr ViewArr<const char> opcode_string(OpCode c) {
+  constexpr Axle::ViewArr<const char> opcode_string(OpCode c) {
     switch (c) {
-#define MOD(n, ...) case OpCode:: n: return lit_view_arr(#n);
+#define MOD(n, ...) case OpCode:: n: return Axle::lit_view_arr(#n);
       OPCODES_MOD;
 #undef MOD
     }
@@ -393,11 +393,11 @@ MOD(Not, CODE_V_V)
   }
 
   template<typename INSTRUCTION>
-  using Emitter = void(*)(Array<u8>&, const INSTRUCTION&);
+  using Emitter = void(*)(Axle::Array<u8>&, const INSTRUCTION&);
 
   namespace Emit {
     template<typename INSTRUCTION>
-    void impl(Array<u8>& arr, const INSTRUCTION& i) {
+    void impl(Axle::Array<u8>& arr, const INSTRUCTION& i) {
       usize curr = arr.size;
       arr.insert_uninit(1 + i.serialize_size());
       arr.data[curr] = static_cast<u8>(INSTRUCTION::OPCODE);
@@ -432,12 +432,12 @@ struct PrintFuncSignature {
   const IR::Function* func;
 };
 
-namespace Format {
+namespace Axle::Format {
   template<>
   struct FormatArg<IR::OpCode> {
     template<Formatter F>
     constexpr static void load_string(F& res, IR::OpCode op) {
-      const ViewArr<const char> str = IR::opcode_string(op);
+      const Axle::ViewArr<const char> str = IR::opcode_string(op);
       return res.load_string(str.data, str.size);
     }
   };
@@ -496,7 +496,7 @@ namespace Eval {
 
     IR::LocalLabel parent = IR::NULL_LOCAL_LABEL;
 
-    Array<VariableState> variables_state;
+    Axle::Array<VariableState> variables_state;
     u32 curr_stack = 0;
 
     IR::VariableId new_variable(const Type& t, IR::ValueRequirements reqs);
@@ -508,7 +508,7 @@ namespace Eval {
     void rescope_variables(usize new_size);
     void reset_variables();
 
-    inline Array<u8>& current_bytecode() const { return ir->current_bytecode(); }
+    inline Axle::Array<u8>& current_bytecode() const { return ir->current_bytecode(); }
   };
 
   IrBuilder start_builder(Eval::Time eval_time, IR::IRStore* ir);
@@ -561,8 +561,8 @@ namespace VM {
   };
 
   struct StackFrame {
-    OwnedArr<u8> bytes;
-    OwnedArr<Value> temporaries = {};
+    Axle::OwnedArr<u8> bytes;
+    Axle::OwnedArr<Value> temporaries = {};
     Value return_val;
 
     const IR::IRStore* ir;
@@ -587,4 +587,28 @@ namespace VM {
   StackFrame new_stack_frame(const IR::IRStore* ir);
 
   void exec(const Env* env, StackFrame* stack_frame);
+  
+  void eval_negate(IR::Format format, Axle::ViewArr<u8> out, Axle::ViewArr<const u8> in);
+}
+
+namespace Axle {
+  template<>
+  struct Viewable<IR::C_ARG> {
+    using ViewT = const u8;
+
+    template<typename U>
+    static constexpr ViewArr<U> view(const IR::C_ARG& v) {
+      return { v.val, v.size };
+    }
+  };
+
+  template<>
+  struct Viewable<VM::StackFrame::RealValue> {
+    using ViewT = u8;
+
+    template<typename U>
+    static constexpr ViewArr<U> view(const VM::StackFrame::RealValue& v) {
+      return { v.ptr, v.t.size() };
+    }
+  };
 }

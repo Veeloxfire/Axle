@@ -2,8 +2,8 @@ HANDLE :: u64;
 DWORD  :: u32;
 BOOL   :: i32;
 
-GetStdHandle :: (i: i32)-> u64 {
-  return #dynamic_import((i32) -> u64, "kernel32.dll", "GetStdHandle")(i);
+GetStdHandle :: (i: DWORD)-> HANDLE {
+  return #dynamic_import((DWORD) -> u64, "kernel32.dll", "GetStdHandle")(i);
 }
 WriteConsoleA :: (handle: HANDLE, string: *void, count: DWORD, out_count: *DWORD) -> BOOL  {
   return #dynamic_import((HANDLE, *void, DWORD, *DWORD, *void) -> BOOL,

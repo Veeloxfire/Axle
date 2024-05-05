@@ -3,6 +3,8 @@
 
 #include <AxleUtil/io.h>
 
+namespace IO_Single = Axle::IO_Single;
+
 namespace IR {
   IR::ValueIndex IRStore::new_temporary(const VariableId& v_id, ValueRequirements requirements) {
     IR::ControlBlock* cb = current_control_block();
@@ -65,7 +67,7 @@ namespace IR {
     return control_blocks.data + (current_block.label - 1);
   }
 
-  Array<u8>& IRStore::current_bytecode() {
+  Axle::Array<u8>& IRStore::current_bytecode() {
     return current_control_block()->bytecode;
   }
 
@@ -559,7 +561,7 @@ Eval::IrBuilder Eval::start_builder(Eval::Time eval_time, IR::IRStore* ir, AST_A
                      });
 
   if (params.count > 0) {
-    OwnedArr<IR::V_ARG> args = new_arr<IR::V_ARG>(params.count);
+    Axle::OwnedArr<IR::V_ARG> args = Axle::new_arr<IR::V_ARG>(params.count);
 
     {
       const Type* parameters = ir->signature->parameter_types.begin();
@@ -691,7 +693,7 @@ IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirement
 
   {
     IR::SSAVar& v = ir->variables.data[id.variable];
-    u32 offset = ceil_to_n(curr_stack, v.type.size());
+    u32 offset = Axle::ceil_to_n(curr_stack, v.type.size());
     v.stack_offset = offset;
 
     curr_stack = offset + v.type.size();
@@ -1072,14 +1074,14 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
     const u8* bc = block->bytecode.begin();
     const u8* bc_end = block->bytecode.end();
 
-    ViewArr<const char> name = lit_view_arr("<invalid>");
+    Axle::ViewArr<const char> name = Axle::lit_view_arr("<invalid>");
     switch (block->cf_type) {
-      case ControlFlowType::Start: name = lit_view_arr("Start"); break;
-      case ControlFlowType::End: name = lit_view_arr("End"); break;
-      case ControlFlowType::Return: name = lit_view_arr("Return"); break;
-      case ControlFlowType::Inline: name = lit_view_arr("Inline"); break;
-      case ControlFlowType::Split: name = lit_view_arr("Split"); break;
-      case ControlFlowType::Merge: name = lit_view_arr("Merge"); break;
+      case ControlFlowType::Start: name = Axle::lit_view_arr("Start"); break;
+      case ControlFlowType::End: name = Axle::lit_view_arr("End"); break;
+      case ControlFlowType::Return: name = Axle::lit_view_arr("Return"); break;
+      case ControlFlowType::Inline: name = Axle::lit_view_arr("Inline"); break;
+      case ControlFlowType::Split: name = Axle::lit_view_arr("Split"); break;
+      case ControlFlowType::Merge: name = Axle::lit_view_arr("Merge"); break;
     }
 
     IO_Single::format("L{} (Type = \"{}\")\n", block->label.label - 1, name);
@@ -1112,7 +1114,7 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
 
             print_value(set.to);
 
-            ByteArray arr = {};
+            Axle::ByteArray arr = {};
             arr.ptr = set.data.val;
             arr.size = set.data.size;
 
@@ -1128,7 +1130,7 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
             print_value(set.to);
             IO_Single::print(" ]");
 
-            ByteArray arr = {};
+            Axle::ByteArray arr = {};
             arr.ptr = set.data.val;
             arr.size = set.data.size;
 

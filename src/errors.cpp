@@ -2,8 +2,10 @@
 #include <AxleUtil/files.h>
 #include <AxleUtil/io.h>
 
-OwnedArr<char> load_span_from_source(const Span& span, const ViewArr<const char>& source) {
-  Array<char> res = {};
+namespace IO = Axle::IO;
+
+Axle::OwnedArr<char> load_span_from_source(const Span& span, const Axle::ViewArr<const char>& source) {
+  Axle::Array<char> res = {};
 
   size_t line = 0;
   size_t i = 0;
@@ -135,7 +137,7 @@ ERROR_CODE Errors::print_all() const {
   return print_error_messages(error_messages);
 }
 
-ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
+ERROR_CODE print_error_messages(const Axle::Array<ErrorMessage>& error_messages)
 {
   ERROR_CODE ret = ERROR_CODE::NO_ERRORS;
 
@@ -144,16 +146,16 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
   auto i = error_messages.begin();
   const auto end = error_messages.end();
 
-  InternHashTable<OwnedArr<const char>> files = {};
+  Axle::InternHashTable<Axle::OwnedArr<const char>> files = {};
 
   for (; i < end; i++) {
     ret = i->type;
 
-    const ViewArr<const char> message_type = error_code_string(i->type);
+    const Axle::ViewArr<const char> message_type = error_code_string(i->type);
     IO::err_print(message_type);
     IO::err_print(":\n");
 
-    OwnedArr<char> type_set_message = format_type_set(const_view_arr(i->message), 4, 70);
+    Axle::OwnedArr<char> type_set_message = format_type_set(const_view_arr(i->message), 4, 70);
 
     IO::err_print(view_arr(type_set_message));
     IO::err_print("\n\n");
@@ -164,17 +166,17 @@ ERROR_CODE print_error_messages(const Array<ErrorMessage>& error_messages)
       IO::err_print("Location: ");
 
       if (!files.contains(i->span.full_path)) {
-        auto load_file = FILES::read_full_file(view_arr(i->span.full_path));
+        auto load_file = Axle::FILES::read_full_file(view_arr(i->span.full_path));
 
         files.insert(i->span.full_path, cast_arr<const char>(std::move(load_file)));
       }
 
-      const OwnedArr<const char>* src_ptr = files.get_val(i->span.full_path);
+      const Axle::OwnedArr<const char>* src_ptr = files.get_val(i->span.full_path);
       ASSERT(src_ptr != nullptr);
 
       IO::err_format("{} {}:{}\n\n", span.full_path, span.char_start, span.line_start);
 
-      OwnedArr<char> string = load_span_from_source(span, view_arr(*src_ptr));
+      Axle::OwnedArr<char> string = load_span_from_source(span, view_arr(*src_ptr));
       IO::err_print(view_arr(string));
       IO::err_print('\n');
     }

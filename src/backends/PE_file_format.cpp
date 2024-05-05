@@ -9,6 +9,9 @@
 #endif
 #include <ctime>
 
+namespace FILES = Axle::FILES;
+namespace IO = Axle::IO;
+
 //// Sizes ////
 
 static_assert(sizeof(COFF_Characteristics::Characteristics) == 2, "Must be 2 bytes");
@@ -23,7 +26,7 @@ constexpr uint32_t FILE_ALIGNMENT = 512;
 
 ///// Definitions /////
 
-static void write_code_partial(FILES::FileData* out,
+static void write_code_partial(FILES::FileHandle out,
                                Backend::DataBucketIterator* code, usize end,
                                usize* const file_ptr, usize* const mem_ptr) {
   while (true) {
@@ -57,10 +60,10 @@ static void write_code_partial(FILES::FileData* out,
   ASSERT(code->actual_location == end);
 }
 
-static void file_align(FILES::FileData* out,
+static void file_align(FILES::FileHandle out,
                        usize* const file_ptr, usize file_al) {
   usize current = *file_ptr;
-  usize new_size = ceil_to_n(current, file_al);
+  usize new_size = Axle::ceil_to_n(current, file_al);
 
   if (new_size != current) {
     FILES::write_padding_bytes(out, '\0', new_size - current);
@@ -69,17 +72,17 @@ static void file_align(FILES::FileData* out,
 }
 
 static void mem_align(usize* const mem_ptr, usize mem_al) {
-  *mem_ptr = ceil_to_n(*mem_ptr, mem_al);
+  *mem_ptr = Axle::ceil_to_n(*mem_ptr, mem_al);
 }
 
 template<typename T>
-static void write_to_image(FILES::FileData* out, const T& t, usize* const file_pos, usize* const mem_pos) {
+static void write_to_image(FILES::FileHandle out, const T& t, usize* const file_pos, usize* const mem_pos) {
   FILES::write_obj(out, t);
   *file_pos += sizeof(T);
   *mem_pos += sizeof(T);
 }
 
-static void write_raw_to_image(FILES::FileData* out, const u8* bytes, usize size, usize* const file_pos, usize* const mem_pos) {
+static void write_raw_to_image(FILES::FileHandle out, const u8* bytes, usize size, usize* const file_pos, usize* const mem_pos) {
   FILES::write(out, bytes, size);
   *file_pos += size;
   *mem_pos += size;
@@ -96,10 +99,8 @@ struct ProgramLocation {
 
 void write_pe_file(CompilerThread* comp_thread,
                    const Backend::ProgramData* program,
-                   const InternString* out_name, const InternString* out_folder, bool lib) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+                   const Axle::InternString* out_name, const Axle::InternString* out_folder, bool lib) {
+  TELEMETRY_FUNCTION();
 
   ASSERT((lib && program->dyn_exports.size != 0) || program->dyn_exports.size == 0);
   ASSERT(lib || program->entry_point != IR::NULL_GLOBAL_LABEL);
@@ -109,7 +110,7 @@ void write_pe_file(CompilerThread* comp_thread,
   const bool has_dynamic_imports = program->dyn_imports.size > 0;
   const bool has_globals = program->globals.size > 0;
 
-  InternHashTable<ProgramLocation> strings = {};
+  Axle::InternHashTable<ProgramLocation> strings = {};
 
   FOR(program->dyn_imports, it) {
     {
@@ -126,15 +127,15 @@ void write_pe_file(CompilerThread* comp_thread,
 
   const bool has_constants = strings.used > 0 || lib;
 
-  ViewArr<const char> suffix;
+  Axle::ViewArr<const char> suffix;
   if (lib) {
-    suffix = lit_view_arr("dll");
+    suffix = Axle::lit_view_arr("dll");
   }
   else {
-    suffix = lit_view_arr("exe");
+    suffix = Axle::lit_view_arr("exe");
   }
 
-  AllocFilePath file_path = format_file_path(view_arr(out_folder), view_arr(out_name), suffix);
+  Axle::AllocFilePath file_path = format_file_path(view_arr(out_folder), view_arr(out_name), suffix);
 
   FILES::OpenedFile file = FILES::replace(view_arr(file_path.raw), FILES::OPEN_MODE::WRITE);
 
@@ -144,7 +145,7 @@ void write_pe_file(CompilerThread* comp_thread,
   }
   IO::format("Writing to: {}\n", file_path.raw);
 
-  auto* const out = file.file;
+  const auto& out = file.file;
 
   usize file_pointer = 0;
   usize memory_pointer = 0;
@@ -269,7 +270,7 @@ void write_pe_file(CompilerThread* comp_thread,
 
   if (has_constants) {
     if (lib) {
-      OwnedArr<char> lib_name = format("{}.{}", out_name, suffix);
+      Axle::OwnedArr<char> lib_name = format("{}.{}", out_name, suffix);
       lib_name_rva = memory_pointer;
 
       write_raw_to_image(out, (const u8*)lib_name.data, lib_name.size, &file_pointer, &memory_pointer);
@@ -278,7 +279,7 @@ void write_pe_file(CompilerThread* comp_thread,
     auto string_itr = strings.itr();
 
     while (string_itr.is_valid()) {
-      const InternString* s = string_itr.key();
+      const Axle::InternString* s = string_itr.key();
       ProgramLocation* l = string_itr.val();
 
       l->file = (uint32_t)file_pointer;
@@ -323,17 +324,15 @@ void write_pe_file(CompilerThread* comp_thread,
   usize import_directory_size = 0;
 
   struct  DynImport {
-    const InternString* function;
-    const InternString* library;
+    const Axle::InternString* function;
+    const Axle::InternString* library;
     u32 index;
   };
 
-  Array<usize> dyn_import_lookup = {};
-  Array<DynImport> dyn_imports = {};
+  Axle::Array<usize> dyn_import_lookup = {};
+  Axle::Array<DynImport> dyn_imports = {};
   if (has_dynamic_imports) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Write Dynamic Imports");
-  #endif
+    TELEMETRY_SCOPE("Write Dynamic Imports");
 
     {
       dyn_import_lookup.insert_uninit(program->dyn_imports.size);
@@ -353,7 +352,7 @@ void write_pe_file(CompilerThread* comp_thread,
       }
     }
 
-    sort_range(dyn_imports.mut_begin(), dyn_imports.mut_end(),
+    Axle::sort_range(dyn_imports.mut_begin(), dyn_imports.mut_end(),
                [](const DynImport& left, const DynImport& right) {
       if (left.library != right.library) {
         return left.library < right.library;
@@ -367,15 +366,15 @@ void write_pe_file(CompilerThread* comp_thread,
     const DynImport* const dyn_imports_end = dyn_imports.end();
 
     struct LI {
-      const InternString* lib_name;
+      const Axle::InternString* lib_name;
       u32 num_funcs;
       usize lookup_table_estimate;
       usize address_table_estimate;
     };
-    Array<LI> library_infos = {};
+    Axle::Array<LI> library_infos = {};
 
     {
-      const InternString* previous_lib = nullptr;
+      const Axle::InternString* previous_lib = nullptr;
       const DynImport* dyn_import_i = dyn_imports_start;
 
       LI* li = nullptr;
@@ -556,12 +555,10 @@ void write_pe_file(CompilerThread* comp_thread,
   const usize code_start = file_pointer;
   const usize code_memory_start = memory_pointer;
 
-  OwnedArr actual_function_locations = new_arr<ProgramLocation>(program->functions.size);
+  Axle::OwnedArr actual_function_locations = Axle::new_arr<ProgramLocation>(program->functions.size);
 
   {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Write Machine Code");
-  #endif
+    TELEMETRY_SCOPE("Write Machine Code");
     //Write all the code
 
     Backend::DataBucketIterator code = program->code_store.start();
@@ -570,7 +567,7 @@ void write_pe_file(CompilerThread* comp_thread,
       const Backend::FunctionMetadata* metadata = nullptr;
     };
 
-    OwnedArr sorted_functions = new_arr<const Backend::FunctionMetadata*>(program->functions.size);
+    Axle::OwnedArr sorted_functions = Axle::new_arr<const Backend::FunctionMetadata*>(program->functions.size);
     {
       const Backend::FunctionMetadata* functions = program->functions.begin();
       FOR_MUT(sorted_functions, it) {
@@ -579,7 +576,7 @@ void write_pe_file(CompilerThread* comp_thread,
       }
     }
 
-    sort_range(sorted_functions.mut_begin(), sorted_functions.mut_end(),
+    Axle::sort_range(sorted_functions.mut_begin(), sorted_functions.mut_end(),
                [](const Backend::FunctionMetadata * l, const Backend::FunctionMetadata * r) { return l->code_start < r->code_start; });
 
     auto sf_i = sorted_functions.begin();
@@ -692,11 +689,9 @@ void write_pe_file(CompilerThread* comp_thread,
   const usize exports_memory_start = memory_pointer;
 
   if (lib) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Write Dynamic Exports");
-  #endif
+    TELEMETRY_SCOPE("Write Dynamic Exports");
 
-    OwnedArr name_offsets = new_arr<u32>(program->dyn_exports.size);
+    Axle::OwnedArr name_offsets = Axle::new_arr<u32>(program->dyn_exports.size);
 
     {
       const auto* exp = program->dyn_exports.begin();
@@ -1051,20 +1046,18 @@ void write_pe_file(CompilerThread* comp_thread,
 
     FILES::write_obj(out, exports_header);
   }
-
-  FILES::close(out);
-  }
+}
 
 void output_pe_exe(CompilerThread* comp_thread,
                    const Backend::ProgramData* program,
-                   const InternString* out_name, const InternString* out_folder) {
+                   const Axle::InternString* out_name, const Axle::InternString* out_folder) {
   write_pe_file(comp_thread, program, out_name, out_folder, false);
 }
 
 
 void output_pe_dll(CompilerThread* comp_thread,
                    const Backend::ProgramData* program,
-                   const InternString* out_name, const InternString* out_folder) {
+                   const Axle::InternString* out_name, const Axle::InternString* out_folder) {
   write_pe_file(comp_thread, program, out_name, out_folder, true);
 }
 
@@ -1098,7 +1091,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
                                         CompilerThread* const comp_thread,
                                         const Span& span,
                                         PEFile* pe_file,
-                                        const ViewArr<const char>& file_name) {
+                                        const Axle::ViewArr<const char>& file_name) {
 
   FILES::OpenedFile file = FILES::open(file_name, FILES::OPEN_MODE::READ);
 
@@ -1239,7 +1232,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     const size_t num_ordinals = directory_table.num_name_pointers;
 
     //Load name rvas
-    Array<RVA> name_rvas = {};
+    Axle::Array<RVA> name_rvas = {};
     name_rvas.insert_uninit(num_ordinals);
     //Seek to names
     FILES::seek_from_start(file.file, resolver.load_rva_ptr(directory_table.name_pointer_table_address));
@@ -1247,7 +1240,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     FILES::read(file.file, name_rvas.data, num_ordinals);
 
     //Load ordinals
-    Array<uint16_t> ordinals = {};
+    Axle::Array<uint16_t> ordinals = {};
     ordinals.insert_uninit(num_ordinals);
     //Seek to ordinals
     FILES::seek_from_start(file.file, resolver.load_rva_ptr(directory_table.ordinal_table_address));
@@ -1258,7 +1251,7 @@ void load_portable_executable_from_file(CompilerGlobals* const comp,
     {
       pe_file->export_table.element_table.reserve_extra(num_ordinals);
 
-      Array<char> name_holder = {};
+      Axle::Array<char> name_holder = {};
 
       for (size_t i = 0; i < num_ordinals; i++) {
         pe_file->export_table.element_table.insert_uninit(1);

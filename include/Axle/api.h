@@ -28,9 +28,10 @@ namespace Backend {
     u32 num_calling_conventions;
 
     System system;
-    ViewArr<const char> system_name;
+    Axle::ViewArr<const char> system_name;
 
     usize ptr_size;
+    usize ptr_align;
 
     PROGRAM_INIT init;
     EMIT_START emit_start;
@@ -40,7 +41,7 @@ namespace Backend {
 
   using OUTPUT_EXECUTABLE = void(*) (CompilerThread* comp_thread,
                                      const ProgramData* program,
-                                     const InternString* out_name, const InternString* out_folder);
+                                     const Axle::InternString* out_name, const Axle::InternString* out_folder);
 
   struct ExecutableFormatInterface {
     OutputFileType type;
@@ -59,21 +60,21 @@ struct APIOptimizationOptions {
 
 struct APIBuildOptions {
   bool debug_break_on_entry = false;
-  ViewArr<const char> current_directory = {};
+  Axle::ViewArr<const char> current_directory = {};
 
-  ViewArr<const char> file_name = {};
-  ViewArr<const char> source_folder = {};
+  Axle::ViewArr<const char> file_name = {};
+  Axle::ViewArr<const char> source_folder = {};
 
   bool library = false;
-  ViewArr<const char> entry_point = {};
+  Axle::ViewArr<const char> entry_point = {};
 
-  ViewArr<const char> std_lib_folder = {};
-  ViewArr<const char> lib_folder = {};
+  Axle::ViewArr<const char> std_lib_folder = {};
+  Axle::ViewArr<const char> lib_folder = {};
 
   u32 default_calling_convention = 0;
 
-  ViewArr<const char> output_name = {};
-  ViewArr<const char> output_folder = {};
+  Axle::ViewArr<const char> output_name = {};
+  Axle::ViewArr<const char> output_folder = {};
   OutputFileType output_file_type;
 
   u32 extra_threads = 0;

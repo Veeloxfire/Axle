@@ -62,22 +62,22 @@ enum class AxleTokenType : uint8_t {
 #undef MODIFY
 };
 
-constexpr ViewArr<const char> token_type_string(AxleTokenType t) {
+constexpr Axle::ViewArr<const char> token_type_string(AxleTokenType t) {
   switch (t) {
-#define MODIFY(tt, str) case AxleTokenType :: tt : return lit_view_arr(#tt);
+#define MODIFY(tt, str) case AxleTokenType :: tt : return Axle::lit_view_arr(#tt);
     AXLE_TOKEN_MODIFY
 #undef MODIFY
   }
 
-  return lit_view_arr("UNKNOWN TOKEN TYPE");
+  return Axle::lit_view_arr("UNKNOWN TOKEN TYPE");
 }
 
-namespace Format {
+namespace Axle::Format {
   template<>
   struct FormatArg<AxleTokenType> {
     template<Formatter F>
     constexpr static void load_string(F& res, AxleTokenType tt) {
-      const ViewArr<const char> str = token_type_string(tt);
+      const Axle::ViewArr<const char> str = token_type_string(tt);
       res.load_string(str.data, str.size);
     }
   };
@@ -99,24 +99,24 @@ struct Token {
   AxleTokenType type = AxleTokenType::End;
   bool consumed_whitespace = false;
 
-  const InternString* string = nullptr;
+  const Axle::InternString* string = nullptr;
 
   TokenPos pos ={};
 };
 
 struct Span;
 
-void set_span_start(const InternString* file_path, const Token& token, Span& span);
+void set_span_start(const Axle::InternString* file_path, const Token& token, Span& span);
 void set_span_end(const Token& token, Span& span);
 
 #define SPAN_START set_span_start(parser->full_path(), parser->current, span)
 #define SPAN_END set_span_end(parser->prev, span)
 
-Span span_of_token(const InternString* file_path, const Token& tok);
+Span span_of_token(const Axle::InternString* file_path, const Token& tok);
 
 
 struct Lexer {
-  const InternString* file_path;
+  const Axle::InternString* file_path;
   Position save_pos = {};
   Position curr_pos = {};
 
@@ -136,9 +136,9 @@ struct Namespace;
 struct Parser {
   Lexer lexer = {};
 
-  MemoryPool ast_store ={};
-  Array<AST_LOCAL> eval_order = {};
-  Array<AST_LOCAL> infer_order = {};
+  Axle::MemoryPool ast_store ={};
+  Axle::Array<AST_LOCAL> eval_order = {};
+  Axle::Array<AST_LOCAL> infer_order = {};
 
   TokenStream stream;
   Namespace* current_namespace;
@@ -147,13 +147,13 @@ struct Parser {
   Token current ={};
   Token next ={};
 
-  FileLocation file_path = {};
-  constexpr const InternString* full_path() const { return file_path.full_name; }
+  Axle::FileLocation file_path = {};
+  constexpr const Axle::InternString* full_path() const { return file_path.full_name; }
 };
 
 template<typename T>
 T* ast_alloc(Parser* p) {
-  static_assert(A_can_cast_to_B<T, AST>, "Only allocate ast nodes using this");
+  static_assert(Axle::A_can_cast_to_B<T, AST>, "Only allocate ast nodes using this");
   return p->ast_store.push<T>();
 }
 
@@ -163,8 +163,8 @@ struct CompilerThread;
 void reset_parser(CompilerGlobals* comp,
                   CompilerThread* const comp_thread,
                   Parser* const parser,
-                  const InternString* file_name,
-                  ViewArr<const char> string);
+                  const Axle::InternString* file_name,
+                  Axle::ViewArr<const char> string);
 
 struct FileAST;
 void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser, FileAST* const file);

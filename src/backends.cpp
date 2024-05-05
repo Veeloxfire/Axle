@@ -72,7 +72,7 @@ void Backend::DataBucketStore::free_held() {
 
   while (curr != nullptr) {
     DataBucket* next = curr->next;
-    free_destruct_single(curr);
+    Axle::free_destruct_single<DataBucket>(curr);
     curr = next;
   }
 
@@ -82,10 +82,9 @@ void Backend::DataBucketStore::free_held() {
   total_size = 0;
 }
 
-
 void Backend::DataBucketStore::push_zeros(usize count) {
   if (bottom == nullptr) {
-    bottom = allocate_default<DataBucket>();
+    bottom = Axle::allocate_default<DataBucket>();
     top = bottom;
     top_fill = 0;
     total_size = 0;
@@ -101,7 +100,7 @@ void Backend::DataBucketStore::push_zeros(usize count) {
     total_size += bucket_remaining;
     count -= bucket_remaining;
 
-    DataBucket* new_b = allocate_default<DataBucket>();
+    DataBucket* new_b = Axle::allocate_default<DataBucket>();
     top->next = new_b;
     top = new_b;
     top_fill = 0;
@@ -117,7 +116,7 @@ void Backend::DataBucketStore::push_zeros(usize count) {
 
 void Backend::DataBucketStore::push_arr(const u8* arr, const u8* end) {
   if (bottom == nullptr) {
-    bottom = allocate_default<DataBucket>();
+    bottom = Axle::allocate_default<DataBucket>();
     top = bottom;
     top_fill = 0;
     total_size = 0;
@@ -136,7 +135,7 @@ void Backend::DataBucketStore::push_arr(const u8* arr, const u8* end) {
 
       total_size += bucket_remaining;
 
-      DataBucket* new_b = allocate_default<DataBucket>();
+      DataBucket* new_b = Axle::allocate_default<DataBucket>();
       top->next = new_b;
       top = new_b;
       top_fill = 0;

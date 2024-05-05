@@ -30,6 +30,7 @@ set(CppHeaders
   "${PROJECT_SOURCE_DIR}/type.h"
   "${PROJECT_SOURCE_DIR}/type_check.h")
 
+target_compile_definitions(AxleCompiler PRIVATE STACKTRACE_ENABLE)
 target_sources(AxleCompiler PRIVATE ${CppFiles})
 target_sources(AxleCompiler PRIVATE 
   FILE_SET HEADERS

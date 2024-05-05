@@ -305,18 +305,18 @@ struct Span;
 
 void output_pe_exe(CompilerThread* comp_thread,
                    const Backend::ProgramData* program,
-                   const InternString* out_name, const InternString* out_folder);
+                   const Axle::InternString* out_name, const Axle::InternString* out_folder);
 
 void output_pe_dll(CompilerThread* comp_thread,
                    const Backend::ProgramData* program,
-                   const InternString* out_name, const InternString* out_folder);
+                   const Axle::InternString* out_name, const Axle::InternString* out_folder);
 
 #if 0
 void load_portable_executable_from_file(CompilerGlobals* const comp,
                                         CompilerThread* const comp_thread,
                                         const Span& span,
                                         PEFile* pe_file,
-                                        const ViewArr<const char>& file_name);
+                                        const Axle::ViewArr<const char>& file_name);
 #endif
 
 constexpr Backend::ExecutableFormatInterface pe_plus_file_interface() {

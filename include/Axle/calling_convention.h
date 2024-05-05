@@ -16,7 +16,7 @@ enum struct CLEANUP : uint8_t {
 struct CallingConvention {
   static constexpr size_t OFFSET_TO_SHADOW = 8ull + 8ull;
 
-  ViewArr<const char> name;
+  Axle::ViewArr<const char> name;
 
   uint8_t return_register = 0;//Usually RAX or 0
   uint8_t stack_pointer_reg = 0;
@@ -48,6 +48,6 @@ struct CallingConvention {
   }
 
   constexpr size_t num_reg_parameters(size_t parameters) const {
-    return smaller(parameters, (size_t)num_parameter_registers);
+    return Axle::smaller(parameters, (size_t)num_parameter_registers);
   }
 };

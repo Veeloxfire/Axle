@@ -18,7 +18,6 @@ foreach(config_type ${CMAKE_CONFIGURATION_TYPES})
 endforeach()
 
 option(AxleTRACING "Enable tracing" OFF)
-option(AxleTHROWING_ASSERTS, "Enable throwing asserts (for better testing)" OFF)
 
 if(NOT DEFINED AxleUtilINCLUDE)
   message(FATAL_ERROR "Requires AxleUtilINCLUDE to compile")
@@ -44,7 +43,7 @@ target_sources(AxleCompiler PRIVATE
   FILES ${AxleHeaders}
 )
 
-target_link_libraries(AxleCompiler PRIVATE "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
+target_link_libraries(AxleCompiler PUBLIC "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
 target_include_directories(AxleCompiler PUBLIC ${AxleINCLUDE})
 target_include_directories(AxleCompiler PUBLIC "${PROJECT_SOURCE_DIR}/src" ${AxleUtilINCLUDE})
 
@@ -60,10 +59,6 @@ if(AxleTRACING)
   endif()
 
   target_link_libraries(AxleCompiler "${TracerBIN}/Tracer.lib")
-endif()
-
-if(AxleTHROWING_ASSERTS)
-  target_compile_definitions(AxleCompiler PRIVATE ASSERT_EXCEPTIONS)
 endif()
 
 add_subdirectory(src)

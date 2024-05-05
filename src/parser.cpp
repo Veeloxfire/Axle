@@ -9,13 +9,15 @@
 #include <Tracer/trace.h>
 #endif
 
+namespace IO_Single = Axle::IO_Single;
+
 struct KeywordPair {
-  ViewArr<const char> keyword;
+  Axle::ViewArr<const char> keyword;
   AxleTokenType type = AxleTokenType::End;
 };
 
 constexpr KeywordPair keywords[] = {
-#define MODIFY(n, str) {lit_view_arr(str), AxleTokenType :: n},
+#define MODIFY(n, str) {Axle::lit_view_arr(str), AxleTokenType :: n},
   AXLE_TOKEN_KEYWORDS
 #undef MODIFY
 };
@@ -23,7 +25,7 @@ constexpr KeywordPair keywords[] = {
 constexpr size_t num_keywords = sizeof(keywords) / sizeof(KeywordPair);
 
 constexpr KeywordPair operators[] = {
-#define MODIFY(n, str) {lit_view_arr(str), AxleTokenType :: n},
+#define MODIFY(n, str) {Axle::lit_view_arr(str), AxleTokenType :: n},
   AXLE_TOKEN_OPERATORS
   AXLE_TOKEN_STRUCTURAL
 #undef MODIFY
@@ -111,7 +113,7 @@ static u64 parse_hex_uint(const char* digits, const u64 len) {
 }
 
 static u64 parse_dec_uint(const char* digits, const u64 len) {
-  ASSERT(0 < len && len <= MAX_DECIMAL_U64_DIGITS);
+  ASSERT(0 < len && len <= Axle::MAX_DECIMAL_U64_DIGITS);
 
   const auto get_digit = [](const char c) -> u8 {
     ASSERT(is_dec_number(c));
@@ -240,7 +242,7 @@ static Token lex_identifier(CompilerGlobals* comp, Lexer* const lex) {
     const KeywordPair& pair = keywords[i];
 
     if (pair.keyword.size == ident_len
-        && memeq_ts<char>(pair.keyword.data, ident.string->string, ident_len)) {
+        && Axle::memeq_ts<char>(pair.keyword.data, ident.string->string, ident_len)) {
       //Is keyword
       ident.type = pair.type;
       //Exit early
@@ -309,7 +311,7 @@ static Token make_operator_token(CompilerGlobals* comp, CompilerThread* comp_thr
   }
 
   Span span = span_of_lex(lex);
-  comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "Unlexable character: '{}'", DisplayChar{ lex->top[0] });
+  comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "Unlexable character: '{}'", Axle::DisplayChar{ lex->top[0] });
   return {};
 }
 
@@ -374,7 +376,7 @@ static Token lex_string(CompilerGlobals* const comp, CompilerThread* const comp_
   lex->top++;
   lex->curr_pos.character++;
 
-  Array<char> out_str = {};
+  Axle::Array<char> out_str = {};
 
   while (lex->top < lex->end && !is_new_line(lex) && lex->top[0] != '\0' && lex->top[0] != '"') {
     out_str.insert(lex->top[0]);
@@ -469,7 +471,7 @@ static Token lex_unpositioned_token(CompilerGlobals* const comp, CompilerThread*
     // \0 is the end of file
     Token eof = {};
     eof.type = AxleTokenType::End;
-    eof.string = comp->services.strings.get()->intern(lit_view_arr("End of file"));
+    eof.string = comp->services.strings.get()->intern(Axle::lit_view_arr("End of file"));
 
     return eof;
   }
@@ -511,7 +513,7 @@ static Token lex_token(CompilerGlobals* const comp_globals, CompilerThread* cons
 static TokenStream next_lex_stream(CompilerGlobals* const comp, CompilerThread* const comp_thread, Lexer* lex, u64 free_start) {
   constexpr size_t STREAM_LEN = 64;
 
-  Array<Token>& stream = comp_thread->current_stream;
+  Axle::Array<Token>& stream = comp_thread->current_stream;
 
   stream.clear();
   stream.reserve_extra(STREAM_LEN);
@@ -599,7 +601,7 @@ static void expect(CompilerGlobals* const comp, CompilerThread* const comp_threa
   }
 }
 
-void set_span_start(const InternString* path, const Token& token, Span& span) {
+void set_span_start(const Axle::InternString* path, const Token& token, Span& span) {
   span.full_path = path;
   span.char_start = token.pos.character_start;
   span.line_start = token.pos.line;
@@ -615,8 +617,8 @@ void set_span_end(const Token& token, Span& span) {
 void reset_parser(CompilerGlobals* const comp,
                   CompilerThread* const comp_thread,
                   Parser* const parser,
-                  const InternString* file_name,
-                  ViewArr<const char> string) {
+                  const Axle::InternString* file_name,
+                  Axle::ViewArr<const char> string) {
   Lexer* lex = &parser->lexer;
 
   //TEMP
@@ -640,7 +642,7 @@ void reset_parser(CompilerGlobals* const comp,
     comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                               "Parser was passed a fully or partially null stream"
                               "Start: '{}', End: '{}'",
-                              PrintPtr{ parser->stream.i }, PrintPtr{ parser->stream.end });
+                              Axle::PrintPtr{ parser->stream.i }, Axle::PrintPtr{ parser->stream.end });
     return;
   }
 
@@ -684,7 +686,7 @@ void reset_parser(CompilerGlobals* const comp,
   parser->prev.pos.line = 0;
 }
 
-Span span_of_token(const InternString* path, const Token& tok) {
+Span span_of_token(const Axle::InternString* path, const Token& tok) {
   Span span = {};
 
   set_span_start(path, tok, span);
@@ -693,7 +695,7 @@ Span span_of_token(const InternString* path, const Token& tok) {
   return span;
 }
 
-static const InternString* parse_name(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {
+static const Axle::InternString* parse_name(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {
   if (parser->current.type != AxleTokenType::Identifier) {
     comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->full_path(), parser->current),
                               "Expected token type '{}'. Found: '{}'",
@@ -701,7 +703,7 @@ static const InternString* parse_name(CompilerGlobals* const comp, CompilerThrea
     return nullptr;
   }
 
-  const InternString* name = parser->current.string;
+  const Axle::InternString* name = parser->current.string;
   advance(comp, comp_thread, parser);
   return name;
 }
@@ -976,7 +978,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
     case AxleTokenType::Intrinsic: {
         if (parser->current.string == comp_thread->intrinsics.dynamic_import) {
 
-          const InternString* type = parser->current.string;
+          const Axle::InternString* type = parser->current.string;
 
           advance(comp, comp_thread, parser);
           if (comp_thread->is_panic()) {
@@ -1004,7 +1006,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
             return 0;
           }
 
-          const InternString* lib = parser->current.string;
+          const Axle::InternString* lib = parser->current.string;
           advance(comp, comp_thread, parser);
           if (comp_thread->is_panic()) {
             return 0;
@@ -1021,7 +1023,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
             return 0;
           }
 
-          const InternString* imp = parser->current.string;
+          const Axle::InternString* imp = parser->current.string;
           advance(comp, comp_thread, parser);
           if (comp_thread->is_panic()) {
             return 0;
@@ -1120,7 +1122,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
         // Ascii string
         // " ... "
 
-        const InternString* str = parser->current.string;
+        const Axle::InternString* str = parser->current.string;
 
         advance(comp, comp_thread, parser);
         if (comp_thread->is_panic()) {
@@ -1203,7 +1205,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
           return 0;
         }
 
-        const InternString* suffix = nullptr;
+        const Axle::InternString* suffix = nullptr;
         if (!parser->current.consumed_whitespace && parser->current.type == AxleTokenType::Identifier) {
           suffix = parser->current.string;
           advance(comp, comp_thread, parser);
@@ -1224,7 +1226,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
         return num;
       }
     case AxleTokenType::Identifier: {
-        const InternString* name = parser->current.string;
+        const Axle::InternString* name = parser->current.string;
 
         advance(comp, comp_thread, parser);
         if (comp_thread->is_panic()) {
@@ -1323,21 +1325,65 @@ static AST_LOCAL parse_primary_and_suffix(CompilerGlobals* const comp, CompilerT
           }
 
           AST_LOCAL index = parse_inner_expression(comp, comp_thread, parser);
-
-          expect(comp, comp_thread, parser, AxleTokenType::Right_Square);
-          if (comp_thread->is_panic()) {
+          if(comp_thread->is_panic()) {
             return 0;
           }
 
-          SPAN_END;
+          if(parser->current.type == AxleTokenType::Comma) {
+            //Is slice index
+            
+            advance(comp, comp_thread, parser);
+            if (comp_thread->is_panic()) {
+              return 0;
+            }
+            
+            AST_LOCAL index_2 = parse_inner_expression(comp, comp_thread, parser);
+            if(comp_thread->is_panic()) {
+              return 0;
+            }
 
-          ASTIndexExpr* index_expr = ast_alloc<ASTIndexExpr>(parser);
-          index_expr->ast_type = AST_TYPE::INDEX_EXPR;
-          index_expr->expr = current;
-          index_expr->index = index;
-          index_expr->node_span = span;
+            expect(comp, comp_thread, parser, AxleTokenType::Right_Square);
+            if(comp_thread->is_panic()) {
+              return 0;
+            }
 
-          current = index_expr;
+            SPAN_END;
+
+            ASTSliceIndex* index_expr = ast_alloc<ASTSliceIndex>(parser);
+            index_expr->ast_type = AST_TYPE::INDEX_EXPR;
+            index_expr->expr = current;
+            index_expr->index_first = index;
+            index_expr->index_second = index_2;
+            index_expr->node_span = span;
+
+            current = index_expr;
+          }
+          else if(parser->current.type == AxleTokenType::Right_Square) {
+            //Is regular index
+            
+            advance(comp, comp_thread, parser);
+            if (comp_thread->is_panic()) {
+              return 0;
+            }
+
+            SPAN_END;
+
+            ASTIndexExpr* index_expr = ast_alloc<ASTIndexExpr>(parser);
+            index_expr->ast_type = AST_TYPE::INDEX_EXPR;
+            index_expr->expr = current;
+            index_expr->index = index;
+            index_expr->node_span = span;
+
+            current = index_expr;
+          }
+          else {
+            comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->full_path(), parser->current),
+                                      "Invalid end to index. Expected '{}' or '{}' found '{}'",
+                                      AxleTokenType::Comma, AxleTokenType::Right_Square,
+                                      parser->current.type);
+            return 0;
+          }
+
           //Loop again
           break;
         }
@@ -1349,7 +1395,7 @@ static AST_LOCAL parse_primary_and_suffix(CompilerGlobals* const comp, CompilerT
             return 0;
           }
 
-          const InternString* name = parse_name(comp, comp_thread, parser);
+          const Axle::InternString* name = parse_name(comp, comp_thread, parser);
           if (comp_thread->is_panic()) {
             return 0;
           }
@@ -1626,7 +1672,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
         }
       }
     case AxleTokenType::Identifier: {
-        const InternString* i = parser->current.string;
+        const Axle::InternString* i = parser->current.string;
         advance(comp, comp_thread, parser);
         if (comp_thread->is_panic()) {
           return 0;
@@ -1642,45 +1688,65 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
         return nt;
       }
     case AxleTokenType::Left_Square: {
-        // Array type
-        // [ BASE ; EXPR ]
+        // Array or Slice type
 
         advance(comp, comp_thread, parser);//[
         if (comp_thread->is_panic()) {
           return 0;
         }
 
-        //Base Type
-        AST_LOCAL base = parse_type(comp, comp_thread, parser);
-        if (comp_thread->is_panic()) {
-          return 0;
+        if(parser->current.type == AxleTokenType::Right_Square) {
+          advance(comp, comp_thread, parser);
+          if(comp_thread->is_panic()) {
+            return 0;
+          }
+
+          AST_LOCAL base = parse_type(comp, comp_thread, parser);
+          
+          SPAN_END;
+
+          ASTSliceType* arr = ast_alloc<ASTSliceType>(parser);
+          arr->ast_type = AST_TYPE::SLICE_TYPE;
+          arr->node_span = span;
+          arr->base = base;
+
+          return arr;
         }
+        else {
+          // Array type
+          // [ BASE ; EXPR ]
+          //Base Type
+          AST_LOCAL base = parse_type(comp, comp_thread, parser);
+          if (comp_thread->is_panic()) {
+            return 0;
+          }
 
-        expect(comp, comp_thread, parser, AxleTokenType::Semicolon);
-        if (comp_thread->is_panic()) {
-          return 0;
+          expect(comp, comp_thread, parser, AxleTokenType::Semicolon);
+          if (comp_thread->is_panic()) {
+            return 0;
+          }
+
+          //Expression
+          AST_LOCAL expr = parse_expression(comp, comp_thread, parser);
+          if (comp_thread->is_panic()) {
+            return 0;
+          }
+
+          expect(comp, comp_thread, parser, AxleTokenType::Right_Square);
+          if (comp_thread->is_panic()) {
+            return 0;
+          }
+
+          SPAN_END;
+
+          ASTArrayType* arr = ast_alloc<ASTArrayType>(parser);
+          arr->ast_type = AST_TYPE::ARRAY_TYPE;
+          arr->node_span = span;
+          arr->base = base;
+          arr->expr = expr;
+
+          return arr;
         }
-
-        //Expression
-        AST_LOCAL expr = parse_expression(comp, comp_thread, parser);
-        if (comp_thread->is_panic()) {
-          return 0;
-        }
-
-        expect(comp, comp_thread, parser, AxleTokenType::Right_Square);
-        if (comp_thread->is_panic()) {
-          return 0;
-        }
-
-        SPAN_END;
-
-        ASTArrayType* arr = ast_alloc<ASTArrayType>(parser);
-        arr->ast_type = AST_TYPE::ARRAY_TYPE;
-        arr->node_span = span;
-        arr->base = base;
-        arr->expr = expr;
-
-        return arr;
       }
     case AxleTokenType::Star: {
         // Pointer type
@@ -1720,7 +1786,7 @@ static AST_LOCAL parse_typed_name(CompilerGlobals* const comp, CompilerThread* c
   Span span = {};
   SPAN_START;
 
-  const InternString* name = parse_name(comp, comp_thread, parser);
+  const Axle::InternString* name = parse_name(comp, comp_thread, parser);
   if (comp_thread->is_panic()) {
     return 0;
   }
@@ -1764,7 +1830,7 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
     return 0;
   }
 
-  const InternString* name = parser->current.string;
+  const Axle::InternString* name = parser->current.string;
   advance(comp, comp_thread, parser);
   if (comp_thread->is_panic()) {
     return 0;
@@ -2282,7 +2348,7 @@ AST_ARR parse_export_list(CompilerGlobals* const comp, CompilerThread* const com
       return {};
     }
 
-    const InternString* name = parser->current.string;
+    const Axle::InternString* name = parser->current.string;
     advance(comp, comp_thread, parser);
     if (comp_thread->is_panic()) {
       return {};
@@ -2811,9 +2877,7 @@ void print_full_ast(AST_LOCAL expr) {
 }
 
 void print_full_ast(const FileAST* file) {
-#ifdef AXLE_TRACING
-  TRACING_SCOPE("Print full ast");
-#endif
+  TELEMETRY_SCOPE("Print full ast");
 
   Printer printer = {};
 

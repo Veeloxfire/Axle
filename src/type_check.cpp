@@ -1,6 +1,8 @@
 #include "type_check.h"
+#include "ast.h"
 #include "ir.h"
 #include "compiler.h"
+#include "type.h"
 
 #ifdef AXLE_TRACING
 #include <Tracer/trace.h>
@@ -26,8 +28,8 @@ struct TypeCheckNode {
 };
 
 struct Typer {
-  Array<TypeCheckNode> new_nodes = {};
-  Array<TypeCheckNode> in_progress = {};
+  Axle::Array<TypeCheckNode> new_nodes = {};
+  Axle::Array<TypeCheckNode> in_progress = {};
 
   Type return_type = {};
 
@@ -58,6 +60,7 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
     case AST_TYPE::NAMED_TYPE: return static_cast<ASTNamedType*>(a)->actual_type;
     case AST_TYPE::ARRAY_TYPE: return static_cast<ASTArrayType*>(a)->actual_type;
     case AST_TYPE::PTR_TYPE: return static_cast<ASTPtrType*>(a)->actual_type;
+    case AST_TYPE::SLICE_TYPE: return static_cast<ASTSliceType*>(a)->actual_type;
     case AST_TYPE::LAMBDA_TYPE: return static_cast<ASTLambdaType*>(a)->actual_type;
     case AST_TYPE::TUPLE_TYPE: return static_cast<ASTTupleType*>(a)->actual_type;
     case AST_TYPE::STRUCT: return static_cast<ASTStructBody*>(a)->actual_type;
@@ -81,7 +84,7 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
               ASSERT(l->decl.init_value != nullptr);
 
               Type t = {};
-              memcpy_ts(&t, 1, (const Type*)(l->decl.init_value), 1);
+              Axle::memcpy_ts(&t, 1, (const Type*)(l->decl.init_value), 1);
               return t;
             }
           case ASTIdentifier::GLOBAL: {
@@ -96,7 +99,7 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
               ASSERT(g->decl.init_value != nullptr);
 
               Type t = {};
-              memcpy_ts(&t, 1, (const Type*)(g->decl.init_value), 1);
+              Axle::memcpy_ts(&t, 1, (const Type*)(g->decl.init_value), 1);
               return t;
             }
         }
@@ -119,9 +122,7 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
 #define TC_STAGE(name, stage) static CheckResult name ## _stage_ ## stage (CompilerGlobals* const comp, CompilerThread* const comp_thread, Typer* const typer, const TypeCheckNode* this_infer)
 
 TC_STAGE(NAMED_TYPE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTNamedType, nt);
 
   nt->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
@@ -148,9 +149,7 @@ TC_STAGE(NAMED_TYPE, 1) {
 }
 
 TC_STAGE(ARRAY_TYPE, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);
 
   Type base_type = get_type_value(comp_thread, at->base);
@@ -178,8 +177,8 @@ TC_STAGE(ARRAY_TYPE, 2) {
 
   const Structure* s;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
     s = find_or_make_array_structure(structures._ptr,
@@ -194,9 +193,7 @@ TC_STAGE(ARRAY_TYPE, 2) {
 }
 
 TC_STAGE(ARRAY_TYPE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);
 
   at->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -208,9 +205,7 @@ TC_STAGE(ARRAY_TYPE, 1) {
 }
 
 TC_STAGE(PTR_TYPE, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTPtrType, ptr);
 
   Type base_type = get_type_value(comp_thread, ptr->base);
@@ -220,8 +215,8 @@ TC_STAGE(PTR_TYPE, 2) {
 
   const Structure* s;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
     s = find_or_make_pointer_structure(structures._ptr,
@@ -235,9 +230,7 @@ TC_STAGE(PTR_TYPE, 2) {
 }
 
 TC_STAGE(PTR_TYPE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTPtrType, ptr);
 
   ptr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -247,12 +240,46 @@ TC_STAGE(PTR_TYPE, 1) {
   return next_stage(PTR_TYPE_stage_2);
 }
 
+TC_STAGE(SLICE_TYPE, 2) {
+  TELEMETRY_FUNCTION();
+  EXPAND_THIS(ASTSliceType, ptr);
+
+  Type base_type = get_type_value(comp_thread, ptr->base);
+  if (comp_thread->is_panic()) {
+    return FINISHED;
+  }
+
+  const Structure* s;
+  {
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
+    comp->services.get_multiple(&structures, &strings);
+
+    s = find_or_make_slice_structure(structures._ptr,
+                                       strings._ptr,
+                                       base_type);
+  }
+
+  ptr->actual_type = to_type(s);
+  ptr->node_type = comp_thread->builtin_types->t_type;
+  return FINISHED;
+}
+
+TC_STAGE(SLICE_TYPE, 1) {
+  TELEMETRY_FUNCTION();
+  EXPAND_THIS(ASTSliceType, ptr);
+
+  ptr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
+  typer->push_node(ptr->base, comp_thread->builtin_types->t_type);
+
+  return next_stage(SLICE_TYPE_stage_2);
+}
+
 TC_STAGE(LAMBDA_TYPE, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambdaType, lt);
-  Array<Type> args = {};
+  Axle::Array<Type> args = {};
   args.reserve_total(lt->args.count);
 
   FOR_AST(lt->args, i) {
@@ -271,8 +298,8 @@ TC_STAGE(LAMBDA_TYPE, 2) {
 
   const SignatureStructure* s;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
     s = find_or_make_lambda_structure(structures._ptr,
                                       strings._ptr,
@@ -286,9 +313,7 @@ TC_STAGE(LAMBDA_TYPE, 2) {
 }
 
 TC_STAGE(LAMBDA_TYPE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambdaType, lt);
 
   lt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -303,11 +328,9 @@ TC_STAGE(LAMBDA_TYPE, 1) {
 }
 
 TC_STAGE(TUPLE_TYPE, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleType, tt);
-  Array<Type> args = {};
+  Axle::Array<Type> args = {};
   args.reserve_total(tt->types.count);
 
   FOR_AST(tt->types, i) {
@@ -321,8 +344,8 @@ TC_STAGE(TUPLE_TYPE, 2) {
 
   const Structure* s;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
     s = find_or_make_tuple_structure(structures._ptr,
@@ -336,9 +359,7 @@ TC_STAGE(TUPLE_TYPE, 2) {
 }
 
 TC_STAGE(TUPLE_TYPE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleType, tt);
 
   tt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -355,9 +376,7 @@ TC_STAGE(TUPLE_TYPE, 1) {
 }
 
 TC_STAGE(STRUCT_EXPR, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTStructExpr, se);
 
   se->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -371,9 +390,7 @@ TC_STAGE(STRUCT_EXPR, 1) {
 }
 
 TC_STAGE(LAMBDA_EXPR, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambdaExpr, le);
 
   ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
@@ -389,11 +406,9 @@ TC_STAGE(LAMBDA_EXPR, 1) {
 }
 
 TC_STAGE(FUNCTION_SIGNATURE, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFuncSig, ast_sig);
-  Array<Type> params = {};
+  Axle::Array<Type> params = {};
   params.reserve_total(ast_sig->parameters.count);
 
   FOR_AST(ast_sig->parameters, i) {
@@ -407,8 +422,8 @@ TC_STAGE(FUNCTION_SIGNATURE, 2) {
 
   const SignatureStructure* sig_struct;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
     sig_struct = find_or_make_lambda_structure(structures._ptr,
@@ -426,9 +441,7 @@ TC_STAGE(FUNCTION_SIGNATURE, 2) {
 }
 
 TC_STAGE(FUNCTION_SIGNATURE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFuncSig, ast_sig);
 
   ast_sig->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -443,9 +456,7 @@ TC_STAGE(FUNCTION_SIGNATURE, 1) {
 }
 
 TC_STAGE(LAMBDA, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambda, lambda);
 
   lambda->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -464,9 +475,7 @@ TC_STAGE(LAMBDA, 1) {
 }
 
 TC_STAGE(MEMBER_ACCESS, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTMemberAccessExpr, member);
 
   AST_LOCAL base = member->expr;
@@ -514,8 +523,8 @@ TC_STAGE(MEMBER_ACCESS, 2) {
       }
 
       {
-        AtomicLock<Structures> structures = {};
-        AtomicLock<StringInterner> strings = {};
+        Axle::AtomicLock<Structures> structures = {};
+        Axle::AtomicLock<Axle::StringInterner> strings = {};
         comp->services.get_multiple(&structures, &strings);
         member->node_type = to_type(find_or_make_pointer_structure(structures._ptr,
                                                                    strings._ptr,
@@ -548,9 +557,7 @@ TC_STAGE(MEMBER_ACCESS, 2) {
 }
 
 TC_STAGE(MEMBER_ACCESS, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTMemberAccessExpr, member);
   
   member->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -562,9 +569,7 @@ TC_STAGE(MEMBER_ACCESS, 1) {
 }
 
 TC_STAGE(INDEX_EXPR, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
   AST_LOCAL base = index_expr->expr;
@@ -586,9 +591,7 @@ TC_STAGE(INDEX_EXPR, 2) {
 }
 
 TC_STAGE(INDEX_EXPR, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
   index_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -602,10 +605,65 @@ TC_STAGE(INDEX_EXPR, 1) {
   return next_stage(INDEX_EXPR_stage_2);
 }
 
+
+TC_STAGE(SLICE_INDEX, 2) {
+  TELEMETRY_FUNCTION();
+  EXPAND_THIS(ASTSliceIndex, index_expr);
+
+  AST_LOCAL base = index_expr->expr;
+  AST_LOCAL index_first = index_expr->index_first;
+  AST_LOCAL index_second = index_expr->index_second;
+
+  same_category(index_expr, base);
+  if(index_first != 0) {
+    reduce_category(index_expr, index_first);
+  }
+
+  if(index_second != 0) {
+    reduce_category(index_expr, index_second);
+  }
+
+  if (!TYPE_TESTS::can_slice(base->node_type)) {
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
+                              "Cannot take slice of type: {}",
+                              base->node_type.name);
+    return FINISHED;
+  }
+
+  ASSERT(index_first->node_type == comp_thread->builtin_types->t_u64);
+  ASSERT(index_second->node_type == comp_thread->builtin_types->t_u64);
+ 
+  {
+    const Type t = base->node_type.unchecked_base<ArrayStructure>()->base;
+    
+    Axle::AtomicLock<Structures> structures;
+    Axle::AtomicLock<Axle::StringInterner> strings;
+    comp->services.get_multiple(&structures, &strings);
+
+    index_expr->node_type = to_type(find_or_make_slice_structure(structures._ptr, strings._ptr, t)); 
+  }
+  return FINISHED;
+}
+
+TC_STAGE(SLICE_INDEX, 1) {
+  TELEMETRY_FUNCTION();
+  EXPAND_THIS(ASTSliceIndex, index_expr);
+
+  index_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+
+  typer->push_node(index_expr->expr, {});
+  if(index_expr->index_first != 0) {
+    typer->push_node(index_expr->index_first, comp_thread->builtin_types->t_u64);
+  }
+  if(index_expr->index_second != 0) {
+    typer->push_node(index_expr->index_second, comp_thread->builtin_types->t_u64);
+  }
+  
+  return next_stage(INDEX_EXPR_stage_2);
+}
+
 TC_STAGE(TUPLE_LIT, known_type) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   FOR_AST(tup->elements, it) {
@@ -615,11 +673,9 @@ TC_STAGE(TUPLE_LIT, known_type) {
 }
 
 TC_STAGE(TUPLE_LIT, new_type) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleLitExpr, tup);
-  Array<Type> element_types = {};
+  Axle::Array<Type> element_types = {};
   element_types.reserve_total(tup->elements.count);
 
   FOR_AST(tup->elements, it) {
@@ -629,8 +685,8 @@ TC_STAGE(TUPLE_LIT, new_type) {
 
   const Structure* ts;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
     ts = find_or_make_tuple_structure(structures._ptr,
                                       strings._ptr,
@@ -642,9 +698,7 @@ TC_STAGE(TUPLE_LIT, new_type) {
 }
 
 TC_STAGE(TUPLE_LIT, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   const Type infer_type = this_infer->infer;
@@ -751,9 +805,7 @@ TC_STAGE(TUPLE_LIT, 2) {
 }
 
 TC_STAGE(TUPLE_LIT, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   tup->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -767,9 +819,7 @@ TC_STAGE(TUPLE_LIT, 1) {
 }
 
 TC_STAGE(ARRAY_EXPR, infer_2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayExpr, arr_expr);
   ASSERT(!this_infer->infer.is_valid());
 
@@ -790,8 +840,8 @@ TC_STAGE(ARRAY_EXPR, infer_2) {
 
   const Structure* arr_s;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
     arr_s = find_or_make_array_structure(structures._ptr,
@@ -805,9 +855,7 @@ TC_STAGE(ARRAY_EXPR, infer_2) {
 }
 
 TC_STAGE(ARRAY_EXPR, infer_1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayExpr, arr_expr);
   ASSERT(!this_infer->infer.is_valid());
 
@@ -833,9 +881,7 @@ TC_STAGE(ARRAY_EXPR, infer_1) {
 }
 
 TC_STAGE(ARRAY_EXPR, known) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayExpr, arr_expr);
   ASSERT(this_infer->infer.is_valid());
 
@@ -848,9 +894,7 @@ TC_STAGE(ARRAY_EXPR, known) {
 }
 
 TC_STAGE(ARRAY_EXPR, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayExpr, arr_expr);
 
   arr_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -903,9 +947,7 @@ TC_STAGE(ARRAY_EXPR, 1) {
 }
 
 TC_STAGE(ASCII_CHAR, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAsciiChar, a);
   a->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   a->node_type = comp_thread->builtin_types->t_ascii;
@@ -913,9 +955,7 @@ TC_STAGE(ASCII_CHAR, 1) {
 }
 
 TC_STAGE(ASCII_STRING, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAsciiString, ascii);
   ascii->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   
@@ -923,8 +963,8 @@ TC_STAGE(ASCII_STRING, 1) {
 
   const Structure* s;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
     s = find_or_make_array_structure(structures._ptr,
@@ -937,9 +977,7 @@ TC_STAGE(ASCII_STRING, 1) {
 }
 
 TC_STAGE(NUMBER, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTNumber, num);
   num->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -958,10 +996,10 @@ TC_STAGE(NUMBER, 1) {
 
       u64 max_val = 0;
       if (is->is_signed) {
-        max_val = bit_fill_lower<u64>((is->size * 8) - 1);
+        max_val = Axle::bit_fill_lower<u64>((is->size * 8) - 1);
       }
       else {
-        max_val = bit_fill_lower<u64>(is->size * 8);
+        max_val = Axle::bit_fill_lower<u64>(is->size * 8);
       }
 
       if (num->num_value > max_val) {
@@ -1003,9 +1041,7 @@ TC_STAGE(NUMBER, 1) {
 }
 
 TC_STAGE(EXPORT_SINGLE, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTExportSingle, es);
 
   if (es->value->node_type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
@@ -1019,9 +1055,7 @@ TC_STAGE(EXPORT_SINGLE, 2) {
 }
 
 TC_STAGE(EXPORT_SINGLE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTExportSingle, es);
 
   es->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -1031,9 +1065,7 @@ TC_STAGE(EXPORT_SINGLE, 1) {
 }
 
 TC_STAGE(EXPORT, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTExport, e);
   e->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1046,9 +1078,7 @@ TC_STAGE(EXPORT, 1) {
 }
 
 TC_STAGE(LINK, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLink, imp);
 
   imp->node_type = get_type_value(comp_thread, imp->import_type);
@@ -1087,9 +1117,7 @@ TC_STAGE(LINK, 2) {
 }
 
 TC_STAGE(LINK, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLink, imp);
   imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1099,9 +1127,7 @@ TC_STAGE(LINK, 1) {
 }
 
 TC_STAGE(IDENTIFIER_EXPR, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIdentifier, ident);
 
   if (ident->id_type == ASTIdentifier::LOCAL) {
@@ -1131,9 +1157,7 @@ TC_STAGE(IDENTIFIER_EXPR, 1) {
 }
 
 TC_STAGE(CAST, 3) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
   reduce_category(cast, expr);
@@ -1229,9 +1253,7 @@ TC_STAGE(CAST, 3) {
 }
 
 TC_STAGE(CAST, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
 
@@ -1241,9 +1263,7 @@ TC_STAGE(CAST, 2) {
 }
 
 TC_STAGE(CAST, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
   cast->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1255,9 +1275,7 @@ TC_STAGE(CAST, 1) {
 }
 
 TC_STAGE(UNARY_OPERATOR, neg_2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::NEG);
 
@@ -1290,9 +1308,7 @@ TC_STAGE(UNARY_OPERATOR, neg_2) {
 }
 
 TC_STAGE(UNARY_OPERATOR, addr_2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::ADDRESS);
 
@@ -1302,8 +1318,8 @@ TC_STAGE(UNARY_OPERATOR, addr_2) {
 
   const Structure* ptr;
   {
-    AtomicLock<Structures> structures = {};
-    AtomicLock<StringInterner> strings = {};
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple(&structures, &strings);
 
     ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
@@ -1316,9 +1332,7 @@ TC_STAGE(UNARY_OPERATOR, addr_2) {
 }
 
 TC_STAGE(UNARY_OPERATOR, deref_2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::DEREF);
 
@@ -1339,7 +1353,7 @@ TC_STAGE(UNARY_OPERATOR, deref_2) {
     return FINISHED;
   }
   else {
-    const ViewArr<const char> op_string = UNARY_OP_STRING::get(expr->op);
+    const Axle::ViewArr<const char> op_string = UNARY_OP_STRING::get(expr->op);
 
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
                               "No unary operator '{}' exists for type: '{}'",
@@ -1350,9 +1364,7 @@ TC_STAGE(UNARY_OPERATOR, deref_2) {
 }
 
 TC_STAGE(UNARY_OPERATOR, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1395,7 +1407,7 @@ TC_STAGE(UNARY_OPERATOR, 1) {
       }
   }
 
-  const ViewArr<const char> name = UNARY_OP_STRING::get(expr->op);
+  const Axle::ViewArr<const char> name = UNARY_OP_STRING::get(expr->op);
 
   comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
                             "Type checking is not implemented for unary operator '{}'",
@@ -1409,9 +1421,7 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
                                        CompilerThread* comp_thread,
                                        Typer* typer,
                                        const TypeCheckNode* this_infer) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBinaryOperatorExpr, expr);
 
   AST_LOCAL left_ast = expr->left;
@@ -1966,7 +1976,7 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
 #endif
   }
 
-  const ViewArr<const char> op_string = BINARY_OP_STRING::get(expr->op);
+  const Axle::ViewArr<const char> op_string = BINARY_OP_STRING::get(expr->op);
 
   comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
                             "No binary operator '{}' exists for left type: '{}', and right type: '{}'",
@@ -1975,9 +1985,7 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
 }
 
 TC_STAGE(BINARY_OPERATOR, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBinaryOperatorExpr, bin_op);
   AST_LOCAL left = bin_op->left;
   AST_LOCAL right = bin_op->right;;
@@ -1991,9 +1999,7 @@ TC_STAGE(BINARY_OPERATOR, 2) {
 }
 
 TC_STAGE(BINARY_OPERATOR, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBinaryOperatorExpr, bin_op);
 
   bin_op->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -2010,9 +2016,7 @@ TC_STAGE(BINARY_OPERATOR, 1) {
 }
 
 TC_STAGE(IMPORT, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTImport, imp);
   AST_LOCAL expr = imp->expr_location;
   ASSERT(expr->node_type.is_valid());
@@ -2048,9 +2052,7 @@ TC_STAGE(IMPORT, 2) {
 }
 
 TC_STAGE(IMPORT, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTImport, imp);
   imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   
@@ -2061,9 +2063,7 @@ TC_STAGE(IMPORT, 1) {
 }
 
 static bool test_function_overload(const CallSignature* sig, const SignatureStructure* sig_struct) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   //Correct name and number of args
   if (sig->arguments.size == sig_struct->parameter_types.size) {
@@ -2095,9 +2095,7 @@ static void check_call_arguments(CompilerGlobals* const comp,
                                  CompilerThread* const comp_thread,
                                  Typer* typer,
                                  ASTFunctionCallExpr* const call) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   ASSERT(call->sig != nullptr);
   const SignatureStructure* sig_struct = call->sig;
@@ -2121,9 +2119,7 @@ static void check_call_arguments(CompilerGlobals* const comp,
 }
 
 TC_STAGE(FUNCTION_CALL, 3) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
   const Type& func_type = call->function->node_type;
@@ -2173,9 +2169,7 @@ TC_STAGE(FUNCTION_CALL, 3) {
 }
 
 TC_STAGE(FUNCTION_CALL, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
   const Type& func_type = call->function->node_type;
@@ -2200,9 +2194,7 @@ TC_STAGE(FUNCTION_CALL, 2) {
 }
 
 TC_STAGE(FUNCTION_CALL, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
   call->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;//not constant yet
@@ -2213,9 +2205,7 @@ TC_STAGE(FUNCTION_CALL, 1) {
 }
 
 TC_STAGE(ASSIGN, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAssign, assign);
 
   AST_LOCAL assign_to = assign->assign_to;
@@ -2233,9 +2223,7 @@ TC_STAGE(ASSIGN, 2) {
 }
 
 TC_STAGE(ASSIGN, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAssign, assign);
   AST_LOCAL assign_to = assign->assign_to;
 
@@ -2245,9 +2233,7 @@ TC_STAGE(ASSIGN, 1) {
 }
 
 TC_STAGE(DECL, 3) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, ast_decl);
 
   AST_LOCAL decl_expr = ast_decl->expr;
@@ -2329,9 +2315,7 @@ TC_STAGE(DECL, 3) {
 }
 
 TC_STAGE(DECL, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, decl);
 
   Type expr_type = {};
@@ -2355,9 +2339,7 @@ TC_STAGE(DECL, 2) {
 }
 
 TC_STAGE(DECL, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, decl);
   AST_LOCAL decl_expr = decl->expr;
 
@@ -2371,9 +2353,7 @@ TC_STAGE(DECL, 1) {
 }
 
 TC_STAGE(IF_ELSE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIfElse, if_else);
 
   typer->push_node(if_else->condition, comp_thread->builtin_types->t_bool);
@@ -2388,9 +2368,7 @@ TC_STAGE(IF_ELSE, 1) {
 }
 
 TC_STAGE(WHILE, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTWhile, while_loop);
 
   typer->push_node(while_loop->condition, comp_thread->builtin_types->t_bool);
@@ -2401,9 +2379,7 @@ TC_STAGE(WHILE, 1) {
 }
 
 TC_STAGE(BLOCK, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBlock, block);
 
   FOR_AST(block->block, it) {
@@ -2415,9 +2391,7 @@ TC_STAGE(BLOCK, 1) {
 }
 
 TC_STAGE(RETURN, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTReturn, ret);
 
   ASSERT(typer->return_type.is_valid());
@@ -2441,17 +2415,15 @@ TC_STAGE(RETURN, 1) {
 }
 
 TC_STAGE(STRUCT, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTStructBody, body);
 
   //Build the new structure
   {
     CompositeStructure* cmp_s;
     {
-      AtomicLock<Structures> structures = {};
-      AtomicLock<StringInterner> strings = {};
+      Axle::AtomicLock<Structures> structures = {};
+      Axle::AtomicLock<Axle::StringInterner> strings = {};
       comp->services.get_multiple(&structures, &strings);
       cmp_s = STRUCTS::new_composite_structure(structures._ptr,
                                                strings._ptr);
@@ -2459,7 +2431,7 @@ TC_STAGE(STRUCT, 2) {
     uint32_t current_size = 0;
     uint32_t current_alignment = 0;
 
-    Array<StructElement> elements = {};
+    Axle::Array<StructElement> elements = {};
     elements.reserve_total(body->elements.count);
 
     FOR_AST(body->elements, it) {
@@ -2477,10 +2449,10 @@ TC_STAGE(STRUCT, 2) {
 
       uint32_t this_align = b->type.structure->alignment;
 
-      current_size = (uint32_t)ceil_to_n(current_size, this_align);
+      current_size = (uint32_t)Axle::ceil_to_n(current_size, this_align);
       current_size += b->type.structure->size;
 
-      current_alignment = larger(this_align, current_alignment);
+      current_alignment = Axle::larger(this_align, current_alignment);
     }
 
     cmp_s->elements = bake_arr(std::move(elements));
@@ -2497,9 +2469,7 @@ TC_STAGE(STRUCT, 2) {
 }
 
 TC_STAGE(STRUCT, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTStructBody, body);
 
   FOR_AST(body->elements, it) {
@@ -2514,9 +2484,7 @@ TC_STAGE(STRUCT, 1) {
 }
 
 TC_STAGE(TYPED_NAME, 2) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTypedName, name);
 
   name->node_type = get_type_value(comp_thread, name->type);
@@ -2537,9 +2505,7 @@ TC_STAGE(TYPED_NAME, 2) {
 }
 
 TC_STAGE(TYPED_NAME, 1) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTypedName, name);
 
   typer->push_node(name->type, comp_thread->builtin_types->t_type);
@@ -2548,9 +2514,7 @@ TC_STAGE(TYPED_NAME, 1) {
 }
 
 static TypeCheckStageFn get_first_stage(AST_TYPE type) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   switch (type) {
 #define MOD(ty) case AST_TYPE:: ty : return ty ## _stage_1;
@@ -2576,18 +2540,14 @@ void TC::type_check_ast(CompilerGlobals* comp,
                         CompilerThread* comp_thread,
                         Namespace* ns,
                         AST_LOCAL root, const Type& infer) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   Typer typer = {};
   typer.available_names = ns;
   typer.in_progress.insert({ root, infer, get_first_stage(root->ast_type) });
 
   constexpr auto sumbit_new_nodes = [](Typer& typer) {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Submit New Nodes");
-  #endif
+    TELEMETRY_SCOPE("Submit New Nodes");
     ASSERT(typer.new_nodes.size > 0);
 
     usize count = typer.new_nodes.size;
@@ -2617,9 +2577,7 @@ void TC::type_check_ast(CompilerGlobals* comp,
       }
 
       if (res.finished) {
-      #ifdef AXLE_TRACING
-        TRACING_SCOPE("Single TC Finished");
-      #endif
+        TELEMETRY_SCOPE("Single TC Finished");
 
         ASSERT(n->node->node_type.is_valid());
 

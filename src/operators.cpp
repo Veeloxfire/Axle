@@ -2,8 +2,8 @@
 #include "compiler.h"
 #include "ast.h"
 
-using UN_OP_EMIT = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t>;
-using BIN_OP_EMIT = FUNCTION_PTR<void, Array<uint8_t>&, uint8_t, uint8_t>;
+using UN_OP_EMIT = Axle::FUNCTION_PTR<void, Axle::Array<uint8_t>&, uint8_t>;
+using BIN_OP_EMIT = Axle::FUNCTION_PTR<void, Axle::Array<uint8_t>&, uint8_t, uint8_t>;
 
 template<typename BIN_OP_TYPE>
 static Eval::RuntimeValue bin_op_impl(IR::IRStore* const ir,
@@ -308,40 +308,37 @@ RuntimeValue BinOpArgs::emit_shift_r_i64_by_8() {
 }
 #endif
 
+namespace {
+  struct NegVisitor {
+    Axle::ViewArr<u8> out;
+
+    template<typename T>
+    void operator()(const auto&...) const {
+      INVALID_CODE_PATH("Attempted to negate a type which was not a signed integer");
+    }
+
+    template<Axle::OneOf<i8, i16, i32, i64> T>
+    void operator()(const Axle::ViewArr<const u8> data) const {
+      T i;
+      bool res = Axle::deserialize_le<T>(data, i);
+      ASSERT(res);
+      Axle::serialize_le<T>(out, -i);
+    }
+  };
+}
+
 static Eval::RuntimeValue constant_fold_neg(CompilerGlobals* comp, const u8* data, const Type& type) {
   ASSERT(type.is_valid());
   ASSERT(TYPE_TESTS::is_signed_int(type));
 
-  const auto* ptr = type.unchecked_base<IntegerStructure>();
+  const auto* const int_t = type.unchecked_base<IntegerStructure>();
 
   u8* out = comp->new_constant(type.size());
 
-  switch (ptr->size) {
-    case 1: {
-        i8 i = data[0];
-        *out = -i;
-        break;
-      }
-    case 2: {
-        i16 i = x16_from_bytes(data);
-        x16_to_bytes(-i, out);
-        break;
-      }
-    case 4: {
-        i32 i = x32_from_bytes(data);
-        x32_to_bytes(-i, out);
-        break;
-      }
-    case 8: {
-        i64 i = x64_from_bytes(data);
-        x64_to_bytes(-i, out);
-        break;
-      }
-    default: {
-        INVALID_CODE_PATH("Invalid integer size");
-        break;
-      }
-  }
+  const Axle::ViewArr<const u8> in_ser {data, type.size()};
+  Axle::ViewArr<u8> out_ser = {out, type.size()};
+
+  visit_ir_type(NegVisitor{out_ser}, int_t->ir_format, in_ser);
 
   return Eval::as_constant(out, type);
 }

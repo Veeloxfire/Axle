@@ -13,6 +13,7 @@
 MOD(NAMED_TYPE) \
 MOD(ARRAY_TYPE) \
 MOD(PTR_TYPE) \
+MOD(SLICE_TYPE) \
 MOD(LAMBDA_TYPE) \
 MOD(TUPLE_TYPE) \
 MOD(CAST) \
@@ -27,6 +28,7 @@ MOD(ARRAY_EXPR) \
 MOD(ASCII_STRING) \
 MOD(ASCII_CHAR) \
 MOD(INDEX_EXPR) \
+MOD(SLICE_INDEX) \
 MOD(MEMBER_ACCESS) \
 MOD(LAMBDA) \
 MOD(LAMBDA_EXPR) \
@@ -51,12 +53,12 @@ enum struct AST_TYPE : u8 {
 #undef MOD
 };
 
-constexpr ViewArr<const char> ast_type_string(AST_TYPE ty) {
+constexpr Axle::ViewArr<const char> ast_type_string(AST_TYPE ty) {
   switch (ty) {
-#define MOD(n) case AST_TYPE :: n : return lit_view_arr(#n);
+#define MOD(n) case AST_TYPE :: n : return Axle::lit_view_arr(#n);
     AST_TYPE_MOD;
 #undef MOD
-    default: return lit_view_arr("invalid-ast-type");
+    default: return Axle::lit_view_arr("invalid-ast-type");
   }
 }
 
@@ -66,6 +68,8 @@ struct AST {
 
   Type node_type = {};
   Span node_span = {};
+
+  constexpr AST() = default;
 };
 
 template<typename T>
@@ -78,7 +82,7 @@ struct ASTNamedType : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::NAMED_TYPE;
 
   Type actual_type = {};
-  const InternString* name = nullptr;
+  const Axle::InternString* name = nullptr;
   const Global* global = nullptr;
 };
 
@@ -93,6 +97,13 @@ struct ASTArrayType : public AST {
 
 struct ASTPtrType : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::PTR_TYPE;
+
+  Type actual_type = {};
+  AST_LOCAL base = 0;
+};
+
+struct ASTSliceType : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::SLICE_TYPE;
 
   Type actual_type = {};
   AST_LOCAL base = 0;
@@ -159,10 +170,17 @@ struct ASTIndexExpr : public AST {
   AST_LOCAL index = 0;
 };
 
+struct ASTSliceIndex : public AST {
+  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::SLICE_INDEX;
+  AST_LOCAL expr = 0;
+  AST_LOCAL index_first = 0;
+  AST_LOCAL index_second = 0;
+};
+
 struct ASTNumber : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::NUMBER;
   uint64_t num_value = 0;
-  const InternString* suffix = nullptr;
+  const Axle::InternString* suffix = nullptr;
 };
 
 struct ASTArrayExpr : public AST {
@@ -178,7 +196,7 @@ struct ASTIdentifier : public AST {
   };
 
   TYPE id_type;
-  const InternString* name;
+  const Axle::InternString* name;
 
   union {
     Local* local;
@@ -186,7 +204,7 @@ struct ASTIdentifier : public AST {
   };
 };
 
-namespace Format {
+namespace Axle::Format {
   template<>
   struct FormatArg<ASTIdentifier::TYPE> {
     template<Formatter F>
@@ -206,12 +224,12 @@ struct ASTMemberAccessExpr : public AST {
   AST_LOCAL expr = 0;
 
   uint32_t offset = 0;
-  const InternString* name = nullptr;
+  const Axle::InternString* name = nullptr;
 };
 
 struct ASTAsciiString : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::ASCII_STRING;
-  const InternString* string;
+  const Axle::InternString* string;
 };
 
 struct ASTAsciiChar : public AST {
@@ -227,7 +245,7 @@ struct ASTBlock : public AST {
 struct ASTTypedName : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::TYPED_NAME;
   AST_LOCAL type = {};
-  const InternString* name = nullptr;
+  const Axle::InternString* name = nullptr;
 
   Local* local_ptr = nullptr;
 };
@@ -242,7 +260,7 @@ struct ASTDecl : public AST {
   bool compile_time_const;
   TYPE decl_type;
 
-  const InternString* name;
+  const Axle::InternString* name;
   Type type;
 
   AST_LOCAL type_ast;
@@ -267,7 +285,7 @@ struct PrintCallSignature {
   const ASTFunctionCallExpr* call;
 };
 
-namespace Format {
+namespace Axle::Format {
   template<>
   struct FormatArg<PrintCallSignature> {
     template<Formatter F>
@@ -279,12 +297,12 @@ namespace Format {
       auto l = call->arguments.start;
 
       if (l) {
-        FormatArg<const InternString*>::load_string(res, l->curr->node_type.name);
+        FormatArg<const Axle::InternString*>::load_string(res, l->curr->node_type.name);
         l = l->next;
 
         while (l) {
           res.load_string_raw(", ");
-          FormatArg<const InternString*>::load_string(res, l->curr->node_type.name);
+          FormatArg<const Axle::InternString*>::load_string(res, l->curr->node_type.name);
           l = l->next;
         }
       }
@@ -354,15 +372,15 @@ struct ASTLink : public AST {
 
   bool dynamic = false;
 
-  const InternString* lib_file = nullptr;
-  const InternString* name = nullptr;
+  const Axle::InternString* lib_file = nullptr;
+  const Axle::InternString* name = nullptr;
 
   usize import_index = 0;
 };
 
 struct ASTExportSingle : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::EXPORT_SINGLE;
-  const InternString* name = nullptr;
+  const Axle::InternString* name = nullptr;
   AST_LOCAL value = 0;
 
   usize export_index = 0;
@@ -377,7 +395,7 @@ struct FileAST {
   AST_ARR top_level = {};
 
   Namespace* ns = nullptr;
-  FileLocation file_loc = {};
+  Axle::FileLocation file_loc = {};
 };
 
 struct Printer {

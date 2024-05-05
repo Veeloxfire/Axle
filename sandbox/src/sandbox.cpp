@@ -10,11 +10,13 @@
 #include <Tracer/trace.h>
 #endif
 
+namespace IO = Axle::IO;
+
 struct ArgErrors {
   bool errored;
 
   template<typename ... T>
-  constexpr void report_error(const Format::FormatString& fstring, const T& ...ts) {
+  constexpr void report_error(const Axle::Format::FormatString& fstring, const T& ...ts) {
     IO::err_format(fstring, ts...);
     IO::err_print('\n');
     errored = true;
@@ -29,30 +31,30 @@ int main(int argc, const char** args) {
   };
 #endif
 
-  ViewArr<const char> out_folder;
-  ViewArr<const char> out_name;
-  ViewArr<const char> stdlib;
-  ViewArr<const char> lib;
-  ViewArr<const char> in;
+  Axle::ViewArr<const char> out_folder;
+  Axle::ViewArr<const char> out_name;
+  Axle::ViewArr<const char> stdlib;
+  Axle::ViewArr<const char> lib;
+  Axle::ViewArr<const char> in;
 
   {
     ArgErrors errors = {};
 
     clArg::ArgsList arg_list = { static_cast<usize>(argc), args };
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, lit_view_arr("in"), in);
+      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("in"), in);
     }
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, lit_view_arr("stdlib"), stdlib);
+      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("stdlib"), stdlib);
     }
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, lit_view_arr("lib"), lib);
+      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("lib"), lib);
     }
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, lit_view_arr("out_name"), out_name);
+      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("out_name"), out_name);
     }
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, lit_view_arr("out_folder"), out_folder);
+      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("out_folder"), out_folder);
     }
 
     if (errors.errored) {
@@ -65,7 +67,7 @@ int main(int argc, const char** args) {
   ASSERT(stdlib.data != nullptr);
   ASSERT(lib.data != nullptr);
 
-  Windows::NativePath cwd = Windows::get_current_directory();
+  Axle::Windows::NativePath cwd = Axle::Windows::get_current_directory();
   IO::format("CWD: {}\n", cwd.view());
 
   constexpr Backend::PlatformInterface pi = x86_64_platform_interface();
@@ -88,7 +90,7 @@ int main(int argc, const char** args) {
 
   options.build.library = false;
   if (!options.build.library) {
-    options.build.entry_point = lit_view_arr("main");
+    options.build.entry_point = Axle::lit_view_arr("main");
   }
 
   options.build.output_name = out_name;
@@ -114,9 +116,8 @@ int main(int argc, const char** args) {
   //options.optimize.non_stack_locals = true;
   
   {
-  #ifdef AXLE_TRACING
-    TRACING_SCOPE("Compiler");
-  #endif
+    TELEMETRY_SCOPE("Compiler");
+
     int out = compile_and_write(options);
 
     if (out != 0) {

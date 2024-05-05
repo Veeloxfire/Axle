@@ -20,18 +20,18 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 
 #include <chrono>
 
+namespace IO = Axle::IO;
+
 int compile_and_write(const APIOptions& options) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   //Setup
   Backend::ProgramData program = {};
   program.extra = options.program_extra;
 
-  StringInterner strings = {};//strings created first -> strings deleted last
+  Axle::StringInterner strings = {};//strings created first -> strings deleted last
   FileLoader file_loader = {};
-  Structures structures = {};
+  Structures structures = {options.platform_interface->ptr_size, options.platform_interface->ptr_align};
   NameManager names = {};
   Compilation compilation = {};
 
@@ -48,12 +48,12 @@ int compile_and_write(const APIOptions& options) {
 
   compiler.builtin_types = &builtin_types;
 
-  compiler.pipelines.comp_structure._debug_name = lit_view_arr("Structure");
-  compiler.pipelines.comp_body._debug_name = lit_view_arr("Body");
-  compiler.pipelines.comp_signature._debug_name = lit_view_arr("Signature");
-  compiler.pipelines.comp_global._debug_name = lit_view_arr("Global");
-  compiler.pipelines.comp_import._debug_name = lit_view_arr("Import");
-  compiler.pipelines.comp_export._debug_name = lit_view_arr("Export");
+  compiler.pipelines.comp_structure._debug_name = Axle::lit_view_arr("Structure");
+  compiler.pipelines.comp_body._debug_name = Axle::lit_view_arr("Body");
+  compiler.pipelines.comp_signature._debug_name = Axle::lit_view_arr("Signature");
+  compiler.pipelines.comp_global._debug_name = Axle::lit_view_arr("Global");
+  compiler.pipelines.comp_import._debug_name = Axle::lit_view_arr("Import");
+  compiler.pipelines.comp_export._debug_name = Axle::lit_view_arr("Export");
 
   compilation.dependencies.depend_check_pipe = &compiler.pipelines.depend_check;
 
@@ -81,7 +81,7 @@ int compile_and_write(const APIOptions& options) {
   }
 
   {
-    FileLocation loc = parse_file_location(view_arr(compiler.build_options.lib_folder),
+    Axle::FileLocation loc = parse_file_location(view_arr(compiler.build_options.lib_folder),
                                            view_arr(compiler.build_options.file_name),
                                            compiler.services.strings.get()._ptr);
 
@@ -102,13 +102,9 @@ int compile_and_write(const APIOptions& options) {
   }
 
   {
-#ifdef AXLE_TRACING
-    TRACING_SCOPE("Write output file");
-#endif
+    TELEMETRY_SCOPE("Write output file");
 
-#ifdef ASSERT_EXCEPTIONS
     try {
-#endif
       if (compiler.build_options.is_library) {
         ASSERT(program.entry_point == IR::NULL_GLOBAL_LABEL);
         if (program.dyn_exports.size == 0) {
@@ -123,14 +119,12 @@ int compile_and_write(const APIOptions& options) {
         options.executable_format_interface->output_executable(&compiler_thread, &program,
                                                                compiler.build_options.output_name, compiler.build_options.output_folder);
       }
-#ifdef ASSERT_EXCEPTIONS
     }
     catch (const std::exception& e) {
       const char* message = e.what();
-      const ViewArr<const char> message_view = { message, strlen_ts(message) };
+      const Axle::ViewArr<const char> message_view = { message, Axle::strlen_ts(message) };
       compiler_thread.report_error(ERROR_CODE::ASSERT_ERROR, Span{}, "Assertion Failed with message: {}", message_view);
     }
-#endif
 
     if (compiler_thread.is_panic()) {
       ERROR_CODE code = print_error_messages(compiler_thread.errors.error_messages);

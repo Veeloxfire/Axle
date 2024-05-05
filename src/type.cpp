@@ -7,11 +7,11 @@
 #include <Tracer/trace.h>
 #endif
 
-TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInterner* strings,
-                                             const ViewArr<const Type>& types) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+namespace Format = Axle::Format;
+
+TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, Axle::StringInterner* strings,
+                                             const Axle::ViewArr<const Type>& types) {
+  TELEMETRY_FUNCTION();
 
   TupleStructure* const type = structures->tuple_structures.allocate();
 
@@ -20,7 +20,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
 
   //Load the name
   {
-    type->elements = new_arr<TupleElement>(types.size);
+    type->elements = Axle::new_arr<TupleElement>(types.size);
 
     uint32_t current_size = 0;
     uint32_t current_align = 0;
@@ -35,36 +35,36 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
     if (i < end) {
       ASSERT(tup_el < tup_el_end);
 
-      Format::format_to_formatter(name, "({}", i->name);
+      Format::format_to(name, "({}", i->name);
 
       tup_el->type = *i;
       tup_el->offset = current_size;
 
-      current_size = ceil_to_n(current_size, i->structure->alignment);
+      current_size = Axle::ceil_to_n(current_size, i->structure->alignment);
       current_size += i->structure->size;
 
-      current_align = larger(i->structure->alignment, current_align);
+      current_align = Axle::larger(i->structure->alignment, current_align);
 
       i++;
       tup_el++;
 
       for (; i < end; (i++, tup_el++)) {
         ASSERT(tup_el < tup_el_end);
-        Format::format_to_formatter(name, ", {}", i->name);
+        Format::format_to(name, ", {}", i->name);
 
         tup_el->type = *i;
         tup_el->offset = current_size;
 
-        current_size = ceil_to_n(current_size, i->structure->alignment);
+        current_size = Axle::ceil_to_n(current_size, i->structure->alignment);
         current_size += i->structure->size;
 
-        current_align = larger(i->structure->alignment, current_align);
+        current_align = Axle::larger(i->structure->alignment, current_align);
       }
 
-      Format::format_to_formatter(name, ")");
+      Format::format_to(name, ")");
     }
     else {
-      Format::format_to_formatter(name, "()");
+      Format::format_to(name, "()");
     }
 
     name.load_char('\n');
@@ -72,7 +72,7 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
     type->size = current_size;
     type->alignment = current_align;
 
-    type->struct_name = strings->intern(view_arr(name));
+    type->struct_name = strings->intern(Axle::view_arr(name));
   }
 
   structures->structures.insert(type);
@@ -80,14 +80,11 @@ TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, StringInter
   return type;
 }
 
-
-SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, StringInterner* strings,
+SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, Axle::StringInterner* strings,
                                                   const CallingConvention* conv,
-                                                  OwnedArr<Type>&& params,
+                                                  Axle::OwnedArr<Type>&& params,
                                                   Type ret_type) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   SignatureStructure* type = structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
   type->ir_format = IR::Format::opaque;
@@ -106,17 +103,17 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
     name.load_char('(');
 
     if (i < end) {
-      Format::format_to_formatter(name, "{}", i->name);
+      Format::format_to(name, "{}", i->name);
       i++;
     }
 
     for (; i < end; i++) {
-      Format::format_to_formatter(name, ", {}", i->name);
+      Format::format_to(name, ", {}", i->name);
     }
 
-    Format::format_to_formatter(name, ") -> {}", type->return_type.name);
+    Format::format_to(name, ") -> {}", type->return_type.name);
 
-    type->struct_name = strings->intern(view_arr(name));
+    type->struct_name = strings->intern(Axle::view_arr(name));
   }
 
   structures->structures.insert(type);
@@ -125,10 +122,8 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, String
 }
 
 
-IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const InternString* name) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const Axle::InternString* name) {
+  TELEMETRY_FUNCTION();
 
   IntegerStructure* const type = structures->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
@@ -138,25 +133,21 @@ IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const Inter
   return type;
 }
 
-CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, StringInterner* strings) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Axle::StringInterner* strings) {
+  TELEMETRY_FUNCTION();
 
   CompositeStructure* const type = structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
   type->ir_format = IR::Format::opaque;
-  type->struct_name = strings->intern(lit_view_arr("anoymous-struct"));
+  type->struct_name = strings->intern(Axle::lit_view_arr("anoymous-struct"));
 
   structures->structures.insert(type);
 
   return type;
 }
 
-EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterner* strings, const Type& base) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+EnumStructure* STRUCTS::new_enum_structure(Structures* structures, Axle::StringInterner* strings, const Type& base) {
+  TELEMETRY_FUNCTION();
 
 
   EnumStructure* const type = structures->enum_structures.allocate();
@@ -173,11 +164,9 @@ EnumStructure* STRUCTS::new_enum_structure(Structures* structures, StringInterne
   return type;
 }
 
-ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInterner* strings, const Type& base,
+ArrayStructure* STRUCTS::new_array_structure(Structures* structures, Axle::StringInterner* strings, const Type& base,
                                              size_t length) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   ArrayStructure* const type = structures->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
@@ -194,19 +183,35 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, StringInter
 }
 
 PointerStructure* STRUCTS::new_pointer_structure(Structures* structures,
-                                                 StringInterner* strings,
+                                                 Axle::StringInterner* strings,
                                                  const Type& base) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
   
   PointerStructure* const type = structures->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
-  type->ir_format = IR::Format::uint64;
+  type->ir_format = IR::Format::pointer;
   type->base = base;
   type->struct_name = strings->format_intern("*{}", base.name);
   type->size = (u32)structures->pointer_size;
-  type->alignment = (u32)structures->pointer_size;
+  type->alignment = (u32)structures->pointer_align;
+
+  structures->structures.insert(type);
+
+  return type;
+}
+
+SliceStructure* STRUCTS::new_slice_structure(Structures* structures,
+                                             Axle::StringInterner* strings,
+                                             const Type& base) {
+  TELEMETRY_FUNCTION();
+  
+  SliceStructure* const type = structures->slice_structures.allocate();
+  type->type = STRUCTURE_TYPE::SLICE;
+  type->ir_format = IR::Format::slice;
+  type->base = base;
+  type->struct_name = strings->format_intern("[]{}", base.name);
+  type->size = (u32)structures->slice_size;
+  type->alignment = (u32)structures->slice_align;
 
   structures->structures.insert(type);
 
@@ -215,11 +220,9 @@ PointerStructure* STRUCTS::new_pointer_structure(Structures* structures,
 
 EnumValue* STRUCTS::new_enum_value(Structures* structures,
                                    EnumStructure* enum_s,
-                                   const InternString* enum_name,
-                                   const InternString* value_name) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+                                   const Axle::InternString* enum_name,
+                                   const Axle::InternString* value_name) {
+  TELEMETRY_FUNCTION();
 
   EnumValue* const val = structures->enum_values.allocate();
   val->type = Type{ enum_name, enum_s };
@@ -232,11 +235,9 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
 }
 
 const ArrayStructure* find_or_make_array_structure(Structures* const structures,
-                                                   StringInterner* strings,
+                                                   Axle::StringInterner* strings,
                                                    const Type& base, size_t length) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -260,11 +261,9 @@ const ArrayStructure* find_or_make_array_structure(Structures* const structures,
   return STRUCTS::new_array_structure(structures, strings, base, length);
 }
 
-const PointerStructure* find_or_make_pointer_structure(Structures* const structures, StringInterner* strings,
+const PointerStructure* find_or_make_pointer_structure(Structures* const structures, Axle::StringInterner* strings,
                                                        const Type& base) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -287,11 +286,34 @@ const PointerStructure* find_or_make_pointer_structure(Structures* const structu
   return STRUCTS::new_pointer_structure(structures, strings, base);
 }
 
-const TupleStructure* find_or_make_tuple_structure(Structures* const structures, StringInterner* strings,
-                                                   const ViewArr<const Type>& els) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+const SliceStructure* find_or_make_slice_structure(Structures* const structures, Axle::StringInterner* strings,
+                                                       const Type& base) {
+  TELEMETRY_FUNCTION();
+
+  {
+    auto i = structures->structures.begin();
+    const auto end = structures->structures.end();
+
+    for (; i < end; i++) {
+      const Structure* s = *i;
+      if (s->type == STRUCTURE_TYPE::SLICE) {
+        //Is pointer
+        const SliceStructure* ps = static_cast<const SliceStructure*>(s);
+        if (ps->base == base) {
+          //Is same
+          return ps;
+        }
+      }
+    }
+  }
+
+  //Doesnt exist - need to make new type
+  return STRUCTS::new_slice_structure(structures, strings, base);
+}
+
+const TupleStructure* find_or_make_tuple_structure(Structures* const structures, Axle::StringInterner* strings,
+                                                   const Axle::ViewArr<const Type>& els) {
+  TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -333,13 +355,11 @@ const TupleStructure* find_or_make_tuple_structure(Structures* const structures,
 }
 
 const SignatureStructure* find_or_make_lambda_structure(Structures* const structures,
-                                                        StringInterner* strings,
+                                                        Axle::StringInterner* strings,
                                                         const CallingConvention* conv,
-                                                        OwnedArr<Type>&& params,
+                                                        Axle::OwnedArr<Type>&& params,
                                                         Type ret_type) {
-#ifdef AXLE_TRACING
-  TRACING_FUNCTION();
-#endif
+  TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -379,7 +399,7 @@ const SignatureStructure* find_or_make_lambda_structure(Structures* const struct
 
 
 
-BuiltinTypes STRUCTS::create_builtins(Structures* structures, StringInterner* strings) {
+BuiltinTypes STRUCTS::create_builtins(Structures* structures, Axle::StringInterner* strings) {
   BuiltinTypes builtin_types = {};
 
   {
@@ -406,7 +426,7 @@ BuiltinTypes STRUCTS::create_builtins(Structures* structures, StringInterner* st
 
   {
     const auto int_type = [&](const auto& name, bool is_signed, u32 size, IR::Format ir_format, Type* t) {
-      IntegerStructure* s = STRUCTS::new_int_structure(structures, strings->intern(lit_view_arr(name)));
+      IntegerStructure* s = STRUCTS::new_int_structure(structures, strings->intern(Axle::lit_view_arr(name)));
       s->is_signed = is_signed;
       s->size = size;
       s->alignment = size;
@@ -441,7 +461,7 @@ BuiltinTypes STRUCTS::create_builtins(Structures* structures, StringInterner* st
 
   {
     EnumStructure* const s_bool = STRUCTS::new_enum_structure(structures, strings, builtin_types.t_u8);
-    const InternString* bool_name = strings->intern("bool", 4);
+    const Axle::InternString* bool_name = strings->intern("bool", 4);
 
     builtin_types.t_bool = to_type(s_bool);
     s_bool->enum_values.reserve_extra(2);
@@ -463,10 +483,9 @@ BuiltinTypes STRUCTS::create_builtins(Structures* structures, StringInterner* st
   return builtin_types;
 }
 Structures::~Structures() {
+  TELEMETRY_FUNCTION();
+  
   {
-#ifdef AXLE_TRACING
-    TRACING_FUNCTION();
-#endif
 
     auto i = structures.begin();
     const auto end = structures.end();
@@ -485,6 +504,9 @@ Structures::~Structures() {
           break;
         case STRUCTURE_TYPE::POINTER:
           pointer_structures.free((const PointerStructure*)s);
+          break;
+        case STRUCTURE_TYPE::SLICE:
+          slice_structures.free((const SliceStructure*)s);
           break;
         case STRUCTURE_TYPE::INTEGER:
           int_structures.free((const IntegerStructure*)s);
@@ -673,8 +695,16 @@ bool TYPE_TESTS::is_pointer(const Structure* s) {
   return s->type == STRUCTURE_TYPE::POINTER;
 }
 
+bool TYPE_TESTS::is_slice(const Structure* s) {
+  return s->type == STRUCTURE_TYPE::SLICE;
+}
+
 bool TYPE_TESTS::can_index(const Structure* s) {
-  return is_pointer(s) || is_array(s);
+  return is_pointer(s) || is_array(s) || is_slice(s);
+}
+
+bool TYPE_TESTS::can_slice(const Structure* s) {
+  return is_array(s) || is_slice(s);//TODO: maybe slice pointers
 }
 
 bool TYPE_TESTS::is_array(const Structure* s) {

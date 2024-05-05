@@ -1,7 +1,7 @@
 #include <AxleTest/unit_tests.h>
 #include "errors.h"
 
-void load_span_single_test(UNIT_TESTS::TestErrors* test_errors, const ViewArr<const char>& src) {
+void load_span_single_test(AxleTest::TestErrors* test_errors, const Axle::ViewArr<const char>& src) {
   {
     constexpr Span span = {
       nullptr,
@@ -9,12 +9,12 @@ void load_span_single_test(UNIT_TESTS::TestErrors* test_errors, const ViewArr<co
       2,2
     };
 
-    constexpr ViewArr expected = lit_view_arr(R"(  hello
+    constexpr Axle::ViewArr expected = Axle::lit_view_arr(R"(  hello
 /--^
 | world
 \--^)");
 
-    OwnedArr final_v = load_span_from_source(span, src);
+    Axle::OwnedArr final_v = load_span_from_source(span, src);
 
     TEST_STR_EQ(expected, final_v);
   }
@@ -26,9 +26,9 @@ void load_span_single_test(UNIT_TESTS::TestErrors* test_errors, const ViewArr<co
       3,1
     };
 
-    constexpr ViewArr expected = lit_view_arr("  hello\n   ^^");
+    constexpr Axle::ViewArr expected = Axle::lit_view_arr("  hello\n   ^^");
 
-    OwnedArr final_v = load_span_from_source(span, src);
+    Axle::OwnedArr final_v = load_span_from_source(span, src);
 
     TEST_STR_EQ(expected, final_v);
   }
@@ -36,15 +36,15 @@ void load_span_single_test(UNIT_TESTS::TestErrors* test_errors, const ViewArr<co
 
 TEST_FUNCTION(Errors, load_span) {
   
-  load_span_single_test(test_errors, lit_view_arr("\nhello\nworld\none and\ntwo\nthree\n"));
+  load_span_single_test(test_errors, Axle::lit_view_arr("\nhello\nworld\none and\ntwo\nthree\n"));
   TEST_CHECK_ERRORS();
 
-  load_span_single_test(test_errors, lit_view_arr("\r\nhello\r\nworld\r\none and\r\ntwo\r\nthree\r\n"));
+  load_span_single_test(test_errors, Axle::lit_view_arr("\r\nhello\r\nworld\r\none and\r\ntwo\r\nthree\r\n"));
   TEST_CHECK_ERRORS();
 
-  load_span_single_test(test_errors, lit_view_arr("\n\rhello\n\rworld\n\rone and\n\rtwo\n\rthree\n\r"));
+  load_span_single_test(test_errors, Axle::lit_view_arr("\n\rhello\n\rworld\n\rone and\n\rtwo\n\rthree\n\r"));
   TEST_CHECK_ERRORS();
 
-  load_span_single_test(test_errors, lit_view_arr("\rhello\rworld\rone and\rtwo\rthree\r"));
+  load_span_single_test(test_errors, Axle::lit_view_arr("\rhello\rworld\rone and\rtwo\rthree\r"));
   TEST_CHECK_ERRORS();
 }

@@ -1,7 +1,7 @@
 #include "names.h"
 #include "compiler.h"
 
-GlobalName* NameManager::add_global_name(Errors* errors, Namespace* ns, const InternString* name, Global* g) const {
+GlobalName* NameManager::add_global_name(Errors* errors, Namespace* ns, const Axle::InternString* name, Global* g) const {
   ASSERT(name != nullptr);
   ASSERT(g != nullptr);
   
@@ -34,7 +34,7 @@ void NameManager::add_global_import(Errors* const errors, Namespace* ns, Namespa
   ns->imported.insert(imp);
 }
 
-GlobalName* NameManager::find_direct_global_name(Namespace* ns, const InternString* name) const {
+GlobalName* NameManager::find_direct_global_name(Namespace* ns, const Axle::InternString* name) const {
   FOR_MUT(ns->globals, it) {
     if (it->name == name) {
       return it;
@@ -44,7 +44,7 @@ GlobalName* NameManager::find_direct_global_name(Namespace* ns, const InternStri
   return nullptr;
 }
 
-GlobalName* NameManager::find_global_name(Namespace* ns, const InternString* name) const {
+GlobalName* NameManager::find_global_name(Namespace* ns, const Axle::InternString* name) const {
   ASSERT(name != nullptr);
 
   GlobalName* n = find_direct_global_name(ns, name);
@@ -63,7 +63,7 @@ GlobalName* NameManager::find_global_name(Namespace* ns, const InternString* nam
 }
 
 
-NameFindItr NameManager::global_name_iterator(Namespace* ns, const InternString* name) const {
+NameFindItr NameManager::global_name_iterator(Namespace* ns, const Axle::InternString* name) const {
   return { ns, name, 0, 0 };
 }
 

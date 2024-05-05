@@ -45,13 +45,10 @@ if(AxleTRACING)
   message(FATAL_ERROR "Cannot trace the unit tests")
 endif()
 
-if(AxleTHROWING_ASSERTS)
-  target_compile_definitions(AxleUnitTests PRIVATE ASSERT_EXCEPTIONS)
-endif()
-
 add_executable(AxleIntegrationTests "${PROJECT_SOURCE_DIR}/src/tests.cpp")
 set_target_properties(AxleIntegrationTests PROPERTIES OUTPUT_NAME "AxleIntegrationTests$<CONFIG>")
 target_include_directories(AxleIntegrationTests PRIVATE "${PROJECT_SOURCE_DIR}/src" ${AxleINCLUDE} ${AxleUtilINCLUDE})
+target_compile_definitions(AxleIntegrationTests PRIVATE STACKTRACE_ENABLE)
 
 target_link_libraries(AxleIntegrationTests AxleCompiler)
 

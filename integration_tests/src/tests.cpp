@@ -14,6 +14,8 @@
 
 #include "tester.h"
 
+namespace IO = Axle::IO;
+
 #ifdef TRACING_ENABLE
 #error Cannot trace the tests
 
@@ -153,13 +155,13 @@ struct Tester {
 };
 
 struct Test {
-  ViewArr<const char> test_name;
-  ViewArr<const char> base_name;
+  Axle::ViewArr<const char> test_name;
+  Axle::ViewArr<const char> base_name;
   uint64_t return_value;
 
   template<usize N, usize M>
   constexpr Test(const char(&t_name)[N], const char(&b_name)[M], uint64_t return_value_)
-    : test_name(lit_view_arr(t_name)), base_name(lit_view_arr(b_name)), return_value(return_value_) {}
+    : test_name(Axle::lit_view_arr(t_name)), base_name(Axle::lit_view_arr(b_name)), return_value(return_value_) {}
 };
 
 static constexpr char TEST_DIR[] = "src/";
@@ -213,7 +215,7 @@ ProgramOutput run_program(const char* name, u64& out, bool debugging) {
   PROCESS_INFORMATION pi;
   ZeroMemory(&pi, sizeof(pi));
 
-  BOOL finished = CreateProcessA(name, NULL, 0, NULL, FALSE, NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi);
+  BOOL finished = CreateProcessA(name, NULL, 0, NULL, false, NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi);
   if (finished == 0) {
     return ProgramOutput::INVALID_PROGRAM;
   }
@@ -303,19 +305,19 @@ TestOutcome run_test(const APIOptions& opts, const char* expected_output_path, c
   }
 }
 
-void print_test_collection(ViewArr<const char> system_name,
-                           ViewArr<const char> group_name,
-                           ViewArr<const char> group_list_name,
-                           ViewArr<const ViewArr<const char>> test_collection) {
-  ViewArr<const char> indicator;
+void print_test_collection(Axle::ViewArr<const char> system_name,
+                           Axle::ViewArr<const char> group_name,
+                           Axle::ViewArr<const char> group_list_name,
+                           Axle::ViewArr<const Axle::ViewArr<const char>> test_collection) {
+  Axle::ViewArr<const char> indicator;
   if (test_collection.size == 0) {
-    indicator = lit_view_arr("No");
+    indicator = Axle::lit_view_arr("No");
   }
   else if (test_collection.size == NUM_TESTS) {
-    indicator = lit_view_arr("All");
+    indicator = Axle::lit_view_arr("All");
   }
   else {
-    indicator = lit_view_arr("Some");
+    indicator = Axle::lit_view_arr("Some");
   }
 
   IO::format("\n{} {} {}!", indicator, system_name, group_name);
@@ -337,16 +339,16 @@ void print_test_collection(ViewArr<const char> system_name,
 }
 
 bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizationOptions& optimize) {
-  ViewArr<const char> comp_error_tests[NUM_TESTS] = {};
+  Axle::ViewArr<const char> comp_error_tests[NUM_TESTS] = {};
   size_t num_comp_errorr_tests = 0;
 
-  ViewArr<const char> wrong_answer_tests[NUM_TESTS] = {};
+  Axle::ViewArr<const char> wrong_answer_tests[NUM_TESTS] = {};
   size_t num_wrong_answer_tests = 0;
 
-  ViewArr<const char> passed_tests[NUM_TESTS] = {};
+  Axle::ViewArr<const char> passed_tests[NUM_TESTS] = {};
   size_t num_passed_tests = 0;
 
-  ViewArr<const char> system_name = tester.pi->system_name;
+  Axle::ViewArr<const char> system_name = tester.pi->system_name;
 
   for (size_t i = 0; i < NUM_TESTS; i++) {
     const auto& test = tests[i];
@@ -358,24 +360,24 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
 
     options.optimize = optimize;
 
-    const auto file_name_holder = format("{}.axl", test.base_name);
-    const auto exe_name_holder = format_file_path(lit_view_arr(EXE_DIR), test.base_name, lit_view_arr("exe"));
+    const auto file_name_holder = Axle::format("{}.axl", test.base_name);
+    const auto exe_name_holder = Axle::format_file_path(Axle::lit_view_arr(EXE_DIR), test.base_name, Axle::lit_view_arr("exe"));
 
 
     options.platform_interface = tester.pi;
     options.executable_format_interface = tester.efi;
 
-    assert(tester.pi->num_calling_conventions > 0);
+    ASSERT(tester.pi->num_calling_conventions > 0);
     options.build.debug_break_on_entry = false;
     options.build.default_calling_convention = 0;
-    options.build.entry_point = lit_view_arr("main");
-    options.build.current_directory = lit_view_arr(".");//TODO: actually get this
-    options.build.file_name = const_view_arr(file_name_holder);
+    options.build.entry_point = Axle::lit_view_arr("main");
+    options.build.current_directory = Axle::lit_view_arr(".");//TODO: actually get this
+    options.build.file_name = Axle::const_view_arr(file_name_holder);
     options.build.output_name = test.base_name;
-    options.build.output_folder = lit_view_arr(EXE_DIR);
+    options.build.output_folder = Axle::lit_view_arr(EXE_DIR);
     options.build.output_file_type = tester.efi->type;
-    options.build.std_lib_folder = lit_view_arr("..\\stdlib");
-    options.build.lib_folder = lit_view_arr(TEST_DIR);
+    options.build.std_lib_folder = Axle::lit_view_arr("..\\stdlib");
+    options.build.lib_folder = Axle::lit_view_arr(TEST_DIR);
 
     options.build.extra_threads = tester.extra_threads;
 
@@ -420,15 +422,15 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
     }
   }
 
-  print_test_collection(system_name, lit_view_arr("Tests passed"), lit_view_arr("Passed tests"),
+  print_test_collection(system_name, Axle::lit_view_arr("Tests passed"), Axle::lit_view_arr("Passed tests"),
                         view_arr(passed_tests, 0, num_passed_tests));
   IO::print("\n");
 
-  print_test_collection(system_name, lit_view_arr("Tests produced wrong answers"), lit_view_arr("Wrong answer tests"),
+  print_test_collection(system_name, Axle::lit_view_arr("Tests produced wrong answers"), Axle::lit_view_arr("Wrong answer tests"),
                         view_arr(wrong_answer_tests, 0, num_wrong_answer_tests));
   IO::print("\n");
 
-  print_test_collection(system_name, lit_view_arr("Tests had compile errors"), lit_view_arr("Compile errorr tests"),
+  print_test_collection(system_name, Axle::lit_view_arr("Tests had compile errors"), Axle::lit_view_arr("Compile errorr tests"),
                         view_arr(comp_error_tests, 0, num_comp_errorr_tests));
 
   return num_passed_tests < NUM_TESTS;
@@ -436,7 +438,7 @@ bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizatio
 
 //Runs all the test with a specific calling convention and system
 bool run_all_tests(const Tester& tester) {
-  ViewArr<const char> system_name = tester.pi->system_name;
+  Axle::ViewArr<const char> system_name = tester.pi->system_name;
 
   IO::format("=== Running tests in: {} ===\n", system_name);
 
@@ -452,10 +454,10 @@ bool run_all_tests(const Tester& tester) {
 }
 
 int main() {
-  Windows::set_current_directory(lit_view_arr(ROOT_DIR));
+  Axle::Windows::set_current_directory(Axle::lit_view_arr(ROOT_DIR));
   
   {
-    auto current_dir = Windows::get_current_directory();
+    auto current_dir = Axle::Windows::get_current_directory();
 
     IO::format("Current Working Directory: {}\n", current_dir.view());
   }

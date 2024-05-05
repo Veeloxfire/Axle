@@ -9,8 +9,8 @@ enum struct MainSide : uint8_t {
 
 struct BinOpArgs;
 struct UnOpArgs;
-using BINARY_OPERATOR_FUNCTION = MEMBER<BinOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
-using UNARY_OPERATOR_FUNCTION = MEMBER<UnOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
+using BINARY_OPERATOR_FUNCTION = Axle::MEMBER<BinOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
+using UNARY_OPERATOR_FUNCTION = Axle::MEMBER<UnOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
 
 struct BinOpEmitInfo {
   MainSide main_side;

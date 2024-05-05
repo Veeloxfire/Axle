@@ -3,9 +3,9 @@
 #include <Axle/calling_convention.h>
 
 namespace X64 {
-  struct REGISTER_CONSTANT { uint8_t REG; ViewArr<const char> name; };
+  struct REGISTER_CONSTANT { uint8_t REG; Axle::ViewArr<const char> name; };
 
-#define REGISTER_DEFINE(NAME, VAL) inline constexpr REGISTER_CONSTANT NAME = { VAL, lit_view_arr(#NAME) }
+#define REGISTER_DEFINE(NAME, VAL) inline constexpr REGISTER_CONSTANT NAME = { VAL, Axle::lit_view_arr(#NAME) }
 
   REGISTER_DEFINE(rax, 0);
   REGISTER_DEFINE(rcx, 1);
@@ -45,11 +45,11 @@ namespace X64 {
     r14,
   };
 
-  constexpr ViewArr<const char> x86_64_reg_name_from_num(uint8_t reg) noexcept {
-    constexpr size_t num_registers = sizeof(all_x64_regs) / sizeof(REGISTER_CONSTANT);
+  constexpr Axle::ViewArr<const char> x86_64_reg_name_from_num(uint8_t reg) noexcept {
+    constexpr size_t num_registers = Axle::array_size(all_x64_regs);
 
     if (reg >= num_registers) {
-      return lit_view_arr("<INVALID-REGISTER>");
+      return Axle::lit_view_arr("<INVALID-REGISTER>");
     }
     else {
       return all_x64_regs[reg].name;
@@ -62,7 +62,7 @@ namespace X64 {
     combine_regs(const uint8_t(&volatiles)[num_volatile],
                  const uint8_t(&non_volatiles)[num_non_volatile],
                  T&& ... extras) {
-    ConstArray<uint8_t, num_volatile + num_non_volatile + sizeof...(T)> arr = {};
+    Axle::ConstArray<uint8_t, num_volatile + num_non_volatile + sizeof...(T)> arr = {};
 
     size_t i = 0;
     for (; i < num_volatile; i++) {
@@ -75,7 +75,7 @@ namespace X64 {
     }
 
     if constexpr (sizeof...(T) > 0) {
-      using EXTRA_ARR = ConstArray<const REGISTER_CONSTANT*, sizeof...(T)>;
+      using EXTRA_ARR = Axle::ConstArray<const REGISTER_CONSTANT*, sizeof...(T)>;
       const auto extras_arr = EXTRA_ARR::create((&extras)...);
 
       i = 0;
@@ -89,7 +89,7 @@ namespace X64 {
 
   template<size_t all, size_t num_volatile, size_t num_non_volatile>
   constexpr CallingConvention
-    make_calling_convention(const ViewArr<const char>& name,
+    make_calling_convention(const Axle::ViewArr<const char>& name,
                             const uint8_t(&all_regs_unordered)[all],
                             const uint8_t* params,
                             size_t num_params,
@@ -158,7 +158,7 @@ namespace X64 {
 
 
   inline constexpr CallingConvention CONVENTION_microsoft_x64
-    = make_calling_convention(lit_view_arr("Microsoft x64"),
+    = make_calling_convention(Axle::lit_view_arr("Microsoft x64"),
                               MICROSOFT_X64::all_regs_unordered.data,
                               MICROSOFT_X64::parameters,
                               MICROSOFT_X64::num_parameters,
@@ -180,7 +180,7 @@ namespace X64 {
   }
 
   constexpr CallingConvention CONVENTION_stdcall
-    = make_calling_convention(lit_view_arr("stdcall"),
+    = make_calling_convention(Axle::lit_view_arr("stdcall"),
                               STDCALL::all_regs_unordered.data,
                               nullptr,
                               0,
@@ -228,9 +228,10 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
 constexpr Backend::PlatformInterface x86_64_platform_interface() {
   Backend::PlatformInterface in = {};
   in.valid_calling_conventions = X64::X64_CALLING_CONVENTIONS;
-  in.num_calling_conventions = static_cast<u32>(array_size(X64::X64_CALLING_CONVENTIONS));
-  in.system_name = lit_view_arr(X64::SYSTEM_NAME);
+  in.num_calling_conventions = static_cast<u32>(Axle::array_size(X64::X64_CALLING_CONVENTIONS));
+  in.system_name = Axle::lit_view_arr(X64::SYSTEM_NAME);
   in.ptr_size = 8;
+  in.ptr_align = 8;
 
   in.init = x64_init;
   in.emit_function = x64_emit_function;

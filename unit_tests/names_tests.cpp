@@ -5,14 +5,14 @@
 
 TEST_FUNCTION(names, add_names) {
   NameManager name_manager = {};
-  StringInterner strings = {};
+  Axle::StringInterner strings = {};
 
   Namespace ns = {};
 
   Global n0_g = {};
-  const InternString* n0_name = strings.intern(lit_view_arr("hello"));
+  const Axle::InternString* n0_name = strings.intern(Axle::lit_view_arr("hello"));
   Global n1_g = {};
-  const InternString* n1_name = strings.intern(lit_view_arr("world"));
+  const Axle::InternString* n1_name = strings.intern(Axle::lit_view_arr("world"));
 
   Errors errors = {};
   {
@@ -137,18 +137,18 @@ TEST_FUNCTION(names, add_import) {
 
 TEST_FUNCTION(names, importing_names) {
   NameManager name_manager = {};
-  StringInterner strings = {};
+  Axle::StringInterner strings = {};
 
   Namespace ns0 = {};
   Namespace ns1 = {};
   Namespace ns2 = {};
 
   Global n0_g = {};
-  const InternString* n0_name = strings.intern(lit_view_arr("hello"));
+  const Axle::InternString* n0_name = strings.intern(Axle::lit_view_arr("hello"));
   Global n1_g = {};
-  const InternString* n1_name = strings.intern(lit_view_arr("world"));
+  const Axle::InternString* n1_name = strings.intern(Axle::lit_view_arr("world"));
   Global n2_g = {};
-  const InternString* n2_name = strings.intern(lit_view_arr("1234"));
+  const Axle::InternString* n2_name = strings.intern(Axle::lit_view_arr("1234"));
 
   Errors errors = {};
   {
@@ -259,13 +259,13 @@ TEST_FUNCTION(names, importing_names) {
 
 TEST_FUNCTION(names, duplicate_names) {
   NameManager name_manager = {};
-  StringInterner strings = {};
+  Axle::StringInterner strings = {};
 
   Namespace ns0 = {};
   Namespace ns1 = {};
 
   Global n0_g = {};
-  const InternString* n0_name = strings.intern(lit_view_arr("hello"));
+  const Axle::InternString* n0_name = strings.intern(Axle::lit_view_arr("hello"));
   Global n1_g = {};
 
   Errors errors = {};

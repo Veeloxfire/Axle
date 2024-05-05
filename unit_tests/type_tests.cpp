@@ -8,7 +8,7 @@ struct Group {
   VALUE_CATEGORY low_start;
   VALUE_CATEGORY low_end;
 };
-static void test_reduce_vc(UNIT_TESTS::TestErrors* test_errors, AST_LOCAL low, AST_LOCAL high, const Group& g) {
+static void test_reduce_vc(AxleTest::TestErrors* test_errors, AST_LOCAL low, AST_LOCAL high, const Group& g) {
   low->value_category = g.low_start;
   high->value_category = g.high_start;
 
@@ -108,9 +108,8 @@ TEST_FUNCTION(Types, ValueCategory) {
 }
 
 TEST_FUNCTION(Types, Builtin) {
-  StringInterner strings = {};
-  Structures structures = {};
-  structures.pointer_size = 8;
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
 
   BuiltinTypes builtins = STRUCTS::create_builtins(&structures, &strings);
 
@@ -133,9 +132,8 @@ TEST_FUNCTION(Types, Builtin) {
 };
 
 TEST_FUNCTION(Types, lambdas) {
-  StringInterner strings = {};
-  Structures structures = {};
-  structures.pointer_size = 8;
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
 
   BuiltinTypes builtin = STRUCTS::create_builtins(&structures, &strings);
 
@@ -155,9 +153,8 @@ TEST_FUNCTION(Types, lambdas) {
 }
 
 TEST_FUNCTION(Types, pointers) {
-  StringInterner strings = {};
-  Structures structures = {};
-  structures.pointer_size = 8;
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
 
   BuiltinTypes builtin = STRUCTS::create_builtins(&structures, &strings);
 
@@ -175,9 +172,8 @@ TEST_FUNCTION(Types, pointers) {
 }
 
 TEST_FUNCTION(Types, arrays) {
-  StringInterner strings = {};
-  Structures structures = {};
-  structures.pointer_size = 8;
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
 
   BuiltinTypes builtin = STRUCTS::create_builtins(&structures, &strings);
 
@@ -199,9 +195,8 @@ TEST_FUNCTION(Types, arrays) {
 }
 
 TEST_FUNCTION(Types, tuples) {
-  StringInterner strings = {};
-  Structures structures = {};
-  structures.pointer_size = 8;
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
 
   BuiltinTypes builtin = STRUCTS::create_builtins(&structures, &strings);
 
@@ -212,7 +207,7 @@ TEST_FUNCTION(Types, tuples) {
 
   const TupleStructure* tup_struct
    = STRUCTS::new_tuple_structure(&structures, &strings,
-                                  view_arr(example_tup));
+                                  Axle::view_arr(example_tup));
 
   TEST_EQ(STRUCTURE_TYPE::TUPLE, tup_struct->expected_type_enum);
   TEST_EQ(STRUCTURE_TYPE::TUPLE, tup_struct->type);
@@ -221,6 +216,6 @@ TEST_FUNCTION(Types, tuples) {
 
   const TupleStructure* tup_struct2
    = find_or_make_tuple_structure(&structures, &strings,
-                                  view_arr(example_tup));
+                                  Axle::view_arr(example_tup));
   TEST_EQ(tup_struct, tup_struct2);
 }
