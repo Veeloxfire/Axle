@@ -2770,27 +2770,35 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
             || files->unparsed_files.size > 0)) {
       comp->work_counter += 1;
 
+      Format::ArrayFormatter error = {};
+      Format::format_to(error, "Work still exists but is not accessable\n");
+
       auto i = compilation->store.active_units.begin();
       const auto end = compilation->store.active_units.end();
 
-      Format::ArrayFormatter error = {};
-      Format::format_to(error, "Work still exists but is not accessable\nThe following compilation units are inaccessable:\n");
+      if (i < end) {
+        Format::format_to(error, "The following compilation units are inaccessable: \n");
+        for (; i < end; ++i) {
+          CompilationUnit* unit = *i;
+          ASSERT(unit != nullptr);
+          ASSERT(unit->main_pipe != nullptr);
+          Axle::ViewArr<const char> debug_name = unit->main_pipe->_debug_name;
+          if (debug_name.data == nullptr) {
+            debug_name = Axle::lit_view_arr("Type unsupported in this mode");
+          }
 
-      for (; i < end; ++i) {
-        CompilationUnit* unit = *i;
-        ASSERT(unit != nullptr);
-        ASSERT(unit->main_pipe != nullptr);
-        Axle::ViewArr<const char> debug_name = unit->main_pipe->_debug_name;
-        if (debug_name.data == nullptr) {
-          debug_name = Axle::lit_view_arr("Type unsupported in this mode");
+          Format::format_to(error, "- Id: {} | Type: {}\n"
+                            "  Waiting on Units: {} | Waiting on Names: {}\n",
+                            unit->id, debug_name, unit->unit_wait_on_count, unit->unfound_wait_on_count);
         }
-
-        Format::format_to(error, "- Id: {} | Type: {}\n"
-                                 "  Waiting on Units: {} | Waiting on Names: {}\n", 
-                                 unit->id, debug_name, unit->unit_wait_on_count, unit->unfound_wait_on_count);
       }
 
       Format::format_to(error, "Pipeline states:\n");
+      Format::format_to(error, "- Unparsed files: {}\n", files->unparsed_files.size);
+
+      comp->pipelines.depend_check.mutex.acquire();
+      Format::format_to(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
+      comp->pipelines.depend_check.mutex.release();
 
       comp->pipelines.depend_check.mutex.acquire();
       Format::format_to(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
