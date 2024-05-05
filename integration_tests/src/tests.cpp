@@ -8,6 +8,7 @@
 #include <AxleUtil/args.h>
 
 #include <Axle/api.h>
+#include <AxleTest/unit_tests.h>
 
 #include <Axle/backends/x64_backend.h>
 #include <Axle/backends/PE_file_format.h>
@@ -169,24 +170,6 @@ static constexpr char EXE_DIR[] = "out/";
 
 static constexpr u8 ONES_U8[2] = { 1, 1 };
 
-//Add tests here to make a new test
-static constexpr Test tests[] = {
-  Test{"Operators Unsigned", "operators_unsigned", operations_unsigned_cpp()},
-  Test{"Operators Signed", "operators_signed", operations_signed_cpp()},
-  Test{"Operators Comptime", "operators_comptime", operations_optim()},
-  Test{"Fibonnaci Recursive", "fib_recurse", fib_recurse_main()},
-  Test{"Fibonnaci Loop", "fib_loop", fib_loop_main()},
-  Test{"Arrays", "arrays", arrays_main()},
-  Test{"Pointers", "pointers", 3},
-  Test{"FNV1 Hash", "fnv1_hash", fnv1_hash("hello", 5)},
-  Test{"FNV1 Hash Single", "fnv1_hash_single", fnv1_hash(ONES_U8, 1)},
-  Test{"FNV1 Hash Double", "fnv1_hash_double", fnv1_hash(ONES_U8, 2)},
-  Test{"Globals", "globals", fib_count_main()},
-  Test{"Structs", "structs", 3},
-};
-
-static constexpr size_t NUM_TESTS = sizeof(tests) / sizeof(Test);
-
 static constexpr u32 TIME_TO_WAIT_MS = 1000 * 20;//20 seconds
 
 struct Expected {
@@ -207,7 +190,7 @@ bool try_read_shared(T& t, const volatile unsigned char* mem, usize size) {
   return true;
 }
 
-ProgramOutput run_program(const char* name, u64& out, bool debugging) {
+void run_program(AxleTest::TestErrors* test_errors, const char* name, const Expected& expected, bool debugging) {
   STARTUPINFOA si = {};
   ZeroMemory(&si, sizeof(si));
   si.cb = sizeof(si);
@@ -217,7 +200,8 @@ ProgramOutput run_program(const char* name, u64& out, bool debugging) {
 
   BOOL finished = CreateProcessA(name, NULL, 0, NULL, false, NORMAL_PRIORITY_CLASS, NULL, NULL, &si, &pi);
   if (finished == 0) {
-    return ProgramOutput::INVALID_PROGRAM;
+    test_errors->report_error("Attempted to run invalid program");
+    return;
   }
 
   DEFER(&) {
@@ -229,257 +213,92 @@ ProgramOutput run_program(const char* name, u64& out, bool debugging) {
   DWORD waited = WaitForSingleObject(pi.hProcess, wait);
   if (waited == WAIT_TIMEOUT) {
     TerminateProcess(pi.hProcess, 1);
-    return ProgramOutput::TIMED_OUT;
+    test_errors->report_error("Process timed out");
+    return;
   }
 
   SHARED_MEM shared = {};
   get_shared_memory(&shared);
 
-  if (!try_read_shared(out, shared.buffer, shared.size)) {
-    return ProgramOutput::INCORRECT;
+  u64 result = 0; 
+  if (!try_read_shared(result, shared.buffer, shared.size)) {
+    test_errors->report_error("Size of output was incorrect");
   }
-  else {
-    return ProgramOutput::CORRECT;
-  }
+
+  // Final check
+  TEST_EQ(expected.val, result);
 }
 
-enum struct TestOutcome {
-  Pass,
-  WrongAnswer,
-  CompilationError,
-};
-
-TestOutcome run_test(const APIOptions& opts, const char* expected_output_path, const Expected& expected) noexcept {
-  //Time all the tests
-  const auto start = std::chrono::high_resolution_clock::now();
+void run_test(AxleTest::TestErrors* errors, const APIOptions& opts, const char* expected_output_path, const Expected& expected) {
 
   const int return_code = compile_and_write(opts);
-
-  const auto compiler_end = std::chrono::high_resolution_clock::now();
-  ProgramOutput output = ProgramOutput::INVALID_PROGRAM;
-
-  u64 res = 0;
-  if (return_code == 0) {
-    output = run_program(expected_output_path, res, opts.build.debug_break_on_entry);
+  if(return_code != 0) {
+    errors->report_error("Compile failed (see output). Code: {}", return_code);
+    return;
   }
 
-  const auto end = std::chrono::high_resolution_clock::now();
-
-  IO::format("Test ran for: {} us (compiler ran for: {} us)\n",
-             std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(),
-             std::chrono::duration_cast<std::chrono::microseconds>(compiler_end - start).count());
-
-  if (return_code != 0) {
-    IO::format("Compiler Error. Return code: {}\n", return_code);
-    return TestOutcome::CompilationError;
-  }
-  else {
-    switch (output) {
-      case ProgramOutput::INVALID_PROGRAM: {
-          IO::print("Could not finish the test - program could not be opened\n");
-          return TestOutcome::CompilationError;
-        }
-      case ProgramOutput::TIMED_OUT: {
-          IO::print("Could not finish the test - timed out before program could finish executing\n");
-          return TestOutcome::WrongAnswer;
-        }
-      case ProgramOutput::INCORRECT: {
-          IO::print("Program produced incorrect result format - could not be correct value\n");
-          return TestOutcome::WrongAnswer;
-        }
-      case ProgramOutput::CORRECT: {
-          if (res != expected.val) {
-            IO::format("Incorrect Results. Expected: {}. Actual: {}\n", expected.val, res);
-            return TestOutcome::WrongAnswer;
-          }
-          else {
-            IO::print("Test Passed!\n");
-            return TestOutcome::Pass;
-          }
-        }
-      default: {
-          IO::print("Unexpected Test State\n");
-          return TestOutcome::CompilationError;
-        }
-    }
-  }
+  run_program(errors, expected_output_path, expected, opts.build.debug_break_on_entry);
 }
 
-void print_test_collection(Axle::ViewArr<const char> system_name,
-                           Axle::ViewArr<const char> group_name,
-                           Axle::ViewArr<const char> group_list_name,
-                           Axle::ViewArr<const Axle::ViewArr<const char>> test_collection) {
-  Axle::ViewArr<const char> indicator;
-  if (test_collection.size == 0) {
-    indicator = Axle::lit_view_arr("No");
-  }
-  else if (test_collection.size == NUM_TESTS) {
-    indicator = Axle::lit_view_arr("All");
-  }
-  else {
-    indicator = Axle::lit_view_arr("Some");
-  }
-
-  IO::format("\n{} {} {}!", indicator, system_name, group_name);
-
-  if (test_collection.size > 0) {
-    IO::format("\n{}: ", group_list_name);
-
-    auto i = test_collection.begin();
-    const auto end = test_collection.end();
-
-    IO::format(" \"{}\"", *i);
-    i++;
-
-    for (; i < end; i++) {
-      IO::format(", \"{}\"", *i);
-    }
-  }
-
-}
-
-bool run_all_tests_with_optimizations(const Tester& tester, const APIOptimizationOptions& optimize) {
-  Axle::ViewArr<const char> comp_error_tests[NUM_TESTS] = {};
-  size_t num_comp_errorr_tests = 0;
-
-  Axle::ViewArr<const char> wrong_answer_tests[NUM_TESTS] = {};
-  size_t num_wrong_answer_tests = 0;
-
-  Axle::ViewArr<const char> passed_tests[NUM_TESTS] = {};
-  size_t num_passed_tests = 0;
-
-  Axle::ViewArr<const char> system_name = tester.pi->system_name;
-
-  for (size_t i = 0; i < NUM_TESTS; i++) {
-    const auto& test = tests[i];
-
-    APIOptions options = {};
-
-    X64::ProgramExtra program_extra = {};
-    options.program_extra = &program_extra;
-
-    options.optimize = optimize;
-
-    const auto file_name_holder = Axle::format("{}.axl", test.base_name);
-    const auto exe_name_holder = Axle::format_file_path(Axle::lit_view_arr(EXE_DIR), test.base_name, Axle::lit_view_arr("exe"));
-
-
-    options.platform_interface = tester.pi;
-    options.executable_format_interface = tester.efi;
-
-    ASSERT(tester.pi->num_calling_conventions > 0);
-    options.build.debug_break_on_entry = false;
-    options.build.default_calling_convention = 0;
-    options.build.entry_point = Axle::lit_view_arr("main");
-    options.build.current_directory = Axle::lit_view_arr(".");//TODO: actually get this
-    options.build.file_name = Axle::const_view_arr(file_name_holder);
-    options.build.output_name = test.base_name;
-    options.build.output_folder = Axle::lit_view_arr(EXE_DIR);
-    options.build.output_file_type = tester.efi->type;
-    options.build.std_lib_folder = Axle::lit_view_arr("..\\stdlib");
-    options.build.lib_folder = Axle::lit_view_arr(TEST_DIR);
-
-    options.build.extra_threads = tester.extra_threads;
-
-    options.print.ast = false;
-    options.print.comptime_res = false;
-    options.print.comptime_exec = false;
-    options.print.finished_ir = false;
-    options.print.finished_mc = false;
-    options.print.run_headers = false;
-    options.print.register_select = false;
-    options.print.file_loads = false;
-    options.print.comp_units = false;
-    options.print.work = false;
-
-    IO::format("\nStarting Test: {}\n", test.test_name);
-
-    Expected expected = {};
-    expected.val = test.return_value;
-    const TestOutcome outcome = run_test(options, exe_name_holder.raw.data, expected);
-
-#ifdef COUNT_ALLOC
-    //Print memory leaks
-    print_still_allocated_and_reset();
-#endif
-
-    switch (outcome) {
-      case TestOutcome::Pass: {
-          passed_tests[num_passed_tests] = test.test_name;
-          num_passed_tests++;
-          break;
-        }
-      case TestOutcome::WrongAnswer: {
-          wrong_answer_tests[num_wrong_answer_tests] = test.test_name;
-          num_wrong_answer_tests++;
-          break;
-        }
-      case TestOutcome::CompilationError: {
-          comp_error_tests[num_comp_errorr_tests] = test.test_name;
-          num_comp_errorr_tests++;
-          break;
-        }
-    }
-  }
-
-  print_test_collection(system_name, Axle::lit_view_arr("Tests passed"), Axle::lit_view_arr("Passed tests"),
-                        view_arr(passed_tests, 0, num_passed_tests));
-  IO::print("\n");
-
-  print_test_collection(system_name, Axle::lit_view_arr("Tests produced wrong answers"), Axle::lit_view_arr("Wrong answer tests"),
-                        view_arr(wrong_answer_tests, 0, num_wrong_answer_tests));
-  IO::print("\n");
-
-  print_test_collection(system_name, Axle::lit_view_arr("Tests had compile errors"), Axle::lit_view_arr("Compile errorr tests"),
-                        view_arr(comp_error_tests, 0, num_comp_errorr_tests));
-
-  return num_passed_tests < NUM_TESTS;
-}
-
-//Runs all the test with a specific calling convention and system
-bool run_all_tests(const Tester& tester) {
-  Axle::ViewArr<const char> system_name = tester.pi->system_name;
-
-  IO::format("=== Running tests in: {} ===\n", system_name);
-
-  bool any_failed = false;
-
-  APIOptimizationOptions opts = {};
-
-  //no optimizations
-  any_failed |= run_all_tests_with_optimizations(tester, opts);
-
-  IO::format("\n=== Finished tests in: {} ===\n\n", system_name);
-  return any_failed;
-}
-
-int main() {
-  Axle::Windows::set_current_directory(Axle::lit_view_arr(ROOT_DIR));
-  
-  {
-    auto current_dir = Axle::Windows::get_current_directory();
-
-    IO::format("Current Working Directory: {}\n", current_dir.view());
-  }
+void run_test_with_setup_x64_pe(AxleTest::TestErrors* test_errors, Axle::ViewArr<const char> base_name, const Expected& expected) {
   constexpr Backend::PlatformInterface x64_pi = x86_64_platform_interface();
   constexpr Backend::ExecutableFormatInterface PE_efi = pe_plus_file_interface();
 
-  const Tester tester = { &x64_pi, &PE_efi, 3 };
 
-  bool any_failed = false;
+  APIOptions options = {};
 
-  IO::print("\n========== Started all tests ==========\n\n");
-  any_failed |= run_all_tests(tester);
-  IO::print("==========  Ended all tests  ==========\n\n");
+  X64::ProgramExtra program_extra = {};
+  options.program_extra = &program_extra;
+  options.optimize = {};
 
-  if (any_failed) {
-    IO::print("Some tests failed!!!\n");
-  }
-  else {
-    IO::print("All tests passed!!!\n");
-  }
+  const auto file_name_holder = Axle::format("{}.axl", base_name);
+  const auto exe_name_holder = Axle::format_file_path(Axle::lit_view_arr(EXE_DIR), base_name, Axle::lit_view_arr("exe"));
 
-  IO::print("\n\n");
+  options.platform_interface = &x64_pi;
+  options.executable_format_interface = &PE_efi;
 
-  return 0;
+  ASSERT(x64_pi.num_calling_conventions > 0);
+  options.build.debug_break_on_entry = false;
+  options.build.default_calling_convention = 0;
+  options.build.entry_point = Axle::lit_view_arr("main");
+  options.build.current_directory = Axle::lit_view_arr(".");//TODO: actually get this
+  options.build.file_name = Axle::const_view_arr(file_name_holder);
+  options.build.output_name = base_name;
+  options.build.output_folder = Axle::lit_view_arr(EXE_DIR);
+  options.build.output_file_type = PE_efi.type;
+  options.build.std_lib_folder = Axle::lit_view_arr("..\\stdlib");
+  options.build.lib_folder = Axle::lit_view_arr(TEST_DIR);
+
+  options.build.extra_threads = 3;
+
+  options.print.ast = false;
+  options.print.comptime_res = false;
+  options.print.comptime_exec = false;
+  options.print.finished_ir = false;
+  options.print.finished_mc = false;
+  options.print.run_headers = false;
+  options.print.register_select = false;
+  options.print.file_loads = false;
+  options.print.comp_units = false;
+  options.print.work = false;
+
+  run_test(test_errors, options, exe_name_holder.raw.data, expected);
 }
+
+#define INTEGRATION_TEST(name, expr) TEST_FUNCTION(Integration, name) { \
+  constexpr Expected expected = { expr }; \
+  run_test_with_setup_x64_pe(test_errors, Axle::lit_view_arr(#name), expected); \
+}
+
+INTEGRATION_TEST(operators_unsigned, operations_unsigned_cpp());
+INTEGRATION_TEST(operators_signed, operations_signed_cpp());
+INTEGRATION_TEST(operators_comptime, operations_optim());
+INTEGRATION_TEST(fib_recurse, fib_recurse_main());
+INTEGRATION_TEST(fib_loop, fib_loop_main());
+INTEGRATION_TEST(arrays, arrays_main());
+INTEGRATION_TEST(pointers, 3);
+INTEGRATION_TEST(fnv1_hash, fnv1_hash("hello", 5));
+INTEGRATION_TEST(fnv1_hash_single, fnv1_hash(ONES_U8, 1));
+INTEGRATION_TEST(fnv1_hash_double, fnv1_hash(ONES_U8, 2));
+INTEGRATION_TEST(globals, fib_count_main());
+INTEGRATION_TEST(structs, 3); 
