@@ -311,6 +311,9 @@ namespace visit_detail {
 
     template<typename V>
     static constexpr auto visit(V&& v, const Ts1& ... pre_args, const T& t, const Ts2& ... post_args) {
+      using PtrType = std::remove_const_t<std::remove_pointer_t<T>>;
+      static_assert(std::derived_from<PtrType, Structure>, "Must be a strucutre");
+      
       if constexpr (std::same_as<const Structure*, T>) {
         switch (t->type) {
 #define FORWARD_T(case_t, cast_t) \
@@ -332,10 +335,7 @@ return Next<cast_t>::visit(std::forward<V>(v), pre_args..., static_cast<cast_t>(
         return std::forward<V>(v)(InvalidTypeVisit{});
       }
       else {
-        using PtrType = std::remove_const_t<std::remove_pointer_t<T>>;
-        static_assert(std::derived_from<Structure, PtrType>, "Must be a strucutre");
-       
-        visitor<TypeArr<Ts1..., T>, TypeArr<Ts2...>>::visit(std::forward<V>(v), pre_args..., t, post_args...);
+        return Next<T>::visit(std::forward<V>(v), pre_args..., t, post_args...);
       }
     }
 
