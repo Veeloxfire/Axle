@@ -775,15 +775,18 @@ IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
         return IR::v_arg(rv.value.index, rv.value.offset, rv.type);
       }
     case RVT::Indirect: {
-        IR::ValueIndex v = ir->new_temporary(rv.type, {});
+        ASSERT(rv.type.struct_type() == STRUCTURE_TYPE::POINTER);
+        const auto* ptr_t = rv.type.unchecked_base<PointerStructure>();
+        const Type copy_t = ptr_t->base;
+        IR::ValueIndex v = ir->new_temporary(copy_t, {});
 
         IR::Types::CopyLoad cpy = {};
-        cpy.to = IR::v_arg(v, 0, rv.type);
+        cpy.to = IR::v_arg(v, 0, copy_t);
         cpy.from = IR::v_arg(rv.value.index, rv.value.offset, rv.type);
 
         IR::Emit::CopyLoad(ir->current_bytecode(), cpy);
 
-        return IR::v_arg(v, 0, rv.type);
+        return IR::v_arg(v, 0, copy_t);
       }
   }
 

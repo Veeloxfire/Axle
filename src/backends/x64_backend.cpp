@@ -1512,9 +1512,12 @@ namespace X64 {
 
 constexpr auto load_types_info() {
   struct FormatData {
-    usize sizes[9];
+    usize sizes[10];
 
-    constexpr usize get_size(IR::Format f) const { return sizes[static_cast<usize>(f)]; }
+    constexpr usize get_size(IR::Format f) const {
+      ASSERT(static_cast<usize>(f) < Axle::array_size(sizes));
+      return sizes[static_cast<usize>(f)];
+    }
   };
 
   FormatData d = {};
@@ -1528,6 +1531,7 @@ constexpr auto load_types_info() {
   d.sizes[static_cast<usize>(IR::Format::sint32)] = 4;
   d.sizes[static_cast<usize>(IR::Format::uint64)] = 8;
   d.sizes[static_cast<usize>(IR::Format::sint64)] = 8;
+  d.sizes[static_cast<usize>(IR::Format::pointer)] = 8;
 
   return d;
 }
@@ -1739,6 +1743,17 @@ namespace IntHelpers {
         }
         break;
       }
+      case IR::Format::pointer: {
+        switch (t_format) {
+          case IR::Format::pointer:
+            if (from == to) return;
+            X64::mov(inst, X64::R64{ from }, X64::R64{ to });
+
+            break;
+          default: INVALID_CODE_PATH("Unsupported copy");
+        }
+        break;
+      }
       default:
         INVALID_CODE_PATH("Cant handle other data formats");
     }
@@ -1894,6 +1909,17 @@ namespace IntHelpers {
         }
         break;
       }
+      case IR::Format::pointer: {
+        switch (t_format) {
+          case IR::Format::pointer:
+            X64::mov(inst, X64::RM64{ from.rm }, X64::R64{ to });
+
+            break;
+          default: INVALID_CODE_PATH("Unsupported copy");
+        }
+        break;
+      }
+
       default:
         INVALID_CODE_PATH("Cant handle other data formats");
     }
@@ -2185,6 +2211,18 @@ namespace IntHelpers {
         }
         break;
       }
+      case IR::Format::pointer: {
+        switch (t_format) {
+          case IR::Format::pointer: {
+            X64::Instruction i = {};
+            X64::mov(i, X64::R64{ from }, X64::RM64{ to.rm });
+            X64::append_instruction(program, i);
+            break;
+          }
+          default: INVALID_CODE_PATH("Unsupported copy");
+        }
+        break;
+      }
       default:
         INVALID_CODE_PATH("Cant handle other data formats");
     }
@@ -2218,7 +2256,8 @@ namespace IntHelpers {
         break;
       }
       case IR::Format::uint64:
-      case IR::Format::sint64: {
+      case IR::Format::sint64:
+      case IR::Format::pointer: {
         u64 v;
         bool res = Axle::deserialize_le<u64>(data, v);
         ASSERT(res);
@@ -2267,7 +2306,8 @@ namespace IntHelpers {
         break;
       }
       case IR::Format::uint64:
-      case IR::Format::sint64: {
+      case IR::Format::sint64:
+      case IR::Format::pointer: {
         i64 val;
         bool res = Axle::deserialize_le<i64>(data, val);
         ASSERT(res);
@@ -2501,6 +2541,16 @@ namespace IntHelpers {
         }
         break;
       }
+      case IR::Format::pointer: {
+        switch (t_format) {
+          case IR::Format::pointer:
+            X64::mov(first, X64::RM64{ from.rm }, X64::R64{ temp });
+            X64::mov(second, X64::R64{ temp }, X64::RM64{ to.rm });
+            break;
+          default: INVALID_CODE_PATH("Unsupported copy");
+        }
+        break;
+      }
       default:
         INVALID_CODE_PATH("Cant handle other data formats");
     }
@@ -2542,13 +2592,94 @@ namespace IntHelpers {
     return left;\
   }
 
-  EMIT_SYMMETRICAL_HELPER(add);
-  EMIT_SYMMETRICAL_HELPER(sub);
   EMIT_SYMMETRICAL_HELPER(and_);
   EMIT_SYMMETRICAL_HELPER(or_);
   EMIT_SYMMETRICAL_HELPER(xor_);
 
 #undef EMIT_SYMMETRICAL_HELPER
+
+  static X64::R emit_add(Backend::ProgramData* program,
+      X64::R left, IR::Format l_format,
+      X64::R right, IR::Format r_format) {
+    if(l_format == r_format) {
+      X64::Instruction i = {};
+      switch (l_format) {
+        case IR::Format::uint8:
+        case IR::Format::sint8: {
+          X64::add(i, X64::R8{right}, X64::R8{left});
+          break;
+        }
+        case IR::Format::uint16:
+        case IR::Format::sint16: {
+          X64::add(i, X64::R16{right}, X64::R16{left});
+          break;
+        }
+        case IR::Format::uint32:
+        case IR::Format::sint32: {
+          X64::add(i, X64::R32{right}, X64::R32{left});
+          break;
+        }
+        case IR::Format::uint64:
+        case IR::Format::sint64: {
+          X64::add(i, X64::R64{right}, X64::R64{left});
+          break;
+        }
+        default: INVALID_CODE_PATH("Invalid add format");
+      }
+      X64::append_instruction(program, i);
+      return left;
+    }
+    else if((l_format == IR::Format::pointer && r_format == IR::Format::uint64)
+        || (l_format == IR::Format::uint64 && r_format == IR::Format::pointer)) {
+      X64::Instruction i = {};
+      X64::add(i, X64::R64{right}, X64::R64{left});
+      X64::append_instruction(program, i);
+      return left;
+    }
+
+    INVALID_CODE_PATH("Invalid add format");
+  }
+
+  static X64::R emit_sub(Backend::ProgramData* program,
+      X64::R left, IR::Format l_format,
+      X64::R right, IR::Format r_format) {
+    if(l_format == r_format) {
+      X64::Instruction i = {};
+      switch (l_format) {
+        case IR::Format::uint8:
+        case IR::Format::sint8: {
+          X64::sub(i, X64::R8{right}, X64::R8{left});
+          break;
+        }
+        case IR::Format::uint16:
+        case IR::Format::sint16: {
+          X64::sub(i, X64::R16{right}, X64::R16{left});
+          break;
+        }
+        case IR::Format::uint32:
+        case IR::Format::sint32: {
+          X64::sub(i, X64::R32{right}, X64::R32{left});
+          break;
+        }
+        case IR::Format::uint64:
+        case IR::Format::sint64: {
+          X64::sub(i, X64::R64{right}, X64::R64{left});
+          break;
+        }
+        default: INVALID_CODE_PATH("Invalid sub format");
+      }
+      X64::append_instruction(program, i);
+      return left;
+    }
+    else if(l_format == IR::Format::pointer && r_format == IR::Format::pointer) {
+      X64::Instruction i = {};
+      X64::sub(i, X64::R64{right}, X64::R64{left});
+      X64::append_instruction(program, i);
+      return left;
+    }
+
+    INVALID_CODE_PATH("Invalid sub format");
+  }
 
   static X64::R emit_mul(Backend::ProgramData* program,
       X64::R left, IR::Format l_format,
@@ -2596,7 +2727,7 @@ namespace IntHelpers {
         X64::imul(i, X64::R64{right}, X64::R64{left});
         break;
       }
-      default: INVALID_CODE_PATH("Invalid comparable format");
+      default: INVALID_CODE_PATH("Invalid multiply format");
     }
 
     X64::append_instruction(program, i);
@@ -2647,7 +2778,7 @@ namespace IntHelpers {
         X64::idiv(i, X64::R64{right}, X64::RAX{});
         break;
       }
-      default: INVALID_CODE_PATH("Invalid comparable format");
+      default: INVALID_CODE_PATH("Invalid divide format");
     }
 
     X64::append_instruction(program, i);
@@ -2698,7 +2829,7 @@ namespace IntHelpers {
         X64::idiv(i, X64::R64{right}, X64::RAX{});
         break;
       }
-      default: INVALID_CODE_PATH("Invalid comparable format");
+      default: INVALID_CODE_PATH("Invalid mod format");
     }
 
     X64::append_instruction(program, i);
@@ -2711,23 +2842,24 @@ namespace IntHelpers {
     ASSERT(l_format == r_format);
     X64::Instruction i = {};
     switch (l_format) {
-      case  IR::Format::uint8:
-      case  IR::Format::sint8: {
+      case IR::Format::uint8:
+      case IR::Format::sint8: {
         X64::cmp(i, X64::R8{right}, X64::R8{left});
         break;
       }
-      case  IR::Format::uint16:
-      case  IR::Format::sint16: {
+      case IR::Format::uint16:
+      case IR::Format::sint16: {
         X64::cmp(i, X64::R16{right}, X64::R16{left});
         break;
       }
-      case  IR::Format::uint32:
-      case  IR::Format::sint32: {
+      case IR::Format::uint32:
+      case IR::Format::sint32: {
         X64::cmp(i, X64::R32{right}, X64::R32{left});
         break;
       }
-      case  IR::Format::uint64:
-      case  IR::Format::sint64: {
+      case IR::Format::uint64:
+      case IR::Format::sint64:
+      case IR::Format::pointer: {
         X64::cmp(i, X64::R64{right}, X64::R64{left});
         break;
       }
@@ -5193,6 +5325,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
           X64Value f = selector.get_val(addr.from);
           X64Value t = selector.get_val(addr.to);
           ASSERT(t.t.struct_type() == STRUCTURE_TYPE::POINTER);
+          ASSERT(t.t.struct_format() == IR::Format::pointer);
 
           ASSERT(f.value_type == ValueType::Memory);
 
@@ -5219,6 +5352,7 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
           X64Value f = selector.get_val(addr.from);
           ASSERT(f.t.struct_type() == STRUCTURE_TYPE::POINTER);
+          ASSERT(f.t.struct_format() == IR::Format::pointer);
           const auto* pt_f = f.t.unchecked_base<PointerStructure>();
 
           X64Value t = selector.get_val(addr.to);
@@ -5265,7 +5399,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
           const IR::GlobalReference& global_r = ir->globals_used[addr.im32];
 
           X64Value g = selector.get_val(addr.val);
-          ASSERT(g.t.struct_format() == IR::Format::uint64);
+          ASSERT(g.t.struct_type() == STRUCTURE_TYPE::POINTER);
+          ASSERT(g.t.struct_format() == IR::Format::pointer);
 
           switch (g.value_type) {
             case ValueType::Register: {

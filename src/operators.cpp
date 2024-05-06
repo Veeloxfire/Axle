@@ -63,8 +63,8 @@ Eval::RuntimeValue BinOpArgs::emit_add_ints() {
 }
 
 Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
-  Type dest_type = info->dest_type;
-  ASSERT(dest_type.struct_type() == STRUCTURE_TYPE::POINTER);
+  Type ptr_type = info->dest_type;
+  ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
@@ -75,7 +75,7 @@ Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
   const Type size_type = comp->builtin_types->t_u64;
 
   if (info->main_side == MainSide::LEFT) {
-    ASSERT(dest_type == lt);
+    ASSERT(ptr_type == lt);
     ASSERT(size_type == rt);
 
     int_val = right;
@@ -83,14 +83,14 @@ Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
   }
   else {
     ASSERT(info->main_side == MainSide::RIGHT);
-    ASSERT(dest_type == rt);
+    ASSERT(ptr_type == rt);
     ASSERT(size_type == lt);
 
     int_val = left;
     ptr_val = right;
   }
 
-  const auto* ptr = dest_type.unchecked_base<PointerStructure>();
+  const auto* ptr = ptr_type.unchecked_base<PointerStructure>();
   const u64 size_holder = ptr->base.size();
   ASSERT(size_holder != 0);
 
@@ -99,10 +99,10 @@ Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
 
     const Eval::RuntimeValue to_add = bin_op_impl<IR::Types::Mul>(ir, right, ptr_size, size_type, IR::Emit::Mul);
 
-    return bin_op_impl<IR::Types::Add>(ir, ptr_val, to_add, size_type, IR::Emit::Add);
+    return bin_op_impl<IR::Types::Add>(ir, ptr_val, to_add, ptr_type, IR::Emit::Add);
   }
   else {
-    return bin_op_impl<IR::Types::Add>(ir, ptr_val, int_val, size_type, IR::Emit::Add);
+    return bin_op_impl<IR::Types::Add>(ir, ptr_val, int_val, ptr_type, IR::Emit::Add);
   }
 }
 
