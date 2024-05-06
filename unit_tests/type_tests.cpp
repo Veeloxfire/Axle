@@ -219,3 +219,40 @@ TEST_FUNCTION(Types, tuples) {
                                   Axle::view_arr(example_tup));
   TEST_EQ(tup_struct, tup_struct2);
 }
+
+namespace  {
+struct TypeVisitor {
+  AxleTest::TestErrors* test_errors;
+
+  void operator()(InvalidTypeVisit) const {
+    test_errors->report_error("Had invalid type visit");
+  }
+
+  void operator()(
+      const auto* t_type,
+      const auto* t_void,
+      const auto* t_u8
+      ) const {
+    TEST_EQ(true, (std::same_as<decltype(t_type), const TypeStructure*>));
+    TEST_EQ(true, (std::same_as<decltype(t_void), const VoidStructure*>));
+    TEST_EQ(true, (std::same_as<decltype(t_u8), const IntegerStructure*>));
+  }
+
+  void operator()(
+      const TypeStructure* t_type,
+      const VoidStructure* t_void,
+      const IntegerStructure* t_u8) const {}
+};
+}
+
+TEST_FUNCTION(Types, visitor) {
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
+
+  const BuiltinTypes builtin = STRUCTS::create_builtins(&structures, &strings);
+
+  visit_types(TypeVisitor{test_errors},
+    builtin.t_type.structure,
+    builtin.t_void.structure,
+    builtin.t_u8.structure);
+}
