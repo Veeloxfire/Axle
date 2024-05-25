@@ -1830,7 +1830,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
   for (const Axle::InternString* base : paths_to_try) {
     Axle::AllocFilePath try_path = format_file_path(view_arr(base), path);
 
-    if (Axle::FILES::exist(const_view_arr(try_path.raw))) {
+    if (Axle::FILES::exists(const_view_arr(try_path.raw))) {
       auto strings = comp->services.strings.get();
       loc = parse_file_location(try_path, strings._ptr);
       found = true;
@@ -2997,7 +2997,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   {
     Axle::OwnedArr cwd = normalize_path(options.build.current_directory);
 
-    if (!Axle::FILES::exist(view_arr(cwd))) {
+    if (!Axle::FILES::exists(view_arr(cwd))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "Current directory was invalid: {}", cwd);
       return;
@@ -3064,7 +3064,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   {
     Axle::OwnedArr stdlib = normalize_path(view_arr(file_loader->cwd.directory), options.build.std_lib_folder);
-    if (!Axle::FILES::exist(view_arr(stdlib))) {
+    if (!Axle::FILES::exists(view_arr(stdlib))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "std lib folder was invalid: {}", stdlib);
       return;
@@ -3081,7 +3081,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
 
   {
     Axle::OwnedArr lib_folder = normalize_path(view_arr(file_loader->cwd.directory), options.build.lib_folder);
-    if (!Axle::FILES::exist(view_arr(lib_folder))) {
+    if (!Axle::FILES::exists(view_arr(lib_folder))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "lib folder was invalid: {}", lib_folder);
       return;
