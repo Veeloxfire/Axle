@@ -1298,9 +1298,6 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
                                        "Unexpected Token Type '{}'", parser->current.type);
       return 0;
   }
-
-  INVALID_CODE_PATH("Did not return an expression node ...");
-  return 0;
 }
 
 static AST_LOCAL parse_primary_and_suffix(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {
@@ -1489,7 +1486,6 @@ static AST_LOCAL parse_primary_and_suffix(CompilerGlobals* const comp, CompilerT
   }
 
   INVALID_CODE_PATH("Managed to escape loop ...");
-  return 0;
 }
 
 static AST_LOCAL parse_unary_op(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {
@@ -1561,8 +1557,6 @@ static AST_LOCAL parse_unary_op(CompilerGlobals* const comp, CompilerThread* con
     default:
       return parse_primary_and_suffix(comp, comp_thread, parser);
   }
-
-  INVALID_CODE_PATH("Did not return an expression");
 }
 
 static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {
@@ -1778,8 +1772,6 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
         return 0;
       }
   }
-
-  INVALID_CODE_PATH("Did not return type node");
 }
 
 static AST_LOCAL parse_typed_name(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {

@@ -737,7 +737,6 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR
   }
 
   INVALID_CODE_PATH("Did not find imported variable");
-  return Eval::no_value();
 }
 
 void Eval::IrBuilder::switch_control_block(IR::LocalLabel index, IR::LocalLabel _parent) {
@@ -791,7 +790,6 @@ IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
   }
 
   INVALID_CODE_PATH("Invalid RVT");
-  return {};
 }
 
 Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue& val, const Type& ptr_type) {
@@ -800,7 +798,6 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
   switch (val.rvt) {
     case RVT::Constant: {
         INVALID_CODE_PATH("Cannot take the address of a constant");
-        return Eval::no_value();
       }
 
     case RVT::Direct: {
@@ -837,7 +834,6 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
   }
 
   INVALID_CODE_PATH("Illegal RVT type");
-  return Eval::no_value();
 }
 
 Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
@@ -847,7 +843,6 @@ Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
   switch (val.rvt) {
     case RVT::Constant: {
         INVALID_CODE_PATH("Cannot take the address of a constant");
-        return Eval::no_value();
       }
     case RVT::Direct: {
         ASSERT(val.type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY);
@@ -889,7 +884,6 @@ Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
 
 
   INVALID_CODE_PATH("Illegal RVT type");
-  return Eval::no_value();
 }
 
 
@@ -901,7 +895,6 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
   switch (val.rvt) {
     case RVT::Constant: {
         INVALID_CODE_PATH("Cannot take the address of a constant");
-        return Eval::no_value();
       }
 
     case RVT::Direct: {
@@ -927,7 +920,6 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
   }
 
   INVALID_CODE_PATH("Illegal RVT type");
-  return Eval::no_value();
 }
 
 Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
@@ -965,7 +957,6 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
   switch (val.rvt) {
     case RVT::Constant: {
         INVALID_CODE_PATH("Cannot dynamically index a constant");
-        return Eval::no_value();
       }
     case RVT::Direct: {
         IR::ValueIndex v = ir->new_temporary(ptr_type, {});
@@ -987,7 +978,6 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
       }
     default: {
         INVALID_CODE_PATH("Illegal RVT");
-        return Eval::no_value();
       }
   }
 

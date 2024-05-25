@@ -158,7 +158,8 @@ namespace X64 {
   static constexpr uint8_t sib(uint8_t s, uint8_t i, uint8_t b) {
     return sib_scale(s) | sib_i_b(i, b);
   }
-
+// currently unused
+#if 0
   static RM memory_rm(u8 reg, i32 disp, u8 index_reg, u8 scale) {
     ASSERT(scale == 1 || scale == 2 || scale == 4 || scale == 8);
 
@@ -179,6 +180,7 @@ namespace X64 {
     rm.sib.index = index_reg;
     return rm;
   }
+#endif
 
   static RM memory_rm(u8 reg, i32 disp) {
     RM rm = {};
@@ -1026,6 +1028,8 @@ namespace X64 {
 
   static constexpr auto jump_equal = jump_zero;
 
+  // currently unused
+#if 0
   static void jump_not_equal(Instruction& arr, i32 jump_offset) {
     arr.insert(0x0F);
     arr.insert(X64::JNE_NEAR);
@@ -1106,6 +1110,7 @@ namespace X64 {
     Axle::ViewArr<u8> im = arr.sub_range(4);
     Axle::serialize_le<i32>(im, jump_offset);
   }
+#endif
 
   static void div(Instruction& arr, R8 from, RAX) {
     if (need_rex(from.r)) {
@@ -3403,7 +3408,6 @@ namespace Helpers {
 
     X64::R operator()(InvalidTypeVisit) const {
       INVALID_CODE_PATH("Invalid add types");
-      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
@@ -3430,7 +3434,6 @@ namespace Helpers {
 
     X64::R operator()(InvalidTypeVisit) const {
       INVALID_CODE_PATH("Invalid sub types");
-      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
@@ -3457,7 +3460,6 @@ namespace Helpers {
 
     X64::R operator()(InvalidTypeVisit) const {
       INVALID_CODE_PATH("Invalid mul types");
-      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
@@ -3484,7 +3486,6 @@ namespace Helpers {
 
     X64::R operator()(InvalidTypeVisit) const {
       INVALID_CODE_PATH("Invalid div types");
-      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
@@ -3512,7 +3513,6 @@ namespace Helpers {
 
     X64::R operator()(InvalidTypeVisit) const {
       INVALID_CODE_PATH("Invalid div types");
-      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
@@ -3540,7 +3540,6 @@ namespace Helpers {
 
     X64::R operator()(InvalidTypeVisit) const {
       INVALID_CODE_PATH("Invalid and types");
-      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
@@ -3567,7 +3566,6 @@ namespace Helpers {
 
     X64::R operator()(InvalidTypeVisit) const {
       INVALID_CODE_PATH("Invalid or types");
-      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
@@ -3594,7 +3592,6 @@ namespace Helpers {
 
     X64::R operator()(InvalidTypeVisit) const {
       INVALID_CODE_PATH("Invalid xor types");
-      return X64::R{X64::rINVALID.REG};
     }
 
     //Base case
@@ -4630,10 +4627,9 @@ namespace X64 {
   }
 }
 
-void x64_emit_dyn_library_function(CompilerThread* comp_thread, const IR::DynLibraryImport* lib_import, const CallingConvention* convention,
-    Backend::ProgramData* program) {
+void x64_emit_dyn_library_function(CompilerThread*, const IR::DynLibraryImport* lib_import, const CallingConvention*, Backend::ProgramData* program) {
   TELEMETRY_FUNCTION();
-  X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
+  //X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   Backend::FunctionMetadata func = {};
   func.code_start = program->code_store.current_location().actual_location;
@@ -4659,7 +4655,6 @@ void x64_emit_dyn_library_function(CompilerThread* comp_thread, const IR::DynLib
 
     X64::jump_abs(i, X64::IPOffset{0});
     X64::append_instruction(program, i);
-
   }
 
   func.code_size = program->code_store.total_size - func.code_start;
@@ -4670,7 +4665,6 @@ void x64_emit_dyn_library_function(CompilerThread* comp_thread, const IR::DynLib
   }
 
   program->functions.data[lib_import->label.label - 1] = func;
-
 }
 
 void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
@@ -4817,7 +4811,7 @@ struct BlockResolveOutput {
 void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const IR::IRStore* ir, const CallingConvention* convention,
     Backend::ProgramData* program) {
   TELEMETRY_FUNCTION();
-  X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
+  //X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   ASSERT(ir->global_label != IR::NULL_GLOBAL_LABEL);
   ASSERT(ir->control_blocks.size > 0);//means we did nothing
@@ -6218,9 +6212,6 @@ static Axle::OwnedArr<char> rm_reg_string(x86PrintOptions* const p_opts,
       INVALID_CODE_PATH("Internal error. Unrecognised assembly code register format");
     }
   }
-
-  INVALID_CODE_PATH("Internal error. Unrecognised assembly code register format");
-  return {};
 }
 
 static Axle::OwnedArr<char> r_reg_string(x86PrintOptions* p_opts,

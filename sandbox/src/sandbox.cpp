@@ -42,19 +42,19 @@ int main(int argc, const char** args) {
 
     clArg::ArgsList arg_list = { static_cast<usize>(argc), args };
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("in"), in);
+      [[maybe_unused]]bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("in"), in);
     }
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("stdlib"), stdlib);
+      [[maybe_unused]]bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("stdlib"), stdlib);
     }
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("lib"), lib);
+      [[maybe_unused]]bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("lib"), lib);
     }
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("out_name"), out_name);
+      [[maybe_unused]]bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("out_name"), out_name);
     }
     {
-      bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("out_folder"), out_folder);
+      [[maybe_unused]]bool _unused = clArg::parse_arg(errors, arg_list, Axle::lit_view_arr("out_folder"), out_folder);
     }
 
     if (errors.errored) {

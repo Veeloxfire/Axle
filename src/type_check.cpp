@@ -104,7 +104,6 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
             }
         }
 
-        INVALID_CODE_PATH("Invalid identifier type");
         comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
                                   "Invalid identifier type");
         return {};
@@ -119,7 +118,7 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
 }
 
 #define EXPAND_THIS(asttype, name) asttype* const name = downcast_ast<asttype>(this_infer->node);
-#define TC_STAGE(name, stage) static CheckResult name ## _stage_ ## stage (CompilerGlobals* const comp, CompilerThread* const comp_thread, Typer* const typer, const TypeCheckNode* this_infer)
+#define TC_STAGE(name, stage) static CheckResult name ## _stage_ ## stage ([[maybe_unused]] CompilerGlobals* const comp, [[maybe_unused]] CompilerThread* const comp_thread, [[maybe_unused]] Typer* const typer, const TypeCheckNode* this_infer)
 
 TC_STAGE(NAMED_TYPE, 1) {
   TELEMETRY_FUNCTION();
@@ -1208,7 +1207,7 @@ TC_STAGE(CAST, 3) {
         break;
       }
     case STRUCTURE_TYPE::INTEGER: {
-        const auto* from_int = cast_from.unchecked_base<IntegerStructure>();
+        //const auto* from_int = cast_from.unchecked_base<IntegerStructure>();
 
         if (cast_to.struct_type() == STRUCTURE_TYPE::INTEGER) {
           cast->emit = CASTS::int_to_int;
@@ -1419,7 +1418,6 @@ TC_STAGE(UNARY_OPERATOR, 1) {
 
 CheckResult type_check_binary_operator(CompilerGlobals* comp,
                                        CompilerThread* comp_thread,
-                                       Typer* typer,
                                        const TypeCheckNode* this_infer) {
   TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBinaryOperatorExpr, expr);
@@ -1995,7 +1993,7 @@ TC_STAGE(BINARY_OPERATOR, 2) {
 
   //TODO: constant folding
   //TODO: inference
-  return type_check_binary_operator(comp, comp_thread, typer, this_infer);
+  return type_check_binary_operator(comp, comp_thread, this_infer);
 }
 
 TC_STAGE(BINARY_OPERATOR, 1) {
@@ -2091,9 +2089,7 @@ static bool test_function_overload(const CallSignature* sig, const SignatureStru
   return false;
 }
 
-static void check_call_arguments(CompilerGlobals* const comp,
-                                 CompilerThread* const comp_thread,
-                                 Typer* typer,
+static void check_call_arguments(CompilerThread* const comp_thread,
                                  ASTFunctionCallExpr* const call) {
   TELEMETRY_FUNCTION();
 
@@ -2129,7 +2125,7 @@ TC_STAGE(FUNCTION_CALL, 3) {
     reduce_category(call, it);
   }
 
-  check_call_arguments(comp, comp_thread, typer, call);
+  check_call_arguments(comp_thread, call);
   if (comp_thread->is_panic()) {
     return FINISHED;
   }
@@ -2270,8 +2266,6 @@ TC_STAGE(DECL, 3) {
       }
     default: {
         INVALID_CODE_PATH("Declaration was somehow not a global or local variable ...");
-        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, {}, "Declaration was somehow not a global or local");
-        return FINISHED;
       }
   }
 
@@ -2341,7 +2335,6 @@ TC_STAGE(DECL, 2) {
 TC_STAGE(DECL, 1) {
   TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, decl);
-  AST_LOCAL decl_expr = decl->expr;
 
   if (decl->type_ast != nullptr) {
     typer->push_node(decl->type_ast, comp_thread->builtin_types->t_type);
