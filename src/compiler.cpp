@@ -353,15 +353,9 @@ void dependency_check_ast_node(CompilerGlobals* const comp,
         ASTIndexExpr* index = (ASTIndexExpr*)a;
 
         dependency_check_ast_node(comp, comp_thread, state, index->expr);
-        dependency_check_ast_node(comp, comp_thread, state, index->index);
-        return;
-      }
-    case AST_TYPE::SLICE_INDEX: {
-        ASTSliceIndex* index = (ASTSliceIndex*)a;
-
-        dependency_check_ast_node(comp, comp_thread, state, index->expr);
-        dependency_check_ast_node(comp, comp_thread, state, index->index_first);
-        dependency_check_ast_node(comp, comp_thread, state, index->index_second);
+        FOR_AST(index->arguments, it) {
+          dependency_check_ast_node(comp, comp_thread, state, it);
+        }
         return;
       }
     case AST_TYPE::MEMBER_ACCESS: {
@@ -937,52 +931,60 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         ASTIndexExpr* index = (ASTIndexExpr*)expr;
         AST_LOCAL index_expr = index->expr;
-        AST_LOCAL index_index = index->index;
+        const usize count = index->arguments.count;
 
-        ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
+        if(count == 1) {
+          ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
 
-        Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
-                                                  builder, eval.forward(index_expr, IR::ValueRequirements::Address));
-        if (comp_thread->is_panic()) {
+          AST_LOCAL index_index = index->arguments.start->curr;
+
+          Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
+              builder, eval.forward(index_expr, IR::ValueRequirements::Address));
+          if (comp_thread->is_panic()) {
+            return Eval::no_value();
+          }
+
+          Eval::RuntimeValue index_val = compile_bytecode(comp, comp_thread,
+              builder, NodeEval::new_value(index_index));
+          if (comp_thread->is_panic()) {
+            return Eval::no_value();
+          }
+
+          u64 u = base_size;
+          const auto c = Eval::as_constant((const u8*)&u, comp_thread->builtin_types->t_u64);
+
+          BinOpEmitInfo emit_info = {};
+          {
+            emit_info.dest_type = comp_thread->builtin_types->t_u64;
+            emit_info.main_side = MainSide::LEFT;
+            emit_info.func = &BinOpArgs::emit_mul_ints;
+          }
+
+          BinOpArgs args = {
+            &emit_info,
+            comp,
+            builder->ir,
+            index_val,
+            c,
+          };
+
+          const Eval::RuntimeValue offset = args.emit_mul_ints();
+
+          const Type t = generate_pointer_type(comp, base_type);
+
+          return Eval::sub_object(builder->ir, arr, offset, t);
+        }
+        else if(count == 0 || count == 2) {
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+              "Slices not implemented yet");
           return Eval::no_value();
         }
-
-        Eval::RuntimeValue index_val = compile_bytecode(comp, comp_thread,
-                                                        builder, NodeEval::new_value(index_index));
-        if (comp_thread->is_panic()) {
+        else {
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+              "Invalid number of index parameters: {}", count);
           return Eval::no_value();
         }
-
-        u64 u = base_size;
-        const auto c = Eval::as_constant((const u8*)&u, comp_thread->builtin_types->t_u64);
-
-        BinOpEmitInfo emit_info = {};
-        {
-          emit_info.dest_type = comp_thread->builtin_types->t_u64;
-          emit_info.main_side = MainSide::LEFT;
-          emit_info.func = &BinOpArgs::emit_mul_ints;
-        }
-
-        BinOpArgs args = {
-          &emit_info,
-          comp,
-          builder->ir,
-          index_val,
-          c,
-        };
-
-        const Eval::RuntimeValue offset = args.emit_mul_ints();
-
-        const Type t = generate_pointer_type(comp, base_type);
-
-        return Eval::sub_object(builder->ir, arr, offset, t);
       }
-    case AST_TYPE::SLICE_INDEX: {
-      //static_assert(false, "TODO");
-      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                                "Slices not implemented yet");
-      return Eval::no_value();
-    }
     case AST_TYPE::TUPLE_LIT: {
         ASSERT(expr->node_type.struct_type() == STRUCTURE_TYPE::COMPOSITE);
 

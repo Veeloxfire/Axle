@@ -1321,65 +1321,60 @@ static AST_LOCAL parse_primary_and_suffix(CompilerGlobals* const comp, CompilerT
             return 0;
           }
 
-          AST_LOCAL index = parse_inner_expression(comp, comp_thread, parser);
-          if(comp_thread->is_panic()) {
-            return 0;
-          }
+          AST_ARR arguments = {};
+          AST_LINKED* curr_list = nullptr;
 
-          if(parser->current.type == AxleTokenType::Comma) {
-            //Is slice index
-            
-            advance(comp, comp_thread, parser);
+          //Arguments
+          if (parser->current.type != AxleTokenType::Right_Square) {
+            while (!comp_thread->is_panic()) {
+              if (curr_list == nullptr) {
+                curr_list = parser->ast_store.push<AST_LINKED>();
+                arguments.start = curr_list;
+              }
+              else {
+                curr_list->next = parser->ast_store.push<AST_LINKED>();
+                curr_list = curr_list->next;
+              }
+              curr_list->next = nullptr;
+              arguments.count += 1;
+
+              curr_list->curr = parse_inner_expression(comp, comp_thread, parser);
+
+              if (parser->current.type == AxleTokenType::Right_Square) {
+                break;
+              }
+              else if (parser->current.type == AxleTokenType::Comma) {
+                advance(comp, comp_thread, parser);
+                continue;
+              }
+              else {
+                //ERROR
+                comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->full_path(), parser->current),
+                                          "Expected '{}', Found '{}'",
+                                          AxleTokenType::Comma, parser->current.type);
+                return 0;
+              }
+            }
+
             if (comp_thread->is_panic()) {
               return 0;
             }
-            
-            AST_LOCAL index_2 = parse_inner_expression(comp, comp_thread, parser);
-            if(comp_thread->is_panic()) {
-              return 0;
-            }
-
-            expect(comp, comp_thread, parser, AxleTokenType::Right_Square);
-            if(comp_thread->is_panic()) {
-              return 0;
-            }
-
-            SPAN_END;
-
-            ASTSliceIndex* index_expr = ast_alloc<ASTSliceIndex>(parser);
-            index_expr->ast_type = AST_TYPE::INDEX_EXPR;
-            index_expr->expr = current;
-            index_expr->index_first = index;
-            index_expr->index_second = index_2;
-            index_expr->node_span = span;
-
-            current = index_expr;
           }
-          else if(parser->current.type == AxleTokenType::Right_Square) {
-            //Is regular index
-            
-            advance(comp, comp_thread, parser);
-            if (comp_thread->is_panic()) {
-              return 0;
-            }
 
-            SPAN_END;
-
-            ASTIndexExpr* index_expr = ast_alloc<ASTIndexExpr>(parser);
-            index_expr->ast_type = AST_TYPE::INDEX_EXPR;
-            index_expr->expr = current;
-            index_expr->index = index;
-            index_expr->node_span = span;
-
-            current = index_expr;
-          }
-          else {
-            comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->full_path(), parser->current),
-                                      "Invalid end to index. Expected '{}' or '{}' found '{}'",
-                                      AxleTokenType::Comma, AxleTokenType::Right_Square,
-                                      parser->current.type);
+          advance(comp, comp_thread, parser);
+          if (comp_thread->is_panic()) {
             return 0;
           }
+
+          SPAN_END;
+
+          ASTIndexExpr* index = ast_alloc<ASTIndexExpr>(parser);
+          index->ast_type = index->EXPECTED_AST_TYPE;
+          index->node_span = span;
+          index->expr = current;
+          index->arguments = arguments;
+
+          current = index;
 
           //Loop again
           break;
@@ -2673,7 +2668,18 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
         ASTIndexExpr* ie = (ASTIndexExpr*)a;
         print_ast(printer, ie->expr);
         IO_Single::print('[');
-        print_ast(printer, ie->index);
+        AST_LINKED* l = ie->arguments.start;
+
+        if (l) {
+          print_ast(printer, l->curr);
+          l = l->next;
+
+          while (l) {
+            IO_Single::print(", ");
+            print_ast(printer, l->curr);
+            l = l->next;
+          }
+        }
         IO_Single::print(']');
         return;
       }

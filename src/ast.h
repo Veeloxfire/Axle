@@ -28,7 +28,6 @@ MOD(ARRAY_EXPR) \
 MOD(ASCII_STRING) \
 MOD(ASCII_CHAR) \
 MOD(INDEX_EXPR) \
-MOD(SLICE_INDEX) \
 MOD(MEMBER_ACCESS) \
 MOD(LAMBDA) \
 MOD(LAMBDA_EXPR) \
@@ -169,14 +168,7 @@ struct ASTCastExpr : public AST {
 struct ASTIndexExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::INDEX_EXPR;
   AST_LOCAL expr = 0;
-  AST_LOCAL index = 0;
-};
-
-struct ASTSliceIndex : public AST {
-  constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::SLICE_INDEX;
-  AST_LOCAL expr = 0;
-  AST_LOCAL index_first = 0;
-  AST_LOCAL index_second = 0;
+  AST_ARR arguments = {};
 };
 
 struct ASTNumber : public AST {

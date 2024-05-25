@@ -572,21 +572,64 @@ TC_STAGE(INDEX_EXPR, 2) {
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
   AST_LOCAL base = index_expr->expr;
-  AST_LOCAL index = index_expr->index;
+  const usize arg_count = index_expr->arguments.count;
 
   same_category(index_expr, base);
-  reduce_category(index_expr, index);
-
-  if (!TYPE_TESTS::can_index(base->node_type)) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
-                              "Cannot take index of type: {}",
-                              base->node_type.name);
-    return FINISHED;
+  FOR_AST(index_expr->arguments, it) {
+    reduce_category(index_expr, it);
+    ASSERT(it->node_type == comp_thread->builtin_types->t_u64);
   }
 
-  ASSERT(index->node_type == comp_thread->builtin_types->t_u64);
-  index_expr->node_type = base->node_type.unchecked_base<ArrayStructure>()->base;
-  return FINISHED;
+  constexpr auto index_or_slice_base = [](const Type& t) {
+    struct V {
+      Type operator()(const Structure*) const {
+        INVALID_CODE_PATH("Cannot index or slice this type");
+      }
+      Type operator()(const ArrayStructure* as) const {
+        return as->base;
+      }
+      Type operator()(const SliceStructure* s) const {
+        return s->base;
+      }
+    };
+    return visit_types(V{}, t.structure);
+  };
+
+  if(arg_count == 1) {
+    if (!TYPE_TESTS::can_index(base->node_type)) {
+      comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
+          "Cannot take index of type: {}",
+          base->node_type.name);
+      return FINISHED;
+    }
+
+    index_expr->node_type = index_or_slice_base(base->node_type);
+    return FINISHED;
+  }
+  else if(arg_count == 0 || arg_count == 2) {
+    if (!TYPE_TESTS::can_slice(base->node_type)) {
+      comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
+          "Cannot take slice of type: {}",
+          base->node_type.name);
+      return FINISHED;
+    }
+
+    const Type t = index_or_slice_base(base->node_type);
+   
+    {
+      Axle::AtomicLock<Structures> structures;
+      Axle::AtomicLock<Axle::StringInterner> strings;
+      comp->services.get_multiple(&structures, &strings);
+
+      index_expr->node_type = to_type(find_or_make_slice_structure(structures._ptr, strings._ptr, t));
+    }
+    return FINISHED;
+  }
+  else {
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
+          "Cannot index with {} arguments", arg_count);
+    return FINISHED;
+  }
 }
 
 TC_STAGE(INDEX_EXPR, 1) {
@@ -596,69 +639,13 @@ TC_STAGE(INDEX_EXPR, 1) {
   index_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   AST_LOCAL base = index_expr->expr;
-  AST_LOCAL index = index_expr->index;
 
   typer->push_node(base, {});
-  typer->push_node(index, comp_thread->builtin_types->t_u64);
+  FOR_AST(index_expr->arguments, it) {
+    typer->push_node(it, comp_thread->builtin_types->t_u64);
+  }
 
   return next_stage(INDEX_EXPR_stage_2);
-}
-
-
-TC_STAGE(SLICE_INDEX, 2) {
-  TELEMETRY_FUNCTION();
-  EXPAND_THIS(ASTSliceIndex, index_expr);
-
-  AST_LOCAL base = index_expr->expr;
-  AST_LOCAL index_first = index_expr->index_first;
-  AST_LOCAL index_second = index_expr->index_second;
-
-  same_category(index_expr, base);
-  if(index_first != 0) {
-    reduce_category(index_expr, index_first);
-  }
-
-  if(index_second != 0) {
-    reduce_category(index_expr, index_second);
-  }
-
-  if (!TYPE_TESTS::can_slice(base->node_type)) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
-                              "Cannot take slice of type: {}",
-                              base->node_type.name);
-    return FINISHED;
-  }
-
-  ASSERT(index_first->node_type == comp_thread->builtin_types->t_u64);
-  ASSERT(index_second->node_type == comp_thread->builtin_types->t_u64);
- 
-  {
-    const Type t = base->node_type.unchecked_base<ArrayStructure>()->base;
-    
-    Axle::AtomicLock<Structures> structures;
-    Axle::AtomicLock<Axle::StringInterner> strings;
-    comp->services.get_multiple(&structures, &strings);
-
-    index_expr->node_type = to_type(find_or_make_slice_structure(structures._ptr, strings._ptr, t)); 
-  }
-  return FINISHED;
-}
-
-TC_STAGE(SLICE_INDEX, 1) {
-  TELEMETRY_FUNCTION();
-  EXPAND_THIS(ASTSliceIndex, index_expr);
-
-  index_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
-
-  typer->push_node(index_expr->expr, {});
-  if(index_expr->index_first != 0) {
-    typer->push_node(index_expr->index_first, comp_thread->builtin_types->t_u64);
-  }
-  if(index_expr->index_second != 0) {
-    typer->push_node(index_expr->index_second, comp_thread->builtin_types->t_u64);
-  }
-  
-  return next_stage(SLICE_INDEX_stage_2);
 }
 
 TC_STAGE(TUPLE_LIT, known_type) {
