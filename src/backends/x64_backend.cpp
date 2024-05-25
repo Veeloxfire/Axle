@@ -3253,13 +3253,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid structures for reg to reg copy");
-    }
-
     //Base case
     void operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid structures for reg to reg copy");
     }
 
     void operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3278,10 +3274,6 @@ namespace Helpers {
     Backend::ProgramData* program;
     Axle::ViewArr<const u8> from;
     const MemoryView& to;
-
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid structures for mem store");
-    }
 
     //Base case
     void operator()(const Structure*) const {
@@ -3302,13 +3294,9 @@ namespace Helpers {
     Axle::ViewArr<const u8> from;
     X64::R to;
 
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid structures for reg store");
-    }
-
     //Base case
     void operator()(const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid structures for reg store");
     }
 
     void operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1) const {
@@ -3325,13 +3313,9 @@ namespace Helpers {
     const MemoryView& from;
     X64::R to;
 
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid structures for mem to reg copy");
-    }
-
     //Base case
     void operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid structures for mem to reg copy");
     }
 
     void operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3351,13 +3335,9 @@ namespace Helpers {
     X64::R from;
     const MemoryView& to;
 
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid structures for reg to mem copy");
-    }
-
     //Base case
     void operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid structures for reg to mem copy");
     }
 
     void operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3377,10 +3357,6 @@ namespace Helpers {
     const MemoryView& from;
     const MemoryView& to;
     X64::R temp;
-
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid structures for mem to mem copy");
-    }
 
     //Base case
     void operator()(const Structure*, const Structure*) const {
@@ -3406,13 +3382,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    X64::R operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid add types");
-    }
-
     //Base case
     X64::R operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid add types");
     }
 
     X64::R operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3432,13 +3404,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    X64::R operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid sub types");
-    }
-
     //Base case
     X64::R operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid sub types");
     }
 
     X64::R operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3458,13 +3426,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    X64::R operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid mul types");
-    }
-
     //Base case
     X64::R operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid mul types");
     }
 
     X64::R operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3484,13 +3448,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    X64::R operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid div types");
-    }
-
     //Base case
     X64::R operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid div types");
     }
 
     X64::R operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3511,13 +3471,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    X64::R operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid div types");
-    }
-
     //Base case
     X64::R operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid mod types");
     }
 
     X64::R operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3538,13 +3494,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    X64::R operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid and types");
-    }
-
     //Base case
     X64::R operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid and types");
     }
 
     X64::R operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3564,13 +3516,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    X64::R operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid or types");
-    }
-
     //Base case
     X64::R operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid or types");
     }
 
     X64::R operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3590,13 +3538,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    X64::R operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid xor types");
-    }
-
     //Base case
     X64::R operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid xor types");
     }
 
     X64::R operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3616,13 +3560,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid great types");
-    }
-
     //Base case
     void operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid Great types");
     }
 
     void operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3642,13 +3582,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid great types");
-    }
-
     //Base case
     void operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid Less types");
     }
 
     void operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3668,13 +3604,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid great types");
-    }
-
     //Base case
     void operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid Eq types");
     }
 
     void operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,
@@ -3695,13 +3627,9 @@ namespace Helpers {
     X64::R from;
     X64::R to;
 
-    void operator()(InvalidTypeVisit) const {
-      INVALID_CODE_PATH("Invalid great types");
-    }
-
     //Base case
     void operator()(const Structure*, const Structure*) const {
-      return operator()(InvalidTypeVisit{});
+      INVALID_CODE_PATH("Invalid Neq types");
     }
 
     void operator()(const Axle::OneOf<IntegerStructure, EnumStructure, PointerStructure> auto* s1,

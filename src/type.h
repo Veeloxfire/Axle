@@ -294,8 +294,6 @@ struct SignatureStructure : public Structure {
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::LAMBDA;
 };
 
-struct InvalidTypeVisit {};
-
 namespace visit_detail {
   template<typename ... T>
   struct TypeArr {};
@@ -332,7 +330,7 @@ return Next<cast_t>::visit(std::forward<V>(v), pre_args..., static_cast<cast_t>(
           FORWARD_T(STRUCTURE_TYPE::SLICE, const SliceStructure*);
         }
       
-        return std::forward<V>(v)(InvalidTypeVisit{});
+        INVALID_CODE_PATH("Invalid structure type");
       }
       else {
         return Next<T>::visit(std::forward<V>(v), pre_args..., t, post_args...);
@@ -359,9 +357,6 @@ constexpr auto visit_types(V&& visitor, const Ts& ... structs) {
 template<typename V>
 constexpr auto visit_ir_type(V&& visitor, IR::Format format, Axle::ViewArr<const u8> data) {
   switch(format) {
-    case IR::Format::opaque: {
-      return std::forward<V>(visitor).template operator()<InvalidTypeVisit>();
-    }
     case IR::Format::uint8: {
       return std::forward<V>(visitor).template operator()<u8>(data);
     }
@@ -386,11 +381,10 @@ constexpr auto visit_ir_type(V&& visitor, IR::Format format, Axle::ViewArr<const
     case IR::Format::sint64: {
       return std::forward<V>(visitor).template operator()<i64>(data);
     }
-    case IR::Format::pointer: {
-      return std::forward<V>(visitor).template operator()<InvalidTypeVisit>();
-    }
+    case IR::Format::opaque:
+    case IR::Format::pointer:
     case IR::Format::slice: {
-      return std::forward<V>(visitor).template operator()<InvalidTypeVisit>();
+      INVALID_CODE_PATH("TODO: dont yet support visiting these");
     }
   }
 

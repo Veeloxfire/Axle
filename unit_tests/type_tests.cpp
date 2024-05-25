@@ -224,10 +224,6 @@ namespace  {
 struct TypeVisitor {
   AxleTest::TestErrors* test_errors;
 
-  void operator()(InvalidTypeVisit) const {
-    test_errors->report_error("Had invalid type visit");
-  }
-
   void operator()(
       const auto* t_type,
       const auto* t_void,
@@ -237,11 +233,6 @@ struct TypeVisitor {
     TEST_EQ(true, (std::same_as<decltype(t_void), const VoidStructure*>));
     TEST_EQ(true, (std::same_as<decltype(t_u8), const IntegerStructure*>));
   }
-
-  void operator()(
-      const TypeStructure* t_type,
-      const VoidStructure* t_void,
-      const IntegerStructure* t_u8) const {}
 };
 }
 
