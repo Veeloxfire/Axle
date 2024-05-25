@@ -43,6 +43,12 @@ target_sources(AxleCompiler PRIVATE
   FILES ${AxleHeaders}
 )
 
+if(MSVC)
+  target_compile_options(AxleCompiler PUBLIC /W4 /WX /permissive-)
+else()
+  target_compile_options(AxleCompiler PUBLIC -Wall -Wextra -Wpedantic -Werror)
+endif()
+
 target_link_libraries(AxleCompiler PUBLIC "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
 target_include_directories(AxleCompiler PUBLIC ${AxleINCLUDE})
 target_include_directories(AxleCompiler PUBLIC "${PROJECT_SOURCE_DIR}/src" ${AxleUtilINCLUDE})
