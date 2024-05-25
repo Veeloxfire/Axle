@@ -659,7 +659,7 @@ TC_STAGE(SLICE_INDEX, 1) {
     typer->push_node(index_expr->index_second, comp_thread->builtin_types->t_u64);
   }
   
-  return next_stage(INDEX_EXPR_stage_2);
+  return next_stage(SLICE_INDEX_stage_2);
 }
 
 TC_STAGE(TUPLE_LIT, known_type) {
