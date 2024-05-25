@@ -55,11 +55,13 @@ enum struct AST_TYPE : u8 {
 
 constexpr Axle::ViewArr<const char> ast_type_string(AST_TYPE ty) {
   switch (ty) {
+    case AST_TYPE::INVALID: return Axle::lit_view_arr("INVALID");
 #define MOD(n) case AST_TYPE :: n : return Axle::lit_view_arr(#n);
     AST_TYPE_MOD;
 #undef MOD
-    default: return Axle::lit_view_arr("invalid-ast-type");
   }
+
+  INVALID_CODE_PATH("Invalid ast type");
 }
 
 struct AST {
@@ -213,8 +215,8 @@ namespace Axle::Format {
         case ASTIdentifier::LOCAL: res.load_string_lit("LOCAL"); return;
         case ASTIdentifier::GLOBAL: res.load_string_lit("GLOBAL"); return;
       }
-
-      return res.load_string_lit("INVALID");
+      
+      INVALID_CODE_PATH("Invalid Identifier Type");
     }
   };
 }
@@ -432,8 +434,10 @@ constexpr void reduce_category(AST_LOCAL low, AST_LOCAL high) {
         case VALUE_CATEGORY::VARIABLE_MUTABLE:
           return;
       }
-      return;
+
+
+      INVALID_CODE_PATH("Invalid value category");
   }
 
-  return;
+  INVALID_CODE_PATH("Invalid value category");
 }

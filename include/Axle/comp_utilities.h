@@ -99,7 +99,7 @@ constexpr Axle::ViewArr<const char> error_code_string(ERROR_CODE c) {
 #undef MOD
   }
 
-  return Axle::lit_view_arr("Invalid code");
+  INVALID_CODE_PATH("Invalid error code");
 }
 
 namespace Axle::Format {
@@ -148,7 +148,7 @@ namespace BINARY_OP_STRING {
 #undef MODIFY
     }
 
-    return Axle::lit_view_arr("UNKNOWN OPERATOR");
+    INVALID_CODE_PATH("Invalid binary operator");
   }
 }
 
@@ -176,10 +176,9 @@ namespace UNARY_OP_STRING {
 #undef MODIFY
     }
 
-    return Axle::lit_view_arr("UNKNOWN OPERATOR");
+    INVALID_CODE_PATH("Invalid unary operator");
   }
 }
-
 
 #define INTRINSIC_MODS \
   MOD(import) \

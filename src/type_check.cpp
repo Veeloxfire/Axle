@@ -2520,9 +2520,10 @@ static TypeCheckStageFn get_first_stage(AST_TYPE type) {
 #define MOD(ty) case AST_TYPE:: ty : return ty ## _stage_1;
       AST_TYPE_MOD;
 #undef MOD
-    case AST_TYPE::INVALID:
-    default: INVALID_CODE_PATH("Invalid node type"); return nullptr;
+    case AST_TYPE::INVALID: INVALID_CODE_PATH("Invalid node type");
   }
+
+  INVALID_CODE_PATH("Invalid node type");
 }
 
 void Typer::push_node(AST_LOCAL loc, Type infer) {

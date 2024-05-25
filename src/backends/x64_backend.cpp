@@ -146,9 +146,9 @@ namespace X64 {
       case 2: return SIB_SCALE_2;
       case 4: return SIB_SCALE_4;
       case 8: return SIB_SCALE_8;
-      default:
-              return 0;
     }
+
+    INVALID_CODE_PATH("Invalid SIB scale");
   }
 
   static constexpr uint8_t sib_i_b(uint8_t i, uint8_t b) {
@@ -3885,8 +3885,8 @@ constexpr bool temp_needs_memory(const IR::SSATemp& temp) {
   if (temp.type.size() > 8) return true;
 
   switch (temp.type.structure->type) {
-    case STRUCTURE_TYPE::VOID: INVALID_CODE_PATH("Cannot have void value"); return false;
-    case STRUCTURE_TYPE::TYPE: INVALID_CODE_PATH("Cannot have type value at runtime"); return false;
+    case STRUCTURE_TYPE::VOID: INVALID_CODE_PATH("Cannot have void value");
+    case STRUCTURE_TYPE::TYPE: INVALID_CODE_PATH("Cannot have type value at runtime");
     case STRUCTURE_TYPE::INTEGER: return false;
     case STRUCTURE_TYPE::POINTER: return false;
     case STRUCTURE_TYPE::ENUM: return false;
@@ -3896,10 +3896,10 @@ constexpr bool temp_needs_memory(const IR::SSATemp& temp) {
     case STRUCTURE_TYPE::FIXED_ARRAY: return true;
     case STRUCTURE_TYPE::TUPLE: return true;
 
-    case STRUCTURE_TYPE::LAMBDA: INVALID_CODE_PATH("Cannot have lambda value at runtime"); return false;
+    case STRUCTURE_TYPE::LAMBDA: INVALID_CODE_PATH("Cannot have lambda value at runtime");
   }
 
-  return false;
+  INVALID_CODE_PATH("Unexpected structure type");
 }
 
 ResolvedMappings resolve_values(CompilerGlobals* comp,

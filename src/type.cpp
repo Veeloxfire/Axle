@@ -497,34 +497,33 @@ Structures::~Structures() {
         case STRUCTURE_TYPE::TYPE:
         case STRUCTURE_TYPE::VOID:
           INVALID_CODE_PATH("Should not find any of these");
-          break;
-
+          continue;
         case STRUCTURE_TYPE::FIXED_ARRAY:
           array_structures.free((const ArrayStructure*)s);
-          break;
+          continue;
         case STRUCTURE_TYPE::POINTER:
           pointer_structures.free((const PointerStructure*)s);
-          break;
+          continue;
         case STRUCTURE_TYPE::SLICE:
           slice_structures.free((const SliceStructure*)s);
-          break;
+          continue;
         case STRUCTURE_TYPE::INTEGER:
           int_structures.free((const IntegerStructure*)s);
-          break;
+          continue;
         case STRUCTURE_TYPE::COMPOSITE:
           composite_structures.free((const CompositeStructure*)s);
-          break;
+          continue;
         case STRUCTURE_TYPE::ENUM:
           enum_structures.free((const EnumStructure*)s);
-          break;
+          continue;
         case STRUCTURE_TYPE::TUPLE:
           tuple_structures.free((const TupleStructure*)s);
-          break;
+          continue;
         case STRUCTURE_TYPE::LAMBDA:
           lambda_structures.free((const SignatureStructure*)s);
-          break;
-        default: INVALID_CODE_PATH("All structures should be covered");
+          continue;
       }
+      INVALID_CODE_PATH("All structures should be covered");
     }
   }
 
