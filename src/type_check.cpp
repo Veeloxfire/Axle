@@ -1251,6 +1251,19 @@ TC_STAGE(CAST, 3) {
 
         break;
       }
+    case STRUCTURE_TYPE::SLICE: {
+        const auto* from_slice = cast_from.unchecked_base<SliceStructure>();
+        if (cast_to.struct_type() == STRUCTURE_TYPE::SLICE) {
+          const auto* to_slice = cast_to.unchecked_base<SliceStructure>();
+
+          if (TYPE_TESTS::match_sizes(from_slice->base, to_slice->base)) {
+            cast->emit = CASTS::no_op;
+            return FINISHED;
+          }
+        }
+
+        break;
+      }
     case STRUCTURE_TYPE::VOID: {
         comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, cast->node_span,
                                   "Cannot cast '{}' to any type\n"
