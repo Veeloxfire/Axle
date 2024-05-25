@@ -65,11 +65,13 @@ add_subdirectory(src)
 
 option(BUILD_SANDBOX "Build sandbox" OFF)
 if(BUILD_SANDBOX)
- add_subdirectory(sandbox)
+  message(NOTICE "Sandbox Enabled")
+  add_subdirectory(sandbox)
 endif()
 
 option(BUILD_TESTS "Build tests" OFF)
 if(BUILD_TESTS)
+  message(NOTICE "Tests Enabled")
   set(TesterINCLUDE "${PROJECT_SOURCE_DIR}/lib_include" CACHE STRING "" FORCE)
   set(TesterBIN "${PROJECT_SOURCE_DIR}/lib" CACHE STRING "" FORCE)
 
