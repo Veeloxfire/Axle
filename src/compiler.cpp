@@ -919,6 +919,11 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             return Eval::no_value();
           }
         }
+        else if (st == STRUCTURE_TYPE::SLICE) {
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                                    "Slices not implemented yet");
+          return Eval::no_value();
+        }
         else {
           comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
                                     "Type \"{}\" does not support member access", m_base->node_type.name);

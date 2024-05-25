@@ -544,6 +544,34 @@ TC_STAGE(MEMBER_ACCESS, 2) {
       return FINISHED;
     }
   }
+  else if (struct_type == STRUCTURE_TYPE::SLICE) {
+    const Type& slice_t = base->node_type;
+
+    const SliceStructure* as = slice_t.unchecked_base<SliceStructure>();
+
+    if (member->name == comp_thread->important_names.ptr) {
+      {
+        Axle::AtomicLock<Structures> structures = {};
+        Axle::AtomicLock<Axle::StringInterner> strings = {};
+        comp->services.get_multiple(&structures, &strings);
+        member->node_type = to_type(find_or_make_pointer_structure(structures._ptr,
+                                                                   strings._ptr,
+                                                                   as->base));
+      }
+
+      reduce_category(member, base);
+    }
+    else  if (member->name == comp_thread->important_names.len) {
+      member->node_type = comp_thread->builtin_types->t_u64;
+      reduce_category(member, base);
+    }
+    else {
+      comp_thread->report_error(ERROR_CODE::NAME_ERROR, member->node_span,
+                                "Type '{}' has no member '{}'",
+                                slice_t.name, member->name);
+      return FINISHED;
+    }
+  }
   else {
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, member->node_span,
                               "Type '{}' does not have any members (it is not a composite type)",
