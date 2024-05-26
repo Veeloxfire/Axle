@@ -127,6 +127,16 @@ TEST_FUNCTION(Eval, value_creation) {
     TEST_EQ(static_cast<const Axle::InternString*>(nullptr), rv.type.name);
   }
 
+  {
+    const u64 u = 0;
+    Eval::RuntimeValue v = Eval::as_constant((const u8*)&u, builtin_types.t_u64);
+
+    TEST_EQ(Eval::RVT::Constant, v.rvt);
+    TEST_EQ(builtin_types.t_u64, v.type);
+    TEST_EQ(builtin_types.t_u64, v.effective_type());
+    TEST_EQ((const u8*)&u, v.constant);
+  }
+
   IR::ValueIndex id1 = ir.new_temporary(builtin_types.t_u64, {});
   TEST_EQ(static_cast<u32>(0), id1.index);
 
@@ -151,5 +161,77 @@ TEST_FUNCTION(Eval, value_creation) {
     TEST_EQ(builtin_types.t_u64, v.effective_type());
     TEST_EQ(id1, v.value.index);
     TEST_EQ(static_cast<u32>(0), v.value.offset);
+  }
+}
+
+TEST_FUNCTION(Eval, constant_subobject) {
+  SETUP_TEST_TYPES(strings, structures, builtin_types);
+  SETUP_TEST_IR(ir, start_block);
+
+  const PointerStructure* const u64_ps_s = STRUCTS::new_pointer_structure(&structures, &strings, builtin_types.t_u64);
+
+  const Type u64_ps_t = to_type(u64_ps_s);
+
+  const PointerStructure* const u32_ps_s = STRUCTS::new_pointer_structure(&structures, &strings, builtin_types.t_u32);
+
+  const Type u32_ps_t = to_type(u32_ps_s);
+
+  IR::ValueIndex id1 = ir.new_temporary(builtin_types.t_u64, {});
+
+  TEST_EQ(static_cast<u32>(0), id1.index);
+  Eval::RuntimeValue v = Eval::as_direct(id1, builtin_types.t_u64);
+
+  TEST_EQ(Eval::RVT::Direct, v.rvt);
+  TEST_EQ(builtin_types.t_u64, v.type);
+  TEST_EQ(builtin_types.t_u64, v.effective_type());
+  TEST_EQ(id1, v.value.index);
+  TEST_EQ(static_cast<u32>(0), v.value.offset);
+
+  {
+    Eval::RuntimeValue v_sub = Eval::sub_object(&ir, v, 0, u64_ps_t, builtin_types.t_u64);
+
+    TEST_EQ(Eval::RVT::Direct, v_sub.rvt);
+    TEST_EQ(builtin_types.t_u64, v_sub.type);
+    TEST_EQ(builtin_types.t_u64, v_sub.effective_type());
+    TEST_EQ(v.value.index, v_sub.value.index);
+    TEST_EQ(static_cast<u32>(0), v_sub.value.offset);
+  }
+
+  {
+    Eval::RuntimeValue v_sub = Eval::sub_object(&ir, v, 4, u32_ps_t, builtin_types.t_u64);
+
+    TEST_EQ(Eval::RVT::Direct, v_sub.rvt);
+    TEST_EQ(builtin_types.t_u32, v_sub.type);
+    TEST_EQ(builtin_types.t_u32, v_sub.effective_type());
+    TEST_EQ(v.value.index, v_sub.value.index);
+    TEST_EQ(static_cast<u32>(4), v_sub.value.offset);
+  }
+
+  v = Eval::as_indirect(id1, u64_ps_t);
+
+  TEST_EQ(Eval::RVT::Indirect, v.rvt);
+  TEST_EQ(u64_ps_t, v.type);
+  TEST_EQ(builtin_types.t_u64, v.effective_type());
+  TEST_EQ(id1, v.value.index);
+  TEST_EQ(static_cast<u32>(0), v.value.offset);
+
+  {
+    Eval::RuntimeValue v_sub = Eval::sub_object(&ir, v, 0, u64_ps_t, builtin_types.t_u64);
+
+    TEST_EQ(Eval::RVT::Indirect, v_sub.rvt);
+    TEST_EQ(u64_ps_t, v_sub.type);
+    TEST_EQ(builtin_types.t_u64, v_sub.effective_type());
+    TEST_EQ(v.value.index, v_sub.value.index);
+    TEST_EQ(static_cast<u32>(0), v_sub.value.offset);
+  }
+
+  {
+    Eval::RuntimeValue v_sub = Eval::sub_object(&ir, v, 4, u32_ps_t, builtin_types.t_u64);
+
+    TEST_EQ(Eval::RVT::Indirect, v_sub.rvt);
+    TEST_EQ(u32_ps_t, v_sub.type);
+    TEST_EQ(builtin_types.t_u32, v_sub.effective_type());
+    TEST_NEQ(v.value.index, v_sub.value.index);
+    TEST_EQ(static_cast<u32>(0), v_sub.value.offset);
   }
 }
