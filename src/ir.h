@@ -434,6 +434,34 @@ struct PrintFuncSignature {
 
 namespace Axle::Format {
   template<>
+  struct FormatArg<IR::ValueIndex> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const IR::ValueIndex vi) {
+      res.load_string_lit("IR::ValueIndex(");
+      FormatArg<decltype(vi.index)>::load_string(res, vi.index);
+      res.load_string_lit(")");
+      return;
+    }
+  };
+
+  template<>
+  struct FormatArg<IR::ControlFlowType> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, IR::ControlFlowType ct) {
+      switch (ct) {
+        case IR::ControlFlowType::Start: return res.load_string_lit("ControlFlowType::Start");
+        case IR::ControlFlowType::End: return res.load_string_lit("ControlFlowType::End");
+        case IR::ControlFlowType::Return: return res.load_string_lit("ControlFlowType::Return");
+        case IR::ControlFlowType::Inline: return res.load_string_lit("ControlFlowType::Inline");
+        case IR::ControlFlowType::Split: return res.load_string_lit("ControlFlowType::Split");
+        case IR::ControlFlowType::Merge: return res.load_string_lit("ControlFlowType::Merge");
+      }
+
+      INVALID_CODE_PATH("Invalid control flow type");
+    }
+  };
+
+  template<>
   struct FormatArg<IR::OpCode> {
     template<Formatter F>
     constexpr static void load_string(F& res, IR::OpCode op) {
@@ -552,6 +580,22 @@ namespace CASTS {
   Eval::RuntimeValue take_address(IR::IRStore* const ir,
                                   const Type& to,
                                   const Eval::RuntimeValue& val);
+}
+
+namespace Axle::Format {
+  template<>
+  struct FormatArg<Eval::RVT> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, Eval::RVT rvt) {
+      switch (rvt) {
+        case Eval::RVT::Constant: return res.load_string_lit("RVT::Constant");
+        case Eval::RVT::Direct: return res.load_string_lit("RVT::Direct");
+        case Eval::RVT::Indirect: return res.load_string_lit("RVT::Indirect");
+      }
+
+      INVALID_CODE_PATH("Invalid rvt type");
+    }
+  };
 }
 
 namespace VM {

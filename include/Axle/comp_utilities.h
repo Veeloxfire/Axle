@@ -272,6 +272,64 @@ namespace IR {
   struct IRStore;
 }
 
+namespace Axle::Format {
+  template<>
+  struct FormatArg<IR::Format> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, IR::Format f) {
+      switch (f) {
+        case IR::Format::opaque: return res.load_string_lit("opaque");
+        case IR::Format::uint8: return res.load_string_lit("uint8");
+        case IR::Format::sint8: return res.load_string_lit("sint8");
+        case IR::Format::uint16: return res.load_string_lit("uint16");
+        case IR::Format::sint16: return res.load_string_lit("sint16");
+        case IR::Format::uint32: return res.load_string_lit("uint32");
+        case IR::Format::sint32: return res.load_string_lit("sint32");
+        case IR::Format::uint64: return res.load_string_lit("uint64");
+        case IR::Format::sint64: return res.load_string_lit("sint64");
+        case IR::Format::pointer: return res.load_string_lit("pointer");
+        case IR::Format::slice: return res.load_string_lit("slice");
+      }
+
+      INVALID_CODE_PATH("Invalid format type");
+    }
+  };
+
+  template<>
+  struct FormatArg<IR::LocalLabel> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const IR::LocalLabel lb) {
+      if(lb == IR::NULL_LOCAL_LABEL) {
+        res.load_string_lit("IR::NULL_LOCAL_LABEL");
+        return;
+      }
+      else {
+        res.load_string_lit("IR::LocalLabel(");
+        FormatArg<decltype(lb.label)>::load_string(res, lb.label);
+        res.load_string_lit(")");
+        return;
+      }
+    }
+  };
+
+  template<>
+  struct FormatArg<IR::GlobalLabel> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, const IR::GlobalLabel lb) {
+      if(lb == IR::NULL_GLOBAL_LABEL) {
+        res.load_string_lit("IR::NULL_GLOBAL_LABEL");
+        return;
+      }
+      else {
+        res.load_string_lit("IR::GlobalLabel(");
+        FormatArg<decltype(lb.label)>::load_string(res, lb.label);
+        res.load_string_lit(")");
+        return;
+      }
+    }
+  };
+}
+
 enum struct System : u8 {
   X86_64,
 };

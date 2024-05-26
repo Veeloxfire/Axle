@@ -52,6 +52,7 @@ target_sources(UnitTestsClient PRIVATE
   "${PROJECT_SOURCE_DIR}/test_client_main.cpp"
 
   "${PROJECT_SOURCE_DIR}/errors_tests.cpp"
+  "${PROJECT_SOURCE_DIR}/ir_tests.cpp"
   "${PROJECT_SOURCE_DIR}/names_tests.cpp"
   "${PROJECT_SOURCE_DIR}/type_tests.cpp"
   "${PROJECT_SOURCE_DIR}/vm_tests.cpp"

@@ -85,6 +85,7 @@ namespace IR {
     ASSERT(st.child != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
+    ASSERT(cb->cf_type == ControlFlowType(0));
     cb->cf_type = st.CF_TYPE;
     cb->cf_start = st;
   }
@@ -93,6 +94,7 @@ namespace IR {
     ASSERT(e.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
+    ASSERT(cb->cf_type == ControlFlowType(0));
     cb->cf_type = e.CF_TYPE;
     cb->cf_end = e;
   }
@@ -100,6 +102,7 @@ namespace IR {
     ASSERT(r.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
+    ASSERT(cb->cf_type == ControlFlowType(0));
     cb->cf_type = r.CF_TYPE;
     cb->cf_return = r;
   }
@@ -108,6 +111,7 @@ namespace IR {
     ASSERT(i.child != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
+    ASSERT(cb->cf_type == ControlFlowType(0));
     cb->cf_type = i.CF_TYPE;
     cb->cf_inline = i;
   }
@@ -117,6 +121,7 @@ namespace IR {
     ASSERT(s.false_branch != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
+    ASSERT(cb->cf_type == ControlFlowType(0));
     cb->cf_type = s.CF_TYPE;
     cb->cf_split = s;
   }
@@ -126,6 +131,7 @@ namespace IR {
     ASSERT(m.child != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
+    ASSERT(cb->cf_type == ControlFlowType(0));
     cb->cf_type = m.CF_TYPE;
     cb->cf_merge = m;
   }
@@ -924,9 +930,15 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
 
 Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Eval::RuntimeValue& offset, const Type& ptr_type) {
+  const Type u64_type = offset.type;
+  ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
+  ASSERT(u64_type.structure->size == 8);
+  ASSERT(!u64_type.unchecked_base<IntegerStructure>()->is_signed);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
   const auto* pt = ptr_type.unchecked_base<PointerStructure>();
   const Type& base = pt->base;
+
+  ASSERT(val.effective_type().size() >= base.size());
 
   if (offset.rvt == RVT::Constant) {
     //Special cases for a constant sub-object
@@ -996,20 +1008,8 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
   return Eval::as_indirect(v, ptr_type);
 }
 
-const char* format_name(IR::Format f) {
-  switch (f) {
-    case IR::Format::opaque: return "opaque";
-    case IR::Format::uint8: return "uint8";
-    case IR::Format::sint8: return "sint8";
-    case IR::Format::uint16: return "uint16";
-    case IR::Format::sint16: return "sint16";
-    case IR::Format::uint32: return "uint32";
-    case IR::Format::sint32: return "sint32";
-    case IR::Format::uint64: return "uint64";
-    case IR::Format::sint64: return "sint64";
   }
 
-  return "[invalid format]";
 }
 
 void print_value(const IR::V_ARG& arg) {

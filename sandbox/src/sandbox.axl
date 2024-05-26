@@ -1,12 +1,12 @@
-hash :: (ptr: *u8, len: u64) -> u64 {
+hash :: (slice: []u8) -> u64 {
   hash_v : u64 = 0xcbf29ce484222325;
+  i: u64 = 0;
 
-  while(len > 0) {
+  while(i < slice.len) {
     hash_v = hash_v * 0x100000001b3;
-    hash_v = hash_v ^ cast(u64, *ptr);
+    hash_v = hash_v ^ cast(u64, slice[i]);
 
-    ptr = ptr + 1;
-    len = len - 1;
+    i = i + 1;
   }
 
   return hash_v;
@@ -15,5 +15,5 @@ hash :: (ptr: *u8, len: u64) -> u64 {
 main :: () -> u64 {
   arr :=  "hello";
 
-  return hash(cast(*u8, arr.ptr), 5);
+  return hash(cast([]u8, arr[]));
 }

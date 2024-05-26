@@ -13,8 +13,6 @@ void run_test_for_integer(AxleTest::TestErrors* test_errors,
   ir.signature = builtin_types->t_void_call.unchecked_base<SignatureStructure>();
   ir.global_label = { 1 };
 
-  
-
   IR::LocalLabel start_cf = ir.new_control_block();
   IR::LocalLabel end_cf = ir.new_control_block();
   ir.start_control_block(start_cf);
@@ -129,7 +127,7 @@ void run_test_for_integer(AxleTest::TestErrors* test_errors,
   }
 }
 
-TEST_FUNCTION(IR, basic_math) {
+TEST_FUNCTION(VM, basic_math) {
   //Setup
   Axle::StringInterner strings = {};
   Structures structures = {8,8};
