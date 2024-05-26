@@ -548,6 +548,11 @@ namespace Eval {
                           const RuntimeValue& offset,
                           const Type& ptr_type);
 
+  RuntimeValue sub_object(IR::IRStore* const ir,
+                          const RuntimeValue& val,
+                          u64 fixed_offset,
+                          const Type& ptr_type,
+                          const Type& u64_type);
 
   RuntimeValue addrof(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type);
   RuntimeValue deref(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type);

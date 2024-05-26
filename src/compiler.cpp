@@ -877,13 +877,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
           const Type ptr_type = generate_pointer_type(comp, member_e->node_type);
 
-          u64* data = comp->new_constant<u64>();
-          u64 val = member_e->offset;
-          Axle::memcpy_ts(data, 1, &val, 1);
-
-          const auto c = Eval::as_constant((const u8*)data, comp->builtin_types->t_u64);
-
-          return Eval::sub_object(builder->ir, obj, c, ptr_type);
+          return Eval::sub_object(builder->ir, obj, member_e->offset,
+                                  ptr_type, comp->builtin_types->t_u64);
         }
         else if (st == STRUCTURE_TYPE::FIXED_ARRAY) {
           if (member_e->name == comp->important_names.ptr) {
@@ -920,9 +915,38 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           }
         }
         else if (st == STRUCTURE_TYPE::SLICE) {
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                                    "Slices not implemented yet");
-          return Eval::no_value();
+          Eval::RuntimeValue obj = compile_bytecode(comp, comp_thread,
+                                                    builder, eval.forward(m_base));
+          if (comp_thread->is_panic()) {
+            return Eval::no_value();
+          }
+
+          if (member_e->name == comp->important_names.ptr) {
+            Type ptr_type = member_e->node_type;
+            ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
+
+            const Type indirect_type = generate_pointer_type(comp, ptr_type);
+
+            const u64 val = 0;
+            return Eval::sub_object(builder->ir, obj, val,
+                                    indirect_type, comp->builtin_types->t_u64);
+          }
+          else if (member_e->name == comp->important_names.len) {
+            Type len_type = member_e->node_type;
+            ASSERT(len_type == comp->builtin_types->t_u64);
+
+            const Type indirect_type = generate_pointer_type(comp, len_type);
+
+            const u64 offset = Axle::ceil_to_n(comp->platform_interface.ptr_size,
+                static_cast<usize>(comp->builtin_types->t_u64.structure->alignment));
+            return Eval::sub_object(builder->ir, obj, offset,
+                                    indirect_type, comp->builtin_types->t_u64);
+          }
+          else {
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+                                      "No semantics supported for the member \"{}\" on an array", member_e->name);
+            return Eval::no_value();
+          }
         }
         else {
           comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,

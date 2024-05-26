@@ -391,8 +391,6 @@ constexpr auto visit_ir_type(V&& visitor, IR::Format format, Axle::ViewArr<const
   INVALID_CODE_PATH("Unexpected IR type");
 }
 
-
-
 struct PrintSignatureType {
   const SignatureStructure* sig;
 };
@@ -470,7 +468,8 @@ struct Structures {
 
   constexpr Structures(usize ptr_s, usize ptr_a) :
     pointer_size{ptr_s}, pointer_align{ptr_a},
-    slice_size{ptr_s * 2}, slice_align{ptr_a}
+    slice_size{Axle::ceil_to_n<usize>(ptr_s, 8)},
+    slice_align{Axle::larger<usize>(ptr_a, 8)}
   {}
 
   ~Structures();

@@ -1008,8 +1008,60 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
   return Eval::as_indirect(v, ptr_type);
 }
 
+Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
+                                    const Eval::RuntimeValue& val,
+                                    u64 offset,
+                                    const Type& ptr_type,
+                                    const Type& u64_type) {
+  ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
+  ASSERT(u64_type.structure->size == 8);
+  ASSERT(!u64_type.unchecked_base<IntegerStructure>()->is_signed);
+
+  ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
+  const auto* pt = ptr_type.unchecked_base<PointerStructure>();
+  const Type& base = pt->base;
+
+  ASSERT(val.effective_type().size() >= base.size());
+
+  switch (val.rvt) {
+    case RVT::Constant: {
+      return Eval::as_constant(val.constant + offset, base);
+    }
+
+    case RVT::Direct: {
+      Eval::RuntimeValue res = val;
+      res.type = base;
+      res.value.offset += (u32)offset;
+
+      return res;
+    }
+    case RVT::Indirect: {
+      if(offset == 0) {
+        Eval::RuntimeValue res = val;
+        res.type = ptr_type;
+
+        return res;
+      }
+      else {
+        const IR::ValueIndex v = ir->new_temporary(ptr_type, {});
+
+        const RuntimeValue offset_v = Eval::as_constant((const u8*)&offset, u64_type);
+
+        const IR::V_ARG offset_arg = Eval::load_v_arg(ir, offset_v);
+
+        IR::Types::Add add = {};
+        add.left = IR::v_arg(val.value.index, val.value.offset, val.type);
+        add.right = offset_arg;
+        add.to = IR::v_arg(v, 0, ptr_type);
+
+        IR::Emit::Add(ir->current_bytecode(), add);
+
+        return Eval::as_indirect(v, ptr_type);
+      }
+    }
   }
 
+  INVALID_CODE_PATH("Invalid RVT type");
 }
 
 void print_value(const IR::V_ARG& arg) {
