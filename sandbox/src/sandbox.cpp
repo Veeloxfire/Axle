@@ -16,7 +16,7 @@ struct ArgErrors {
   bool errored;
 
   template<typename ... T>
-  constexpr void report_error(const Axle::Format::FormatString& fstring, const T& ...ts) {
+  constexpr void report_error(const Axle::Format::FormatString<T...>& fstring, const T& ...ts) {
     IO::err_format(fstring, ts...);
     IO::err_print('\n');
     errored = true;
@@ -30,6 +30,7 @@ int main(int argc, const char** args) {
     Tracing::end_default_tracing_thread();
   };
 #endif
+  STACKTRACE_FUNCTION();
 
   Axle::ViewArr<const char> out_folder;
   Axle::ViewArr<const char> out_name;

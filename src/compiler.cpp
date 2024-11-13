@@ -145,7 +145,7 @@ template<typename ... T>
 void set_unfound_name(CompilerThread* const comp_thread,
                       UnknownName&& name,
                       ERROR_CODE code, const Span& span,
-                      const Format::FormatString& f_message, T&& ... ts) {
+                      const Format::FormatString<T...>& f_message, const T& ... ts) {
 
   ASSERT(name.ident != nullptr);
 
@@ -156,7 +156,7 @@ void set_unfound_name(CompilerThread* const comp_thread,
   dep->dependency = nullptr;
   dep->as_error.type = code;
   dep->as_error.span = span;
-  dep->as_error.message = format(f_message, std::forward<T>(ts)...);
+  dep->as_error.message = format(f_message, ts...);
 }
 
 Local* DependencyChecker::get_local(const Axle::InternString* name) {

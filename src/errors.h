@@ -28,11 +28,8 @@ struct Errors {
   Axle::Array<ErrorMessage> error_messages ={};
 
   template<typename ... T>
-  void report_error(ERROR_CODE code, const Span& span, const Axle::Format::FormatString& f_message, const T& ... ts) {
+  void report_error(ERROR_CODE code, const Span& span, const Axle::Format::FormatString<T...>& f_message, const T& ... ts) {
     panic = true;
-
-    ASSERT(f_message.arr != nullptr);
-    ASSERT(f_message.len != 0);
 
     Axle::OwnedArr<const char> message = Axle::format(f_message, ts...);
     ASSERT(message.data != nullptr);
