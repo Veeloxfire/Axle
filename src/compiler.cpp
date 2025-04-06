@@ -2860,7 +2860,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       Format::format_to(error, "- Compile Export: {}\n", comp->pipelines.comp_export.size);
       comp->pipelines.comp_export.mutex.release();
 
-      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, error.take());
+      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, std::move(error).bake());
       comp->global_panic.set();
       comp->global_errors_mutex.acquire();
       comp->global_errors.concat(std::move(comp_thread->errors.error_messages));
@@ -3144,7 +3144,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
         Format::format_to(error_message, "No calling conventions available");
       }
 
-      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, error_message.take());
+      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, std::move(error_message).bake());
       return;
     }
     else {

@@ -352,13 +352,13 @@ void write_pe_file(CompilerThread* comp_thread,
       }
     }
 
-    Axle::sort_range(dyn_imports.mut_begin(), dyn_imports.mut_end(),
+    Axle::sort_view(Axle::view_arr(dyn_imports),
                [](const DynImport& left, const DynImport& right) {
       if (left.library != right.library) {
-        return left.library < right.library;
+        return left.library <=> right.library;
       }
       else {
-        return left.function < right.function;
+        return left.function <=> right.function;
       }
     });
 
@@ -576,8 +576,10 @@ void write_pe_file(CompilerThread* comp_thread,
       }
     }
 
-    Axle::sort_range(sorted_functions.mut_begin(), sorted_functions.mut_end(),
-               [](const Backend::FunctionMetadata * l, const Backend::FunctionMetadata * r) { return l->code_start < r->code_start; });
+    Axle::sort_view(Axle::view_arr(sorted_functions),
+      [](const Backend::FunctionMetadata * l, const Backend::FunctionMetadata * r) {
+        return l->code_start <=> r->code_start;
+      });
 
     auto sf_i = sorted_functions.begin();
     const auto sf_end = sorted_functions.end();
