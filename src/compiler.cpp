@@ -2400,7 +2400,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
       if (file_loader->unparsed_files.size > 0) {
         TELEMETRY_SCOPE("Parse Files");
-        thead_doing_work(comp, comp_thread);
+        thread_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
           IO::format("Work | Parsing {} Files \n", file_loader->unparsed_files.size);
@@ -2429,7 +2429,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       const IR::IRStore* ir = nullptr;
       if (comp->finished_irs.try_pop_front(&ir)) {
         TELEMETRY_SCOPE("Emit IR");
-        thead_doing_work(comp, comp_thread);
+        thread_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
           IO::format("Work | Output Finished IR\n");
@@ -2453,7 +2453,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.comp_import.try_pop_front(&unit)) {
     TELEMETRY_SCOPE("Import");
-    thead_doing_work(comp, comp_thread);
+    thread_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Import {}\n", unit->id);
     }
@@ -2483,7 +2483,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.comp_body.try_pop_front(&unit)) {
     TELEMETRY_SCOPE("Compile Lambda Body");
-    thead_doing_work(comp, comp_thread);
+    thread_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
       IO::format("Work | Work {}\n", unit->id);
@@ -2512,7 +2512,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.comp_global.try_pop_front(&unit)) {
     TELEMETRY_SCOPE("Emit Global");
-    thead_doing_work(comp, comp_thread);
+    thread_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Global {}\n", unit->id);
     }
@@ -2541,7 +2541,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.comp_structure.try_pop_front(&unit)) {
     TELEMETRY_SCOPE("Compile Structure");
-    thead_doing_work(comp, comp_thread);
+    thread_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Structure {}\n", unit->id);
     }
@@ -2570,7 +2570,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.comp_signature.try_pop_front(&unit)) {
     TELEMETRY_SCOPE("Compile Lambda Signature");
-    thead_doing_work(comp, comp_thread);
+    thread_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
       IO::format("Work | Signature {}\n", unit->id);
@@ -2614,7 +2614,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.comp_export.try_pop_front(&unit)) {
     TELEMETRY_SCOPE("Compile Export");
-    thead_doing_work(comp, comp_thread);
+    thread_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
       IO::format("Work | Export {}\n", unit->id);
@@ -2643,7 +2643,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.depend_check.try_pop_front(&unit)) {
     TELEMETRY_SCOPE("Depend check");
-    thead_doing_work(comp, comp_thread);
+    thread_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
       IO::format("Work | Depend Check {}\n", unit->id);
@@ -2702,7 +2702,8 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       compilation->unfound_names.names.remove_if(found_dep_l);
 
       if (num_unfound != compilation->unfound_names.names.size) {
-        thead_doing_work(comp, comp_thread);
+        thread_doing_work(comp, comp_thread);
+        return;
       }
     }
   }
@@ -2722,7 +2723,7 @@ void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_threa
 
   {//force reset
     comp_thread->doing_work = false;
-    thead_doing_work(comp, comp_thread);
+    thread_doing_work(comp, comp_thread);
   }
 
   while (!comp->is_global_panic() && (comp_thread->doing_work || comp->work_counter > 0)) {

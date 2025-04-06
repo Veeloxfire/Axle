@@ -404,7 +404,7 @@ struct CompilerThread : CompilerConstants {
   }
 };
 
-inline constexpr void thead_doing_work(CompilerGlobals* comp, CompilerThread* comp_thread) {
+inline constexpr void thread_doing_work(CompilerGlobals* comp, CompilerThread* comp_thread) {
   if (!comp_thread->doing_work) {
     comp->work_counter += 1;
     comp_thread->doing_work = true;
