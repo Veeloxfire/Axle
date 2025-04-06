@@ -191,6 +191,15 @@ bool try_read_shared(T& t, const volatile unsigned char* mem, usize size) {
 }
 
 void run_program(AxleTest::TestErrors* test_errors, const char* name, const Expected& expected, bool debugging) {
+  if (!load_shared_memory()) {
+    test_errors->report_error("Failed to load shared memory");
+  }
+  DEFER(&) {
+    if (!unload_shared_memory()) {
+      test_errors->report_error("Failed to unload shared memory");
+    }
+  };
+
   STARTUPINFOA si = {};
   ZeroMemory(&si, sizeof(si));
   si.cb = sizeof(si);

@@ -3835,7 +3835,7 @@ constexpr bool temp_needs_memory(const IR::SSATemp& temp) {
 ResolvedMappings resolve_values(CompilerGlobals* comp,
     CompilerThread* comp_thread,
     RegisterResolver* resolver,
-    const CallingConvention* convention) {
+    const CallingConvention* this_convention) {
   TELEMETRY_FUNCTION();
   const u8* const bc_start = resolver->bytecode_start;
   const u8* const bc_end = resolver->bytecode_end;
@@ -4023,9 +4023,9 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         bc = IR::Read::StartFunc(bc, bc_end, start_func);
 
         for (usize i = 0; i < start_func.n_values; ++i) {
-          ASSERT(i < convention->num_parameter_registers);//TEMP
+          ASSERT(i < this_convention->num_parameter_registers);//TEMP
 
-          new_fixed_intermediate(intermediates, expr_id, convention->parameter_registers[i]);
+          new_fixed_intermediate(intermediates, expr_id, this_convention->parameter_registers[i]);
 
           IR::V_ARG arg;
           bc += IR::deserialize(bc, bc_end - bc, arg);
@@ -4046,7 +4046,10 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
         bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
 
-        u32 call_space = convention->shadow_space_size;
+        const CallingConvention* call_convention = sig_struct->calling_convention;
+        ASSERT(call_convention == this_convention);
+
+        u32 call_space = call_convention->shadow_space_size;
 
         for (usize i = 0; i < ((usize)call.n_values - has_return); ++i) {
           IR::V_ARG arg;
@@ -4056,8 +4059,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
           VisitRes im = visit_ordered_value(values, lifetimes, resolver, arg, expr_id);
 
-          if (i < convention->num_parameter_registers) {
-            new_fixed_intermediate(intermediates, expr_id, convention->parameter_registers[i]);
+          if (i < call_convention->num_parameter_registers) {
+            new_fixed_intermediate(intermediates, expr_id, call_convention->parameter_registers[i]);
           }
           else {
             call_space += 8;
@@ -4084,7 +4087,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
           bc += IR::deserialize(bc, bc_end - bc, ret);
           [[maybe_unused]] VisitRes im = visit_ordered_value(values, lifetimes, resolver, ret, expr_id + 1);
 
-          new_fixed_intermediate(intermediates, expr_id, convention->return_register);
+          new_fixed_intermediate(intermediates, expr_id, call_convention->return_register);
 
           expr_id += 1;
         }
@@ -4275,7 +4278,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         [[maybe_unused]] auto vr = visit_ordered_value(values, lifetimes, resolver, v, expr_id);
 
         expr_id += 1;
-        new_fixed_intermediate(intermediates, expr_id, convention->return_register);
+        new_fixed_intermediate(intermediates, expr_id, this_convention->return_register);
         break;
       }
 
@@ -4290,8 +4293,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
   // Create then colour the graph
 
-  const usize number_of_registers = (usize)convention->num_volatile_registers
-    + (usize)convention->num_non_volatile_registers;
+  const usize number_of_registers = (usize)this_convention->num_volatile_registers
+    + (usize)this_convention->num_non_volatile_registers;
 
   {
     // Start off doing intermediates since we can do those easily
@@ -4332,7 +4335,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
       u32 reg_index = 0;
 
       for (; reg_index < number_of_registers; ++reg_index) {
-        u8 r = convention->all_regs_unordered[reg_index];
+        u8 r = this_convention->all_regs_unordered[reg_index];
         if ((used_regs & (1llu << (usize)r)) == 0) {
           break;
         }
@@ -4340,7 +4343,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
       ASSERT(reg_index < number_of_registers);
 
-      auto reg_id = convention->all_regs_unordered[reg_index];
+      auto reg_id = this_convention->all_regs_unordered[reg_index];
 
       i->reg = reg_id;
       i->known_reg = true;
@@ -4418,11 +4421,11 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
 
       u32 reg_index = 0;
       if (v.crosses_call) {
-        reg_index = convention->num_volatile_registers;
+        reg_index = this_convention->num_volatile_registers;
       }
 
       for (; reg_index < number_of_registers; ++reg_index) {
-        u8 r = convention->all_regs_unordered[reg_index];
+        u8 r = this_convention->all_regs_unordered[reg_index];
         ASSERT(r < 32);
         if ((used_regs & (1u << r)) == 0) {
           break;
@@ -4432,7 +4435,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
       //TODO: spill registers
       ASSERT(reg_index < number_of_registers);
 
-      auto reg_id = convention->all_regs_unordered[reg_index];
+      auto reg_id = this_convention->all_regs_unordered[reg_index];
 
       used_registers |= (1llu << reg_id);
 
@@ -4645,12 +4648,31 @@ void x64_emit_start(CompilerGlobals* comp,
   program->entry_point = entry;
   program->start_code.code_start = program->code_store.current_location().actual_location;
 
-  X64::Instruction init_stack = {};
-  X64::R rbp_r = X64::R{ X64::rbp.REG };
-  X64::R rsp_r = X64::R{ X64::rsp.REG };
-  X64::mov(init_stack, X64::R64{rsp_r}, X64::R64{rbp_r});
+  {
+    X64::Instruction init_stack = {};
+    X64::R rbp_r = X64::R{ X64::rbp.REG };
+    X64::R rsp_r = X64::R{ X64::rsp.REG };
+    X64::mov(init_stack, X64::R64{rsp_r}, X64::R64{rbp_r});
 
-  X64::append_instruction(program, init_stack);
+    X64::append_instruction(program, init_stack);
+  }
+
+  constexpr const CallingConvention* exit_process_convention =
+    &X64::CONVENTION_microsoft_x64;
+
+  constexpr u32 shadow_space = exit_process_convention->shadow_space_size;
+  static_assert(shadow_space == 32);
+  {
+    X64::Instruction stack = {};
+    X64::R rsp_r = X64::R{ X64::rsp.REG };
+    
+    static_assert(shadow_space % 16 == 0);
+    constexpr u32 stack_space = shadow_space + 8;
+    static_assert(stack_space % 16 == 8);
+    X64::sub(stack, X64::R64{rsp_r}, X64::IMM32{stack_space});
+
+    X64::append_instruction(program, stack);
+  }
 
   if (comp->build_options.debug_break_on_entry) {
     X64::Instruction trap = {};
@@ -4891,14 +4913,18 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
 
     ASSERT(temporary_counter == total_temporaries);
 
-    stack_top = Axle::ceil_to_8(stack_top);
-    if (calls) {
-      stack_top += call_space_used;
-      stack_top = Axle::ceil_to_n<u32>(stack_top, 16);//align to call alignment
-    }
   }
-
+  
   temporary_mappings.free();//Done with this. I wish there was a way to delete a variable from scope :(
+
+  stack_top = Axle::ceil_to_8(stack_top);
+  stack_top += call_space_used;
+
+  if (calls) {
+    //align to call alignment
+    stack_top = Axle::ceil_to_n<u32>(stack_top + 8, 16) - 8;
+    ASSERT(stack_top % 16 == 8);
+  }
 
   stack_top -= register_save_space;
 
@@ -5389,7 +5415,6 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
           }
 
           if (stack_top > 0) {
-
             X64::R rbp = X64::R{ convention->base_pointer_reg };
             X64::R rsp = X64::R{ convention->stack_pointer_reg };
 
@@ -5452,6 +5477,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
           break;
         }
         case IR::OpCode::Call: {
+          ASSERT((num_registers_to_save * 8 + stack_top) % 16 == 8);
+          
           IR::Types::Call call;
           bc = IR::Read::Call(bc, bc_end, call);
           ASSERT(call.values == nullptr);
@@ -5459,7 +5486,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
           const GlobalLabelInfo l_info = comp->get_label_info(call.label);
           const SignatureStructure* sig_struct = l_info.signature;
           const bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
-
+          
+          ASSERT(convention == sig_struct->calling_convention);
           ASSERT(call_space_used >= convention->shadow_space_size);
 
           for (usize i = 0; i < ((usize)call.n_values - has_return); ++i) {
