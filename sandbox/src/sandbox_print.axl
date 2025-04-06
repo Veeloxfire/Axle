@@ -1,0 +1,7 @@
+#import "io.axl";
+
+main :: () -> u64 {
+  hello :: "hello";
+  print_raw(hello.ptr, hello.len);
+  return 0;
+}

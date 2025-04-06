@@ -101,7 +101,7 @@ int main(int argc, const char** args) {
   options.build.std_lib_folder = stdlib;
   options.build.lib_folder = lib;
 
-  options.build.extra_threads = 3;
+  options.build.extra_threads = 0;
 
   options.print.ast = false;
   options.print.comptime_res = false;

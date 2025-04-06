@@ -362,8 +362,6 @@ void write_pe_file(CompilerThread* comp_thread,
       }
     });
 
-    const DynImport* const dyn_imports_start = dyn_imports.begin();
-    const DynImport* const dyn_imports_end = dyn_imports.end();
 
     struct LI {
       const Axle::InternString* lib_name;
@@ -374,24 +372,35 @@ void write_pe_file(CompilerThread* comp_thread,
     Axle::Array<LI> library_infos = {};
 
     {
-      const Axle::InternString* previous_lib = nullptr;
-      const DynImport* dyn_import_i = dyn_imports_start;
-
+      const DynImport* previous = nullptr;
       LI* li = nullptr;
 
-      for (; dyn_import_i < dyn_imports_end; dyn_import_i += 1) {
-        if (previous_lib != dyn_import_i->library) {
-          previous_lib = dyn_import_i->library;
-          library_infos.insert_uninit(1);
-          li = library_infos.back();
-          li->lib_name = dyn_import_i->library;
-          li->num_funcs = 1;
+      dyn_imports.remove_if([&](const DynImport& curr) {
+        if (previous != nullptr && previous->library == curr.library) {
+          // filter duplicates
+          if (previous->function == curr.function) {
+            return true;
+          }
+
+          li->num_funcs += 1;
+          
+          previous = &curr;
+          return false;
         }
         else {
-          li->num_funcs += 1;
+          library_infos.insert_uninit(1);
+          li = library_infos.back();
+          li->lib_name = curr.library;
+          li->num_funcs = 1;
+          
+          previous = &curr;
+          return false;
         }
-      }
+      });
     }
+
+    const DynImport* const dyn_imports_start = dyn_imports.begin();
+    const DynImport* const dyn_imports_end = dyn_imports.end();
 
 
     usize import_tables_size = 0;

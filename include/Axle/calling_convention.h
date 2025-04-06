@@ -33,6 +33,8 @@ struct CallingConvention {
 
   uint8_t shadow_space_size = 0;//bytes
 
+  uint32_t param_by_reference_size = 0;
+  
   uint64_t non_volatiles_bit_mask = 0;
   uint64_t volatiles_bit_mask = 0;
 

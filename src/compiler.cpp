@@ -606,6 +606,25 @@ static Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                            Eval::IrBuilder* const builder,
                                            const NodeEval& eval);
 
+
+static constexpr bool pass_by_reference(const CallingConvention* conv, const Structure* s) {
+  return conv->param_by_reference_size > 0
+    && conv->param_by_reference_size < s->size;
+}
+
+static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
+  const PointerStructure* ps;
+  {
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
+    comp->services.get_multiple(&structures, &strings);
+
+    ps = find_or_make_pointer_structure(structures._ptr, strings._ptr, base);
+  }
+
+  return to_type(ps);
+}
+
 static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
                                                 CompilerThread* const comp_thread,
                                                 Eval::IrBuilder* const builder,
@@ -628,6 +647,20 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
     if (comp_thread->is_panic()) {
       return Eval::no_value();
     }
+
+    if (pass_by_reference(call->sig->calling_convention, val.type.structure)) {
+      const Type ptr_type = generate_pointer_type(comp, val.type);
+      
+      IR::ValueIndex temp = ir->new_temporary(val.type, {});
+
+      IR::Types::Copy cc = {};
+      cc.from = Eval::load_v_arg(ir, val);
+      cc.to = IR::v_arg(temp, 0, val.type);
+
+      val = Eval::as_indirect(temp, ptr_type);
+    }
+
+    ASSERT(!pass_by_reference(call->sig->calling_convention, val.type.structure));
 
     IR::V_ARG v_arg = Eval::load_v_arg(ir, val);
     args.insert(v_arg);
@@ -702,19 +735,6 @@ Eval::RuntimeValue CASTS::take_address(IR::IRStore* const ir,
                                        const Eval::RuntimeValue& val) {
   ASSERT(val.type.is_valid());
   return Eval::addrof(ir, val, to);
-}
-
-static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
-  const PointerStructure* ps;
-  {
-    Axle::AtomicLock<Structures> structures = {};
-    Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
-
-    ps = find_or_make_pointer_structure(structures._ptr, strings._ptr, base);
-  }
-
-  return to_type(ps);
 }
 
 Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* builder, Global* global,
@@ -1598,7 +1618,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         Local* const local = decl->local_ptr;
 
         if (local->decl.init_value != nullptr) {
-          local->variable_id = builder->new_variable(local->decl.type, {});
+          local->variable_id = builder->new_variable(local->decl.type, {}, false);
 
           const auto var = builder->import_variable(local->variable_id, {});
 
@@ -1613,7 +1633,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
             return;
           }
 
-          local->variable_id = builder->new_variable(local->decl.type, {});
+          local->variable_id = builder->new_variable(local->decl.type, {}, false);
           const auto var = builder->import_variable(local->variable_id, {});
 
           Eval::assign(builder->ir, var, r);
@@ -1644,9 +1664,18 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
   }
 
   IR::IRStore expr_ir = {};
-  expr_ir.signature = comp_thread->builtin_types->t_void_call.extract_base<SignatureStructure>();
+  expr_ir.signature = comp_thread->builtin_types->t_void_call.unchecked_base<SignatureStructure>();
 
-  Eval::IrBuilder builder = start_builder(Eval::Time::CompileTime, &expr_ir);
+  Eval::IrBuilder builder;
+  {
+    Eval::StartupInfo startup = Eval::init_startup(&builder, Eval::Time::CompileTime, &expr_ir);
+
+    IR::Types::StartFunc start;
+    start.values = nullptr;
+    start.n_values = 0;
+
+    Eval::end_startup(&builder, startup, start);
+  }
 
   Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(root));
   if (comp_thread->is_panic()) {
@@ -1734,9 +1763,65 @@ static void compile_lambda_body(CompilerGlobals* comp,
 
     ASSERT(root->sig->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
     ASTFuncSig* func_sig = static_cast<ASTFuncSig*>(root->sig);
+    
+    ASSERT(ir->signature->parameter_types.size == func_sig->parameters.count);
 
     {
-      Eval::IrBuilder builder = start_builder(Eval::Time::Runtime, ir, func_sig->parameters);
+      Eval::IrBuilder builder;
+      {
+        Eval::StartupInfo startup = Eval::init_startup(&builder, Eval::Time::Runtime, ir);
+          
+        const SignatureStructure* signature = ir->signature;
+        
+        Axle::OwnedArr<IR::V_ARG> args = Axle::new_arr<IR::V_ARG>(signature->parameter_types.size);
+
+        {
+          const Type* parameters = signature->parameter_types.begin();
+          const Type* const parameters_end = signature->parameter_types.end();
+          IR::V_ARG* va = args.mut_begin();
+
+          FOR_AST(func_sig->parameters, p) {
+            ASSERT(parameters < parameters_end);
+            ASSERT(p->node_type == *parameters);
+            ASSERT(p->ast_type == AST_TYPE::TYPED_NAME);
+            ASTTypedName* n = (ASTTypedName*)p;
+            Local* local_ptr = n->local_ptr;
+
+            const bool indirect = Eval::must_pass_type_by_reference(
+                ir->signature->calling_convention, parameters->structure);
+
+            Type p_type = *parameters;
+            if (indirect) {
+              p_type = generate_pointer_type(comp, p_type);
+            }
+
+            auto id = builder.new_variable(p_type, {}, indirect);
+            local_ptr->variable_id = id;
+            
+            Eval::RuntimeValue rv = builder.import_variable(id, {});
+
+            if (indirect) {
+              ASSERT(rv.rvt == Eval::RVT::Indirect);
+              rv.rvt = Eval::RVT::Direct;
+            }
+            else {
+              ASSERT(rv.rvt == Eval::RVT::Direct);
+            }
+
+            *va = Eval::load_v_arg(ir, rv);
+            va += 1;
+            parameters += 1;
+          }
+
+          ASSERT(parameters == parameters_end);
+        }
+
+        IR::Types::StartFunc start;
+        start.n_values = (u32)args.size;
+        start.values = args.data;
+
+        Eval::end_startup(&builder, startup, start);
+      }
 
       {
         AST_ARR arr = ((ASTBlock*)root->body)->block;
@@ -1942,7 +2027,16 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
     IR::IRStore* ir = comp->new_ir(label, sig);
 
     {
-      Eval::IrBuilder builder = Eval::start_builder(Eval::Time::Runtime, ir);
+      Eval::IrBuilder builder;
+      {
+        Eval::StartupInfo startup = Eval::init_startup(&builder, Eval::Time::Runtime, ir);
+
+        IR::Types::StartFunc start;
+        start.values = nullptr;
+        start.n_values = 0;
+
+        Eval::end_startup(&builder, startup, start);
+      }
 
       global->is_runtime_available = true;
       global->dynamic_init_index = new_dynamic_init_object(comp,

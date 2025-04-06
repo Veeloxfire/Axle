@@ -1117,7 +1117,7 @@ TC_STAGE(LINK, 2) {
       IR::DynLibraryImport import_lib = {};
       import_lib.name = imp->name;
       import_lib.path = imp->lib_file;
-      import_lib.label = comp->next_function_label(t.extract_base<SignatureStructure>(), imp->node_span);
+      import_lib.label = comp->next_function_label(t.unchecked_base<SignatureStructure>(), imp->node_span);
 
       comp->dyn_lib_imports.insert(std::move(import_lib));
       imp->import_index = comp->dyn_lib_imports.size;
@@ -1646,7 +1646,7 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
         switch (left.struct_type()) {
           case STRUCTURE_TYPE::ENUM: {
               if (left == right) {
-                const auto* en = left.extract_base<EnumStructure>();
+                const auto* en = left.unchecked_base<EnumStructure>();
                 ASSERT(en->base.struct_type() == STRUCTURE_TYPE::INTEGER);
 
                 expr->node_type = comp_thread->builtin_types->t_bool;
@@ -1707,7 +1707,7 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
         switch (left.struct_type()) {
           case STRUCTURE_TYPE::ENUM: {
               if (left == right) {
-                const auto* en = left.extract_base<EnumStructure>();
+                const auto* en = left.unchecked_base<EnumStructure>();
                 ASSERT(en->base.struct_type() == STRUCTURE_TYPE::INTEGER);
 
 
@@ -1823,7 +1823,7 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
         switch (left.struct_type()) {
           case STRUCTURE_TYPE::ENUM: {
               if (left == right) {
-                const auto* en = left.extract_base<EnumStructure>();
+                const auto* en = left.unchecked_base<EnumStructure>();
                 ASSERT(en->base.struct_type() == STRUCTURE_TYPE::INTEGER);
 
                 expr->node_type = left;
@@ -1892,7 +1892,7 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
         switch (left.struct_type()) {
           case STRUCTURE_TYPE::ENUM: {
               if (left == right) {
-                const auto* en = left.extract_base<EnumStructure>();
+                const auto* en = left.unchecked_base<EnumStructure>();
                 ASSERT(en->base.struct_type() == STRUCTURE_TYPE::INTEGER);
 
                 expr->node_type = left;

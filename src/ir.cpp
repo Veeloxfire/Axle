@@ -36,12 +36,13 @@ namespace IR {
     return { static_cast<u32>(i) };
   }
 
-  VariableId IRStore::new_variable(const Type& t, ValueRequirements requirements) {
+  VariableId IRStore::new_variable(const Type& t, ValueRequirements requirements, bool indirect) {
     usize i = variables.size;
     variables.insert_uninit(1);
     IR::SSAVar* var = variables.back();
     var->type = t;
     var->requirements = requirements;
+    var->indirect = indirect;
 
     return VariableId{ static_cast<u32>(i) };
   }
@@ -545,19 +546,19 @@ Eval::RuntimeValue Eval::as_constant(const u8* constant, const Type& type) {
   return r;
 }
 
-
-Eval::IrBuilder Eval::start_builder(Eval::Time eval_time, IR::IRStore* ir) {
-  return start_builder(eval_time, ir, {});
+bool Eval::must_pass_type_by_reference(const CallingConvention* conv, const Structure* s) {
+  return conv->param_by_reference_size > 0
+    && conv->param_by_reference_size < s->size;
 }
 
-Eval::IrBuilder Eval::start_builder(Eval::Time eval_time, IR::IRStore* ir, AST_ARR params) {
+Eval::StartupInfo Eval::init_startup(
+    IrBuilder* builder,
+    Eval::Time eval_time, IR::IRStore* ir) {
   ASSERT(ir != nullptr);
   ASSERT(ir->signature != nullptr);
-  ASSERT(ir->signature->parameter_types.size == params.count);
 
-  Eval::IrBuilder builder = {};
-  builder.ir = ir;
-  builder.eval_time = eval_time;
+  builder->ir = ir;
+  builder->eval_time = eval_time;
 
   IR::LocalLabel startup = ir->new_control_block();
   IR::LocalLabel first = ir->new_control_block();
@@ -566,49 +567,24 @@ Eval::IrBuilder Eval::start_builder(Eval::Time eval_time, IR::IRStore* ir, AST_A
     first,
                      });
 
-  if (params.count > 0) {
-    Axle::OwnedArr<IR::V_ARG> args = Axle::new_arr<IR::V_ARG>(params.count);
+  return { startup, first };
+}
 
-    {
-      const Type* parameters = ir->signature->parameter_types.begin();
-      const Type* const parameters_end = ir->signature->parameter_types.end();
-      IR::V_ARG* va = args.mut_begin();
-
-      FOR_AST(params, p) {
-        ASSERT(parameters < parameters_end);
-        ASSERT(p->node_type == *parameters);
-        ASSERT(p->ast_type == AST_TYPE::TYPED_NAME);
-        ASTTypedName* n = (ASTTypedName*)p;
-        Local* local_ptr = n->local_ptr;
-
-        auto id = builder.new_variable(*parameters, {});
-        local_ptr->variable_id = id;
-        *va = Eval::load_v_arg(ir, builder.import_variable(id, {}));
-        va += 1;
-        parameters += 1;
-      }
-
-      ASSERT(parameters == parameters_end);
+void Eval::end_startup(IrBuilder* builder, const StartupInfo& startup, const IR::Types::StartFunc& start) {
+  {
+    const CallingConvention* conv = builder->ir->signature->calling_convention;
+    for (u32 i = 0; i < start.n_values; ++i) {
+      ASSERT(conv->param_by_reference_size == 0
+          || start.values[i].size <= conv->param_by_reference_size);
+      ASSERT(start.values[i].offset == 0);
     }
-
-    IR::Types::StartFunc sf = {};
-    sf.n_values = (u32)args.size;
-    sf.values = args.data;
-
-    IR::Emit::StartFunc(ir->current_bytecode(), sf);
-  }
-  else {
-    IR::Types::StartFunc sf = {};
-    sf.n_values = 0;
-    sf.values = nullptr;
-
-    IR::Emit::StartFunc(ir->current_bytecode(), sf);
   }
 
-  builder.reset_variables();
-  builder.switch_control_block(first, startup);
+  IR::Emit::StartFunc(builder->ir->current_bytecode(), start);
 
-  return builder;
+  builder->reset_variables();
+  builder->switch_control_block(startup.first, startup.startup);
+
 }
 
 void Eval::end_builder(Eval::IrBuilder* builder) {
@@ -694,8 +670,8 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
   INVALID_CODE_PATH("Invalid RVT");
 }
 
-IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirements reqs) {
-  IR::VariableId id = ir->new_variable(t, reqs);
+IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirements reqs, bool indirect) {
+  IR::VariableId id = ir->new_variable(t, reqs, indirect);
 
   {
     IR::SSAVar& v = ir->variables.data[id.variable];
@@ -730,7 +706,12 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR
 
         cb->temporaries.data[it->current_temp.index].requirements |= reqs;
 
-        return Eval::as_direct(it->current_temp, sv.type);
+        if (sv.indirect) {
+          return Eval::as_indirect(it->current_temp, sv.type);
+        }
+        else {
+          return Eval::as_direct(it->current_temp, sv.type);
+        }
       }
 
       IR::ValueIndex v = ir->new_temporary(id, reqs);
@@ -738,7 +719,12 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR
       it->imported = true;
       it->current_temp = v;
 
-      return Eval::as_direct(v, sv.type);
+      if (sv.indirect) {
+        return Eval::as_indirect(v, sv.type);
+      }
+      else {
+        return Eval::as_direct(v, sv.type);
+      }
     }
   }
 
@@ -1037,16 +1023,20 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
     }
     case RVT::Indirect: {
       if(offset == 0) {
-        Eval::RuntimeValue res = val;
-        res.type = ptr_type;
+        const IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
-        return res;
+        IR::Types::Copy cpy = {};
+        cpy.from = IR::v_arg(val.value.index, val.value.offset, val.type);
+        cpy.to = IR::v_arg(v, 0, ptr_type);
+        
+        IR::Emit::Copy(ir->current_bytecode(), cpy);
+
+        return Eval::as_indirect(v, ptr_type);
       }
       else {
         const IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         const RuntimeValue offset_v = Eval::as_constant((const u8*)&offset, u64_type);
-
         const IR::V_ARG offset_arg = Eval::load_v_arg(ir, offset_v);
 
         IR::Types::Add add = {};

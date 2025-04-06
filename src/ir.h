@@ -43,10 +43,10 @@ namespace IR {
   };
 
   struct SSAVar {
-    ValueRequirements requirements;
+    ValueRequirements requirements = {};
     Type type = {};
-
-    u32 stack_offset;
+    bool indirect = false;
+    u32 stack_offset = 0;
   };
 
   enum struct ControlFlowType {
@@ -140,7 +140,7 @@ namespace IR {
     
     Axle::Array<ControlBlock> control_blocks = {};
 
-    VariableId new_variable(const Type& t, ValueRequirements requirements);
+    VariableId new_variable(const Type& t, ValueRequirements requirements, bool indirect);
     ValueIndex new_temporary(const Type& t, ValueRequirements requirements);
     ValueIndex new_temporary(const VariableId& var, ValueRequirements requirements);
 
@@ -527,7 +527,7 @@ namespace Eval {
     Axle::Array<VariableState> variables_state;
     u32 curr_stack = 0;
 
-    IR::VariableId new_variable(const Type& t, IR::ValueRequirements reqs);
+    IR::VariableId new_variable(const Type& t, IR::ValueRequirements reqs, bool indirect);
     RuntimeValue import_variable(const IR::VariableId& id, IR::ValueRequirements reqs);
 
     void switch_control_block(IR::LocalLabel index, IR::LocalLabel parent);
@@ -539,8 +539,17 @@ namespace Eval {
     inline Axle::Array<u8>& current_bytecode() const { return ir->current_bytecode(); }
   };
 
-  IrBuilder start_builder(Eval::Time eval_time, IR::IRStore* ir);
-  IrBuilder start_builder(Eval::Time eval_time, IR::IRStore* ir, AST_ARR params);
+  bool must_pass_type_by_reference(const CallingConvention* conv, const Structure* s);
+
+  struct StartupInfo {
+    IR::LocalLabel startup;
+    IR::LocalLabel first;
+  };
+
+  StartupInfo init_startup(
+      IrBuilder* builder,
+      Eval::Time eval_time, IR::IRStore* ir);
+  void end_startup(IrBuilder* builder, const StartupInfo& startup, const IR::Types::StartFunc& start);
   void end_builder(IrBuilder* builder);
 
   RuntimeValue sub_object(IR::IRStore* const ir,

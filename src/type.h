@@ -153,37 +153,32 @@ struct Type {
   /// Helper functions ///
 
   inline constexpr STRUCTURE_TYPE struct_type() const {
+    ASSERT(structure != nullptr);
     return structure->type;
   }
 
   inline constexpr IR::Format struct_format() const {
+    ASSERT(structure != nullptr);
     return structure->ir_format;
   }
 
   inline constexpr u32 size() const {
+    ASSERT(structure != nullptr);
     return structure->size;
   }
 
   template<typename T>
   inline constexpr const T* unchecked_base() const {
+    ASSERT(structure != nullptr);
     ASSERT(structure->type == T::expected_type_enum);
     return static_cast<const T*>(structure);
   }
 
   template<typename T>
   inline constexpr T* unchecked_base_mut() const {
+    ASSERT(structure != nullptr);
     ASSERT(structure->type == T::expected_type_enum);
     return static_cast<T*>(structure);
-  }
-
-  template<typename T>
-  inline constexpr const T* extract_base() const {
-    if (T::expected_type_enum == struct_type()) {
-      return static_cast<const T*>(structure);
-    }
-    else {
-      return nullptr;
-    }
   }
 
   inline constexpr bool is_valid() const {
@@ -468,9 +463,12 @@ struct Structures {
 
   constexpr Structures(usize ptr_s, usize ptr_a) :
     pointer_size{ptr_s}, pointer_align{ptr_a},
-    slice_size{Axle::ceil_to_n<usize>(ptr_s, 8)},
+    slice_size{Axle::ceil_to_n<usize>(ptr_s + 8, 8)},
     slice_align{Axle::larger<usize>(ptr_a, 8)}
-  {}
+  {
+    ASSERT(slice_align % 8 == 0);
+    ASSERT(slice_align % ptr_a == 0);
+  }
 
   ~Structures();
 };

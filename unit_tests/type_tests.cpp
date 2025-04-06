@@ -155,6 +155,11 @@ TEST_FUNCTION(Types, lambdas) {
 TEST_FUNCTION(Types, pointers) {
   Axle::StringInterner strings = {};
   Structures structures = {8,8};
+  
+  TEST_EQ(static_cast<usize>(8), structures.pointer_size);
+  TEST_EQ(static_cast<usize>(8), structures.pointer_align);
+  TEST_EQ(static_cast<usize>(16), structures.slice_size);
+  TEST_EQ(static_cast<usize>(8), structures.slice_align);
 
   BuiltinTypes builtin = STRUCTS::create_builtins(&structures, &strings);
 

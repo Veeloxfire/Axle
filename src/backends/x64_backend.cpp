@@ -2993,7 +2993,7 @@ namespace Helpers {
     u32 alignment = from.known_alignment;
     ASSERT(from.size % from.known_alignment == 0);
 
-    u32 count = from.known_alignment / alignment;
+    u32 count = from.size / alignment;
 
     switch (alignment) {
       case 1: {
@@ -3267,6 +3267,8 @@ namespace Helpers {
   static void copy_reg_to_reg(Backend::ProgramData* program,
       X64::R from, const Structure* f_type,
       X64::R to, const Structure* t_type) {
+    ASSERT(f_type->size <= 8
+        && t_type->size <= 8);
     dispatch_pair(RegRegDispatch{ program, from, to }, f_type, t_type);
   }
 
@@ -3305,6 +3307,7 @@ namespace Helpers {
   };
 
   static void load_const_to_reg(Backend::ProgramData* program, const Structure* ty, X64::R reg, const Axle::ViewArr<const u8>& data) {
+    ASSERT(ty->size <= 8);
     return visit_types(ConstRegDispatch{ program, data, reg }, ty);
   }
 
@@ -3327,6 +3330,7 @@ namespace Helpers {
   static void copy_mem_to_reg(Backend::ProgramData* program,
       const MemoryView& from, const Structure* f_type,
       X64::R to, const Structure* t_type) {
+    ASSERT(t_type->size <= 8);
     return dispatch_pair(MemRegDispatch{ program, from, to }, f_type, t_type);
   }
 
@@ -3349,6 +3353,7 @@ namespace Helpers {
   static void copy_reg_to_mem(Backend::ProgramData* program,
       X64::R from, const Structure* f_type,
       const MemoryView& to, const Structure* t_type) {
+    ASSERT(f_type->size <= 8);
     return dispatch_pair(RegMemDispatch{ program, from, to }, f_type, t_type);
   }
 
@@ -4014,13 +4019,10 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         break;
       }
       case IR::OpCode::StartFunc: {
-        const SignatureStructure* sig = resolver->sig_struct;
         IR::Types::StartFunc start_func;
         bc = IR::Read::StartFunc(bc, bc_end, start_func);
 
-        ASSERT(start_func.n_values == sig->parameter_types.size);
-
-        for (usize i = 0; i < sig->parameter_types.size; ++i) {
+        for (usize i = 0; i < start_func.n_values; ++i) {
           ASSERT(i < convention->num_parameter_registers);//TEMP
 
           new_fixed_intermediate(intermediates, expr_id, convention->parameter_registers[i]);
@@ -4049,6 +4051,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         for (usize i = 0; i < ((usize)call.n_values - has_return); ++i) {
           IR::V_ARG arg;
           bc += IR::deserialize(bc, bc_end - bc, arg);
+
+          ASSERT(arg.size <= 8);
 
           VisitRes im = visit_ordered_value(values, lifetimes, resolver, arg, expr_id);
 
@@ -5411,16 +5415,27 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             IR::V_ARG arg;
             bc += IR::deserialize(bc, bc_end - bc, arg);
 
-            const Type& param = ir->signature->parameter_types[i];
             ASSERT(arg.size <= 8);//TODO: parameters of different types
-            ASSERT(arg.size == param.size());
             ASSERT(arg.offset == 0);//temp - need to fix this
-
-
+            
             X64::R r = selector.get_next_intermediate_reg();
-
+            
             X64Value to = selector.get_val(arg);
-            ASSERT(param == to.t);
+            
+            {
+              const Type& param = to.t;
+              
+              if (Eval::must_pass_type_by_reference(convention, param.structure)) {
+                const Type& param_p = param.unchecked_base<PointerStructure>()->base;
+
+                ASSERT(param_p == to.t);
+                ASSERT(arg.size == param_p.size());
+              }
+              else {
+                ASSERT(param == to.t);
+                ASSERT(arg.size == param.size());
+              }
+            }
 
             switch (to.value_type) {
               case ValueType::Register: {
@@ -5450,9 +5465,12 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
           for (usize i = 0; i < ((usize)call.n_values - has_return); ++i) {
             IR::V_ARG arg;
             bc += IR::deserialize(bc, bc_end - bc, arg);
+          
+            ASSERT(arg.size <= 8);
 
             X64Value arg_v = selector.get_val(arg);
-            const Type& param_t = sig_struct->parameter_types[i];
+            
+            const Type& param_t = arg_v.t;
 
             if (i < convention->num_parameter_registers) {
               X64::R arg_reg = selector.get_next_intermediate_reg();
@@ -5471,11 +5489,10 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
             else {
               MemoryView arg_mem = {};
 
-              const Type& t = sig_struct->parameter_types[i];
-              arg_mem.known_alignment = t.structure->alignment;
-              arg_mem.size = t.size();
+              arg_mem.known_alignment = param_t.structure->alignment;
+              arg_mem.size = param_t.size();
               arg_mem.rm = X64::memory_rm(convention->base_pointer_reg, -static_cast<i32>(stack_top - (i * 8)));
-
+              
               switch (arg_v.value_type) {
                 case ValueType::Register: {
                   if (arg_v.expects_intermeidate) {

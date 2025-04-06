@@ -44,10 +44,12 @@ target_sources(AxleCompiler PRIVATE
 )
 
 if(MSVC)
-  target_compile_options(AxleCompiler PUBLIC /W4 /WX /permissive-)
+  set(CxxFlags /W4 /WX /permissive-)
 else()
-  target_compile_options(AxleCompiler PUBLIC -Wall -Wextra -Wpedantic -Werror)
+  set(CxxFlags -Wall -Wextra -Wpedantic -Werror)
 endif()
+
+target_compile_options(AxleCompiler PUBLIC ${CxxFlags})
 
 target_link_libraries(AxleCompiler PUBLIC "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
 target_include_directories(AxleCompiler PUBLIC ${AxleINCLUDE})
@@ -78,9 +80,24 @@ endif()
 option(BUILD_TESTS "Build tests" OFF)
 if(BUILD_TESTS)
   message(NOTICE "Tests Enabled")
-  set(TesterINCLUDE "${PROJECT_SOURCE_DIR}/lib_include" CACHE STRING "" FORCE)
-  set(TesterBIN "${PROJECT_SOURCE_DIR}/lib" CACHE STRING "" FORCE)
-
   add_subdirectory(unit_tests)
+  
+  set(TesterINCLUDE "${PROJECT_SOURCE_DIR}/lib_include" CACHE STRING "" FORCE)
+
+  add_library(TesterLib STATIC
+    "${PROJECT_SOURCE_DIR}/Tester/src/tester.c"
+  )
+  target_include_directories(TesterLib PUBLIC ${TesterINCLUDE})
+  target_compile_options(TesterLib PUBLIC ${CxxFlags})
+  
+  add_library(TesterDll SHARED
+    "${PROJECT_SOURCE_DIR}/Tester/src/tester.c"
+  )
+  target_include_directories(TesterDll PUBLIC ${TesterINCLUDE})
+  target_compile_options(TesterDll PUBLIC ${CxxFlags})
+
+  set_target_properties(TesterDll PROPERTIES OUTPUT_NAME "Tester")
+
   add_subdirectory(integration_tests)
+
 endif()

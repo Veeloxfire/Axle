@@ -1,5 +1,5 @@
 #include <Windows.h>
-#include "tester.h"
+#include <tester.h>
 
 #define SHARED_MAX_SIZE 1024
 static volatile unsigned char* shared_memory = NULL;
@@ -13,10 +13,7 @@ BOOL WINAPI DllMain(HINSTANCE _handle, DWORD fdwReason, LPVOID _reserved) {
   (void)_reserved;
 
   if (fdwReason == DLL_PROCESS_ATTACH) {
-    load_shared_memory();
-  }
-  else if (fdwReason == DLL_PROCESS_DETACH) {
-    unload_shared_memory();
+    //load_shared_memory();
   }
 
   return TRUE;
@@ -60,23 +57,11 @@ __declspec(dllexport) bool load_shared_memory() {
   return true;
 }
 
-__declspec(dllexport) bool unload_shared_memory() {
-  if (shared_memory == NULL) {
-    return false;
-  }
-  UnmapViewOfFile((const void*)shared_memory);
-  shared_memory = NULL;
-
-  if (shared_map == NULL) {
-    return false;
-  }
-  CloseHandle(shared_map);
-  shared_map = NULL;
-
-  return true;
-}
-
 __declspec(dllexport) void write_shared_memory(const void* buffer, size_t size) {
+  (void)buffer;
+  (void)size;
+  return;
+#if 0
   size_t i = 0;
   const unsigned char* b = (const unsigned char*)buffer;
   volatile unsigned char* shared = (volatile unsigned char*)shared_memory;
@@ -113,6 +98,7 @@ __declspec(dllexport) void write_shared_memory(const void* buffer, size_t size) 
   for (; i < prev_size; ++i) {
     shared[i] = 0;
   }
+#endif
 }
 
 __declspec(dllexport) void get_shared_memory(SHARED_MEM* shared_out) {

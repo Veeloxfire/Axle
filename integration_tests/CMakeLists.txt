@@ -28,11 +28,7 @@ if(NOT DEFINED AxleUtilBIN)
 endif()
 
 if(NOT DEFINED TesterINCLUDE)
-  message(FATAL_ERROR "Require TesterINCLUDE (tester include path) to be provided, even if not tracing")
-endif()
-
-if(NOT DEFINED TesterBIN)
-  message(FATAL_ERROR "Require TesterBIN (tester library path) to be provided, even if not tracing")
+  message(FATAL_ERROR "Require TesterINCLUDE (tester include path) to be provided")
 endif()
 
 if(AxleTRACING)
@@ -66,10 +62,13 @@ target_sources(IntegrationTestsClient PRIVATE
 )
 
 target_link_libraries(IntegrationTestsServer "${AxleUtilBIN}/AxleTestServer$<CONFIG>.lib" "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
-target_link_libraries(IntegrationTestsClient AxleCompiler "${AxleUtilBIN}/AxleTestClient$<CONFIG>.lib" "${TesterBIN}/Tester.lib")
+target_link_libraries(IntegrationTestsClient AxleCompiler TesterLib "${AxleUtilBIN}/AxleTestClient$<CONFIG>.lib")
 
 target_include_directories(IntegrationTestsServer PUBLIC src ${TesterINCLUDE} "${PROJECT_SOURCE_DIR}/../src")
 
-add_custom_target(CopyDll ALL
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${TesterBIN}/Tester.dll" "$<TARGET_FILE_DIR:IntegrationTestsServer>"
-      DEPENDS IntegrationTestsServer)
+add_custom_target(CopyDLL ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:TesterDll>/Tester.dll" "${PROJECT_SOURCE_DIR}/out")
+add_custom_target(CopyPDB ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:TesterDll>/Tester.pdb" "${PROJECT_SOURCE_DIR}/out")
+
+add_dependencies(IntegrationTestsClient CopyDLL CopyPDB)

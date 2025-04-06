@@ -130,6 +130,8 @@ namespace X64 {
       convention.volatiles_bit_mask = mask;
     }
 
+    convention.param_by_reference_size = 8;
+
     convention.return_register = ret_reg.REG;
     convention.stack_pointer_reg = sp_reg.REG;
     convention.base_pointer_reg = bp_reg.REG;

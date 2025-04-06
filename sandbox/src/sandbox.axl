@@ -15,5 +15,5 @@ hash :: (slice: []u8) -> u64 {
 main :: () -> u64 {
   arr :=  "hello";
 
-  return hash(cast([]u8, arr[]));
+  return hash(cast([]u8, arr[,]));
 }
