@@ -1233,7 +1233,7 @@ void print_value(const IR::V_ARG& arg) {
 void print_value(const IR::P_ARG& arg) {
   IO_Single::print("[ ");
   IO_Single::format("T{} [{}, {}]", arg.ptr.index, arg.ptr_offset, IR::Format::pointer);
-  if (arg.val_format == IR::Format::opaque) {
+  if (arg.val_format != IR::Format::opaque) {
     IO_Single::format(", {}.., {} ]", 0, arg.val_format);
   }
   else {
@@ -1327,6 +1327,12 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
       IO_Single::format("  {}:\t", op);
 
       switch (op) {
+        case IR::OpCode::BreakPoint: {
+            IR::Types::BreakPoint bp;
+            bc = IR::Read::BreakPoint(bc, bc_end, bp);
+            IO_Single::print(" ---\n");
+            break;
+          }
         case IR::OpCode::Set: {
             IR::Types::Set set;
             bc = IR::Read::Set(bc, bc_end, set);

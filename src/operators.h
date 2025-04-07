@@ -7,16 +7,8 @@ enum struct MainSide : uint8_t {
   LEFT, RIGHT
 };
 
-struct BinOpArgs;
-struct UnOpArgs;
-using BINARY_OPERATOR_FUNCTION = Axle::MEMBER<BinOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
-using UNARY_OPERATOR_FUNCTION = Axle::MEMBER<UnOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
-
-struct BinOpEmitInfo {
-  MainSide main_side;
-  Type dest_type;
-  BINARY_OPERATOR_FUNCTION func = nullptr;
-};
+struct BinOpEmitInfo;
+struct UnOpEmitInfo;
 
 struct BinOpArgs {
   const BinOpEmitInfo* info;
@@ -26,9 +18,7 @@ struct BinOpArgs {
   const Eval::RuntimeValue& left;
   const Eval::RuntimeValue& right;
 
-  inline Eval::RuntimeValue emit() {
-    return (this->*(info->func))();
-  }
+  Eval::RuntimeValue emit();
 
   //Emits
   Eval::RuntimeValue emit_add_ints();
@@ -53,24 +43,39 @@ struct BinOpArgs {
 #endif
 };
 
-struct UnOpEmitInfo {
-  Type src_type;
-  Type dest_type;
-  UNARY_OPERATOR_FUNCTION func = nullptr;
-};
-
 struct UnOpArgs {
   const UnOpEmitInfo* info;
   CompilerGlobals* comp;
   IR::IRStore* ir;
   const Eval::RuntimeValue& prim;
 
-  inline Eval::RuntimeValue emit() {
-    return (this->*(info->func))();
-  }
+  Eval::RuntimeValue emit();
 
   //Emits
   Eval::RuntimeValue emit_neg_int();
   Eval::RuntimeValue emit_address();
   Eval::RuntimeValue emit_deref_ptr();
 };
+
+using BINARY_OPERATOR_FUNCTION = Axle::MEMBER<BinOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
+using UNARY_OPERATOR_FUNCTION = Axle::MEMBER<UnOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
+
+struct BinOpEmitInfo {
+  MainSide main_side;
+  Type dest_type;
+  BINARY_OPERATOR_FUNCTION func = nullptr;
+};
+
+struct UnOpEmitInfo {
+  Type src_type;
+  Type dest_type;
+  UNARY_OPERATOR_FUNCTION func = nullptr;
+};
+
+inline Eval::RuntimeValue BinOpArgs::emit() {
+  return (this->*(info->func))();
+}
+
+inline Eval::RuntimeValue UnOpArgs::emit() {
+  return (this->*(info->func))();
+}

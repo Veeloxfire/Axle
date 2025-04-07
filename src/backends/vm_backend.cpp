@@ -171,6 +171,9 @@ static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
       case IR::Format::sint32: return Axle::serialize_le<i32>(to, static_cast<i32>(i));
       case IR::Format::uint64: return Axle::serialize_le<u64>(to, static_cast<u64>(i));
       case IR::Format::sint64: return Axle::serialize_le<i64>(to, static_cast<i64>(i));
+      case IR::Format::opaque:
+      case IR::Format::pointer:
+      case IR::Format::slice:
       default: INVALID_CODE_PATH("Unsupported copy");
     }
   };
@@ -184,6 +187,9 @@ static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
     case IR::Format::sint32: return int_dispatch.operator()<i32>(to, t_format, from);
     case IR::Format::uint64: return int_dispatch.operator()<u64>(to, t_format, from);
     case IR::Format::sint64: return int_dispatch.operator()<i64>(to, t_format, from);
+    case IR::Format::opaque:
+    case IR::Format::pointer:
+    case IR::Format::slice:
     default: INVALID_CODE_PATH("Unsupported copy");
   }
 }
@@ -203,6 +209,15 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
 #endif
 
       switch (opcode) {
+        case IR::OpCode::BreakPoint: {
+            IR::Types::BreakPoint break_point;
+            stack_frame->IP = IR::Read::BreakPoint(stack_frame->IP, stack_frame->IP_END, break_point);
+
+            if (IsDebuggerPresent()) {
+              DebugBreak();
+            }
+            break;
+          }
         case IR::OpCode::Set: {
             IR::Types::Set set;
             stack_frame->IP = IR::Read::Set(stack_frame->IP, stack_frame->IP_END, set);
@@ -321,6 +336,9 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             case IR::Format::sint32: do_op.operator()<i32>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
             case IR::Format::uint64: do_op.operator()<u64>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
             case IR::Format::sint64: do_op.operator()<i64>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
+            case IR::Format::opaque: \
+            case IR::Format::pointer: \
+            case IR::Format::slice: \
             default: { \
               errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
               return; \
@@ -379,6 +397,11 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
               errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary logical not (only supported format is uint8)");
             }
           } break;
+
+        case IR::OpCode::AddrOf:
+        case IR::OpCode::AddrOfLoad:
+        case IR::OpCode::AddrOfGlobal:
+        case IR::OpCode::Call:
         default: {
             errors->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                       "Encountered invalid/unsupported instruction during ir execution\n"

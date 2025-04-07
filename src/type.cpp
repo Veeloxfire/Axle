@@ -537,6 +537,10 @@ Structures::~Structures() {
   }
 }
 
+// putting in all switch cases even with default
+#pragma warning(push)
+#pragma warning(disable: 4061)
+
 //Can cast without any value modification or checks
 static bool can_implicit_cast(const Type& from, const Type& to) {
   if (from == to) {
@@ -667,6 +671,8 @@ static bool can_implicit_cast(const Type& from, const Type& to) {
 
   return false;
 }
+
+#pragma warning(pop)
 
 
 //No longer supported

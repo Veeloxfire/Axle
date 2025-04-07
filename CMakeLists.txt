@@ -44,7 +44,7 @@ target_sources(AxleCompiler PRIVATE
 )
 
 if(MSVC)
-  set(CxxFlags /W4 /WX /permissive-)
+  set(CxxFlags /diagnostics:caret /Wall /WX /wd4365 /wd4514 /wd4582 /wd4583 /wd4623 /wd4625 /wd4626 /wd4627 /wd4710 /wd4711 /wd4820 /wd5026 /wd5027 /wd5039 /wd5045 /wd5220 /permissive-)
 else()
   set(CxxFlags -Wall -Wextra -Wpedantic -Werror)
 endif()

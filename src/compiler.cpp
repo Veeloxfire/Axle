@@ -1071,9 +1071,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           ptr_member.type = ptr_t;
           
           Eval::RuntimeValue len_member = slice;
-          ptr_member.value.offset = ptr_t.size();
+          len_member.value.offset = ptr_t.size();
           ASSERT(ptr_t.size() == 8);
-          ptr_member.type = comp_thread->builtin_types->t_u64;
+          len_member.type = comp_thread->builtin_types->t_u64;
 
           {
             Eval::RuntimeValue ptr = Eval::arr_to_ptr(builder->ir, arr, ptr_t);
@@ -1375,6 +1375,21 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
     case AST_TYPE::FUNCTION_CALL: {
         return compile_function_call(comp, comp_thread, builder, eval);
       }
+
+    case AST_TYPE::INVALID:
+    case AST_TYPE::DECL:
+    case AST_TYPE::LAMBDA:
+    case AST_TYPE::STRUCT:
+    case AST_TYPE::TYPED_NAME:
+    case AST_TYPE::ASSIGN:
+    case AST_TYPE::BLOCK:
+    case AST_TYPE::IF_ELSE:
+    case AST_TYPE::WHILE:
+    case AST_TYPE::RETURN:
+    case AST_TYPE::FUNCTION_SIGNATURE:
+    case AST_TYPE::IMPORT:
+    case AST_TYPE::EXPORT:
+    case AST_TYPE::EXPORT_SINGLE:
     default: {
         //Invalid enum type
         //probably just didnt get around to supporting it
@@ -1713,10 +1728,48 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
         return;
       }
-    default: {
+
+    // Expressions
+    case AST_TYPE::NAMED_TYPE:
+    case AST_TYPE::ARRAY_TYPE:
+    case AST_TYPE::PTR_TYPE:
+    case AST_TYPE::SLICE_TYPE:
+    case AST_TYPE::LAMBDA_TYPE:
+    case AST_TYPE::TUPLE_TYPE:
+    case AST_TYPE::CAST:
+    case AST_TYPE::UNARY_OPERATOR:
+    case AST_TYPE::BINARY_OPERATOR:
+    case AST_TYPE::IDENTIFIER_EXPR:
+    case AST_TYPE::NUMBER:
+    case AST_TYPE::FUNCTION_CALL:
+    case AST_TYPE::TUPLE_LIT:
+    case AST_TYPE::ARRAY_EXPR:
+    case AST_TYPE::ASCII_STRING:
+    case AST_TYPE::ASCII_CHAR:
+    case AST_TYPE::INDEX_EXPR:
+    case AST_TYPE::MEMBER_ACCESS:
+    case AST_TYPE::LAMBDA:
+    case AST_TYPE::LAMBDA_EXPR:
+    case AST_TYPE::STRUCT:
+    case AST_TYPE::STRUCT_EXPR:
+    case AST_TYPE::TYPED_NAME:
+    case AST_TYPE::FUNCTION_SIGNATURE:
+    case AST_TYPE::IMPORT:
+    case AST_TYPE::EXPORT:
+    case AST_TYPE::EXPORT_SINGLE:
+    case AST_TYPE::LINK: {
         [[maybe_unused]] auto _ = compile_bytecode(comp, comp_thread, builder, NodeEval::new_value(statement));
         return;
       }
+
+    case AST_TYPE::INVALID:
+    default: {
+        //Invalid enum type
+        //probably just didnt get around to supporting it
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, statement->node_span,
+            "Invalid statement type: {}", ast_type_string(statement->ast_type));
+        return;
+    }
   }
 }
 

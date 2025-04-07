@@ -2,6 +2,6 @@
 
 main :: () -> u64 {
   hello :: "hello";
-  print_raw(hello.ptr, hello.len);
+  print(hello[]);
   return 0;
 }

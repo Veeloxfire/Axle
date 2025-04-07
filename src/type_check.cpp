@@ -56,6 +56,10 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
   ASSERT(a->node_type == comp_thread->builtin_types->t_type);
   ASSERT(VC::is_comptime(a->value_category));
 
+// putting in all switch cases even with default
+#pragma warning(push)
+#pragma warning(disable: 4061)
+
   switch (a->ast_type) {
     case AST_TYPE::NAMED_TYPE: return static_cast<ASTNamedType*>(a)->actual_type;
     case AST_TYPE::ARRAY_TYPE: return static_cast<ASTArrayType*>(a)->actual_type;
@@ -115,6 +119,9 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
         return {};
       }
   }
+
+// putting in all switch cases even with default
+#pragma warning(pop)
 }
 
 #define EXPAND_THIS(asttype, name) asttype* const name = downcast_ast<asttype>(this_infer->node);
@@ -1271,12 +1278,19 @@ TC_STAGE(CAST, 3) {
                                   cast_from.name, cast_from.name, cast_to.name);
         return FINISHED;
       }
+    
+    case STRUCTURE_TYPE::TYPE:
+    case STRUCTURE_TYPE::TUPLE:
+    case STRUCTURE_TYPE::LAMBDA:
+    case STRUCTURE_TYPE::COMPOSITE: {
+        comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, cast->node_span,
+                                  "Cannot cast type '{}' to type '{}'",
+                                  cast_from.name, cast_to.name);
+        return FINISHED;
+      }
   }
 
-  comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, cast->node_span,
-                            "Cannot cast type '{}' to type '{}'",
-                            cast_from.name, cast_to.name);
-  return FINISHED;
+  INVALID_CODE_PATH("Invalid STRUCTURE_TYPE");
 }
 
 TC_STAGE(CAST, 2) {
@@ -1455,6 +1469,9 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
 
   const Type& left = left_ast->node_type;
   const Type& right = right_ast->node_type;
+
+#pragma warning(push)
+#pragma warning(disable: 4061)
 
   switch (expr->op) {
     case BINARY_OPERATOR::ADD: {
@@ -1929,8 +1946,9 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
 
         break;
       }
-#if 0
     case BINARY_OPERATOR::LEFT_SHIFT: {
+      break;
+#if 0
         switch (left.struct_type()) {
           case STRUCTURE_TYPE::INTEGER: {
               const auto* int_l = left.unchecked_base<IntegerStructure>();
@@ -1960,9 +1978,12 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
         }
 
         break;
+#endif
       }
 
     case BINARY_OPERATOR::RIGHT_SHIFT: {
+      break;
+#if 0
         switch (left.struct_type()) {
           case STRUCTURE_TYPE::INTEGER: {
               const auto* int_l = left.unchecked_base<IntegerStructure>();
@@ -1998,9 +2019,11 @@ CheckResult type_check_binary_operator(CompilerGlobals* comp,
         }
 
         break;
-      }
 #endif
+      }
   }
+
+#pragma warning(pop)
 
   const Axle::ViewArr<const char> op_string = BINARY_OP_STRING::get(expr->op);
 

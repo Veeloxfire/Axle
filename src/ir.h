@@ -1,6 +1,7 @@
 #pragma once
 #include <AxleUtil/utility.h>
 #include "type.h"
+#include "errors.h"
 
 namespace IR {
   struct EvalPromise {

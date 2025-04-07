@@ -13,8 +13,8 @@ typedef struct {
   size_t size;
 } SHARED_MEM;
 
-  __declspec(dllexport) bool load_shared_memory();
-  __declspec(dllexport) bool unload_shared_memory();
+  __declspec(dllexport) bool load_shared_memory(void);
+  __declspec(dllexport) bool unload_shared_memory(void);
   __declspec(dllexport) void write_shared_memory(const void* buffer, size_t size);
   __declspec(dllexport) void get_shared_memory(SHARED_MEM* shared);
 

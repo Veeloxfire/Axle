@@ -4,8 +4,6 @@
 #include <AxleUtil/formattable.h>
 
 #include <Axle/comp_utilities.h>
-#include "names.h"
-#include "errors.h"
 
 struct CompilationUnit;
 struct CallingConvention;

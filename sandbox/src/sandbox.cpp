@@ -103,11 +103,11 @@ int main(int argc, const char** args) {
 
   options.build.extra_threads = 0;
 
-  options.print.ast = false;
+  options.print.ast = true;
   options.print.comptime_res = false;
   options.print.comptime_exec = false;
-  options.print.finished_ir = false;
-  options.print.finished_mc = false;
+  options.print.finished_ir = true;
+  options.print.finished_mc = true;
   options.print.run_headers = false;
   options.print.register_select = false;
   options.print.file_loads = true;

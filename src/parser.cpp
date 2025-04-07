@@ -718,6 +718,10 @@ static constexpr uint8_t precidence_table[] = {
 #undef MODIFY
 };
 
+// putting in all switch cases even with default
+#pragma warning(push)
+#pragma warning(disable: 4061)
+
 static bool is_binary_operator(const Parser* const parser) {
   switch (parser->current.type) {
     case AxleTokenType::Add: return true;
@@ -2487,6 +2491,9 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
   file->top_level = top_level;
 }
 
+// putting in all switch cases even with default
+#pragma warning(pop) 
+
 void Printer::newline() const {
   IO_Single::print('\n');
 
@@ -2515,6 +2522,12 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::PTR_TYPE: {
         ASTPtrType* pt = (ASTPtrType*)a;
         IO_Single::print('*');
+        print_ast(printer, pt->base);
+        return;
+      }
+    case AST_TYPE::SLICE_TYPE: {
+        ASTSliceType* pt = (ASTSliceType*)a;
+        IO_Single::print("[]");
         print_ast(printer, pt->base);
         return;
       }
@@ -2821,8 +2834,14 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
     case AST_TYPE::RETURN: {
         ASTReturn* r = (ASTReturn*)a;
 
-        IO_Single::print("return ");
-        print_ast(printer, r->expr);
+        if (r->expr != nullptr) {
+          IO_Single::print("return ");
+          print_ast(printer, r->expr);
+        }
+        else {
+          IO_Single::print("return");
+        }
+
         return;
       }
     case AST_TYPE::FUNCTION_SIGNATURE: {
@@ -2848,6 +2867,29 @@ static void print_ast(Printer* const printer, AST_LOCAL a) {
 
         IO_Single::print("#import ");
         print_ast(printer, i->expr_location);
+        return;
+      }
+    case AST_TYPE::EXPORT: {
+        ASTExport* e = (ASTExport*)a;
+
+        IO_Single::print("#export {");
+        printer->tabs += 1;
+        printer->newline();
+
+        FOR_AST(e->export_list, it) {
+          print_ast(printer, it);
+          IO_Single::print(",");
+          printer->newline();
+        }
+
+        printer->tabs -= 1;
+        return;
+      }
+    case AST_TYPE::EXPORT_SINGLE: {
+        ASTExportSingle* e = (ASTExportSingle*)a;
+
+        IO_Single::format("\"{}\" = ", e->name);
+        print_ast(printer, e->value);
         return;
       }
     case AST_TYPE::LINK: {

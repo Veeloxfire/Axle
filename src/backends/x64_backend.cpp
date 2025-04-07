@@ -1522,7 +1522,7 @@ constexpr auto load_types_info() {
   };
 
   struct FormatData {
-    SizeAndAlignment saa[10];
+    SizeAndAlignment saa[11];
 
     constexpr u32 get_size(IR::Format f) const {
       ASSERT(static_cast<usize>(f) < Axle::array_size(saa));
@@ -1546,6 +1546,7 @@ constexpr auto load_types_info() {
   d.saa[static_cast<usize>(IR::Format::uint64)] = { 8, 8 };
   d.saa[static_cast<usize>(IR::Format::sint64)] = { 8, 8 };
   d.saa[static_cast<usize>(IR::Format::pointer)] = { 8, 8 };
+  d.saa[static_cast<usize>(IR::Format::slice)] = { 16, 8 };
 
   return d;
 }
@@ -1585,6 +1586,9 @@ namespace IntHelpers {
 
     X64::append_instruction(program, i);
   }
+
+#pragma warning(push)
+#pragma warning(disable: 4061)
 
   static void copy_reg_to_reg(Backend::ProgramData* program,
       X64::R from, IR::Format f_format,
@@ -2918,6 +2922,8 @@ namespace IntHelpers {
     X64::setne(i, X64::R8{left});
     X64::append_instruction(program, i);
   }
+
+#pragma warning(pop)
 }
 
 namespace Helpers {
@@ -3625,16 +3631,17 @@ constexpr bool temp_needs_memory(const IR::SSATemp& temp) {
   switch (temp.type.structure->type) {
     case STRUCTURE_TYPE::VOID: INVALID_CODE_PATH("Cannot have void value");
     case STRUCTURE_TYPE::TYPE: INVALID_CODE_PATH("Cannot have type value at runtime");
+    case STRUCTURE_TYPE::LAMBDA: INVALID_CODE_PATH("Cannot have lambda value at runtime");
+    
     case STRUCTURE_TYPE::INTEGER: return false;
     case STRUCTURE_TYPE::POINTER: return false;
     case STRUCTURE_TYPE::ENUM: return false;
 
-                               //TODO: allow these to be inside registers
+    //TODO: allow these to be inside registers
     case STRUCTURE_TYPE::COMPOSITE: return true;
     case STRUCTURE_TYPE::FIXED_ARRAY: return true;
     case STRUCTURE_TYPE::TUPLE: return true;
-
-    case STRUCTURE_TYPE::LAMBDA: INVALID_CODE_PATH("Cannot have lambda value at runtime");
+    case STRUCTURE_TYPE::SLICE: return true;
   }
 
   INVALID_CODE_PATH("Unexpected structure type");
@@ -3951,9 +3958,22 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
             new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
             break;
           }
-          default: {
+          case IR::Format::sint16:
+          case IR::Format::sint32:
+          case IR::Format::sint64: {
             new_intermediate(intermediates, expr_id);
             break;
+          }
+
+          case IR::Format::opaque:
+          case IR::Format::pointer:
+          case IR::Format::slice:
+          default: {
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+                "Invalid Mul operands\n"
+                "Left: {}, Right: {}",
+                left.t, right.t);
+            return {};
           }
         }
 
@@ -3990,6 +4010,10 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
             new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
             break;
           }
+          
+          case IR::Format::opaque:
+          case IR::Format::pointer:
+          case IR::Format::slice:
           default: {
             comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                 "Invalid Div/Mod operands\n"
@@ -4032,6 +4056,10 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
             new_fixed_intermediate(mangled_registers, expr_id, X64::rdx.REG);
             break;
           }
+          
+          case IR::Format::opaque:
+          case IR::Format::pointer:
+          case IR::Format::slice:
           default: {
             comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                 "Invalid Div/Mod operands\n"
@@ -4048,6 +4076,8 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         break;
       }
 
+      case IR::OpCode::Neg:// TODO
+      case IR::OpCode::Not:// TODO
       default: {
         const Axle::ViewArr<const char> opcode_name = IR::opcode_string(op);
         if (opcode_name.data == nullptr) {
@@ -5573,6 +5603,8 @@ void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const
         EMIT_BIN_OP_CMP(Eq, Helpers::emit_eq);
         EMIT_BIN_OP_CMP(Neq, Helpers::emit_neq);
 
+        case IR::OpCode::Neg:// TODO
+        case IR::OpCode::Not:// TODO
         default: {
           const Axle::ViewArr<const char> opcode_name = IR::opcode_string(op);
           if (opcode_name.data == nullptr) {

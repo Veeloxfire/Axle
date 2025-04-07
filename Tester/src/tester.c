@@ -1,5 +1,8 @@
-#include <Windows.h>
 #include <tester.h>
+
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 
 #define SHARED_MAX_SIZE 1024
 static volatile unsigned char* shared_memory = NULL;
@@ -19,7 +22,7 @@ BOOL WINAPI DllMain(HINSTANCE _handle, DWORD fdwReason, LPVOID _reserved) {
   return TRUE;
 }
 
-__declspec(dllexport) bool load_shared_memory() {
+__declspec(dllexport) bool load_shared_memory(void) {
   if (shared_map != NULL) {
     return false;
   }
@@ -57,7 +60,7 @@ __declspec(dllexport) bool load_shared_memory() {
   return true;
 }
 
-__declspec(dllexport) bool unload_shared_memory() {
+__declspec(dllexport) bool unload_shared_memory(void) {
   if (shared_memory == NULL) {
     return false;
   }
