@@ -18,6 +18,7 @@ namespace IO = Axle::IO;
 namespace Format = Axle::Format;
 
 CompilationUnit* CompilationUnitStore::allocate_unit() {
+  TELEMETRY_FUNCTION();
   CompilationUnit* unit = compilation_units.allocate();
 
   unit->id = ++comp_unit_counter;
@@ -28,6 +29,7 @@ CompilationUnit* CompilationUnitStore::allocate_unit() {
 }
 
 void CompilationUnitStore::free_unit(CompilationUnit* unit) {
+  TELEMETRY_FUNCTION();
   active_units.remove_if([id = unit->id](CompilationUnit* u) { return u->id == id; });
 
   compilation_units.free(unit);
@@ -45,6 +47,7 @@ CompilationUnit* CompilationUnitStore::get_unit_if_exists(u64 id) const {
 }
 
 IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s, const Span& span) {
+  TELEMETRY_FUNCTION();
   label_mutex.acquire();
   IR::GlobalLabel label = { label_signature_table.size + 1 };
   label_signature_table.insert({s, span});
@@ -62,6 +65,7 @@ GlobalLabelInfo CompilerGlobals::get_label_info(IR::GlobalLabel label) {
 }
 
 IR::IRStore* CompilerGlobals::new_ir(IR::GlobalLabel label, const SignatureStructure* sig) {
+  TELEMETRY_FUNCTION();
   ir_mutex.acquire();
   IR::IRStore* ir = ir_builders_single_threaded.insert();
   ir_mutex.release();
@@ -73,6 +77,7 @@ IR::IRStore* CompilerGlobals::new_ir(IR::GlobalLabel label, const SignatureStruc
 }
 
 IR::Function* CompilerGlobals::new_function() {
+  TELEMETRY_FUNCTION();
   functions_mutex.acquire();
   IR::Function* func = functions_single_threaded.insert();
   functions_mutex.release();
@@ -80,6 +85,7 @@ IR::Function* CompilerGlobals::new_function() {
 }
 
 Local* CompilerGlobals::new_local() {
+  TELEMETRY_FUNCTION();
   locals_mutex.acquire();
   Local* loc = locals_single_threaded.insert();
   locals_mutex.release();
@@ -87,6 +93,7 @@ Local* CompilerGlobals::new_local() {
 }
 
 Global* CompilerGlobals::new_global() {
+  TELEMETRY_FUNCTION();
   globals_mutex.acquire();
   Global* glob = globals_single_threaded.insert();
   globals_mutex.release();
@@ -94,6 +101,7 @@ Global* CompilerGlobals::new_global() {
 }
 
 Namespace* CompilerGlobals::new_namespace() {
+  TELEMETRY_FUNCTION();
   namespaces_mutex.acquire();
   Namespace* names = namespaces_single_threaded.insert();
   namespaces_mutex.release();
@@ -108,6 +116,8 @@ CompilationUnit* new_compilation_unit(Compilation* const comp,
                                       AST_LOCAL root,
                                       void* detail,
                                       bool print) {
+  TELEMETRY_FUNCTION();
+  
   ASSERT(comp != nullptr);
   ASSERT(names != nullptr);
   ASSERT(detail != nullptr);
@@ -146,6 +156,7 @@ void set_unfound_name(CompilerThread* const comp_thread,
                       UnknownName&& name,
                       ERROR_CODE code, const Span& span,
                       const Format::FormatString<T...>& f_message, const T& ... ts) {
+  TELEMETRY_FUNCTION();
 
   ASSERT(name.ident != nullptr);
 
@@ -160,6 +171,8 @@ void set_unfound_name(CompilerThread* const comp_thread,
 }
 
 Local* DependencyChecker::get_local(const Axle::InternString* name) {
+  TELEMETRY_FUNCTION();
+  
   auto i = locals.begin();
   const auto end = locals.end();
 
@@ -176,6 +189,8 @@ Local* DependencyChecker::get_local(const Axle::InternString* name) {
 
 static u32 new_dynamic_init_object(CompilerGlobals* const comp, u32 size, u32 alignment,
                                    IR::IRStore* ir) {
+  TELEMETRY_FUNCTION();
+  
   Backend::GlobalData holder = {};
   holder.size = size;
   holder.alignment = alignment;
@@ -188,6 +203,8 @@ static u32 new_dynamic_init_object(CompilerGlobals* const comp, u32 size, u32 al
 
 static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, u32 size, u32 alignment,
                                          const u8* value) {
+  TELEMETRY_FUNCTION();
+  
   Backend::GlobalData holder = {};
   holder.size = size;
   holder.alignment = alignment;
@@ -199,6 +216,8 @@ static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, u32 size, 
 }
 
 Global* test_global_dependency(CompilerGlobals* const comp, CompilerThread* const comp_thread, DependencyChecker* const state, const Span& span, const Axle::InternString* ident) {
+  TELEMETRY_FUNCTION();
+  
   auto names = comp->services.names.get();
   const GlobalName* name = names->find_global_name(state->available_names, ident);
 
@@ -606,13 +625,8 @@ static Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                            Eval::IrBuilder* const builder,
                                            const NodeEval& eval);
 
-
-static constexpr bool pass_by_reference(const CallingConvention* conv, const Structure* s) {
-  return conv->param_by_reference_size > 0
-    && conv->param_by_reference_size < s->size;
-}
-
 static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
+  TELEMETRY_FUNCTION();
   const PointerStructure* ps;
   {
     Axle::AtomicLock<Structures> structures = {};
@@ -643,24 +657,25 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
   args.reserve_total(call->arguments.count + (usize)has_return);
 
   FOR_AST(call->arguments, it) {
-    Eval::RuntimeValue val = compile_bytecode(comp, comp_thread, builder, NodeEval::new_value(it));
+    bool indirect = Eval::must_pass_type_by_reference(call->sig->calling_convention, it->node_type.structure);
+
+    NodeEval arg_eval = NodeEval::new_value(it);
+    if (indirect) {
+      arg_eval.requirements.add_address();
+    }
+
+    Eval::RuntimeValue val = compile_bytecode(comp, comp_thread, builder, arg_eval);
     if (comp_thread->is_panic()) {
       return Eval::no_value();
     }
 
-    if (pass_by_reference(call->sig->calling_convention, val.type.structure)) {
+    if (indirect) {
       const Type ptr_type = generate_pointer_type(comp, val.type);
-      
-      IR::ValueIndex temp = ir->new_temporary(val.type, {});
 
-      IR::Types::Copy cc = {};
-      cc.from = Eval::load_v_arg(ir, val);
-      cc.to = IR::v_arg(temp, 0, val.type);
-
-      val = Eval::as_indirect(temp, ptr_type);
+      val = Eval::addrof(builder->ir, val, ptr_type);
     }
 
-    ASSERT(!pass_by_reference(call->sig->calling_convention, val.type.structure));
+    ASSERT(!Eval::must_pass_type_by_reference(call->sig->calling_convention, val.type.structure));
 
     IR::V_ARG v_arg = Eval::load_v_arg(ir, val);
     args.insert(v_arg);
@@ -690,7 +705,9 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
     const IR::V_ARG* sv = args.back();
 
     ASSERT(sv->offset == 0);
-    ASSERT(sv->size == sig_struct->return_type.size());
+    ASSERT(sv->format == sig_struct->return_type.struct_format());
+    ASSERT(sv->format != IR::Format::opaque
+        || sv->opaque_size == sig_struct->return_type.size());
 
     return Eval::as_direct(sv->val, sig_struct->return_type);
   }
@@ -703,6 +720,8 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
 Eval::RuntimeValue CASTS::int_to_int(IR::IRStore* const ir,
                                      const Type& to,
                                      const Eval::RuntimeValue& val) {
+  TELEMETRY_FUNCTION();
+  
   ASSERT(to.is_valid() && to.struct_type() == STRUCTURE_TYPE::INTEGER);
   const Type from = val.effective_type();
   ASSERT(from.is_valid() && from.struct_type() == STRUCTURE_TYPE::INTEGER);
@@ -724,6 +743,8 @@ Eval::RuntimeValue CASTS::int_to_int(IR::IRStore* const ir,
 Eval::RuntimeValue CASTS::no_op(IR::IRStore* const,
                                 const Type& to,
                                 const Eval::RuntimeValue& val) {
+  TELEMETRY_FUNCTION();
+  
   ASSERT(val.type.is_valid());
   Eval::RuntimeValue res = val;
   res.type = to;
@@ -733,6 +754,8 @@ Eval::RuntimeValue CASTS::no_op(IR::IRStore* const,
 Eval::RuntimeValue CASTS::take_address(IR::IRStore* const ir,
                                        const Type& to,
                                        const Eval::RuntimeValue& val) {
+  TELEMETRY_FUNCTION();
+  
   ASSERT(val.type.is_valid());
   return Eval::addrof(ir, val, to);
 }
@@ -978,20 +1001,22 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         const Type base_type = expr->node_type;
         const size_t base_size = base_type.size();
 
+
         ASTIndexExpr* index = (ASTIndexExpr*)expr;
         AST_LOCAL index_expr = index->expr;
+        
+        Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
+            builder, eval.forward(index_expr, IR::ValueRequirements::Address));
+        if (comp_thread->is_panic()) {
+          return Eval::no_value();
+        }
+
         const usize count = index->arguments.count;
 
         if(count == 1) {
           ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
 
           AST_LOCAL index_index = index->arguments.start->curr;
-
-          Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
-              builder, eval.forward(index_expr, IR::ValueRequirements::Address));
-          if (comp_thread->is_panic()) {
-            return Eval::no_value();
-          }
 
           Eval::RuntimeValue index_val = compile_bytecode(comp, comp_thread,
               builder, NodeEval::new_value(index_index));
@@ -1023,9 +1048,56 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
           return Eval::sub_object(builder->ir, arr, offset, t);
         }
-        else if(count == 0 || count == 2) {
+        else if(count == 0) {
+          const Type& index_type = index_expr->node_type;
+          if (index_type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+              "For now can only slice fixed arrays: {}", count);
+            return Eval::no_value();
+          }
+          const ArrayStructure* as = index_type.unchecked_base<ArrayStructure>();
+
+          ASSERT(expr->node_type.struct_type() == STRUCTURE_TYPE::SLICE);
+          const SliceStructure* slice_s = expr->node_type.unchecked_base<SliceStructure>();
+
+          const Type ptr_t = generate_pointer_type(comp, slice_s->base);
+
+          IR::ValueIndex v = builder->ir->new_temporary(expr->node_type, eval.requirements);
+
+          Eval::RuntimeValue slice = Eval::as_direct(v, expr->node_type);
+
+          Eval::RuntimeValue ptr_member = slice;
+          ptr_member.value.offset = 0;
+          ptr_member.type = ptr_t;
+          
+          Eval::RuntimeValue len_member = slice;
+          ptr_member.value.offset = ptr_t.size();
+          ASSERT(ptr_t.size() == 8);
+          ptr_member.type = comp_thread->builtin_types->t_u64;
+
+          {
+            Eval::RuntimeValue ptr = Eval::arr_to_ptr(builder->ir, arr, ptr_t);
+            Eval::assign(builder->ir, ptr_member, ptr);
+          }
+          
+          {
+            u64 val = as->length;
+
+            const size_t size = sizeof(val);
+
+            uint8_t* val_c = comp->new_constant(size);
+            Axle::memcpy_ts(val_c, size, (uint8_t*)&val, size);
+
+            Eval::RuntimeValue len = Eval::as_constant(val_c, comp_thread->builtin_types->t_u64);
+            
+            Eval::assign(builder->ir, len_member, len);
+          }
+
+          return slice;
+        }
+        else if (count == 2) {
           comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-              "Slices not implemented yet");
+              "Slices with values are not implemented yet");
           return Eval::no_value();
         }
         else {
@@ -2155,6 +2227,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
 }
 
 void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const Axle::FileLocation& src_loc, ASTImport* imp) noexcept {
+  TELEMETRY_FUNCTION();
 
   CompilationUnit* imp_unit;
   {
@@ -2173,6 +2246,7 @@ void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const 
 }
 
 void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExport* e) noexcept {
+  TELEMETRY_FUNCTION();
 
   CompilationUnit* exp_unit;
   {
@@ -2190,6 +2264,7 @@ void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExp
 }
 
 void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDecl* global) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(global->decl_type == ASTDecl::TYPE::GLOBAL);
 
   Global* glob = comp->new_global();
@@ -2248,6 +2323,7 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
 }
 
 void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept {
+  TELEMETRY_FUNCTION();
   CompilationUnit* unit;
   {
     auto compilation = comp->services.compilation.get();
@@ -2266,6 +2342,7 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
 }
 
 void DependencyManager::try_restart(CompilationUnit* unit, bool print) {
+  TELEMETRY_FUNCTION();
   ASSERT(unit != nullptr);
 
   if (!unit->waiting()) {
@@ -2281,6 +2358,7 @@ void DependencyManager::try_restart(CompilationUnit* unit, bool print) {
 }
 
 void DependencyManager::add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on) {
+  TELEMETRY_FUNCTION();
   ASSERT(now_waiting != nullptr);
   ASSERT(waiting_on != nullptr);
 
@@ -2295,6 +2373,7 @@ void DependencyManager::add_dependency_to(CompilationUnit* now_waiting, Compilat
 }
 
 void DependencyManager::close_dependency(CompilationUnit* ptr, bool print) {
+  TELEMETRY_FUNCTION();
   ASSERT(ptr != nullptr);
   usize i = 0;
   DependencyListSingle* dep_single = ptr->dependency_list;
@@ -2387,7 +2466,6 @@ void close_compilation_unit(CompilerThread* comp_thread, Compilation* compilatio
 }
 
 void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
-
   {
     bool acquired = comp->services.file_loader._mutex.acquire_if_free();
 

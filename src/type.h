@@ -463,12 +463,9 @@ struct Structures {
 
   constexpr Structures(usize ptr_s, usize ptr_a) :
     pointer_size{ptr_s}, pointer_align{ptr_a},
-    slice_size{Axle::ceil_to_n<usize>(ptr_s + 8, 8)},
-    slice_align{Axle::larger<usize>(ptr_a, 8)}
-  {
-    ASSERT(slice_align % 8 == 0);
-    ASSERT(slice_align % ptr_a == 0);
-  }
+    slice_size{ptr_s * 2},
+    slice_align{ptr_a}
+  {}
 
   ~Structures();
 };

@@ -181,13 +181,13 @@ namespace IR {
 #define OPCODES_MOD \
 MOD(BreakPoint, CODE_EMPTY)\
 MOD(Set, CODE_V_C)\
-MOD(SetStore, CODE_V_C)\
+MOD(SetStore, CODE_P_C)\
 MOD(Copy, CODE_V_V)\
-MOD(CopyLoad, CODE_V_V)\
-MOD(CopyStore, CODE_V_V)\
-MOD(CopyLoadStore, CODE_V_V)\
+MOD(CopyLoad, CODE_V_P)\
+MOD(CopyStore, CODE_P_V)\
+MOD(CopyLoadStore, CODE_P_P)\
 MOD(AddrOf, CODE_V_V)\
-MOD(AddrOfLoad, CODE_V_V)\
+MOD(AddrOfLoad, CODE_V_P)\
 MOD(AddrOfGlobal, CODE_V_IM32)\
 MOD(StartFunc, CODE_NV)\
 MOD(Call, CODE_GL_NV)\
@@ -212,7 +212,7 @@ MOD(Not, CODE_V_V)
 #undef MOD
   };
 
-  constexpr Axle::ViewArr<const char> opcode_string(OpCode c) {
+  constexpr Axle::ViewArr<const char> opcode_string(OpCode c) noexcept {
     switch (c) {
 #define MOD(n, ...) case OpCode:: n: return Axle::lit_view_arr(#n);
       OPCODES_MOD;
@@ -225,16 +225,50 @@ MOD(Not, CODE_V_V)
   struct V_ARG {
     ValueIndex val;
     u32 offset;
-    u32 size;
+    IR::Format format;
+    u32 opaque_size;
 
-    static constexpr usize serialize_size() {
-      return sizeof(val) + sizeof(offset) + sizeof(size);
+    constexpr usize serialize_size() const noexcept {
+      if (format == IR::Format::opaque) {
+        return sizeof(val) + sizeof(offset) + sizeof(format) + sizeof(opaque_size);
+      }
+      else {
+        return sizeof(val) + sizeof(offset) + sizeof(format);
+      }
     }
   };
 
-  constexpr V_ARG v_arg(ValueIndex index, u32 offset, const Type& type) {
+  constexpr V_ARG v_arg(ValueIndex index, u32 offset, const Type& type) noexcept {
     return V_ARG{
-      index, offset, type.size(),
+      index, offset, type.struct_format(),
+      type.struct_format() == IR::Format::opaque ? type.size() : 0,
+    };
+  }
+
+  struct P_ARG {
+    ValueIndex ptr;
+    u32 ptr_offset;
+    IR::Format val_format;
+    u32 opaque_val_size;
+    u32 opaque_val_alignment;
+
+    constexpr usize serialize_size() const noexcept {
+      if (val_format == IR::Format::opaque) {
+        return sizeof(ptr) + sizeof(ptr_offset) + sizeof(val_format) + sizeof(opaque_val_size) + sizeof(opaque_val_alignment);
+      }
+      else {
+        return sizeof(ptr) + sizeof(ptr_offset) + sizeof(val_format);
+      }
+    }
+  };
+
+  constexpr P_ARG p_arg(ValueIndex index, u32 offset, const Type& type) noexcept {
+    const PointerStructure* ps = type.unchecked_base<PointerStructure>();
+    const Type& base = ps->base;
+    return P_ARG{
+      index, offset, base.struct_format(),
+      base.struct_format() == IR::Format::opaque ? base.size() : 0,
+      base.struct_format() == IR::Format::opaque ? base.structure->alignment : 0,
     };
   }
 
@@ -242,12 +276,12 @@ MOD(Not, CODE_V_V)
     u32 size;
     const u8* val;
 
-    static constexpr usize static_serialize_size() {
-      return sizeof(size);
+    constexpr usize serialize_size() const noexcept {
+      return sizeof(size) + size;
     }
   };
 
-  constexpr C_ARG c_arg(const u8* data, const Type& type) {
+  constexpr C_ARG c_arg(const u8* data, const Type& type) noexcept {
     return C_ARG{
       type.size(), data,
     };
@@ -256,8 +290,8 @@ MOD(Not, CODE_V_V)
   struct CODE_V {
     V_ARG val;
 
-    static constexpr usize serialize_size() {
-      return decltype(val)::serialize_size();
+    constexpr usize serialize_size() const noexcept {
+      return val.serialize_size();
     }
   };
 
@@ -265,22 +299,28 @@ MOD(Not, CODE_V_V)
     V_ARG val;
     u32 im32;
 
-    static constexpr usize serialize_size() {
-      return decltype(val)::serialize_size() + sizeof(im32);
+    constexpr usize serialize_size() const noexcept {
+      return val.serialize_size() + sizeof(im32);
     }
   };
 
-  //Op val val
+  //Op val const
   struct CODE_V_C {
     V_ARG to;
     C_ARG data;
 
-    static constexpr usize static_serialize_size() {
-      return decltype(to)::serialize_size() + C_ARG::static_serialize_size();
+    constexpr usize serialize_size() const noexcept {
+      return to.serialize_size() + data.serialize_size();
     }
+  };
+  
+  //Op ptr const
+  struct CODE_P_C {
+    P_ARG to;
+    C_ARG data;
 
-    constexpr usize serialize_size() const {
-      return static_serialize_size() + data.size;
+    constexpr usize serialize_size() const noexcept {
+      return to.serialize_size() + data.serialize_size();
     }
   };
 
@@ -290,8 +330,38 @@ MOD(Not, CODE_V_V)
     V_ARG to;
     V_ARG from;
 
-    static constexpr usize serialize_size() {
-      return decltype(to)::serialize_size() + decltype(from)::serialize_size();
+    constexpr usize serialize_size() const noexcept {
+      return to.serialize_size() + from.serialize_size();
+    }
+  };
+
+  //Op val ptr
+  struct CODE_V_P {
+    V_ARG to;
+    P_ARG from;
+
+    constexpr usize serialize_size() const noexcept {
+      return to.serialize_size() + from.serialize_size();
+    }
+  };
+
+  //Op ptr val
+  struct CODE_P_V {
+    P_ARG to;
+    V_ARG from;
+
+    constexpr usize serialize_size() const noexcept {
+      return to.serialize_size() + from.serialize_size();
+    }
+  };
+
+  //Op ptr ptr
+  struct CODE_P_P {
+    P_ARG to;
+    P_ARG from;
+
+    constexpr usize serialize_size() const noexcept {
+      return to.serialize_size() + from.serialize_size();
     }
   };
 
@@ -301,10 +371,10 @@ MOD(Not, CODE_V_V)
     V_ARG left;
     V_ARG right;
 
-    static constexpr usize serialize_size() {
-      return decltype(to)::serialize_size() 
-        + decltype(left)::serialize_size() 
-        + decltype(right)::serialize_size();
+    constexpr usize serialize_size() const noexcept {
+      return to.serialize_size() 
+        + left.serialize_size() 
+        + right.serialize_size();
     }
   };
 
@@ -313,12 +383,12 @@ MOD(Not, CODE_V_V)
     u32 n_values;
     const V_ARG* values;
 
-    static constexpr usize static_serialize_size() {
-      return sizeof(n_values);
-    }
-
-    constexpr usize serialize_size() const {
-      return static_serialize_size() + (usize)n_values * V_ARG::serialize_size();
+    constexpr usize serialize_size() const noexcept {
+      usize s = sizeof(n_values);
+      for(u32 i = 0; i < n_values; ++i) {
+        s += values[i].serialize_size();
+      }
+      return s;
     }
   };
 
@@ -329,12 +399,12 @@ MOD(Not, CODE_V_V)
     u32 n_values;
     const V_ARG* values;
 
-    static constexpr usize static_serialize_size() {
-      return sizeof(label) + sizeof(n_values);
-    }
-
-    constexpr usize serialize_size() const {
-      return static_serialize_size() + (usize)n_values * V_ARG::serialize_size();
+    constexpr usize serialize_size() const noexcept {
+      usize s = sizeof(label) + sizeof(n_values);
+      for(u32 i = 0; i < n_values; ++i) {
+        s += values[i].serialize_size();
+      }
+      return s;
     }
   };
 
@@ -343,46 +413,54 @@ MOD(Not, CODE_V_V)
     LocalLabel label_if;
     LocalLabel label_else;
 
-    static constexpr usize serialize_size() {
-      return V_ARG::serialize_size() + sizeof(label_if) + sizeof(label_else);
+    constexpr usize serialize_size() const noexcept {
+      return val.serialize_size() + sizeof(label_if) + sizeof(label_else);
     }
   };
 
   struct CODE_L {
     LocalLabel local_label;
 
-    static constexpr usize serialize_size() {
+    static constexpr usize serialize_size() noexcept {
       return sizeof(local_label);
     }
   };
 
   struct CODE_EMPTY {
-    static constexpr usize serialize_size() { return 0; }
+    static constexpr usize serialize_size() noexcept { return 0; }
   };
 
-  constexpr usize serialize(const u8*, usize, const CODE_EMPTY&) { return 0; }
-  usize serialize(u8* data, usize remaining_size, const CODE_V& i);
-  usize serialize(u8* data, usize remaining_size, const CODE_V_IM32& i);
-  usize serialize(u8* data, usize remaining_size, const CODE_V_C& i);
-  usize serialize(u8* data, usize remaining_size, const CODE_V_V& i);
-  usize serialize(u8* data, usize remaining_size, const CODE_V_V_V& i);
-  usize serialize(u8* data, usize remaining_size, const CODE_GL_NV& i);
-  usize serialize(u8* data, usize remaining_size, const CODE_NV& i);
-  usize serialize(u8* data, usize remaining_size, const CODE_V_LL& i);
-  usize serialize(u8* data, usize remaining_size, const CODE_L& i);
+  constexpr usize serialize(const u8*, usize, const CODE_EMPTY&) noexcept { return 0; }
+  usize serialize(u8* data, usize remaining_size, const CODE_V& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_V_IM32& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_V_C& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_P_C& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_V_V& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_V_P& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_P_V& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_P_P& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_V_V_V& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_GL_NV& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_NV& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_V_LL& i) noexcept;
+  usize serialize(u8* data, usize remaining_size, const CODE_L& i) noexcept;
 
-  constexpr usize deserialize(const u8*, usize, CODE_EMPTY&) { return 0; }
-  usize deserialize(const u8* data, usize remaining_size, CODE_V& i);
-  usize deserialize(const u8* data, usize remaining_size, CODE_V_IM32& i);
-  usize deserialize(const u8* data, usize remaining_size, CODE_V_C& i);
-  usize deserialize(const u8* data, usize remaining_size, CODE_V_V& i);
-  usize deserialize(const u8* data, usize remaining_size, CODE_V_V_V& i);
-  usize deserialize(const u8* data, usize remaining_size, CODE_V_LL& i);
-  usize deserialize(const u8* data, usize remaining_size, CODE_L& i);
-  usize deserialize(const u8* data, usize remaining_size, V_ARG& i);
+  constexpr usize deserialize(const u8*, usize, CODE_EMPTY&) noexcept { return 0; }
+  usize deserialize(const u8* data, usize remaining_size, CODE_V& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_V_IM32& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_V_C& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_P_C& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_V_V& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_V_P& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_P_V& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_P_P& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_V_V_V& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_V_LL& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_L& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, V_ARG& i) noexcept;
 
-  usize deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i);
-  usize deserialize(const u8* data, usize remaining_size, CODE_NV& i);
+  usize deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i) noexcept;
+  usize deserialize(const u8* data, usize remaining_size, CODE_NV& i) noexcept;
 
   void print_ir(CompilerGlobals* comp, const IR::IRStore* builder);
 
@@ -393,11 +471,12 @@ MOD(Not, CODE_V_V)
   }
 
   template<typename INSTRUCTION>
-  using Emitter = void(*)(Axle::Array<u8>&, const INSTRUCTION&);
+  using Emitter = void(*)(Axle::Array<u8>&, const INSTRUCTION&) noexcept;
 
   namespace Emit {
     template<typename INSTRUCTION>
-    void impl(Axle::Array<u8>& arr, const INSTRUCTION& i) {
+    void impl(Axle::Array<u8>& arr, const INSTRUCTION& i) noexcept {
+      TELEMETRY_FUNCTION();
       usize curr = arr.size;
       arr.insert_uninit(1 + i.serialize_size());
       arr.data[curr] = static_cast<u8>(INSTRUCTION::OPCODE);
@@ -412,7 +491,8 @@ MOD(Not, CODE_V_V)
 
   namespace Read {
     template<typename INSTRUCTION>
-    const u8* impl(const u8* arr, const u8* end, INSTRUCTION& i) {
+    const u8* impl(const u8* arr, const u8* end, INSTRUCTION& i) noexcept {
+      TELEMETRY_FUNCTION();
       ASSERT(arr < end);
       ASSERT(static_cast<OpCode>(*arr) == INSTRUCTION::OPCODE);
       arr += 1;
@@ -634,7 +714,7 @@ namespace VM {
     };
 
     RealValue get_value(const IR::V_ARG& arg);
-    RealValue get_indirect_value(const IR::V_ARG& arg);
+    RealValue get_indirect_value(const IR::P_ARG& arg);
   };
 
   struct Env {

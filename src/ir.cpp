@@ -7,6 +7,7 @@ namespace IO_Single = Axle::IO_Single;
 
 namespace IR {
   IR::ValueIndex IRStore::new_temporary(const VariableId& v_id, ValueRequirements requirements) {
+    TELEMETRY_FUNCTION();
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -24,6 +25,7 @@ namespace IR {
   }
 
   IR::ValueIndex IRStore::new_temporary(const Type& t, ValueRequirements requirements) {
+    TELEMETRY_FUNCTION();
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -37,6 +39,7 @@ namespace IR {
   }
 
   VariableId IRStore::new_variable(const Type& t, ValueRequirements requirements, bool indirect) {
+    TELEMETRY_FUNCTION();
     usize i = variables.size;
     variables.insert_uninit(1);
     IR::SSAVar* var = variables.back();
@@ -48,12 +51,14 @@ namespace IR {
   }
 
   u32 IRStore::new_global_reference(const IR::GlobalReference& ref) {
+    TELEMETRY_FUNCTION();
     u32 i = (u32)globals_used.size;
     globals_used.insert(ref);
     return i;
   }
 
   LocalLabel IRStore::new_control_block() {
+    TELEMETRY_FUNCTION();
     ASSERT(control_blocks.size < 0xffffffff);
 
     control_blocks.insert_uninit(1);
@@ -83,6 +88,7 @@ namespace IR {
   }
 
   void IRStore::set_current_cf(const CFStart& st) {
+    TELEMETRY_FUNCTION();
     ASSERT(st.child != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -92,6 +98,7 @@ namespace IR {
   }
 
   void IRStore::set_current_cf(const CFEnd& e) {
+    TELEMETRY_FUNCTION();
     ASSERT(e.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -100,6 +107,7 @@ namespace IR {
     cb->cf_end = e;
   }
   void IRStore::set_current_cf(const CFReturn& r) {
+    TELEMETRY_FUNCTION();
     ASSERT(r.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -108,6 +116,7 @@ namespace IR {
     cb->cf_return = r;
   }
   void IRStore::set_current_cf(const CFInline& i) {
+    TELEMETRY_FUNCTION();
     ASSERT(i.parent != IR::NULL_LOCAL_LABEL);
     ASSERT(i.child != IR::NULL_LOCAL_LABEL);
 
@@ -117,6 +126,7 @@ namespace IR {
     cb->cf_inline = i;
   }
   void IRStore::set_current_cf(const CFSplt& s) {
+    TELEMETRY_FUNCTION();
     ASSERT(s.parent != IR::NULL_LOCAL_LABEL);
     ASSERT(s.true_branch != IR::NULL_LOCAL_LABEL);
     ASSERT(s.false_branch != IR::NULL_LOCAL_LABEL);
@@ -127,6 +137,7 @@ namespace IR {
     cb->cf_split = s;
   }
   void IRStore::set_current_cf(const CFMerge& m) {
+    TELEMETRY_FUNCTION();
     ASSERT(m.parents[0] != IR::NULL_LOCAL_LABEL);
     ASSERT(m.parents[1] != IR::NULL_LOCAL_LABEL);
     ASSERT(m.child != IR::NULL_LOCAL_LABEL);
@@ -143,23 +154,26 @@ struct Serializer {
   usize remaining_size;
   usize index = 0;
 
-  constexpr Serializer(u8* base, usize remaining) : data_base(base), remaining_size(remaining) {}
+  constexpr Serializer(u8* base, usize remaining) noexcept : data_base(base), remaining_size(remaining) {}
 
-  void write(const u8* in_data, usize in_size) {
+  void write(const u8* in_data, usize in_size) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= in_size);
     memcpy_s(data_base + index, remaining_size, in_data, in_size);
     index += in_size;
     remaining_size -= in_size;
   }
 
-  void write(u8 b) {
+  void write(u8 b) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 1);
     data_base[index] = b;
     index += 1;
     remaining_size -= 1;
   }
 
-  void write(u16 u) {
+  void write(u16 u) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 2);
     data_base[index] = u & 0xff;
     data_base[index + 1] = (u >> 8) & 0xff;
@@ -168,7 +182,8 @@ struct Serializer {
     remaining_size -= 2;
   }
 
-  void write(u32 u) {
+  void write(u32 u) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 4);
     data_base[index] = u & 0xff;
     data_base[index + 1] = (u >> 8) & 0xff;
@@ -179,7 +194,8 @@ struct Serializer {
     remaining_size -= 4;
   }
 
-  void write(u64 u) {
+  void write(u64 u) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 8);
     data_base[index] = u & 0xff;
     data_base[index + 1] = (u >> 8) & 0xff;
@@ -193,26 +209,50 @@ struct Serializer {
     index += 8;
     remaining_size -= 8;
   }
+  
+  void write(IR::Format v) noexcept {
+    TELEMETRY_FUNCTION();
+    write(static_cast<u8>(v));
+  }
 
-  void write(IR::ValueIndex v) {
+  void write(IR::ValueIndex v) noexcept {
+    TELEMETRY_FUNCTION();
     write(v.index);
   }
 
-  void write(IR::LocalLabel l) {
+  void write(IR::LocalLabel l) noexcept {
+    TELEMETRY_FUNCTION();
     write(l.label);
   }
 
-  void write(IR::GlobalLabel gl) {
+  void write(IR::GlobalLabel gl) noexcept {
+    TELEMETRY_FUNCTION();
     write(gl.label);
   }
 
-  void write(const IR::V_ARG& v) {
+  void write(const IR::V_ARG& v) noexcept {
+    TELEMETRY_FUNCTION();
     write(v.val);
     write(v.offset);
-    write(v.size);
+    write(v.format);
+    if (v.format == IR::Format::opaque) {
+      write(v.opaque_size);
+    }
   }
 
-  void write(const IR::C_ARG& c) {
+  void write(const IR::P_ARG& p) noexcept {
+    TELEMETRY_FUNCTION();
+    write(p.ptr);
+    write(p.ptr_offset);
+    write(p.val_format);
+    if (p.val_format == IR::Format::opaque) {
+      write(p.opaque_val_size);
+      write(p.opaque_val_alignment);
+    }
+  }
+
+  void write(const IR::C_ARG& c) noexcept {
+    TELEMETRY_FUNCTION();
     write(c.size);
     write(c.val, static_cast<usize>(c.size));
   }
@@ -224,16 +264,18 @@ struct Deserializer {
   usize remaining_size;
   usize index = 0;
 
-  constexpr Deserializer(const u8* base, usize remaining) : data_base(base), remaining_size(remaining) {}
+  constexpr Deserializer(const u8* base, usize remaining) noexcept : data_base(base), remaining_size(remaining) {}
 
   void read(void* out_data, usize out_size) {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= out_size);
     memcpy_s(out_data, out_size, data_base + index, out_size);
     index += out_size;
     remaining_size -= out_size;
   }
 
-  const u8* bytes_slice(usize out_size) {
+  const u8* bytes_slice(usize out_size) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= out_size);
 
     const u8* res = data_base + index;
@@ -244,15 +286,16 @@ struct Deserializer {
     return res;
   }
 
-
-  void read(u8& b) {
+  void read(u8& b) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 1);
     b = data_base[index];
     index += 1;
     remaining_size -= 1;
   }
 
-  void read(u16& u) {
+  void read(u16& u) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 2);
     u = data_base[index]
       | (data_base[index + 1] << 16);
@@ -261,7 +304,8 @@ struct Deserializer {
     remaining_size -= 2;
   }
 
-  void read(u32& u) {
+  void read(u32& u) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 4);
     u = data_base[index]
       | (data_base[index + 1] << 8)
@@ -272,7 +316,8 @@ struct Deserializer {
     remaining_size -= 4;
   }
 
-  void read(u64& u) {
+  void read(u64& u) noexcept {
+    TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 8);
     u = (u64)data_base[index]
       | ((u64)data_base[index + 1] << 8)
@@ -286,33 +331,67 @@ struct Deserializer {
     index += 8;
     remaining_size -= 8;
   }
+  
+  void read(IR::Format& f) noexcept {
+    TELEMETRY_FUNCTION();
+    u8 b = 0;
+    read(b);
+    f = static_cast<IR::Format>(b);
+  }
 
-  void read(IR::ValueIndex& v) {
+  void read(IR::ValueIndex& v) noexcept {
+    TELEMETRY_FUNCTION();
     read(v.index);
   }
 
-  void read(IR::LocalLabel& l) {
+  void read(IR::LocalLabel& l) noexcept {
+    TELEMETRY_FUNCTION();
     read(l.label);
   }
 
-  void read(IR::GlobalLabel& gl) {
+  void read(IR::GlobalLabel& gl) noexcept {
+    TELEMETRY_FUNCTION();
     read(gl.label);
   }
 
-  void read(IR::V_ARG& v) {
+  void read(IR::V_ARG& v) noexcept {
+    TELEMETRY_FUNCTION();
     read(v.val);
     read(v.offset);
-    read(v.size);
+    read(v.format);
+    if (v.format == IR::Format::opaque) {
+      read(v.opaque_size);
+    }
+    else {
+      v.opaque_size = 0;
+    }
   }
 
-  void read(IR::C_ARG& c) {
+  void read(IR::P_ARG& p) noexcept {
+    TELEMETRY_FUNCTION();
+    read(p.ptr);
+    read(p.ptr_offset);
+    read(p.val_format);
+    if (p.val_format == IR::Format::opaque) {
+      read(p.opaque_val_size);
+      read(p.opaque_val_alignment);
+    }
+    else {
+      p.opaque_val_size = 0;
+      p.opaque_val_alignment = 0;
+    }
+  }
+
+  void read(IR::C_ARG& c) noexcept {
+    TELEMETRY_FUNCTION();
     read(c.size);
     c.val = bytes_slice(c.size);
   }
 };
 
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_V& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_V& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -321,7 +400,8 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V& i) {
   return ser.index;
 }
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_V_IM32& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_V_IM32& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -331,7 +411,8 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_IM32& i) {
   return ser.index;
 }
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_V_C& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_V_C& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -341,7 +422,19 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_C& i) {
   return ser.index;
 }
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_P_C& i) noexcept {
+  TELEMETRY_FUNCTION();
+  ASSERT(remaining_size >= i.serialize_size());
+  Serializer ser = { data, remaining_size };
+
+  ser.write(i.to);
+  ser.write(i.data);
+
+  return ser.index;
+}
+
+usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -351,7 +444,41 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V& i) {
   return ser.index;
 }
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V_V& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_V_P& i) noexcept {
+  TELEMETRY_FUNCTION();
+  ASSERT(remaining_size >= i.serialize_size());
+  Serializer ser = { data, remaining_size };
+
+  ser.write(i.to);
+  ser.write(i.from);
+
+  return ser.index;
+}
+
+usize IR::serialize(u8* data, usize remaining_size, const CODE_P_V& i) noexcept {
+  TELEMETRY_FUNCTION();
+  ASSERT(remaining_size >= i.serialize_size());
+  Serializer ser = { data, remaining_size };
+
+  ser.write(i.to);
+  ser.write(i.from);
+
+  return ser.index;
+}
+
+usize IR::serialize(u8* data, usize remaining_size, const CODE_P_P& i) noexcept {
+  TELEMETRY_FUNCTION();
+  ASSERT(remaining_size >= i.serialize_size());
+  Serializer ser = { data, remaining_size };
+
+  ser.write(i.to);
+  ser.write(i.from);
+
+  return ser.index;
+}
+
+usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V_V& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -362,7 +489,8 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V_V& i) {
   return ser.index;
 }
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_NV& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_NV& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -376,7 +504,8 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_NV& i) {
   return ser.index;
 }
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_GL_NV& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_GL_NV& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -391,7 +520,8 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_GL_NV& i) {
   return ser.index;
 }
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_V_LL& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_V_LL& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -402,7 +532,8 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_LL& i) {
   return ser.index;
 }
 
-usize IR::serialize(u8* data, usize remaining_size, const CODE_L& i) {
+usize IR::serialize(u8* data, usize remaining_size, const CODE_L& i) noexcept {
+  TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -412,8 +543,8 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_L& i) {
 }
 
 
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_V& i) {
-  ASSERT(remaining_size >= i.serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_V& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.val);
@@ -421,8 +552,8 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V& i) {
   return ser.index;
 }
 
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_IM32& i) {
-  ASSERT(remaining_size >= i.serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_IM32& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.val);
@@ -431,9 +562,8 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_IM32& i) {
   return ser.index;
 }
 
-
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_C& i) {
-  ASSERT(remaining_size >= i.static_serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_C& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -442,8 +572,18 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_C& i) {
   return ser.index;
 }
 
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V& i) {
-  ASSERT(remaining_size >= i.serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_C& i) noexcept {
+  TELEMETRY_FUNCTION();
+  Deserializer ser = { data, remaining_size };
+
+  ser.read(i.to);
+  ser.read(i.data);
+
+  return ser.index;
+}
+
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -452,9 +592,38 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V& i) {
   return ser.index;
 }
 
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_P& i) noexcept {
+  TELEMETRY_FUNCTION();
+  Deserializer ser = { data, remaining_size };
 
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V_V& i) {
-  ASSERT(remaining_size >= i.serialize_size());
+  ser.read(i.to);
+  ser.read(i.from);
+
+  return ser.index;
+}
+
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_V& i) noexcept {
+  TELEMETRY_FUNCTION();
+  Deserializer ser = { data, remaining_size };
+
+  ser.read(i.to);
+  ser.read(i.from);
+
+  return ser.index;
+}
+
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_P& i) noexcept {
+  TELEMETRY_FUNCTION();
+  Deserializer ser = { data, remaining_size };
+
+  ser.read(i.to);
+  ser.read(i.from);
+
+  return ser.index;
+}
+
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V_V& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -464,8 +633,8 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V_V& i) {
   return ser.index;
 }
 
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_NV& i) {
-  ASSERT(remaining_size >= i.static_serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_NV& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.n_values);
@@ -474,8 +643,8 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_NV& i) {
   return ser.index;
 }
 
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i) {
-  ASSERT(remaining_size >= i.static_serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.label);
@@ -485,8 +654,8 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i) {
   return ser.index;
 }
 
-usize IR::deserialize(const u8* data, usize remaining_size, V_ARG& v) {
-  ASSERT(remaining_size >= v.serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, V_ARG& v) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(v);
@@ -494,8 +663,8 @@ usize IR::deserialize(const u8* data, usize remaining_size, V_ARG& v) {
   return ser.index;
 }
 
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_LL& i) {
-  ASSERT(remaining_size >= i.serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_LL& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.val);
@@ -505,8 +674,8 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_LL& i) {
   return ser.index;
 }
 
-usize IR::deserialize(const u8* data, usize remaining_size, CODE_L& i) {
-  ASSERT(remaining_size >= i.serialize_size());
+usize IR::deserialize(const u8* data, usize remaining_size, CODE_L& i) noexcept {
+  TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.local_label);
@@ -554,6 +723,7 @@ bool Eval::must_pass_type_by_reference(const CallingConvention* conv, const Stru
 Eval::StartupInfo Eval::init_startup(
     IrBuilder* builder,
     Eval::Time eval_time, IR::IRStore* ir) {
+  TELEMETRY_FUNCTION();
   ASSERT(ir != nullptr);
   ASSERT(ir->signature != nullptr);
 
@@ -571,15 +741,7 @@ Eval::StartupInfo Eval::init_startup(
 }
 
 void Eval::end_startup(IrBuilder* builder, const StartupInfo& startup, const IR::Types::StartFunc& start) {
-  {
-    const CallingConvention* conv = builder->ir->signature->calling_convention;
-    for (u32 i = 0; i < start.n_values; ++i) {
-      ASSERT(conv->param_by_reference_size == 0
-          || start.values[i].size <= conv->param_by_reference_size);
-      ASSERT(start.values[i].offset == 0);
-    }
-  }
-
+  TELEMETRY_FUNCTION();
   IR::Emit::StartFunc(builder->ir->current_bytecode(), start);
 
   builder->reset_variables();
@@ -588,6 +750,7 @@ void Eval::end_startup(IrBuilder* builder, const StartupInfo& startup, const IR:
 }
 
 void Eval::end_builder(Eval::IrBuilder* builder) {
+  TELEMETRY_FUNCTION();
   IR::IRStore* ir = builder->ir;
 
   if (ir->current_block != IR::NULL_LOCAL_LABEL) {
@@ -599,6 +762,7 @@ void Eval::end_builder(Eval::IrBuilder* builder) {
 }
 
 void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eval::RuntimeValue& from) {
+  TELEMETRY_FUNCTION();
   ASSERT(to.rvt != RVT::Constant);
 
   ASSERT(to.type.size() > 0);
@@ -627,7 +791,7 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
             }
           case Eval::RVT::Indirect: {
               IR::Types::CopyLoad ccd = {};
-              ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
+              ccd.from = IR::p_arg(from.value.index, from.value.offset, from.type);
               ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
 
               IR::Emit::CopyLoad(ir->current_bytecode(), ccd);
@@ -641,7 +805,7 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
           case Eval::RVT::Constant: {
               IR::Types::SetStore set = {};
               set.data = IR::c_arg(from.constant, from.type);
-              set.to = IR::v_arg(to.value.index, to.value.offset, to.type);
+              set.to = IR::p_arg(to.value.index, to.value.offset, to.type);
 
               IR::Emit::SetStore(ir->current_bytecode(), set);
               return;
@@ -649,15 +813,15 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
           case Eval::RVT::Direct: {
               IR::Types::CopyStore ccd = {};
               ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
-              ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
+              ccd.to = IR::p_arg(to.value.index, to.value.offset, to.type);
 
               IR::Emit::CopyStore(ir->current_bytecode(), ccd);
               return;
             }
           case Eval::RVT::Indirect: {
               IR::Types::CopyLoadStore ccd = {};
-              ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
-              ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
+              ccd.from = IR::p_arg(from.value.index, from.value.offset, from.type);
+              ccd.to = IR::p_arg(to.value.index, to.value.offset, to.type);
 
               IR::Emit::CopyLoadStore(ir->current_bytecode(), ccd);
               return;
@@ -671,6 +835,7 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
 }
 
 IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirements reqs, bool indirect) {
+  TELEMETRY_FUNCTION();
   IR::VariableId id = ir->new_variable(t, reqs, indirect);
 
   {
@@ -693,6 +858,7 @@ IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirement
 }
 
 Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR::ValueRequirements reqs) {
+  TELEMETRY_FUNCTION();
   ASSERT(id.variable < ir->variables.size);
   IR::SSAVar& sv = ir->variables.data[id.variable];
   sv.requirements |= reqs;
@@ -732,6 +898,7 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR
 }
 
 void Eval::IrBuilder::switch_control_block(IR::LocalLabel index, IR::LocalLabel _parent) {
+  TELEMETRY_FUNCTION();
   ir->end_control_block();
   ir->start_control_block(index);
   parent = _parent;
@@ -749,6 +916,7 @@ void Eval::IrBuilder::reset_variables() {
 }
 
 IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
+  TELEMETRY_FUNCTION();
   switch (rv.rvt) {
     case RVT::Constant: {
         IR::ValueIndex v = ir->new_temporary(rv.type, {});
@@ -773,7 +941,7 @@ IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
 
         IR::Types::CopyLoad cpy = {};
         cpy.to = IR::v_arg(v, 0, copy_t);
-        cpy.from = IR::v_arg(rv.value.index, rv.value.offset, rv.type);
+        cpy.from = IR::p_arg(rv.value.index, rv.value.offset, rv.type);
 
         IR::Emit::CopyLoad(ir->current_bytecode(), cpy);
 
@@ -785,6 +953,7 @@ IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
 }
 
 Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue& val, const Type& ptr_type) {
+  TELEMETRY_FUNCTION();
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   switch (val.rvt) {
@@ -830,6 +999,7 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
 
 Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Type& ptr_type) {
+  TELEMETRY_FUNCTION();
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   switch (val.rvt) {
@@ -881,6 +1051,7 @@ Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
 
 Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
                                const Eval::RuntimeValue& val, const Type& ptr_type) {
+  TELEMETRY_FUNCTION();
   ASSERT(val.type.struct_type() == STRUCTURE_TYPE::POINTER);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
@@ -902,7 +1073,7 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
         IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         IR::Types::AddrOfLoad addr = {};
-        addr.from = IR::v_arg(val.value.index, val.value.offset, val.type);
+        addr.from = IR::p_arg(val.value.index, val.value.offset, val.type);
         addr.to = IR::v_arg(v, 0, ptr_type);
 
         IR::Emit::AddrOfLoad(ir->current_bytecode(), addr);
@@ -916,6 +1087,7 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
 
 Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Eval::RuntimeValue& offset, const Type& ptr_type) {
+  TELEMETRY_FUNCTION();
   const Type u64_type = offset.type;
   ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
   ASSERT(u64_type.structure->size == 8);
@@ -999,6 +1171,7 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     u64 offset,
                                     const Type& ptr_type,
                                     const Type& u64_type) {
+  TELEMETRY_FUNCTION();
   ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
   ASSERT(u64_type.structure->size == 8);
   ASSERT(!u64_type.unchecked_base<IntegerStructure>()->is_signed);
@@ -1023,15 +1196,9 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
     }
     case RVT::Indirect: {
       if(offset == 0) {
-        const IR::ValueIndex v = ir->new_temporary(ptr_type, {});
-
-        IR::Types::Copy cpy = {};
-        cpy.from = IR::v_arg(val.value.index, val.value.offset, val.type);
-        cpy.to = IR::v_arg(v, 0, ptr_type);
-        
-        IR::Emit::Copy(ir->current_bytecode(), cpy);
-
-        return Eval::as_indirect(v, ptr_type);
+        RuntimeValue new_val = val;
+        new_val.type = ptr_type;
+        return new_val;
       }
       else {
         const IR::ValueIndex v = ir->new_temporary(ptr_type, {});
@@ -1055,10 +1222,27 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
 }
 
 void print_value(const IR::V_ARG& arg) {
-  IO_Single::format("T{} [{}..{}]", arg.val.index, arg.offset, arg.offset + arg.size);
+  if (arg.format != IR::Format::opaque) {
+    IO_Single::format("T{} [{}.., {}]", arg.val.index, arg.offset, arg.format);
+  }
+  else {
+    IO_Single::format("T{} [{}..{}, {}]", arg.val.index, arg.offset, arg.opaque_size, arg.format);
+  }
+}
+
+void print_value(const IR::P_ARG& arg) {
+  IO_Single::print("[ ");
+  IO_Single::format("T{} [{}, {}]", arg.ptr.index, arg.ptr_offset, IR::Format::pointer);
+  if (arg.val_format == IR::Format::opaque) {
+    IO_Single::format(", {}.., {} ]", 0, arg.val_format);
+  }
+  else {
+    IO_Single::format(", {}..{}, {} ]", 0, arg.opaque_val_size, arg.val_format);
+  }
 }
 
 void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
+  TELEMETRY_FUNCTION();
   IO_Single::lock();
   DEFER() { IO_Single::unlock(); };
 
@@ -1161,9 +1345,7 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
             IR::Types::SetStore set;
             bc = IR::Read::SetStore(bc, bc_end, set);
 
-            IO_Single::print("[ ");
             print_value(set.to);
-            IO_Single::print(" ]");
 
             Axle::ByteArray arr = {};
             arr.ptr = set.data.val;
@@ -1189,18 +1371,17 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
             bc = IR::Read::CopyLoad(bc, bc_end, copy);
 
             print_value(copy.to);
-            IO_Single::print(" = [ ");
+            IO_Single::print(" = ");
             print_value(copy.from);
-            IO_Single::print(" ]\n");
+            IO_Single::print("\n");
             break;
           }
         case IR::OpCode::CopyStore: {
             IR::Types::CopyStore copy;
             bc = IR::Read::CopyStore(bc, bc_end, copy);
 
-            IO_Single::print("[ ");
             print_value(copy.to);
-            IO_Single::print(" ] = ");
+            IO_Single::print(" = ");
             print_value(copy.from);
             IO_Single::print("\n");
             break;
@@ -1209,11 +1390,10 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
             IR::Types::CopyLoadStore copy;
             bc = IR::Read::CopyLoadStore(bc, bc_end, copy);
 
-            IO_Single::print("[ ");
             print_value(copy.to);
-            IO_Single::print(" ] = [ ");
+            IO_Single::print(" = ");
             print_value(copy.from);
-            IO_Single::print(" ]\n");
+            IO_Single::print("\n");
             break;
           }
         case IR::OpCode::AddrOf: {
@@ -1231,9 +1411,9 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
             bc = IR::Read::AddrOf(bc, bc_end, addr);
 
             print_value(addr.to);
-            IO_Single::print(" = & [ ");
+            IO_Single::print(" = & ");
             print_value(addr.from);
-            IO_Single::print(" ]\n");
+            IO_Single::print("\n");
             break;
           }
         case IR::OpCode::AddrOfGlobal: {

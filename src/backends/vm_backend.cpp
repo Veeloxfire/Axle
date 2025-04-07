@@ -63,8 +63,9 @@ RealValue VM::StackFrame::get_value(const IR::V_ARG& arg) {
   };
 }
 
-RealValue VM::StackFrame::get_indirect_value(const IR::V_ARG& arg) {
-  const u32 i = arg.val.index;
+RealValue VM::StackFrame::get_indirect_value(const IR::P_ARG& arg) {
+  TELEMETRY_FUNCTION();
+  const u32 i = arg.ptr.index;
   const auto& val_info = temporaries[i];
 
   ASSERT(val_info.type.struct_type() == STRUCTURE_TYPE::POINTER);
@@ -153,6 +154,7 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
 
 static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
                         Axle::ViewArr<const u8> from, IR::Format f_format) {
+  TELEMETRY_FUNCTION();
   ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
   
   constexpr auto int_dispatch = []<typename T>(Axle::ViewArr<u8> to, IR::Format t_format, Axle::ViewArr<const u8> from) {
@@ -193,7 +195,12 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
 
   while (true) {
     while (stack_frame->IP < stack_frame->IP_END) {
-      const auto opcode = static_cast<IR::OpCode>(stack_frame->IP[0]);
+      const IR::OpCode opcode 
+        = static_cast<IR::OpCode>(stack_frame->IP[0]);
+
+#ifdef STACKTRACE_ENABLE
+      Axle::Stacktrace::ScopedExecTrace opcode_stacktrace = opcode_string(opcode);
+#endif
 
       switch (opcode) {
         case IR::OpCode::Set: {
@@ -210,8 +217,8 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             break;
           }
         case IR::OpCode::SetStore: {
-            IR::Types::Set set;
-            stack_frame->IP = IR::Read::Set(stack_frame->IP, stack_frame->IP_END, set);
+            IR::Types::SetStore set;
+            stack_frame->IP = IR::Read::SetStore(stack_frame->IP, stack_frame->IP_END, set);
 
             auto to = stack_frame->get_indirect_value(set.to);
 
@@ -260,8 +267,8 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             break;
           }
         case IR::OpCode::CopyLoadStore: {
-            IR::Types::CopyStore copy;
-            stack_frame->IP = IR::Read::CopyStore(stack_frame->IP, stack_frame->IP_END, copy);
+            IR::Types::CopyLoadStore copy;
+            stack_frame->IP = IR::Read::CopyLoadStore(stack_frame->IP, stack_frame->IP_END, copy);
 
             auto from = stack_frame->get_indirect_value(copy.from);
             auto to = stack_frame->get_indirect_value(copy.to);
