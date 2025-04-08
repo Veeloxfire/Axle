@@ -43,14 +43,6 @@ struct ComptimeExec {
   Type type;
 };
 
-struct DependencyChecker {
-  Namespace* available_names;
-  u32 num_locals;
-  Axle::Array<Local*> locals;
-
-  Local* get_local(const Axle::InternString* name);
-};
-
 struct Global {
   Decl decl = {};
   

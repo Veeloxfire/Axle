@@ -63,6 +63,58 @@ constexpr Axle::ViewArr<const char> ast_type_string(AST_TYPE ty) {
   INVALID_CODE_PATH("Invalid ast type");
 }
 
+#define AST_VISIT_TYPE_MOD \
+MOD(NAMED_TYPE) \
+MOD(ARRAY_TYPE) \
+MOD(PTR_TYPE) \
+MOD(SLICE_TYPE) \
+MOD(LAMBDA_TYPE) \
+MOD(TUPLE_TYPE) \
+MOD(CAST) \
+MOD(UNARY_OPERATOR) \
+MOD(BINARY_OPERATOR) \
+MOD(IDENTIFIER_EXPR) \
+MOD(DECL) \
+MOD(NUMBER) \
+MOD(FUNCTION_CALL) \
+MOD(TUPLE_LIT) \
+MOD(ARRAY_EXPR) \
+MOD(ASCII_STRING) \
+MOD(ASCII_CHAR) \
+MOD(INDEX_EXPR) \
+MOD(MEMBER_ACCESS) \
+MOD(LAMBDA) \
+MOD(LAMBDA_EXPR) \
+MOD(STRUCT) \
+MOD(STRUCT_EXPR) \
+MOD(TYPED_NAME) \
+MOD(ASSIGN) \
+MOD(BLOCK) \
+MOD(IF_ELSE) \
+MOD(WHILE) \
+MOD(RETURN) \
+MOD(FUNCTION_SIGNATURE) \
+MOD(IMPORT) \
+MOD(EXPORT) \
+MOD(EXPORT_SINGLE) \
+MOD(LINK)
+
+enum struct AST_VISIT_TYPE : u8 {
+#define MOD(n) n,
+  AST_VISIT_TYPE_MOD
+#undef MOD
+};
+
+constexpr Axle::ViewArr<const char> ast_visit_type_string(AST_VISIT_TYPE ty) {
+  switch (ty) {
+#define MOD(n) case AST_VISIT_TYPE :: n : return Axle::lit_view_arr(#n);
+    AST_TYPE_MOD;
+#undef MOD
+  }
+
+  INVALID_CODE_PATH("Invalid ast visit type");
+}
+
 struct AST {
   AST_TYPE ast_type;
   VALUE_CATEGORY value_category;

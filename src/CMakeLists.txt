@@ -8,6 +8,7 @@ set(CppFiles
   "${PROJECT_SOURCE_DIR}/api.cpp"
   "${PROJECT_SOURCE_DIR}/backends.cpp"
   "${PROJECT_SOURCE_DIR}/compiler.cpp"
+  "${PROJECT_SOURCE_DIR}/dependency_check.cpp"
   "${PROJECT_SOURCE_DIR}/errors.cpp"
   "${PROJECT_SOURCE_DIR}/ir.cpp"
   "${PROJECT_SOURCE_DIR}/names.cpp"

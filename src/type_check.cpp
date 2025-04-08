@@ -2244,7 +2244,7 @@ TC_STAGE(FUNCTION_CALL, 1) {
   TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
-  call->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;//not constant yet
+  call->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   typer->push_node(call->function, {});
 
