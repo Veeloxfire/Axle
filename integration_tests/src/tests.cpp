@@ -165,9 +165,6 @@ struct Test {
     : test_name(Axle::lit_view_arr(t_name)), base_name(Axle::lit_view_arr(b_name)), return_value(return_value_) {}
 };
 
-static constexpr char TEST_DIR[] = "src/";
-static constexpr char EXE_DIR[] = "out/";
-
 static constexpr u8 ONES_U8[2] = { 1, 1 };
 
 static constexpr u32 TIME_TO_WAIT_MS = 1000 * 20;//20 seconds
@@ -261,7 +258,7 @@ void run_test_with_setup_x64_pe(AxleTest::TestErrors* test_errors, Axle::ViewArr
   options.optimize = {};
 
   const auto file_name_holder = Axle::format("{}.axl", base_name);
-  const auto exe_name_holder = Axle::format_file_path(Axle::lit_view_arr(EXE_DIR), base_name, Axle::lit_view_arr("exe"));
+  const auto exe_name_holder = Axle::format_file_path(Axle::lit_view_arr(INTEGRATION_TEST_CLIENT_OUT_DIR), base_name, Axle::lit_view_arr("exe"));
 
   options.platform_interface = &x64_pi;
   options.executable_format_interface = &PE_efi;
@@ -273,10 +270,10 @@ void run_test_with_setup_x64_pe(AxleTest::TestErrors* test_errors, Axle::ViewArr
   options.build.current_directory = Axle::lit_view_arr(".");//TODO: actually get this
   options.build.file_name = Axle::const_view_arr(file_name_holder);
   options.build.output_name = base_name;
-  options.build.output_folder = Axle::lit_view_arr(EXE_DIR);
+  options.build.output_folder = Axle::lit_view_arr(INTEGRATION_TEST_CLIENT_OUT_DIR);
   options.build.output_file_type = PE_efi.type;
-  options.build.std_lib_folder = Axle::lit_view_arr("..\\stdlib");
-  options.build.lib_folder = Axle::lit_view_arr(TEST_DIR);
+  options.build.std_lib_folder = Axle::lit_view_arr(INTEGRATION_TEST_CLIENT_STDLIB_DIR);
+  options.build.lib_folder = Axle::lit_view_arr(INTEGRATION_TEST_CLIENT_SRC_DIR);
 
   options.build.extra_threads = 3;
 

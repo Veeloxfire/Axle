@@ -1,27 +1,15 @@
-cmake_minimum_required(VERSION 3.10)
-project(AxleSandbox)
+
+add_executable(AxleSandbox "${PROJECT_SOURCE_DIR}/sandbox/src/sandbox.cpp")
 
 foreach(config_type ${CMAKE_CONFIGURATION_TYPES})
   string(TOUPPER ${config_type} config_upper)
-  if(NOT DEFINED "CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper}")
-    set("CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
-  endif()
-  if(NOT DEFINED "CMAKE_LIBRARY_OUTPUT_DIRECTORY_${config_upper}")
-    set("CMAKE_LIBRARY_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
-  endif()
-  if(NOT DEFINED "CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper}")
-    set("CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out")
-  endif()
+  set_target_properties(AxleSandbox
+      PROPERTIES
+      "ARCHIVE_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out/sandbox"
+      "LIBRARY_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out/sandbox"
+      "RUNTIME_OUTPUT_DIRECTORY_${config_upper}" "${PROJECT_BINARY_DIR}/out/sandbox"
+  )
 endforeach()
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
-
-add_executable(AxleSandbox "src/sandbox.cpp")
-
-if(NOT DEFINED AxleINCLUDE)
-  message(FATAL_ERROR "Require AxleINCLUDE (axle compiler include path) to be provided")
-endif()
 
 if(NOT DEFINED AxleUtilINCLUDE)
   message(FATAL_ERROR "Require AxleUtilINCLUDE (axle util include path) to be provided")
@@ -47,5 +35,5 @@ if(AxleTRACING)
   target_link_libraries(AxleSandbox "${TracerBIN}/Tracer.lib")
 endif()
 
-target_include_directories(AxleSandbox PRIVATE src ${AxleINCLUDE} ${AxleUtilINCLUDE})
+target_include_directories(AxleSandbox PRIVATE "${PROJECT_SOURCE_DIR}/sandbox/src" ${AxleUtilINCLUDE})
 target_link_libraries(AxleSandbox AxleCompiler "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")

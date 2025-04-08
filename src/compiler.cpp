@@ -2892,14 +2892,22 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   {
-    Axle::OwnedArr stdlib = normalize_path(view_arr(file_loader->cwd.directory), options.build.std_lib_folder);
-    if (!Axle::FILES::exists(view_arr(stdlib))) {
+    if (Axle::is_absolute_path(options.build.std_lib_folder)) {
+      comp->build_options.std_lib_folder = strings->intern(options.build.std_lib_folder);
+    }
+    else {
+      Axle::OwnedArr stdlib = normalize_path(view_arr(file_loader->cwd.directory), options.build.std_lib_folder);
+      comp->build_options.std_lib_folder = strings->intern(stdlib);
+    }
+
+    ASSERT(comp->build_options.std_lib_folder != nullptr);
+
+    if (!Axle::FILES::exists(view_arr(comp->build_options.std_lib_folder))) {
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
-                                "std lib folder was invalid: {}", stdlib);
+                                "std lib folder was invalid: {}", comp->build_options.std_lib_folder);
       return;
     }
 
-    comp->build_options.std_lib_folder = strings->intern(stdlib);
   }
 
   if (options.build.lib_folder.size == 0) {
@@ -2909,14 +2917,19 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   }
 
   {
-    Axle::OwnedArr lib_folder = normalize_path(view_arr(file_loader->cwd.directory), options.build.lib_folder);
-    if (!Axle::FILES::exists(view_arr(lib_folder))) {
-      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
-                                "lib folder was invalid: {}", lib_folder);
-      return;
+    if (Axle::is_absolute_path(options.build.lib_folder)) {
+      comp->build_options.lib_folder = strings->intern(options.build.lib_folder);
+    }
+    else {
+      Axle::OwnedArr lib_folder = normalize_path(view_arr(file_loader->cwd.directory), options.build.lib_folder);
+      comp->build_options.lib_folder = strings->intern(lib_folder);
     }
 
-    comp->build_options.lib_folder = strings->intern(lib_folder);
+    if (!Axle::FILES::exists(view_arr(comp->build_options.lib_folder))) {
+      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
+                                "lib folder was invalid: {}", comp->build_options.lib_folder);
+      return;
+    }
   }
 
   {
