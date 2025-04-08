@@ -92,34 +92,34 @@ void dependency_check_ast_node(CompilerGlobals& comp,
   switch (a->ast_type) {
     case AST_TYPE::INVALID: INVALID_CODE_PATH("Invalid node type"); break;
     case AST_TYPE::NAMED_TYPE: {
-        ASTNamedType* nt = (ASTNamedType*)a;
+        ASTNamedType* nt = downcast_ast<ASTNamedType>(a);
 
         nt->global = test_global_dependency(comp, comp_thread, state, nt->node_span, nt->name);
         return;
       }
     case AST_TYPE::ARRAY_TYPE: {
-        ASTArrayType* at = (ASTArrayType*)a;
+        ASTArrayType* at = downcast_ast<ASTArrayType>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, at->base);
         dependency_check_ast_node(comp, comp_thread, state, at->expr);
         return;
       }
     case AST_TYPE::PTR_TYPE: {
-        ASTPtrType* ptr = (ASTPtrType*)a;
+        ASTPtrType* ptr = downcast_ast<ASTPtrType>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, ptr->base);
 
         return;
       }
     case AST_TYPE::SLICE_TYPE: {
-        ASTSliceType* ptr = (ASTSliceType*)a;
+        ASTSliceType* ptr = downcast_ast<ASTSliceType>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, ptr->base);
 
         return;
       }
     case AST_TYPE::LAMBDA_TYPE: {
-        ASTLambdaType* lt = (ASTLambdaType*)a;
+        ASTLambdaType* lt = downcast_ast<ASTLambdaType>(a);
 
         FOR_AST(lt->args, ty) {
           dependency_check_ast_node(comp, comp_thread, state, ty);
@@ -130,7 +130,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::TUPLE_TYPE: {
-        ASTTupleType* tt = (ASTTupleType*)a;
+        ASTTupleType* tt = downcast_ast<ASTTupleType>(a);
 
         FOR_AST(tt->types, ty) {
           dependency_check_ast_node(comp, comp_thread, state, ty);
@@ -139,27 +139,27 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::CAST: {
-        ASTCastExpr* cast = (ASTCastExpr*)a;
+        ASTCastExpr* cast = downcast_ast<ASTCastExpr>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, cast->type);
         dependency_check_ast_node(comp, comp_thread, state, cast->expr);
         return;
       }
     case AST_TYPE::UNARY_OPERATOR: {
-        ASTUnaryOperatorExpr* un_op = (ASTUnaryOperatorExpr*)a;
+        ASTUnaryOperatorExpr* un_op = downcast_ast<ASTUnaryOperatorExpr>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, un_op->expr);
         return;
       }
     case AST_TYPE::BINARY_OPERATOR: {
-        ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)a;
+        ASTBinaryOperatorExpr* const bin_op = downcast_ast<ASTBinaryOperatorExpr>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, bin_op->left);
         dependency_check_ast_node(comp, comp_thread, state, bin_op->right);
         return;
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
-        ASTIdentifier* ident = (ASTIdentifier*)a;
+        ASTIdentifier* ident = downcast_ast<ASTIdentifier>(a);
 
         const Axle::InternString* name = ident->name;
 
@@ -179,7 +179,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::FUNCTION_CALL: {
-        ASTFunctionCallExpr* const call = (ASTFunctionCallExpr*)a;
+        ASTFunctionCallExpr* const call = downcast_ast<ASTFunctionCallExpr>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, call->function);
 
@@ -190,7 +190,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::TUPLE_LIT: {
-        ASTTupleLitExpr* tup = (ASTTupleLitExpr*)a;
+        ASTTupleLitExpr* tup = downcast_ast<ASTTupleLitExpr>(a);
 
         if (tup->prefix != nullptr) {
           dependency_check_ast_node(comp, comp_thread, state, tup->prefix);
@@ -202,7 +202,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::ARRAY_EXPR: {
-        ASTArrayExpr* arr = (ASTArrayExpr*)a;
+        ASTArrayExpr* arr = downcast_ast<ASTArrayExpr>(a);
 
         FOR_AST(arr->elements, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
@@ -210,7 +210,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::INDEX_EXPR: {
-        ASTIndexExpr* index = (ASTIndexExpr*)a;
+        ASTIndexExpr* index = downcast_ast<ASTIndexExpr>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, index->expr);
         FOR_AST(index->arguments, it) {
@@ -219,16 +219,16 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::MEMBER_ACCESS: {
-        ASTMemberAccessExpr* member = (ASTMemberAccessExpr*)a;
+        ASTMemberAccessExpr* member = downcast_ast<ASTMemberAccessExpr>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, member->expr);
         return;
       }
     case AST_TYPE::LAMBDA_EXPR: {
-        ASTLambdaExpr* le = (ASTLambdaExpr*)a;
+        ASTLambdaExpr* le = downcast_ast<ASTLambdaExpr>(a);
 
-        ASTLambda* lambda = (ASTLambda*)le->lambda;
-        ASTFuncSig* sig = (ASTFuncSig*)lambda->sig;
+        ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
+        ASTFuncSig* sig = downcast_ast<ASTFuncSig>(lambda->sig);
 
         if (sig->sig->sig_struct == nullptr) {
           set_dependency(comp_thread, lambda->function->sig_unit_id);
@@ -237,9 +237,9 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::STRUCT_EXPR: {
-        ASTStructExpr* se = (ASTStructExpr*)a;
+        ASTStructExpr* se = downcast_ast<ASTStructExpr>(a);
 
-        ASTStructBody* struct_body = (ASTStructBody*)se->struct_body;
+        ASTStructBody* struct_body = downcast_ast<ASTStructBody>(se->struct_body);
 
         if (!(struct_body->actual_type.is_valid())) {
           //Is not valid so need to wait for that
@@ -249,7 +249,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::DECL: {
-        ASTDecl* decl = (ASTDecl*)a;
+        ASTDecl* decl = downcast_ast<ASTDecl>(a);
 
         if (decl->type_ast != 0) {
           dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
@@ -285,7 +285,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::TYPED_NAME: {
-        ASTTypedName* tn = (ASTTypedName*)a;
+        ASTTypedName* tn = downcast_ast<ASTTypedName>(a);
 
         if (tn->type != 0) {
           dependency_check_ast_node(comp, comp_thread, state, tn->type);
@@ -313,14 +313,14 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::ASSIGN: {
-        ASTAssign* assign = (ASTAssign*)a;
+        ASTAssign* assign = downcast_ast<ASTAssign>(a);
         dependency_check_ast_node(comp, comp_thread, state, assign->assign_to);
         dependency_check_ast_node(comp, comp_thread, state, assign->value);
 
         return;
       }
     case AST_TYPE::BLOCK: {
-        ASTBlock* block = (ASTBlock*)a;
+        ASTBlock* block = downcast_ast<ASTBlock>(a);
 
         const usize count = state.locals.size;
 
@@ -333,7 +333,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::IF_ELSE: {
-        ASTIfElse* if_else = (ASTIfElse*)a;
+        ASTIfElse* if_else = downcast_ast<ASTIfElse>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, if_else->condition);
 
@@ -351,7 +351,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::WHILE: {
-        ASTWhile* while_s = (ASTWhile*)a;
+        ASTWhile* while_s = downcast_ast<ASTWhile>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, while_s->condition);
 
@@ -361,7 +361,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::RETURN: {
-        ASTReturn* ret = (ASTReturn*)a;
+        ASTReturn* ret = downcast_ast<ASTReturn>(a);
 
         if (ret->expr != nullptr) {
           dependency_check_ast_node(comp, comp_thread, state, ret->expr);
@@ -369,7 +369,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::FUNCTION_SIGNATURE: {
-        ASTFuncSig* func_sig = (ASTFuncSig*)a;
+        ASTFuncSig* func_sig = downcast_ast<ASTFuncSig>(a);
 
         FOR_AST(func_sig->parameters, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
@@ -380,19 +380,19 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::IMPORT: {
-        ASTImport* imp = (ASTImport*)a;
+        ASTImport* imp = downcast_ast<ASTImport>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, imp->expr_location);
         return;
       }
     case AST_TYPE::EXPORT_SINGLE: {
-        ASTExportSingle* es = (ASTExportSingle*)a;
+        ASTExportSingle* es = downcast_ast<ASTExportSingle>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, es->value);
         return;
       }
     case AST_TYPE::EXPORT: {
-        ASTExport* e = (ASTExport*)a;
+        ASTExport* e = downcast_ast<ASTExport>(a);
 
         FOR_AST(e->export_list, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
@@ -400,7 +400,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::LINK: {
-        ASTLink* imp = (ASTLink*)a;
+        ASTLink* imp = downcast_ast<ASTLink>(a);
 
         dependency_check_ast_node(comp, comp_thread, state, imp->import_type);
 
@@ -408,7 +408,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
       }
 
     case AST_TYPE::LAMBDA: {
-        ASTLambda* l = (ASTLambda*)a;
+        ASTLambda* l = downcast_ast<ASTLambda>(a);
 
         ASSERT(state.locals.size == 0);
         ASSERT(state.num_locals == 0);
@@ -419,7 +419,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::STRUCT: {
-        ASTStructBody* s = (ASTStructBody*)a;
+        ASTStructBody* s = downcast_ast<ASTStructBody>(a);
 
         FOR_AST(s->elements, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
