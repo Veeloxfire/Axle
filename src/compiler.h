@@ -94,6 +94,7 @@ struct CompilationUnit {
   COMPILATION_EMIT_TYPE emit;
   Namespace* available_names;
   AST_LOCAL ast;
+  Axle::OwnedArr<AstVisit> visit_arr;
 
   void* detail;
 

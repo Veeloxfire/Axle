@@ -3,11 +3,12 @@
 #include <Axle/comp_utilities.h>
 #include <AxleUtil/utility.h>
 
-struct Namespace;
+#include "ast.h"
 
 namespace DC {
-  void dependency_check_ast(CompilerGlobals* const comp,
-                            CompilerThread* const comp_thread,
-                            Namespace* const available_names,
-                            AST_LOCAL a);
+  Axle::OwnedArr<AstVisit>
+    dependency_check_ast(CompilerGlobals* const comp,
+                         CompilerThread* const comp_thread,
+                         Namespace* const available_names,
+                         AST_LOCAL a);
 }

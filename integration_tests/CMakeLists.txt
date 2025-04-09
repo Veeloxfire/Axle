@@ -59,8 +59,8 @@ target_link_libraries(IntegrationTestsServer "${AxleUtilBIN}/AxleTestServer$<CON
 target_link_libraries(IntegrationTestsClient AxleCompiler TesterLib "${AxleUtilBIN}/AxleTestClient$<CONFIG>.lib")
 
 add_custom_target(CopyDLL ALL
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:TesterDll>/Tester.dll" "${PROJECT_SOURCE_DIR}/out")
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:TesterDll>/Tester.dll" "${PROJECT_SOURCE_DIR}/integration_tests/out/")
 add_custom_target(CopyPDB ALL
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:TesterDll>/Tester.pdb" "${PROJECT_SOURCE_DIR}/out")
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:TesterDll>/Tester.pdb" "${PROJECT_SOURCE_DIR}/integration_tests/out/")
 
 add_dependencies(IntegrationTestsClient CopyDLL CopyPDB)

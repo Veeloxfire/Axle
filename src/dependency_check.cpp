@@ -7,16 +7,13 @@
 namespace Format = Axle::Format;
 
 namespace {
-struct VisitPair {
-  AST_LOCAL a;
-  AST_VISIT_STEP visit_step;
-};
-
 struct DependencyChecker {
   Namespace* available_names;
   u32 num_locals;
   Axle::Array<Local*> locals;
-  Axle::Array<VisitPair> visit_array;
+
+  bool generate_visit;
+  Axle::Array<AstVisit> visit_array;
 
   Local* get_local(const Axle::InternString* name);
   void push_visit(AST_LOCAL a, AST_VISIT_STEP v);
@@ -68,7 +65,9 @@ void DependencyChecker::push_visit(AST_LOCAL a, AST_VISIT_STEP v) {
   TELEMETRY_FUNCTION();
   ASSERT(ast_visit_step_ast_type(v) == a->ast_type);
 
-  visit_array.insert(VisitPair{ a, v });
+  if (generate_visit) {
+    visit_array.insert(AstVisit{ a, v });
+  }
 }
 
 Global* test_global_dependency(CompilerGlobals& comp, CompilerThread& comp_thread, DependencyChecker& state, const Span& span, const Axle::InternString* ident) {
@@ -103,6 +102,9 @@ void dependency_check_ast_node(CompilerGlobals& comp,
   TELEMETRY_FUNCTION();
 
   ASSERT(a != nullptr);
+
+  const usize debug_check_size = state.visit_array.size;
+  DEFER(&) { ASSERT(!state.generate_visit || state.visit_array.size != debug_check_size); };
 
   switch (a->ast_type) {
     case AST_TYPE::INVALID: INVALID_CODE_PATH("Invalid node type"); break;
@@ -212,6 +214,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* ident = downcast_ast<ASTIdentifier>(a);
+        
+        state.push_visit(a, AST_VISIT_STEP::IDENTIFIER_EXPR_DOWN);
 
         const Axle::InternString* name = ident->name;
 
@@ -229,7 +233,6 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         ident->id_type = ASTIdentifier::GLOBAL;//is definitely a global
         ident->global = test_global_dependency(comp, comp_thread, state, ident->node_span, ident->name);
 
-        state.push_visit(a, AST_VISIT_STEP::IDENTIFIER_EXPR_DOWN);
         return;
       }
     case AST_TYPE::FUNCTION_CALL: {
@@ -255,28 +258,18 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         const bool known_type = tup->prefix != nullptr;
 
         if (known_type) {
-          state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_KNOWN_UP_PREFIX);
+          state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_UP_PREFIX);
 
           dependency_check_ast_node(comp, comp_thread, state, tup->prefix);
         }
 
-        if (known_type) {
-          state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_KNOWN_UP_ELEMENTS);
-        }
-        else {
-          state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_UP);
-        }
+        state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_UP_ELEMENTS);
 
         FOR_AST(tup->elements, it) {
           dependency_check_ast_node(comp, comp_thread, state, it);
         }
-
-        if (known_type) {
-          state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_KNOWN_DOWN);
-        }
-        else {
-          state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_DOWN);
-        }
+        
+        state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_DOWN);
         return;
       }
     case AST_TYPE::ARRAY_EXPR: {
@@ -351,7 +344,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
           set_dependency(comp_thread, struct_body->unit_id);
         }
         
-        state.push_visit(a, AST_VISIT_STEP::STRUCT_EXPR);
+        state.push_visit(a, AST_VISIT_STEP::STRUCT_EXPR_DOWN);
 
         return;
       }
@@ -420,7 +413,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
           tn->local_ptr = loc;
 
           loc->decl.name = tn->name;
-  loc->decl.span = tn->node_span;
+          loc->decl.span = tn->node_span;
         }
 
         state.locals.insert(tn->local_ptr);
@@ -561,9 +554,11 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         ASSERT(state.locals.size == 0);
         ASSERT(state.num_locals == 0);
 
+        const bool old_visit = state.generate_visit;
+        state.generate_visit = false;
         dependency_check_ast_node(comp, comp_thread, state, l->sig);
+        state.generate_visit = old_visit;
         dependency_check_ast_node(comp, comp_thread, state, l->body);
-        
 
         return;
       }
@@ -602,11 +597,13 @@ void dependency_check_ast_node(CompilerGlobals& comp,
 }
 }
 
-void DC::dependency_check_ast(CompilerGlobals* const comp,
-                              CompilerThread* const comp_thread,
-                              Namespace* const available_names,
-                              AST_LOCAL a) {
+Axle::OwnedArr<AstVisit>
+  DC::dependency_check_ast(CompilerGlobals* const comp,
+                           CompilerThread* const comp_thread,
+                           Namespace* const available_names,
+                           AST_LOCAL a) {
   DependencyChecker checker = {};
+  checker.generate_visit = true;
   checker.available_names = available_names;
 
   dependency_check_ast_node(*comp, *comp_thread, checker, a);
@@ -618,10 +615,12 @@ void DC::dependency_check_ast(CompilerGlobals* const comp,
     Axle::IO_Single::print("--------------\n");
 
     for (const auto& pair: checker.visit_array) {
-      Axle::IO_Single::format("{}\n", ast_visit_step_string(pair.visit_step));
+      Axle::IO_Single::format("{}\n", ast_visit_step_string(pair.step));
     }
     
     Axle::IO_Single::print("--------------\n");
   }
 #endif
+
+  return Axle::bake_arr(std::move(checker.visit_array));
 }

@@ -1426,20 +1426,21 @@ static void compile_structure(CompilerGlobals* comp,
                               CompilerThread* comp_thread,
                               Namespace* names,
                               ASTStructBody* body,
-                              const StructCompilation*) {
+                              const Axle::ViewArr<const AstVisit> visit_arr) {
   TELEMETRY_FUNCTION();
 
-  TC::type_check_ast(comp, comp_thread, names, body, comp_thread->builtin_types->t_type);
+  body->node_infer_type = comp_thread->builtin_types->t_type;
+  TC::type_check_ast(comp, comp_thread, names, visit_arr);
 }
 
 static void compile_lambda_signature(CompilerGlobals* comp,
                                      CompilerThread* comp_thread,
                                      Namespace* names,
-                                     ASTFuncSig* root,
-                                     const LambdaSigCompilation*) {
+                                     ASTFuncSig*,
+                                     const Axle::ViewArr<const AstVisit> visit_arr) {
   TELEMETRY_FUNCTION();
 
-  TC::type_check_ast(comp, comp_thread, names, root, {});
+  TC::type_check_ast(comp, comp_thread, names, visit_arr);
 }
 
 
@@ -1447,10 +1448,11 @@ static void compile_lambda_body(CompilerGlobals* comp,
                                 CompilerThread* comp_thread,
                                 Namespace* names,
                                 ASTLambda* root,
-                                const LambdaBodyCompilation* l_comp) {
+                                const LambdaBodyCompilation* l_comp,
+                                const Axle::ViewArr<const AstVisit> visit_arr) {
   TELEMETRY_FUNCTION();
 
-  TC::type_check_ast(comp, comp_thread, names, root, {});
+  TC::type_check_ast(comp, comp_thread, names, visit_arr);
   if (comp_thread->is_panic()) {
     return;
   }
@@ -1541,7 +1543,8 @@ static void compile_lambda_body(CompilerGlobals* comp,
 
 
 static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
-                           ASTExport* root, const ExportCompilation*) {
+                           ASTExport* root,
+                           const Axle::ViewArr<const AstVisit> visit_arr) {
   TELEMETRY_FUNCTION();
 
   if (!comp_thread->build_options.is_library) {
@@ -1551,7 +1554,7 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, N
   }
 
 
-  TC::type_check_ast(comp, comp_thread, available_names, root, {});
+  TC::type_check_ast(comp, comp_thread, available_names, visit_arr);
   if (comp_thread->is_panic()) {
     return;
   }
@@ -1593,9 +1596,10 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, N
 }
 
 static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
-                           ASTImport* root, const ImportCompilation* imp) {
+                           ASTImport* root, const ImportCompilation* imp,
+                           const Axle::ViewArr<const AstVisit> visit_arr) {
   TELEMETRY_FUNCTION();
-  TC::type_check_ast(comp, comp_thread, available_names, root, {});
+  TC::type_check_ast(comp, comp_thread, available_names, visit_arr);
   if (comp_thread->is_panic()) {
     return;
   }
@@ -1691,12 +1695,13 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
 
 void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
                     Namespace* available_names,
-                    ASTDecl* decl, GlobalCompilation* global_comp) {
+                    ASTDecl* decl, GlobalCompilation* global_comp,
+                    const Axle::ViewArr<const AstVisit> visit_arr) {
   TELEMETRY_FUNCTION();
 
   Global* global = global_comp->global;
 
-  TC::type_check_ast(comp, comp_thread, available_names, decl, {});
+  TC::type_check_ast(comp, comp_thread, available_names, visit_arr);
   if (comp_thread->is_panic()) {
     return;
   }
@@ -2173,8 +2178,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASSERT(unit->ast != nullptr);
     ASTImport* root = downcast_ast<ASTImport>(unit->ast);
+    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
 
-    compile_import(comp, comp_thread, unit->available_names, root, imp);
+    compile_import(comp, comp_thread, unit->available_names, root, imp, visit_arr);
     if (comp_thread->is_panic()) {
       return;
     }
@@ -2202,8 +2208,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASSERT(unit->ast != nullptr);
     ASTLambda* lambda = downcast_ast<ASTLambda>(unit->ast);
+    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
 
-    compile_lambda_body(comp, comp_thread, unit->available_names, lambda, lbc);
+    compile_lambda_body(comp, comp_thread, unit->available_names, lambda, lbc, visit_arr);
     if (comp_thread->is_panic()) {
       return;
     }
@@ -2231,8 +2238,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASTDecl* decl = downcast_ast<ASTDecl>(unit->ast);
     GlobalCompilation* global_extra = (GlobalCompilation*)unit->detail;
+    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
 
-    compile_global(comp, comp_thread, unit->available_names, decl, global_extra);
+    compile_global(comp, comp_thread, unit->available_names, decl, global_extra, visit_arr);
     if (comp_thread->is_panic()) {
       return;
     }
@@ -2260,8 +2268,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASTStructBody* body = downcast_ast<ASTStructBody>(unit->ast);
     const StructCompilation* struct_extra = (StructCompilation*)unit->detail;
+    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
 
-    compile_structure(comp, comp_thread, unit->available_names, body, struct_extra);
+    compile_structure(comp, comp_thread, unit->available_names, body, visit_arr);
     if (comp_thread->is_panic()) {
       return;
     }
@@ -2287,8 +2296,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     LambdaSigCompilation* lsc = (LambdaSigCompilation*)unit->detail;
     ASSERT(unit->ast != nullptr);
     ASTFuncSig* sig = downcast_ast<ASTFuncSig>(unit->ast);
+    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
 
-    compile_lambda_signature(comp, comp_thread, unit->available_names, sig, lsc);
+    compile_lambda_signature(comp, comp_thread, unit->available_names, sig, visit_arr);
     if (comp_thread->is_panic()) {
       return;
     }
@@ -2333,8 +2343,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     ASSERT(unit->ast != nullptr);
     ASTExport* export_ast = downcast_ast<ASTExport>(unit->ast);
+    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
 
-    compile_export(comp, comp_thread, unit->available_names, export_ast, ec);
+    compile_export(comp, comp_thread, unit->available_names, export_ast, visit_arr);
     if (comp_thread->is_panic()) {
       return;
     }
@@ -2361,7 +2372,8 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     ASSERT(unit->ast != nullptr);
     ASSERT(unit->available_names != nullptr);
 
-    DC::dependency_check_ast(comp, comp_thread, unit->available_names, unit->ast);
+    unit->visit_arr
+      = DC::dependency_check_ast(comp, comp_thread, unit->available_names, unit->ast);
     if (comp_thread->is_panic()) {
       return;
     }
