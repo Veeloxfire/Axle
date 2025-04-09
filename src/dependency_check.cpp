@@ -422,13 +422,14 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         return;
       }
     case AST_TYPE::ASSIGN: {
-        state.push_visit(a, AST_VISIT_STEP::ASSIGN_UP);
+        state.push_visit(a, AST_VISIT_STEP::ASSIGN_UP_LEFT);
         
         ASTAssign* assign = downcast_ast<ASTAssign>(a);
         dependency_check_ast_node(comp, comp_thread, state, assign->assign_to);
+        state.push_visit(a, AST_VISIT_STEP::ASSIGN_UP_RIGHT);
+        
         dependency_check_ast_node(comp, comp_thread, state, assign->value);
 
-        state.push_visit(a, AST_VISIT_STEP::ASSIGN_DOWN);
 
         return;
       }

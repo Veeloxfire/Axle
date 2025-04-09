@@ -433,6 +433,16 @@ TC_STAGE(LAMBDA_UP) {
 
   const SignatureStructure* sig_struct = ast_sig->sig->sig_struct;
   ASSERT(sig_struct != nullptr);//should be done in the signature unit
+  
+  FOR_AST(ast_sig->parameters, it) {
+    ASSERT(it->ast_type == AST_TYPE::TYPED_NAME);
+
+    ASTTypedName* tn = downcast_ast<ASTTypedName>(it);
+    ASSERT(tn != nullptr);
+    ASSERT(tn->local_ptr != nullptr);
+    ASSERT(tn->local_ptr->decl.type.is_valid());
+    ASSERT(tn->local_ptr->decl.value_category == VALUE_CATEGORY::VARIABLE_MUTABLE);
+  }
 
   lambda->node_type = to_type(sig_struct);
 
@@ -2189,11 +2199,13 @@ TC_STAGE(FUNCTION_CALL_UP_FUNCTION) {
   return;
 }
 
-TC_STAGE(ASSIGN_UP) {
+TC_STAGE(ASSIGN_UP_RIGHT) {
   TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAssign, assign);
 
   AST_LOCAL assign_to = assign->assign_to;
+  ASSERT(assign_to->node_type.is_valid());
+  ASSERT(!assign->value->node_type.is_valid());
 
   if (!VC::is_mutable(assign_to->value_category)) {
     comp_thread->report_error(ERROR_CODE::CONST_ERROR, assign_to->node_span,
@@ -2206,11 +2218,13 @@ TC_STAGE(ASSIGN_UP) {
   assign->node_type = comp_thread->builtin_types->t_void;
 }
 
-TC_STAGE(ASSIGN_DOWN) {
+TC_STAGE(ASSIGN_UP_LEFT) {
   TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAssign, assign);
+  
   AST_LOCAL assign_to = assign->assign_to;
-
+  
+  ASSERT(!assign_to->node_type.is_valid());
   assign_to->node_infer_type = {};
 
   return;
