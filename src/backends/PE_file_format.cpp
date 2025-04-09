@@ -4,9 +4,7 @@
 #include <Axle/backends/PE_file_format.h>
 #include "compiler.h"
 #include "backends.h"
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
+#include "tracing_wrapper.h"
 #include <ctime>
 
 namespace FILES = Axle::FILES;
@@ -100,7 +98,7 @@ struct ProgramLocation {
 void write_pe_file(CompilerThread* comp_thread,
                    const Backend::ProgramData* program,
                    const Axle::InternString* out_name, const Axle::InternString* out_folder, bool lib) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   ASSERT((lib && program->dyn_exports.size != 0) || program->dyn_exports.size == 0);
   ASSERT(lib || program->entry_point != IR::NULL_GLOBAL_LABEL);
@@ -332,7 +330,7 @@ void write_pe_file(CompilerThread* comp_thread,
   Axle::Array<usize> dyn_import_lookup = {};
   Axle::Array<DynImport> dyn_imports = {};
   if (has_dynamic_imports) {
-    TELEMETRY_SCOPE("Write Dynamic Imports");
+    AXLE_TELEMETRY_SCOPE("Write Dynamic Imports");
 
     {
       dyn_import_lookup.insert_uninit(program->dyn_imports.size);
@@ -567,7 +565,7 @@ void write_pe_file(CompilerThread* comp_thread,
   Axle::OwnedArr actual_function_locations = Axle::new_arr<ProgramLocation>(program->functions.size);
 
   {
-    TELEMETRY_SCOPE("Write Machine Code");
+    AXLE_TELEMETRY_SCOPE("Write Machine Code");
     //Write all the code
 
     Backend::DataBucketIterator code = program->code_store.start();
@@ -700,7 +698,7 @@ void write_pe_file(CompilerThread* comp_thread,
   const usize exports_memory_start = memory_pointer;
 
   if (lib) {
-    TELEMETRY_SCOPE("Write Dynamic Exports");
+    AXLE_TELEMETRY_SCOPE("Write Dynamic Exports");
 
     Axle::OwnedArr name_offsets = Axle::new_arr<u32>(program->dyn_exports.size);
 

@@ -3,9 +3,7 @@
 #include "compiler.h"
 #include "type.h"
 
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
+#include "tracing_wrapper.h"
 
 struct Typer {
   Type return_type = {};
@@ -94,7 +92,7 @@ static void run_step_impl(CompilerGlobals*, CompilerThread*, Typer*, AST_LOCAL);
 #define TC_STAGE(stage) template<> void run_step_impl<AST_VISIT_STEP:: stage>([[maybe_unused]] CompilerGlobals* const comp, [[maybe_unused]] CompilerThread* const comp_thread, [[maybe_unused]] Typer* const typer, AST_LOCAL this_node)
 
 TC_STAGE(NAMED_TYPE_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTNamedType, nt);
 
   nt->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
@@ -121,7 +119,7 @@ TC_STAGE(NAMED_TYPE_DOWN) {
 }
 
 TC_STAGE(ARRAY_TYPE_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);
   
   Type base_type = get_type_value(comp_thread, at->base);
@@ -165,7 +163,7 @@ TC_STAGE(ARRAY_TYPE_DOWN) {
 }
 
 TC_STAGE(ARRAY_TYPE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);
   
   at->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -177,7 +175,7 @@ TC_STAGE(ARRAY_TYPE_UP) {
 }
 
 TC_STAGE(PTR_TYPE_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTPtrType, ptr);
 
   Type base_type = get_type_value(comp_thread, ptr->base);
@@ -202,7 +200,7 @@ TC_STAGE(PTR_TYPE_DOWN) {
 }
 
 TC_STAGE(PTR_TYPE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTPtrType, ptr);
   
   ptr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -213,7 +211,7 @@ TC_STAGE(PTR_TYPE_UP) {
 }
 
 TC_STAGE(SLICE_TYPE_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTSliceType, ptr);
 
   Type base_type = get_type_value(comp_thread, ptr->base);
@@ -238,7 +236,7 @@ TC_STAGE(SLICE_TYPE_DOWN) {
 }
 
 TC_STAGE(SLICE_TYPE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTSliceType, ptr);
   
   ptr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -249,7 +247,7 @@ TC_STAGE(SLICE_TYPE_UP) {
 }
 
 TC_STAGE(LAMBDA_TYPE_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambdaType, lt);
   Axle::Array<Type> args = {};
   args.reserve_total(lt->args.count);
@@ -285,7 +283,7 @@ TC_STAGE(LAMBDA_TYPE_DOWN) {
 }
 
 TC_STAGE(LAMBDA_TYPE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambdaType, lt);
   
   lt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -300,7 +298,7 @@ TC_STAGE(LAMBDA_TYPE_UP) {
 }
 
 TC_STAGE(TUPLE_TYPE_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleType, tt);
   Axle::Array<Type> args = {};
   args.reserve_total(tt->types.count);
@@ -331,7 +329,7 @@ TC_STAGE(TUPLE_TYPE_DOWN) {
 }
 
 TC_STAGE(TUPLE_TYPE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleType, tt);
   
   tt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -344,7 +342,7 @@ TC_STAGE(TUPLE_TYPE_UP) {
 }
 
 TC_STAGE(STRUCT_EXPR_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTStructExpr, se);
   
   se->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -358,7 +356,7 @@ TC_STAGE(STRUCT_EXPR_DOWN) {
 }
 
 TC_STAGE(LAMBDA_EXPR_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambdaExpr, le);
   
   ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
@@ -374,7 +372,7 @@ TC_STAGE(LAMBDA_EXPR_DOWN) {
 }
 
 TC_STAGE(FUNCTION_SIGNATURE_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFuncSig, ast_sig);
   Axle::Array<Type> params = {};
   params.reserve_total(ast_sig->parameters.count);
@@ -409,7 +407,7 @@ TC_STAGE(FUNCTION_SIGNATURE_DOWN) {
 }
 
 TC_STAGE(FUNCTION_SIGNATURE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFuncSig, ast_sig);
 
   ast_sig->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -424,7 +422,7 @@ TC_STAGE(FUNCTION_SIGNATURE_UP) {
 }
 
 TC_STAGE(LAMBDA_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambda, lambda);
 
   lambda->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -453,7 +451,7 @@ TC_STAGE(LAMBDA_UP) {
 }
 
 TC_STAGE(MEMBER_ACCESS_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTMemberAccessExpr, member);
 
   AST_LOCAL base = member->expr;
@@ -563,7 +561,7 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
 }
 
 TC_STAGE(MEMBER_ACCESS_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTMemberAccessExpr, member);
   
   member->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -575,7 +573,7 @@ TC_STAGE(MEMBER_ACCESS_UP) {
 }
 
 TC_STAGE(INDEX_EXPR_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
   AST_LOCAL base = index_expr->expr;
@@ -640,7 +638,7 @@ TC_STAGE(INDEX_EXPR_DOWN) {
 }
 
 TC_STAGE(INDEX_EXPR_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
   index_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -656,7 +654,7 @@ TC_STAGE(INDEX_EXPR_UP) {
 }
 
 TC_STAGE(TUPLE_LIT_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   if (tup->node_infer_type.is_valid()) {
@@ -691,7 +689,7 @@ TC_STAGE(TUPLE_LIT_DOWN) {
 }
 
 TC_STAGE(TUPLE_LIT_UP_ELEMENTS) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   ASSERT(!tup->node_type.is_valid());
@@ -783,7 +781,7 @@ TC_STAGE(TUPLE_LIT_UP_ELEMENTS) {
 }
 
 TC_STAGE(TUPLE_LIT_UP_PREFIX) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   tup->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -794,7 +792,7 @@ TC_STAGE(TUPLE_LIT_UP_PREFIX) {
 }
 
 TC_STAGE(ARRAY_EXPR_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayExpr, arr_expr);
 
   if (arr_expr->node_infer_type.is_valid()) {
@@ -838,7 +836,7 @@ TC_STAGE(ARRAY_EXPR_DOWN) {
 }
 
 TC_STAGE(ARRAY_EXPR_UP_REST) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayExpr, arr_expr);
   
   if (arr_expr->node_infer_type.is_valid()) {
@@ -861,7 +859,7 @@ TC_STAGE(ARRAY_EXPR_UP_REST) {
 }
 
 TC_STAGE(ARRAY_EXPR_UP_FIRST) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayExpr, arr_expr);
 
   arr_expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -902,7 +900,7 @@ TC_STAGE(ARRAY_EXPR_UP_FIRST) {
 }
 
 TC_STAGE(ASCII_CHAR_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAsciiChar, a);
   a->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   a->node_type = comp_thread->builtin_types->t_ascii;
@@ -910,7 +908,7 @@ TC_STAGE(ASCII_CHAR_DOWN) {
 }
 
 TC_STAGE(ASCII_STRING_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAsciiString, ascii);
   ascii->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   
@@ -932,7 +930,7 @@ TC_STAGE(ASCII_STRING_DOWN) {
 }
 
 TC_STAGE(NUMBER_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTNumber, num);
   num->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -996,7 +994,7 @@ TC_STAGE(NUMBER_DOWN) {
 }
 
 TC_STAGE(EXPORT_SINGLE_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTExportSingle, es);
 
   if (es->value->node_type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
@@ -1010,7 +1008,7 @@ TC_STAGE(EXPORT_SINGLE_DOWN) {
 }
 
 TC_STAGE(EXPORT_SINGLE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTExportSingle, es);
 
   es->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -1020,7 +1018,7 @@ TC_STAGE(EXPORT_SINGLE_UP) {
 }
 
 TC_STAGE(EXPORT_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTExport, e);
   e->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1033,7 +1031,7 @@ TC_STAGE(EXPORT_UP) {
 }
 
 TC_STAGE(LINK_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLink, imp);
 
   imp->node_type = get_type_value(comp_thread, imp->import_type);
@@ -1072,7 +1070,7 @@ TC_STAGE(LINK_DOWN) {
 }
 
 TC_STAGE(LINK_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLink, imp);
   imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1082,7 +1080,7 @@ TC_STAGE(LINK_UP) {
 }
 
 TC_STAGE(IDENTIFIER_EXPR_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIdentifier, ident);
 
   if (ident->id_type == ASTIdentifier::LOCAL) {
@@ -1112,7 +1110,7 @@ TC_STAGE(IDENTIFIER_EXPR_DOWN) {
 }
 
 TC_STAGE(CAST_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
   reduce_category(cast, expr);
@@ -1228,7 +1226,7 @@ TC_STAGE(CAST_DOWN) {
 }
 
 TC_STAGE(CAST_UP_EXPR) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
 
@@ -1238,7 +1236,7 @@ TC_STAGE(CAST_UP_EXPR) {
 }
 
 TC_STAGE(CAST_UP_TYPE) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTCastExpr, cast);
   cast->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1251,7 +1249,7 @@ TC_STAGE(CAST_UP_TYPE) {
 
 static void run_un_up_neg_down(CompilerThread* const comp_thread,
                                AST_LOCAL this_node) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::NEG);
 
@@ -1284,7 +1282,7 @@ static void run_un_up_neg_down(CompilerThread* const comp_thread,
 }
 
 static void run_un_up_addr_down(CompilerGlobals* const comp, AST_LOCAL this_node) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::ADDRESS);
 
@@ -1308,7 +1306,7 @@ static void run_un_up_addr_down(CompilerGlobals* const comp, AST_LOCAL this_node
 }
 
 static void run_un_up_deref_down(CompilerThread* const comp_thread, AST_LOCAL this_node) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   ASSERT(expr->op == UNARY_OPERATOR::DEREF);
 
@@ -1340,7 +1338,7 @@ static void run_un_up_deref_down(CompilerThread* const comp_thread, AST_LOCAL th
 }
 
 TC_STAGE(UNARY_OPERATOR_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
 
   ASSERT(expr->expr->node_type.is_valid());
@@ -1359,7 +1357,7 @@ TC_STAGE(UNARY_OPERATOR_DOWN) {
 }
 
 TC_STAGE(UNARY_OPERATOR_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
   expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
@@ -1412,7 +1410,7 @@ TC_STAGE(UNARY_OPERATOR_UP) {
 void type_check_binary_operator(CompilerGlobals* comp,
                                 CompilerThread* comp_thread,
                                 AST_LOCAL this_node) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBinaryOperatorExpr, expr);
 
   AST_LOCAL left_ast = expr->left;
@@ -1985,7 +1983,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
 }
 
 TC_STAGE(BINARY_OPERATOR_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBinaryOperatorExpr, bin_op);
   AST_LOCAL left = bin_op->left;
   AST_LOCAL right = bin_op->right;
@@ -2002,7 +2000,7 @@ TC_STAGE(BINARY_OPERATOR_DOWN) {
 }
 
 TC_STAGE(BINARY_OPERATOR_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBinaryOperatorExpr, bin_op);
 
   bin_op->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -2019,7 +2017,7 @@ TC_STAGE(BINARY_OPERATOR_UP) {
 }
 
 TC_STAGE(IMPORT_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTImport, imp);
   AST_LOCAL expr = imp->expr_location;
   ASSERT(expr->node_type.is_valid());
@@ -2055,7 +2053,7 @@ TC_STAGE(IMPORT_DOWN) {
 }
 
 TC_STAGE(IMPORT_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTImport, imp);
   imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   
@@ -2066,7 +2064,7 @@ TC_STAGE(IMPORT_UP) {
 }
 
 static bool test_function_overload(const CallSignature* sig, const SignatureStructure* sig_struct) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   //Correct name and number of args
   if (sig->arguments.size == sig_struct->parameter_types.size) {
@@ -2096,7 +2094,7 @@ static bool test_function_overload(const CallSignature* sig, const SignatureStru
 
 static void check_call_arguments(CompilerThread* const comp_thread,
                                  ASTFunctionCallExpr* const call) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(call->sig != nullptr);
   const SignatureStructure* sig_struct = call->sig;
@@ -2120,7 +2118,7 @@ static void check_call_arguments(CompilerThread* const comp_thread,
 }
 
 TC_STAGE(FUNCTION_CALL_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
   const Type& func_type = call->function->node_type;
@@ -2170,7 +2168,7 @@ TC_STAGE(FUNCTION_CALL_DOWN) {
 }
 
 TC_STAGE(FUNCTION_CALL_UP_ARGS) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
   const Type& func_type = call->function->node_type;
@@ -2189,10 +2187,10 @@ TC_STAGE(FUNCTION_CALL_UP_ARGS) {
 }
 
 TC_STAGE(FUNCTION_CALL_UP_FUNCTION) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
-  call->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
+  call->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
 
   call->function->node_infer_type = {};
 
@@ -2200,7 +2198,7 @@ TC_STAGE(FUNCTION_CALL_UP_FUNCTION) {
 }
 
 TC_STAGE(ASSIGN_UP_RIGHT) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAssign, assign);
 
   AST_LOCAL assign_to = assign->assign_to;
@@ -2219,7 +2217,7 @@ TC_STAGE(ASSIGN_UP_RIGHT) {
 }
 
 TC_STAGE(ASSIGN_UP_LEFT) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTAssign, assign);
   
   AST_LOCAL assign_to = assign->assign_to;
@@ -2231,7 +2229,7 @@ TC_STAGE(ASSIGN_UP_LEFT) {
 }
 
 TC_STAGE(DECL_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, ast_decl);
 
   AST_LOCAL decl_expr = ast_decl->expr;
@@ -2311,7 +2309,7 @@ TC_STAGE(DECL_DOWN) {
 }
 
 TC_STAGE(DECL_UP_EXPR) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, decl);
 
   Type expr_type = {};
@@ -2335,7 +2333,7 @@ TC_STAGE(DECL_UP_EXPR) {
 }
 
 TC_STAGE(DECL_UP_TYPE) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, decl);
 
   if (decl->type_ast != nullptr) {
@@ -2344,7 +2342,7 @@ TC_STAGE(DECL_UP_TYPE) {
 }
 
 TC_STAGE(IF_ELSE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIfElse, if_else);
   
   if_else->condition->node_infer_type = comp_thread->builtin_types->t_bool;
@@ -2359,7 +2357,7 @@ TC_STAGE(IF_ELSE_UP) {
 }
 
 TC_STAGE(WHILE_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTWhile, while_loop);
 
   while_loop->condition->node_infer_type = comp_thread->builtin_types->t_bool;
@@ -2370,7 +2368,7 @@ TC_STAGE(WHILE_UP) {
 }
 
 TC_STAGE(BLOCK_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBlock, block);
   
   FOR_AST(block->block, it) {
@@ -2382,7 +2380,7 @@ TC_STAGE(BLOCK_UP) {
 }
 
 TC_STAGE(RETURN_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTReturn, ret);
   
   ASSERT(typer->return_type.is_valid());
@@ -2406,7 +2404,7 @@ TC_STAGE(RETURN_UP) {
 }
 
 TC_STAGE(STRUCT_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTStructBody, body);
 
   //Build the new structure
@@ -2460,7 +2458,7 @@ TC_STAGE(STRUCT_DOWN) {
 }
 
 TC_STAGE(STRUCT_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTStructBody, body);
 
   FOR_AST(body->elements, it) {
@@ -2469,7 +2467,7 @@ TC_STAGE(STRUCT_UP) {
 }
 
 TC_STAGE(TYPED_NAME_DOWN) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTypedName, name);
 
   name->node_type = get_type_value(comp_thread, name->type);
@@ -2490,7 +2488,7 @@ TC_STAGE(TYPED_NAME_DOWN) {
 }
 
 TC_STAGE(TYPED_NAME_UP) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTypedName, name);
   
   name->type->node_infer_type = comp_thread->builtin_types->t_type;
@@ -2502,7 +2500,7 @@ static void run_step(CompilerGlobals* const comp,
                      CompilerThread* const comp_thread,
                      Typer* const typer,
                      AST_LOCAL node, AST_VISIT_STEP step) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   switch (step) {
 #define MOD(s, a, ...) case AST_VISIT_STEP:: s : \
@@ -2521,8 +2519,7 @@ void TC::type_check_ast(CompilerGlobals* const comp,
                         CompilerThread* const comp_thread,
                         Namespace* const ns,
                         const Axle::ViewArr<const AstVisit> visit_arr) {
-  TELEMETRY_FUNCTION();
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   Typer typer = {};
   typer.available_names = ns;

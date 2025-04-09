@@ -5,15 +5,6 @@
 
 using namespace Axle::Primitives;
 
-#ifdef AXLE_TRACING
-#define TELEMETRY_FUNCTION() STACKTRACE_FUNCTION(); TRACING_FUNCTION()
-#define TELEMETRY_SCOPE(name) STACKTRACE_SCOPE(name); TRACING_FUNCTION(name)
-#else
-#define TELEMETRY_FUNCTION() STACKTRACE_FUNCTION()
-#define TELEMETRY_SCOPE(name) STACKTRACE_SCOPE(name)
-#endif
-
-
 //Important forward declarations
 struct CompilerGlobals;
 struct CompilerThread;

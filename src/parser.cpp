@@ -5,9 +5,7 @@
 #include <AxleUtil/memory.h>
 #include <AxleUtil/io.h>
 
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
+#include "tracing_wrapper.h"
 
 namespace IO_Single = Axle::IO_Single;
 
@@ -2917,7 +2915,7 @@ void print_full_ast(AST_LOCAL expr) {
 }
 
 void print_full_ast(const FileAST* file) {
-  TELEMETRY_SCOPE("Print full ast");
+  AXLE_TELEMETRY_SCOPE("Print full ast");
 
   Printer printer = {};
 

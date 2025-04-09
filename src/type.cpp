@@ -3,15 +3,13 @@
 #include "compiler.h"
 #include "type.h"
 
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
+#include "tracing_wrapper.h"
 
 namespace Format = Axle::Format;
 
 TupleStructure* STRUCTS::new_tuple_structure(Structures* structures, Axle::StringInterner* strings,
                                              const Axle::ViewArr<const Type>& types) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   TupleStructure* const type = structures->tuple_structures.allocate();
 
@@ -84,7 +82,7 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, Axle::
                                                   const CallingConvention* conv,
                                                   Axle::OwnedArr<Type>&& params,
                                                   Type ret_type) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   SignatureStructure* type = structures->lambda_structures.allocate();
   type->type = STRUCTURE_TYPE::LAMBDA;
   type->ir_format = IR::Format::opaque;
@@ -123,7 +121,7 @@ SignatureStructure* STRUCTS::new_lambda_structure(Structures* structures, Axle::
 
 
 IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const Axle::InternString* name) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   IntegerStructure* const type = structures->int_structures.allocate();
   type->type = STRUCTURE_TYPE::INTEGER;
@@ -134,7 +132,7 @@ IntegerStructure* STRUCTS::new_int_structure(Structures* structures, const Axle:
 }
 
 CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Axle::StringInterner* strings) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   CompositeStructure* const type = structures->composite_structures.allocate();
   type->type = STRUCTURE_TYPE::COMPOSITE;
@@ -147,7 +145,7 @@ CompositeStructure* STRUCTS::new_composite_structure(Structures* structures, Axl
 }
 
 EnumStructure* STRUCTS::new_enum_structure(Structures* structures, Axle::StringInterner* strings, const Type& base) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
 
   EnumStructure* const type = structures->enum_structures.allocate();
@@ -166,7 +164,7 @@ EnumStructure* STRUCTS::new_enum_structure(Structures* structures, Axle::StringI
 
 ArrayStructure* STRUCTS::new_array_structure(Structures* structures, Axle::StringInterner* strings, const Type& base,
                                              size_t length) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   ArrayStructure* const type = structures->array_structures.allocate();
   type->type = STRUCTURE_TYPE::FIXED_ARRAY;
@@ -185,7 +183,7 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, Axle::Strin
 PointerStructure* STRUCTS::new_pointer_structure(Structures* structures,
                                                  Axle::StringInterner* strings,
                                                  const Type& base) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   PointerStructure* const type = structures->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
@@ -203,7 +201,7 @@ PointerStructure* STRUCTS::new_pointer_structure(Structures* structures,
 SliceStructure* STRUCTS::new_slice_structure(Structures* structures,
                                              Axle::StringInterner* strings,
                                              const Type& base) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   SliceStructure* const type = structures->slice_structures.allocate();
   type->type = STRUCTURE_TYPE::SLICE;
@@ -222,7 +220,7 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
                                    EnumStructure* enum_s,
                                    const Axle::InternString* enum_name,
                                    const Axle::InternString* value_name) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   EnumValue* const val = structures->enum_values.allocate();
   val->type = Type{ enum_name, enum_s };
@@ -237,7 +235,7 @@ EnumValue* STRUCTS::new_enum_value(Structures* structures,
 const ArrayStructure* find_or_make_array_structure(Structures* const structures,
                                                    Axle::StringInterner* strings,
                                                    const Type& base, size_t length) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -263,7 +261,7 @@ const ArrayStructure* find_or_make_array_structure(Structures* const structures,
 
 const PointerStructure* find_or_make_pointer_structure(Structures* const structures, Axle::StringInterner* strings,
                                                        const Type& base) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -288,7 +286,7 @@ const PointerStructure* find_or_make_pointer_structure(Structures* const structu
 
 const SliceStructure* find_or_make_slice_structure(Structures* const structures, Axle::StringInterner* strings,
                                                        const Type& base) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -313,7 +311,7 @@ const SliceStructure* find_or_make_slice_structure(Structures* const structures,
 
 const TupleStructure* find_or_make_tuple_structure(Structures* const structures, Axle::StringInterner* strings,
                                                    const Axle::ViewArr<const Type>& els) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -359,7 +357,7 @@ const SignatureStructure* find_or_make_lambda_structure(Structures* const struct
                                                         const CallingConvention* conv,
                                                         Axle::OwnedArr<Type>&& params,
                                                         Type ret_type) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   {
     auto i = structures->structures.begin();
@@ -483,7 +481,7 @@ BuiltinTypes STRUCTS::create_builtins(Structures* structures, Axle::StringIntern
   return builtin_types;
 }
 Structures::~Structures() {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   {
 

@@ -3,6 +3,8 @@
 #include "type.h"
 #include "errors.h"
 
+#include "tracing_wrapper.h"
+
 namespace IR {
   struct EvalPromise {
     u8* data;
@@ -477,7 +479,7 @@ MOD(Not, CODE_V_V)
   namespace Emit {
     template<typename INSTRUCTION>
     void impl(Axle::Array<u8>& arr, const INSTRUCTION& i) noexcept {
-      TELEMETRY_FUNCTION();
+      AXLE_TELEMETRY_FUNCTION();
       usize curr = arr.size;
       arr.insert_uninit(1 + i.serialize_size());
       arr.data[curr] = static_cast<u8>(INSTRUCTION::OPCODE);
@@ -493,7 +495,7 @@ MOD(Not, CODE_V_V)
   namespace Read {
     template<typename INSTRUCTION>
     const u8* impl(const u8* arr, const u8* end, INSTRUCTION& i) noexcept {
-      TELEMETRY_FUNCTION();
+      AXLE_TELEMETRY_FUNCTION();
       ASSERT(arr < end);
       ASSERT(static_cast<OpCode>(*arr) == INSTRUCTION::OPCODE);
       arr += 1;

@@ -10,6 +10,7 @@ static Eval::RuntimeValue bin_op_impl(IR::IRStore* const ir,
                                       const Eval::RuntimeValue& left_in, const Eval::RuntimeValue& right_in,
                                       const Type& dest_type,
                                       IR::Emitter<BIN_OP_TYPE> emit) {
+  AXLE_TELEMETRY_FUNCTION();
   //TODO: we could do constant folding here! But for now I wont
 
   IR::V_ARG left = Eval::load_v_arg(ir, left_in);
@@ -36,6 +37,8 @@ static Eval::RuntimeValue un_op_impl(CompilerGlobals* comp,
                                      const Type& dest_type,
                                      IR::Emitter<UN_OP_TYPE> emit,
                                      UN_CONSTANT_FOLD constant_fold) {
+  AXLE_TELEMETRY_FUNCTION();
+  
   if (constant_fold != nullptr && from_in.rvt == Eval::RVT::Constant) {
     return constant_fold(comp, from_in.constant, from_in.type);
   }

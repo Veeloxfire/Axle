@@ -25,13 +25,13 @@ if(AxleTRACING)
     message(FATAL_ERROR "Require TracerINCLUDE (tracer include path) to be provided, even if not tracing")
   endif()
 
-  target_include_directories(AxleSandbox PRIVATE  ${TracerINCLUDE})
 
   if(NOT DEFINED TracerBIN)
     message(FATAL_ERROR "Require TracerBIN (tracer include path) to be provided when tracing")
   endif()
 
-  target_compile_definitions(AxleSandbox PRIVATE TRACING_ENABLE)
+  target_compile_definitions(AxleSandbox PRIVATE AXLE_TRACING_ENABLE)
+  target_include_directories(AxleSandbox PRIVATE  ${TracerINCLUDE})
   target_link_libraries(AxleSandbox "${TracerBIN}/Tracer.lib")
 endif()
 

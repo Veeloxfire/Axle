@@ -30,7 +30,7 @@ void set_unfound_name(CompilerThread& comp_thread,
                       UnknownName&& name,
                       ERROR_CODE code, const Span& span,
                       const Format::FormatString<T...>& f_message, const T& ... ts) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(name.ident != nullptr);
 
@@ -45,7 +45,7 @@ void set_unfound_name(CompilerThread& comp_thread,
 }
 
 Local* DependencyChecker::get_local(const Axle::InternString* name) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   auto i = locals.begin();
   const auto end = locals.end();
@@ -62,7 +62,7 @@ Local* DependencyChecker::get_local(const Axle::InternString* name) {
 }
 
 void DependencyChecker::push_visit(AST_LOCAL a, AST_VISIT_STEP v) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(ast_visit_step_ast_type(v) == a->ast_type);
 
   if (generate_visit) {
@@ -71,7 +71,7 @@ void DependencyChecker::push_visit(AST_LOCAL a, AST_VISIT_STEP v) {
 }
 
 Global* test_global_dependency(CompilerGlobals& comp, CompilerThread& comp_thread, DependencyChecker& state, const Span& span, const Axle::InternString* ident) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   auto names = comp.services.names.get();
   const GlobalName* name = names->find_global_name(state.available_names, ident);
@@ -99,7 +99,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
                                CompilerThread& comp_thread,
                                DependencyChecker& state,
                                AST_LOCAL a) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(a != nullptr);
 

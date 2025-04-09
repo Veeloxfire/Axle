@@ -8,9 +8,7 @@
 #include "ir.h"
 #include "compiler.h"
 
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
+#include "tracing_wrapper.h"
 
 namespace IO_Single = Axle::IO_Single;
 
@@ -3651,7 +3649,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
     CompilerThread* comp_thread,
     RegisterResolver* resolver,
     const CallingConvention* this_convention) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   const u8* const bc_start = resolver->bytecode_start;
   const u8* const bc_end = resolver->bytecode_end;
 
@@ -4476,7 +4474,7 @@ namespace X64 {
 }
 
 void x64_emit_dyn_library_function(CompilerThread*, const IR::DynLibraryImport* lib_import, const CallingConvention*, Backend::ProgramData* program) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   //X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   Backend::FunctionMetadata func = {};
@@ -4555,7 +4553,7 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
 void x64_emit_start(CompilerGlobals* comp,
     IR::GlobalLabel entry,
     Backend::ProgramData* program) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   program->entry_point = entry;
@@ -4682,7 +4680,7 @@ struct BlockResolveOutput {
 
 void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const IR::IRStore* ir, const CallingConvention* convention,
     Backend::ProgramData* program) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   //X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   ASSERT(ir->global_label != IR::NULL_GLOBAL_LABEL);

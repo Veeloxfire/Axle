@@ -1,9 +1,7 @@
 #include "ir.h"
 #include "type.h"
 
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
+#include "tracing_wrapper.h"
 
 #include "compiler.h"
 
@@ -64,7 +62,7 @@ RealValue VM::StackFrame::get_value(const IR::V_ARG& arg) {
 }
 
 RealValue VM::StackFrame::get_indirect_value(const IR::P_ARG& arg) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   const u32 i = arg.ptr.index;
   const auto& val_info = temporaries[i];
 
@@ -98,7 +96,7 @@ RealValue VM::StackFrame::get_indirect_value(const IR::P_ARG& arg) {
 //}
 
 VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(ir->control_blocks.size > 0);
 
@@ -154,7 +152,7 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
 
 static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
                         Axle::ViewArr<const u8> from, IR::Format f_format) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
   
   constexpr auto int_dispatch = []<typename T>(Axle::ViewArr<u8> to, IR::Format t_format, Axle::ViewArr<const u8> from) {
@@ -195,7 +193,7 @@ static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
 }
 
 void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   Errors* errors = env->errors;
 

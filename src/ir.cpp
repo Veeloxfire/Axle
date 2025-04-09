@@ -7,7 +7,7 @@ namespace IO_Single = Axle::IO_Single;
 
 namespace IR {
   IR::ValueIndex IRStore::new_temporary(const VariableId& v_id, ValueRequirements requirements) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -25,7 +25,7 @@ namespace IR {
   }
 
   IR::ValueIndex IRStore::new_temporary(const Type& t, ValueRequirements requirements) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -39,7 +39,7 @@ namespace IR {
   }
 
   VariableId IRStore::new_variable(const Type& t, ValueRequirements requirements, bool indirect) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     usize i = variables.size;
     variables.insert_uninit(1);
     IR::SSAVar* var = variables.back();
@@ -51,14 +51,14 @@ namespace IR {
   }
 
   u32 IRStore::new_global_reference(const IR::GlobalReference& ref) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     u32 i = (u32)globals_used.size;
     globals_used.insert(ref);
     return i;
   }
 
   LocalLabel IRStore::new_control_block() {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(control_blocks.size < 0xffffffff);
 
     control_blocks.insert_uninit(1);
@@ -88,7 +88,7 @@ namespace IR {
   }
 
   void IRStore::set_current_cf(const CFStart& st) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(st.child != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -98,7 +98,7 @@ namespace IR {
   }
 
   void IRStore::set_current_cf(const CFEnd& e) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(e.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -107,7 +107,7 @@ namespace IR {
     cb->cf_end = e;
   }
   void IRStore::set_current_cf(const CFReturn& r) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(r.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -116,7 +116,7 @@ namespace IR {
     cb->cf_return = r;
   }
   void IRStore::set_current_cf(const CFInline& i) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(i.parent != IR::NULL_LOCAL_LABEL);
     ASSERT(i.child != IR::NULL_LOCAL_LABEL);
 
@@ -126,7 +126,7 @@ namespace IR {
     cb->cf_inline = i;
   }
   void IRStore::set_current_cf(const CFSplt& s) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(s.parent != IR::NULL_LOCAL_LABEL);
     ASSERT(s.true_branch != IR::NULL_LOCAL_LABEL);
     ASSERT(s.false_branch != IR::NULL_LOCAL_LABEL);
@@ -137,7 +137,7 @@ namespace IR {
     cb->cf_split = s;
   }
   void IRStore::set_current_cf(const CFMerge& m) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(m.parents[0] != IR::NULL_LOCAL_LABEL);
     ASSERT(m.parents[1] != IR::NULL_LOCAL_LABEL);
     ASSERT(m.child != IR::NULL_LOCAL_LABEL);
@@ -157,7 +157,7 @@ struct Serializer {
   constexpr Serializer(u8* base, usize remaining) noexcept : data_base(base), remaining_size(remaining) {}
 
   void write(const u8* in_data, usize in_size) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= in_size);
     memcpy_s(data_base + index, remaining_size, in_data, in_size);
     index += in_size;
@@ -165,7 +165,7 @@ struct Serializer {
   }
 
   void write(u8 b) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 1);
     data_base[index] = b;
     index += 1;
@@ -173,7 +173,7 @@ struct Serializer {
   }
 
   void write(u16 u) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 2);
     data_base[index] = u & 0xff;
     data_base[index + 1] = (u >> 8) & 0xff;
@@ -183,7 +183,7 @@ struct Serializer {
   }
 
   void write(u32 u) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 4);
     data_base[index] = u & 0xff;
     data_base[index + 1] = (u >> 8) & 0xff;
@@ -195,7 +195,7 @@ struct Serializer {
   }
 
   void write(u64 u) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 8);
     data_base[index] = u & 0xff;
     data_base[index + 1] = (u >> 8) & 0xff;
@@ -211,27 +211,27 @@ struct Serializer {
   }
   
   void write(IR::Format v) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     write(static_cast<u8>(v));
   }
 
   void write(IR::ValueIndex v) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     write(v.index);
   }
 
   void write(IR::LocalLabel l) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     write(l.label);
   }
 
   void write(IR::GlobalLabel gl) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     write(gl.label);
   }
 
   void write(const IR::V_ARG& v) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     write(v.val);
     write(v.offset);
     write(v.format);
@@ -241,7 +241,7 @@ struct Serializer {
   }
 
   void write(const IR::P_ARG& p) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     write(p.ptr);
     write(p.ptr_offset);
     write(p.val_format);
@@ -252,7 +252,7 @@ struct Serializer {
   }
 
   void write(const IR::C_ARG& c) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     write(c.size);
     write(c.val, static_cast<usize>(c.size));
   }
@@ -267,7 +267,7 @@ struct Deserializer {
   constexpr Deserializer(const u8* base, usize remaining) noexcept : data_base(base), remaining_size(remaining) {}
 
   void read(void* out_data, usize out_size) {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= out_size);
     memcpy_s(out_data, out_size, data_base + index, out_size);
     index += out_size;
@@ -275,7 +275,7 @@ struct Deserializer {
   }
 
   const u8* bytes_slice(usize out_size) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= out_size);
 
     const u8* res = data_base + index;
@@ -287,7 +287,7 @@ struct Deserializer {
   }
 
   void read(u8& b) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 1);
     b = data_base[index];
     index += 1;
@@ -295,7 +295,7 @@ struct Deserializer {
   }
 
   void read(u16& u) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 2);
     u = data_base[index]
       | (data_base[index + 1] << 16);
@@ -305,7 +305,7 @@ struct Deserializer {
   }
 
   void read(u32& u) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 4);
     u = data_base[index]
       | (data_base[index + 1] << 8)
@@ -317,7 +317,7 @@ struct Deserializer {
   }
 
   void read(u64& u) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     ASSERT(remaining_size >= 8);
     u = (u64)data_base[index]
       | ((u64)data_base[index + 1] << 8)
@@ -333,29 +333,29 @@ struct Deserializer {
   }
   
   void read(IR::Format& f) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     u8 b = 0;
     read(b);
     f = static_cast<IR::Format>(b);
   }
 
   void read(IR::ValueIndex& v) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     read(v.index);
   }
 
   void read(IR::LocalLabel& l) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     read(l.label);
   }
 
   void read(IR::GlobalLabel& gl) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     read(gl.label);
   }
 
   void read(IR::V_ARG& v) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     read(v.val);
     read(v.offset);
     read(v.format);
@@ -368,7 +368,7 @@ struct Deserializer {
   }
 
   void read(IR::P_ARG& p) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     read(p.ptr);
     read(p.ptr_offset);
     read(p.val_format);
@@ -383,7 +383,7 @@ struct Deserializer {
   }
 
   void read(IR::C_ARG& c) noexcept {
-    TELEMETRY_FUNCTION();
+    AXLE_TELEMETRY_FUNCTION();
     read(c.size);
     c.val = bytes_slice(c.size);
   }
@@ -391,7 +391,7 @@ struct Deserializer {
 
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_V& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -401,7 +401,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V& i) noexcept {
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_V_IM32& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -412,7 +412,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_IM32& i) noexce
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_V_C& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -423,7 +423,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_C& i) noexcept 
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_P_C& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -434,7 +434,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_P_C& i) noexcept 
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -445,7 +445,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V& i) noexcept 
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_V_P& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -456,7 +456,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_P& i) noexcept 
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_P_V& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -467,7 +467,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_P_V& i) noexcept 
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_P_P& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -478,7 +478,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_P_P& i) noexcept 
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V_V& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -490,7 +490,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_V_V& i) noexcep
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_NV& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -505,7 +505,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_NV& i) noexcept {
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_GL_NV& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -521,7 +521,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_GL_NV& i) noexcep
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_V_LL& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -533,7 +533,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_V_LL& i) noexcept
 }
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_L& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(remaining_size >= i.serialize_size());
   Serializer ser = { data, remaining_size };
 
@@ -544,7 +544,7 @@ usize IR::serialize(u8* data, usize remaining_size, const CODE_L& i) noexcept {
 
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_V& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.val);
@@ -553,7 +553,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V& i) noexcept 
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_IM32& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.val);
@@ -563,7 +563,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_IM32& i) noex
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_C& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -573,7 +573,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_C& i) noexcep
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_C& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -583,7 +583,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_C& i) noexcep
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -593,7 +593,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V& i) noexcep
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_P& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -603,7 +603,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_P& i) noexcep
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_V& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -613,7 +613,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_V& i) noexcep
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_P& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -623,7 +623,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_P_P& i) noexcep
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V_V& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.to);
@@ -634,7 +634,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_V_V& i) noexc
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_NV& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.n_values);
@@ -644,7 +644,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_NV& i) noexcept
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.label);
@@ -655,7 +655,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_GL_NV& i) noexc
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, V_ARG& v) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(v);
@@ -664,7 +664,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, V_ARG& v) noexcept {
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_LL& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.val);
@@ -675,7 +675,7 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_V_LL& i) noexce
 }
 
 usize IR::deserialize(const u8* data, usize remaining_size, CODE_L& i) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   Deserializer ser = { data, remaining_size };
 
   ser.read(i.local_label);
@@ -723,7 +723,7 @@ bool Eval::must_pass_type_by_reference(const CallingConvention* conv, const Stru
 Eval::StartupInfo Eval::init_startup(
     IrBuilder* builder,
     Eval::Time eval_time, IR::IRStore* ir) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(ir != nullptr);
   ASSERT(ir->signature != nullptr);
 
@@ -741,7 +741,7 @@ Eval::StartupInfo Eval::init_startup(
 }
 
 void Eval::end_startup(IrBuilder* builder, const StartupInfo& startup, const IR::Types::StartFunc& start) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   IR::Emit::StartFunc(builder->ir->current_bytecode(), start);
 
   builder->reset_variables();
@@ -750,7 +750,7 @@ void Eval::end_startup(IrBuilder* builder, const StartupInfo& startup, const IR:
 }
 
 void Eval::end_builder(Eval::IrBuilder* builder) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   IR::IRStore* ir = builder->ir;
 
   if (ir->current_block != IR::NULL_LOCAL_LABEL) {
@@ -762,7 +762,7 @@ void Eval::end_builder(Eval::IrBuilder* builder) {
 }
 
 void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eval::RuntimeValue& from) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(to.rvt != RVT::Constant);
 
   ASSERT(to.type.size() > 0);
@@ -835,7 +835,7 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
 }
 
 IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirements reqs, bool indirect) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   IR::VariableId id = ir->new_variable(t, reqs, indirect);
 
   {
@@ -858,7 +858,7 @@ IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirement
 }
 
 Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR::ValueRequirements reqs) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(id.variable < ir->variables.size);
   IR::SSAVar& sv = ir->variables.data[id.variable];
   sv.requirements |= reqs;
@@ -898,7 +898,7 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR
 }
 
 void Eval::IrBuilder::switch_control_block(IR::LocalLabel index, IR::LocalLabel _parent) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ir->end_control_block();
   ir->start_control_block(index);
   parent = _parent;
@@ -916,7 +916,7 @@ void Eval::IrBuilder::reset_variables() {
 }
 
 IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   switch (rv.rvt) {
     case RVT::Constant: {
         IR::ValueIndex v = ir->new_temporary(rv.type, {});
@@ -953,7 +953,7 @@ IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
 }
 
 Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue& val, const Type& ptr_type) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   switch (val.rvt) {
@@ -999,7 +999,7 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
 
 Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Type& ptr_type) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   switch (val.rvt) {
@@ -1051,7 +1051,7 @@ Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
 
 Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
                                const Eval::RuntimeValue& val, const Type& ptr_type) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(val.type.struct_type() == STRUCTURE_TYPE::POINTER);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
@@ -1087,7 +1087,7 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
 
 Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Eval::RuntimeValue& offset, const Type& ptr_type) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   const Type u64_type = offset.type;
   ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
   ASSERT(u64_type.structure->size == 8);
@@ -1171,7 +1171,7 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     u64 offset,
                                     const Type& ptr_type,
                                     const Type& u64_type) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
   ASSERT(u64_type.structure->size == 8);
   ASSERT(!u64_type.unchecked_base<IntegerStructure>()->is_signed);
@@ -1242,7 +1242,7 @@ void print_value(const IR::P_ARG& arg) {
 }
 
 void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   IO_Single::lock();
   DEFER() { IO_Single::unlock(); };
 

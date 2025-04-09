@@ -11,15 +11,13 @@
 #include "type_check.h"
 #include "dependency_check.h"
 
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
+#include "tracing_wrapper.h"
 
 namespace IO = Axle::IO;
 namespace Format = Axle::Format;
 
 CompilationUnit* CompilationUnitStore::allocate_unit() {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   CompilationUnit* unit = compilation_units.allocate();
 
   unit->id = ++comp_unit_counter;
@@ -30,7 +28,7 @@ CompilationUnit* CompilationUnitStore::allocate_unit() {
 }
 
 void CompilationUnitStore::free_unit(CompilationUnit* unit) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   active_units.remove_if([id = unit->id](CompilationUnit* u) { return u->id == id; });
 
   compilation_units.free(unit);
@@ -48,7 +46,7 @@ CompilationUnit* CompilationUnitStore::get_unit_if_exists(u64 id) const {
 }
 
 IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s, const Span& span) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   label_mutex.acquire();
   IR::GlobalLabel label = { label_signature_table.size + 1 };
   label_signature_table.insert({s, span});
@@ -66,7 +64,7 @@ GlobalLabelInfo CompilerGlobals::get_label_info(IR::GlobalLabel label) {
 }
 
 IR::IRStore* CompilerGlobals::new_ir(IR::GlobalLabel label, const SignatureStructure* sig) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ir_mutex.acquire();
   IR::IRStore* ir = ir_builders_single_threaded.insert();
   ir_mutex.release();
@@ -78,7 +76,7 @@ IR::IRStore* CompilerGlobals::new_ir(IR::GlobalLabel label, const SignatureStruc
 }
 
 IR::Function* CompilerGlobals::new_function() {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   functions_mutex.acquire();
   IR::Function* func = functions_single_threaded.insert();
   functions_mutex.release();
@@ -86,7 +84,7 @@ IR::Function* CompilerGlobals::new_function() {
 }
 
 Local* CompilerGlobals::new_local() {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   locals_mutex.acquire();
   Local* loc = locals_single_threaded.insert();
   locals_mutex.release();
@@ -94,7 +92,7 @@ Local* CompilerGlobals::new_local() {
 }
 
 Global* CompilerGlobals::new_global() {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   globals_mutex.acquire();
   Global* glob = globals_single_threaded.insert();
   globals_mutex.release();
@@ -102,7 +100,7 @@ Global* CompilerGlobals::new_global() {
 }
 
 Namespace* CompilerGlobals::new_namespace() {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   namespaces_mutex.acquire();
   Namespace* names = namespaces_single_threaded.insert();
   namespaces_mutex.release();
@@ -117,7 +115,7 @@ CompilationUnit* new_compilation_unit(Compilation* const comp,
                                       AST_LOCAL root,
                                       void* detail,
                                       bool print) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(comp != nullptr);
   ASSERT(names != nullptr);
@@ -148,7 +146,7 @@ CompilationUnit* new_compilation_unit(Compilation* const comp,
 
 static u32 new_dynamic_init_object(CompilerGlobals* const comp, u32 size, u32 alignment,
                                    IR::IRStore* ir) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   Backend::GlobalData holder = {};
   holder.size = size;
@@ -162,7 +160,7 @@ static u32 new_dynamic_init_object(CompilerGlobals* const comp, u32 size, u32 al
 
 static u32 new_dynamic_init_object_const(CompilerGlobals* const comp, u32 size, u32 alignment,
                                          const u8* value) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   Backend::GlobalData holder = {};
   holder.size = size;
@@ -201,7 +199,7 @@ static Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                            const NodeEval& eval);
 
 static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   const PointerStructure* ps;
   {
     Axle::AtomicLock<Structures> structures = {};
@@ -218,7 +216,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
                                                 CompilerThread* const comp_thread,
                                                 Eval::IrBuilder* const builder,
                                                 const NodeEval& eval) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   IR::IRStore* const ir = builder->ir;
 
@@ -295,7 +293,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
 Eval::RuntimeValue CASTS::int_to_int(IR::IRStore* const ir,
                                      const Type& to,
                                      const Eval::RuntimeValue& val) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(to.is_valid() && to.struct_type() == STRUCTURE_TYPE::INTEGER);
   const Type from = val.effective_type();
@@ -318,7 +316,7 @@ Eval::RuntimeValue CASTS::int_to_int(IR::IRStore* const ir,
 Eval::RuntimeValue CASTS::no_op(IR::IRStore* const,
                                 const Type& to,
                                 const Eval::RuntimeValue& val) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(val.type.is_valid());
   Eval::RuntimeValue res = val;
@@ -329,7 +327,7 @@ Eval::RuntimeValue CASTS::no_op(IR::IRStore* const,
 Eval::RuntimeValue CASTS::take_address(IR::IRStore* const ir,
                                        const Type& to,
                                        const Eval::RuntimeValue& val) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(val.type.is_valid());
   return Eval::addrof(ir, val, to);
@@ -337,7 +335,7 @@ Eval::RuntimeValue CASTS::take_address(IR::IRStore* const ir,
 
 Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* builder, Global* global,
                                     const IR::ValueRequirements reqs) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   IR::IRStore* const ir = builder->ir;
 
@@ -383,7 +381,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                     CompilerThread* const comp_thread,
                                     Eval::IrBuilder* const builder,
                                     const NodeEval& eval) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   AST_LOCAL expr = eval.expr;
   ASSERT(expr->node_type.is_valid());
@@ -979,7 +977,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
                                    CompilerThread* const comp_thread,
                                    Eval::IrBuilder* const builder,
                                    AST_LOCAL const statement) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   //TODD: warnings for inaccessible statements
 
@@ -1356,7 +1354,7 @@ void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
 }
 
 void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, IR::EvalPromise* eval) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   if (!VC::is_comptime(root->value_category)) {
     comp_thread->report_error(ERROR_CODE::VM_ERROR, root->node_span, "Cannot evaluate a non-comptime expression");
@@ -1427,7 +1425,7 @@ static void compile_structure(CompilerGlobals* comp,
                               Namespace* names,
                               ASTStructBody* body,
                               const Axle::ViewArr<const AstVisit> visit_arr) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   body->node_infer_type = comp_thread->builtin_types->t_type;
   TC::type_check_ast(comp, comp_thread, names, visit_arr);
@@ -1438,7 +1436,7 @@ static void compile_lambda_signature(CompilerGlobals* comp,
                                      Namespace* names,
                                      ASTFuncSig*,
                                      const Axle::ViewArr<const AstVisit> visit_arr) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   TC::type_check_ast(comp, comp_thread, names, visit_arr);
 }
@@ -1450,7 +1448,7 @@ static void compile_lambda_body(CompilerGlobals* comp,
                                 ASTLambda* root,
                                 const LambdaBodyCompilation* l_comp,
                                 const Axle::ViewArr<const AstVisit> visit_arr) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   TC::type_check_ast(comp, comp_thread, names, visit_arr);
   if (comp_thread->is_panic()) {
@@ -1545,7 +1543,7 @@ static void compile_lambda_body(CompilerGlobals* comp,
 static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
                            ASTExport* root,
                            const Axle::ViewArr<const AstVisit> visit_arr) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   if (!comp_thread->build_options.is_library) {
     comp_thread->report_error(ERROR_CODE::LINK_ERROR, root->node_span,
@@ -1598,7 +1596,7 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, N
 static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
                            ASTImport* root, const ImportCompilation* imp,
                            const Axle::ViewArr<const AstVisit> visit_arr) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   TC::type_check_ast(comp, comp_thread, available_names, visit_arr);
   if (comp_thread->is_panic()) {
     return;
@@ -1697,7 +1695,7 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
                     Namespace* available_names,
                     ASTDecl* decl, GlobalCompilation* global_comp,
                     const Axle::ViewArr<const AstVisit> visit_arr) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   Global* global = global_comp->global;
 
@@ -1774,7 +1772,7 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
 void compile_current_unparsed_files(CompilerGlobals* const comp,
                                     CompilerThread* const comp_thread,
                                     FileLoader* file_loader) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   while (file_loader->unparsed_files.size > 0) {
     //still have files to parse
@@ -1826,7 +1824,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       ast_file->ns->imported.insert(comp->builtin_namespace);
 
       {
-        TELEMETRY_SCOPE("Parsing");
+        AXLE_TELEMETRY_SCOPE("Parsing");
 
         parser.current_namespace = file_import->ns;
 
@@ -1860,7 +1858,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
 }
 
 void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const Axle::FileLocation& src_loc, ASTImport* imp) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   CompilationUnit* imp_unit;
   {
@@ -1879,7 +1877,7 @@ void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const 
 }
 
 void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExport* e) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   CompilationUnit* exp_unit;
   {
@@ -1897,7 +1895,7 @@ void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExp
 }
 
 void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDecl* global) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(global->decl_type == ASTDecl::TYPE::GLOBAL);
 
   Global* glob = comp->new_global();
@@ -1923,7 +1921,7 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDec
 }
 
 void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLambda* lambda) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   //Setup the function object
   IR::Function* const func = comp->new_function();
@@ -1956,7 +1954,7 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
 }
 
 void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStructBody* struct_body) noexcept {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   CompilationUnit* unit;
   {
     auto compilation = comp->services.compilation.get();
@@ -1975,7 +1973,7 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
 }
 
 void DependencyManager::try_restart(CompilationUnit* unit, bool print) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(unit != nullptr);
 
   if (!unit->waiting()) {
@@ -1991,7 +1989,7 @@ void DependencyManager::try_restart(CompilationUnit* unit, bool print) {
 }
 
 void DependencyManager::add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(now_waiting != nullptr);
   ASSERT(waiting_on != nullptr);
 
@@ -2006,7 +2004,7 @@ void DependencyManager::add_dependency_to(CompilationUnit* now_waiting, Compilat
 }
 
 void DependencyManager::close_dependency(CompilationUnit* ptr, bool print) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   ASSERT(ptr != nullptr);
   usize i = 0;
   DependencyListSingle* dep_single = ptr->dependency_list;
@@ -2029,7 +2027,7 @@ void DependencyManager::close_dependency(CompilationUnit* ptr, bool print) {
 //Might be that dependencies were already dispatched
 //Return true if depended
 bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, CompilationUnit* unit) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(unit != nullptr);
 
@@ -2083,7 +2081,7 @@ bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_threa
 }
 
 void close_compilation_unit(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   UnitID id = unit->id;
 
@@ -2110,7 +2108,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       };
 
       if (file_loader->unparsed_files.size > 0) {
-        TELEMETRY_SCOPE("Parse Files");
+        AXLE_TELEMETRY_SCOPE("Parse Files");
         thread_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
@@ -2139,7 +2137,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
       const IR::IRStore* ir = nullptr;
       if (comp->finished_irs.try_pop_front(&ir)) {
-        TELEMETRY_SCOPE("Emit IR");
+        AXLE_TELEMETRY_SCOPE("Emit IR");
         thread_doing_work(comp, comp_thread);
 
         if (comp->print_options.work) {
@@ -2163,7 +2161,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   CompilationUnit* unit = nullptr;
 
   if (comp->pipelines.comp_import.try_pop_front(&unit)) {
-    TELEMETRY_SCOPE("Import");
+    AXLE_TELEMETRY_SCOPE("Import");
     thread_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Import {}\n", unit->id);
@@ -2194,7 +2192,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_body.try_pop_front(&unit)) {
-    TELEMETRY_SCOPE("Compile Lambda Body");
+    AXLE_TELEMETRY_SCOPE("Compile Lambda Body");
     thread_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
@@ -2224,7 +2222,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_global.try_pop_front(&unit)) {
-    TELEMETRY_SCOPE("Emit Global");
+    AXLE_TELEMETRY_SCOPE("Emit Global");
     thread_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Global {}\n", unit->id);
@@ -2254,7 +2252,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_structure.try_pop_front(&unit)) {
-    TELEMETRY_SCOPE("Compile Structure");
+    AXLE_TELEMETRY_SCOPE("Compile Structure");
     thread_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
       IO::format("Work | Structure {}\n", unit->id);
@@ -2284,7 +2282,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_signature.try_pop_front(&unit)) {
-    TELEMETRY_SCOPE("Compile Lambda Signature");
+    AXLE_TELEMETRY_SCOPE("Compile Lambda Signature");
     thread_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
@@ -2329,7 +2327,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.comp_export.try_pop_front(&unit)) {
-    TELEMETRY_SCOPE("Compile Export");
+    AXLE_TELEMETRY_SCOPE("Compile Export");
     thread_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
@@ -2359,7 +2357,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   }
 
   if (comp->pipelines.depend_check.try_pop_front(&unit)) {
-    TELEMETRY_SCOPE("Depend check");
+    AXLE_TELEMETRY_SCOPE("Depend check");
     thread_doing_work(comp, comp_thread);
 
     if (comp->print_options.work) {
@@ -2394,7 +2392,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     //Wait for there to be no compiling to check unfound deps - best chance they exist
     if (compilation->unfound_names.names.size > 0) {
-      TELEMETRY_SCOPE("Check Unfound Names");
+      AXLE_TELEMETRY_SCOPE("Check Unfound Names");
 
       usize num_unfound = compilation->unfound_names.names.size;
 
@@ -2434,7 +2432,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 }
 
 void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   {//force reset
     comp_thread->doing_work = false;
@@ -2487,7 +2485,7 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
   copy_compiler_constants(comp, comp_thread);//copy to this thread every time
 
   if (extra_threads > 0) {
-#if defined(AXLE_TRACING) && defined(TRACING_ENABLE)
+#if defined(AXLE_TRACING_ENABLE)
     Tracing::Event tracing_start_threads = Tracing::start_event("Start Threads");
 #endif
     Axle::OwnedArr<ThreadData> thread_datas = Axle::new_arr<ThreadData>(extra_threads);
@@ -2513,7 +2511,7 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
     compiler_loop(comp, comp_thread);
 
     {
-      TELEMETRY_SCOPE("Close Threads");
+      AXLE_TELEMETRY_SCOPE("Close Threads");
       for (usize i = 0; i < extra_threads; i++) {
         wait_for_thread_end(handles[i]);
       }
@@ -2566,7 +2564,7 @@ static void free_remaining_compilation_units(Compilation* compilation) {
 }
 
 void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(comp->active_threads >= 1);
 
@@ -2683,7 +2681,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   ASSERT(comp->services.compilation.get()->store.active_units.size == 0);
 
   {
-    TELEMETRY_SCOPE("Load Imports");
+    AXLE_TELEMETRY_SCOPE("Load Imports");
 
     auto p = comp->services.out_program.get();
 
@@ -2698,7 +2696,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   }
 
   if (!comp->build_options.is_library) {
-    TELEMETRY_SCOPE("Create Entry Point");
+    AXLE_TELEMETRY_SCOPE("Create Entry Point");
     
     if (comp->entry_point_label == IR::NULL_GLOBAL_LABEL) {
       comp_thread->report_error(ERROR_CODE::LINK_ERROR, Span{}, "Did not find entry point (expected name = \"{}\")",
@@ -2750,7 +2748,7 @@ void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
 }
 
 void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThread* comp_thread) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   comp_thread->thread_id = 0;//first thread is thread 0
 

@@ -5,10 +5,7 @@
 #include <Axle/api.h>
 #include <Axle/backends/x64_backend.h>
 #include <Axle/backends/PE_file_format.h>
-
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
+#include "tracing_wrapper.h"
 
 namespace IO = Axle::IO;
 
@@ -24,13 +21,13 @@ struct ArgErrors {
 };
 
 int main(int argc, const char** args) {
-#if defined(TRACING_ENABLE) && defined(AXLE_TRACING)
+#ifdef AXLE_TRACING_ENABLE
   Tracing::start_default_tracing_thread("info.trace");
   DEFER() {
     Tracing::end_default_tracing_thread();
   };
 #endif
-  STACKTRACE_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   Axle::ViewArr<const char> out_folder;
   Axle::ViewArr<const char> out_name;
@@ -103,21 +100,21 @@ int main(int argc, const char** args) {
 
   options.build.extra_threads = 0;
 
-  options.print.ast = true;
+  options.print.ast = false;
   options.print.comptime_res = false;
   options.print.comptime_exec = false;
-  options.print.finished_ir = true;
-  options.print.finished_mc = true;
+  options.print.finished_ir = false;
+  options.print.finished_mc = false;
   options.print.run_headers = false;
   options.print.register_select = false;
-  options.print.file_loads = true;
+  options.print.file_loads = false;
   options.print.comp_units = false;
   options.print.work = false;
 
   //options.optimize.non_stack_locals = true;
   
   {
-    TELEMETRY_SCOPE("Compiler");
+    AXLE_TELEMETRY_SCOPE("Compiler");
 
     int out = compile_and_write(options);
 

@@ -7,23 +7,15 @@ static_assert(sizeof(void*) == 8, "Currently only builds in 64 bit");
 #include <AxleUtil/strings.h>
 #include <AxleUtil/files.h>
 
-#ifdef AXLE_TRACING
-#include <Tracer/trace.h>
-#endif
 
-#include "ast.h"
 #include "parser.h"
-
 #include "compiler.h"
-
 #include "backends.h"
-
-#include <chrono>
 
 namespace IO = Axle::IO;
 
 int compile_and_write(const APIOptions& options) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
 
   //Setup
   Backend::ProgramData program = {};
@@ -102,7 +94,7 @@ int compile_and_write(const APIOptions& options) {
   }
 
   {
-    TELEMETRY_SCOPE("Write output file");
+    AXLE_TELEMETRY_SCOPE("Write output file");
 
     try {
       if (compiler.build_options.is_library) {
