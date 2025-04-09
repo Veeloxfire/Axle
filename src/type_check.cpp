@@ -586,18 +586,15 @@ TC_STAGE(INDEX_EXPR_DOWN) {
   }
 
   constexpr auto index_or_slice_base = [](const Type& t) {
-    struct V {
-      Type operator()(const Structure*) const {
-        INVALID_CODE_PATH("Cannot index or slice this type");
-      }
-      Type operator()(const ArrayStructure* as) const {
-        return as->base;
-      }
-      Type operator()(const SliceStructure* s) const {
-        return s->base;
-      }
-    };
-    return visit_types(V{}, t.structure);
+    if (t.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
+      return t.unchecked_base<ArrayStructure>()->base;
+    }
+    else if (t.struct_type() == STRUCTURE_TYPE::SLICE) {
+      return t.unchecked_base<SliceStructure>()->base;
+    }
+    else {
+      INVALID_CODE_PATH("Cannot index or slice this type");
+    }
   };
 
   if(arg_count == 1) {
