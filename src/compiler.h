@@ -50,55 +50,46 @@ struct Global {
   u32 dynamic_init_index = 0;
 };
 
-enum struct COMPILATION_EMIT_TYPE : uint8_t {
+enum struct COMPILATION_UNIT_TYPE : uint8_t {
   STRUCTURE, LAMBDA_BODY, LAMBDA_SIG, GLOBAL, IMPORT, EXPORT
+};
+
+enum struct COMPILATION_UNIT_STAGE : uint8_t {
+  DEPEND_CHECK, TYPE_CHECK, EMIT, DONE,
 };
 
 struct CompPipes {
   Pipe depend_check;
-
-  Pipe comp_structure;
-  Pipe comp_body;
-  Pipe comp_signature;
-  Pipe comp_global;
-  Pipe comp_import;
-  Pipe comp_export;
+  Pipe type_check;
+  Pipe emit;
 };
 
-struct DependencyListSingle {
-  DependencyListSingle* next;
+struct DependencySingle {
+  COMPILATION_UNIT_STAGE stage_required;
   CompilationUnit* waiting;
-};
-
-struct DependencyManager {
-  Pipe* depend_check_pipe;
-  Axle::FreelistBlockAllocator<DependencyListSingle> dependency_list_entry;
-
-  u64 in_flight_units = 0;//Units that are not waiting somewhere
-
-  void close_dependency(CompilationUnit* ptr, bool print);
-  void try_restart(CompilationUnit* ptr, bool print);
-  void add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on);
 };
 
 struct CompilationUnit {
   UnitID id;
+  COMPILATION_UNIT_TYPE type;
+  COMPILATION_UNIT_STAGE stage;
 
-  u32 unit_wait_on_count;
-  u32 unfound_wait_on_count;
+  // controlled by DependencyManager
 
-  u32 depend_list_size;
-  DependencyListSingle* dependency_list;
-  Pipe* main_pipe;
+  std::atomic_uint32_t unit_wait_on_count;
+  std::atomic_uint32_t unfound_wait_on_count;
 
-  COMPILATION_EMIT_TYPE emit;
+  Axle::Array<DependencySingle> dependency_list;
+
+  // controlled by unit
+
   Namespace* available_names;
   AST_LOCAL ast;
   Axle::OwnedArr<AstVisit> visit_arr;
 
   void* detail;
 
-  constexpr bool waiting() const { return unit_wait_on_count > 0 || unfound_wait_on_count > 0; }
+  inline bool waiting() const { return unit_wait_on_count > 0 || unfound_wait_on_count > 0; }
 };
 
 struct GlobalCompilation {
@@ -222,8 +213,8 @@ struct CompilationUnitStore {
 };
 
 struct Compilation {
+  CompPipes* pipes = nullptr;
   UnfoundNames unfound_names = {};
-  DependencyManager dependencies = {};
 
   CompilationUnitStore store = {};
 
@@ -233,6 +224,12 @@ struct Compilation {
   Axle::FreelistBlockAllocator<GlobalCompilation> global_compilation = {};
   Axle::FreelistBlockAllocator<ExportCompilation> export_compilation = {};
   Axle::FreelistBlockAllocator<ImportCompilation> import_compilation = {};
+
+  u64 in_flight_units = 0;//Units that are not waiting somewhere
+
+  void dispatch_ready_dependencies(CompilationUnit* ptr, bool print);
+  void try_restart(CompilationUnit* ptr, bool print);
+  void add_dependency_to(CompilationUnit* waiting_on, const DependencySingle& dep);
 };
 
 
@@ -371,6 +368,11 @@ struct CompilerGlobals : CompilerConstants {
   }
 };
 
+struct DeferredDependency {
+  COMPILATION_UNIT_STAGE stage;
+  UnitID unit;
+};
+
 //Things that cannot be modified by other threads
 struct CompilerThread : CompilerConstants {
   bool doing_work = true;
@@ -380,7 +382,7 @@ struct CompilerThread : CompilerConstants {
   Errors errors = {};
 
   UnfoundNames local_unfound_names;
-  Axle::Array<UnitID> new_depends;
+  Axle::Array<DeferredDependency> new_depends;
   Axle::Array<CompilationUnit*> new_units;
 
   inline constexpr bool is_panic() const { return errors.is_panic(); }

@@ -9,7 +9,7 @@ template<typename T>
 void run_test_for_integer(AxleTest::TestErrors* test_errors,
                           const BuiltinTypes* builtin_types,
                           const Type& int_t) {
-  TELEMETRY_FUNCTION();
+  AXLE_TELEMETRY_FUNCTION();
   
   IR::IRStore ir = {};
   ir.signature = builtin_types->t_void_call.unchecked_base<SignatureStructure>();
@@ -101,6 +101,8 @@ void run_test_for_integer(AxleTest::TestErrors* test_errors,
 
   ir.start_control_block(end_cf);
   ir.set_current_cf(IR::CFEnd{ start_cf });
+
+  ir.completed = true;
 
   {
     Errors errors = {};

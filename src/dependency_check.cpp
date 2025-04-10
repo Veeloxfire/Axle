@@ -19,10 +19,10 @@ struct DependencyChecker {
   void push_visit(AST_LOCAL a, AST_VISIT_STEP v);
 };
 
-void set_dependency(CompilerThread& comp_thread, UnitID id) {
+void set_dependency(CompilerThread& comp_thread, COMPILATION_UNIT_STAGE stage, UnitID id) {
   ASSERT(id != NULL_ID);
 
-  comp_thread.new_depends.insert(id);
+  comp_thread.new_depends.insert({ stage, id });
 }
 
 template<typename ... T>
@@ -102,6 +102,10 @@ void dependency_check_ast_node(CompilerGlobals& comp,
   AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(a != nullptr);
+
+  // should not have gone through any of this yet
+  ASSERT(!a->node_type.is_valid());
+  ASSERT(!a->node_infer_type.is_valid());
 
   const usize debug_check_size = state.visit_array.size;
   DEFER(&) { ASSERT(!state.generate_visit || state.visit_array.size != debug_check_size); };
@@ -327,7 +331,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         ASTFuncSig* sig = downcast_ast<ASTFuncSig>(lambda->sig);
 
         if (sig->sig->sig_struct == nullptr) {
-          set_dependency(comp_thread, lambda->function->sig_unit_id);
+          set_dependency(comp_thread,
+              COMPILATION_UNIT_STAGE::EMIT, lambda->function->sig_unit_id);
         }
         
         state.push_visit(a, AST_VISIT_STEP::LAMBDA_EXPR_DOWN);
@@ -341,7 +346,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
 
         if (!(struct_body->actual_type.is_valid())) {
           //Is not valid so need to wait for that
-          set_dependency(comp_thread, struct_body->unit_id);
+          set_dependency(comp_thread,
+              COMPILATION_UNIT_STAGE::DONE, struct_body->unit_id);
         }
         
         state.push_visit(a, AST_VISIT_STEP::STRUCT_EXPR_DOWN);
@@ -555,10 +561,11 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         ASSERT(state.locals.size == 0);
         ASSERT(state.num_locals == 0);
 
-        const bool old_visit = state.generate_visit;
-        state.generate_visit = false;
-        dependency_check_ast_node(comp, comp_thread, state, l->sig);
-        state.generate_visit = old_visit;
+        ASSERT(l->sig->node_type.is_valid());
+        //const bool old_visit = state.generate_visit;
+        //state.generate_visit = false;
+        //dependency_check_ast_node(comp, comp_thread, state, l->sig);
+        //state.generate_visit = old_visit;
         dependency_check_ast_node(comp, comp_thread, state, l->body);
 
         return;

@@ -40,14 +40,11 @@ int compile_and_write(const APIOptions& options) {
 
   compiler.builtin_types = &builtin_types;
 
-  compiler.pipelines.comp_structure._debug_name = Axle::lit_view_arr("Structure");
-  compiler.pipelines.comp_body._debug_name = Axle::lit_view_arr("Body");
-  compiler.pipelines.comp_signature._debug_name = Axle::lit_view_arr("Signature");
-  compiler.pipelines.comp_global._debug_name = Axle::lit_view_arr("Global");
-  compiler.pipelines.comp_import._debug_name = Axle::lit_view_arr("Import");
-  compiler.pipelines.comp_export._debug_name = Axle::lit_view_arr("Export");
+  compiler.pipelines.depend_check._debug_name = Axle::lit_view_arr("Depend Check");
+  compiler.pipelines.type_check._debug_name = Axle::lit_view_arr("Type Check");
+  compiler.pipelines.emit._debug_name = Axle::lit_view_arr("Emit");
 
-  compilation.dependencies.depend_check_pipe = &compiler.pipelines.depend_check;
+  compilation.pipes = &compiler.pipelines;
 
   compiler.active_threads = options.build.extra_threads + 1;
 

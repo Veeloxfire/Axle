@@ -115,8 +115,7 @@ Namespace* CompilerGlobals::new_namespace() {
 }
 
 CompilationUnit* new_compilation_unit(Compilation* const comp,
-                                      COMPILATION_EMIT_TYPE emit_type,
-                                      Pipe* main_pipe,
+                                      COMPILATION_UNIT_TYPE unit_type,
                                       Namespace* names,
                                       AST_LOCAL root,
                                       void* detail,
@@ -126,24 +125,23 @@ CompilationUnit* new_compilation_unit(Compilation* const comp,
   ASSERT(comp != nullptr);
   ASSERT(names != nullptr);
   ASSERT(detail != nullptr);
-  ASSERT(main_pipe != nullptr);
 
   CompilationUnit* unit = comp->store.allocate_unit();
   unit->unit_wait_on_count = 0;
   unit->unfound_wait_on_count = 0;
-  unit->dependency_list = nullptr;
-  unit->main_pipe = main_pipe;
+  unit->dependency_list = {};
 
-  unit->emit = emit_type;
+  unit->type = unit_type;
+  unit->stage = COMPILATION_UNIT_STAGE::DEPEND_CHECK;
   unit->available_names = names;
   unit->ast = root;
   unit->detail = detail;
 
-  comp->dependencies.in_flight_units += 1;
+  comp->in_flight_units += 1;
 
   if (print) {
     IO::format("Started Comp Unit {}       | Active = {}, In flight = {}\n",
-                 unit->id, comp->store.active_units.size, comp->dependencies.in_flight_units);
+                 unit->id, comp->store.active_units.size, comp->in_flight_units);
   }
 
 
@@ -1387,6 +1385,7 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
   }
 
   Eval::end_builder(&builder);
+  ASSERT(expr_ir.completed);
 
   const Type ref_type = ref.effective_type();
   ASSERT(ref_type == root->node_type);
@@ -1408,7 +1407,10 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
     Axle::memcpy_ts(eval->data, type.size(), ref.constant, type.size());
   }
   else {
+    // should be okay to do this
+    expr_ir.completed = false;
     IR::V_ARG out = Eval::load_v_arg(&expr_ir, ref);
+    expr_ir.completed = true;
 
     {
       VM::Env env = { comp_thread->builtin_types, &comp_thread->errors };
@@ -1426,40 +1428,11 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
   }
 }
 
-static void compile_structure(CompilerGlobals* comp,
-                              CompilerThread* comp_thread,
-                              Namespace* names,
-                              ASTStructBody* body,
-                              const Axle::ViewArr<const AstVisit> visit_arr) {
-  AXLE_TELEMETRY_FUNCTION();
-
-  body->node_infer_type = comp_thread->builtin_types->t_type;
-  TC::type_check_ast(comp, comp_thread, names, visit_arr);
-}
-
-static void compile_lambda_signature(CompilerGlobals* comp,
-                                     CompilerThread* comp_thread,
-                                     Namespace* names,
-                                     ASTFuncSig*,
-                                     const Axle::ViewArr<const AstVisit> visit_arr) {
-  AXLE_TELEMETRY_FUNCTION();
-
-  TC::type_check_ast(comp, comp_thread, names, visit_arr);
-}
-
-
 static void compile_lambda_body(CompilerGlobals* comp,
                                 CompilerThread* comp_thread,
-                                Namespace* names,
                                 ASTLambda* root,
-                                const LambdaBodyCompilation* l_comp,
-                                const Axle::ViewArr<const AstVisit> visit_arr) {
+                                const LambdaBodyCompilation* l_comp) {
   AXLE_TELEMETRY_FUNCTION();
-
-  TC::type_check_ast(comp, comp_thread, names, visit_arr);
-  if (comp_thread->is_panic()) {
-    return;
-  }
 
   ASSERT(root->node_type.is_valid());
 
@@ -1547,20 +1520,13 @@ static void compile_lambda_body(CompilerGlobals* comp,
 }
 
 
-static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
-                           ASTExport* root,
-                           const Axle::ViewArr<const AstVisit> visit_arr) {
+static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread,                           ASTExport* root) {
   AXLE_TELEMETRY_FUNCTION();
-
+  ASSERT(root->node_type.is_valid());
+  
   if (!comp_thread->build_options.is_library) {
     comp_thread->report_error(ERROR_CODE::LINK_ERROR, root->node_span,
                               "Only libraries can dynamically export");
-    return;
-  }
-
-
-  TC::type_check_ast(comp, comp_thread, available_names, visit_arr);
-  if (comp_thread->is_panic()) {
     return;
   }
 
@@ -1601,13 +1567,8 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread, N
 }
 
 static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* available_names,
-                           ASTImport* root, const ImportCompilation* imp,
-                           const Axle::ViewArr<const AstVisit> visit_arr) {
+                           ASTImport* root, const ImportCompilation* imp) {
   AXLE_TELEMETRY_FUNCTION();
-  TC::type_check_ast(comp, comp_thread, available_names, visit_arr);
-  if (comp_thread->is_panic()) {
-    return;
-  }
 
   IR::EvalPromise p = {};
   IR::eval_ast(comp, comp_thread, root->expr_location, &p);
@@ -1700,16 +1661,10 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
 
 void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
                     Namespace* available_names,
-                    ASTDecl* decl, GlobalCompilation* global_comp,
-                    const Axle::ViewArr<const AstVisit> visit_arr) {
+                    ASTDecl* decl, GlobalCompilation* global_comp) {
   AXLE_TELEMETRY_FUNCTION();
 
   Global* global = global_comp->global;
-
-  TC::type_check_ast(comp, comp_thread, available_names, visit_arr);
-  if (comp_thread->is_panic()) {
-    return;
-  }
 
   ASSERT(global->decl.type.is_valid());
 
@@ -1875,7 +1830,7 @@ void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const 
     extra->src_loc = src_loc;
 
     imp_unit = new_compilation_unit(compilation._ptr,
-                                    COMPILATION_EMIT_TYPE::IMPORT, &comp->pipelines.comp_import,
+                                    COMPILATION_UNIT_TYPE::IMPORT,
                                     ns, imp,
                                     (void*)extra, comp->print_options.comp_units);
   }
@@ -1893,7 +1848,7 @@ void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExp
     ExportCompilation* extra = compilation->export_compilation.allocate();
 
     exp_unit = new_compilation_unit(compilation._ptr,
-                                    COMPILATION_EMIT_TYPE::EXPORT, &comp->pipelines.comp_export,
+                                    COMPILATION_UNIT_TYPE::EXPORT,
                                     ns, e,
                                     extra, comp->print_options.comp_units);
   }
@@ -1914,7 +1869,7 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDec
     GlobalCompilation* extra = compilation->global_compilation.allocate();
     extra->global = glob;
     glob_unit = new_compilation_unit(compilation._ptr,
-                                     COMPILATION_EMIT_TYPE::GLOBAL, &comp->pipelines.comp_global,
+                                     COMPILATION_UNIT_TYPE::GLOBAL,
                                      ns, global,
                                      (void*)extra, comp->print_options.comp_units);
   }
@@ -1949,9 +1904,8 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
     sig_extra->func = func;
     sig_extra->lambda = lambda;
 
-
     sig_unit = new_compilation_unit(compilation._ptr,
-                                    COMPILATION_EMIT_TYPE::LAMBDA_SIG, &comp->pipelines.comp_signature,
+                                    COMPILATION_UNIT_TYPE::LAMBDA_SIG,
                                     ns, func_sig,
                                     sig_extra, comp->print_options.comp_units);
 
@@ -1969,7 +1923,7 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
     StructCompilation* struct_extra = compilation->struct_compilation.allocate();
 
     unit = new_compilation_unit(compilation._ptr,
-                                COMPILATION_EMIT_TYPE::STRUCTURE, &comp->pipelines.comp_structure,
+                                COMPILATION_UNIT_TYPE::STRUCTURE,
                                 ns, struct_body,
                                 struct_extra, comp->print_options.comp_units);
 
@@ -1980,7 +1934,7 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
   comp->pipelines.depend_check.push_back(unit);
 }
 
-void DependencyManager::try_restart(CompilationUnit* unit, bool print) {
+void Compilation::try_restart(CompilationUnit* unit, bool print) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(unit != nullptr);
 
@@ -1989,69 +1943,81 @@ void DependencyManager::try_restart(CompilationUnit* unit, bool print) {
       IO::format("Remove Dependency from unit {} -> starting again\n", unit->id);
     }
 
-    ASSERT(depend_check_pipe != nullptr);
+    ASSERT(pipes != nullptr);
+    
+    switch (unit->stage) {
+      case COMPILATION_UNIT_STAGE::DEPEND_CHECK: {
+        pipes->depend_check.push_back(unit);
+        break;
+      }
+      case COMPILATION_UNIT_STAGE::TYPE_CHECK: {
+        pipes->type_check.push_back(unit);
+        break;
+      }
+      case COMPILATION_UNIT_STAGE::EMIT: {
+        pipes->emit.push_back(unit);
+        break;
+      }
+      case COMPILATION_UNIT_STAGE::DONE:
+        INVALID_CODE_PATH("Cannot have a done dependency waiting");
+    }
 
-    depend_check_pipe->push_back(unit);//has to re-run through depend check
     in_flight_units += 1;
   }
 }
 
-void DependencyManager::add_dependency_to(CompilationUnit* now_waiting, CompilationUnit* waiting_on) {
+void Compilation::add_dependency_to(CompilationUnit* waiting_on,
+    const DependencySingle& dep) {
   AXLE_TELEMETRY_FUNCTION();
-  ASSERT(now_waiting != nullptr);
+  ASSERT(dep.waiting != nullptr);
   ASSERT(waiting_on != nullptr);
 
-  now_waiting->unit_wait_on_count += 1;
-  waiting_on->depend_list_size += 1;
+  ASSERT(waiting_on->stage < dep.stage_required);
 
-  DependencyListSingle* old_top = waiting_on->dependency_list;
-  waiting_on->dependency_list = dependency_list_entry.allocate();
-
-  waiting_on->dependency_list->waiting = now_waiting;
-  waiting_on->dependency_list->next = old_top;
+  dep.waiting->unit_wait_on_count += 1;
+  waiting_on->dependency_list.insert(dep);
 }
 
-void DependencyManager::close_dependency(CompilationUnit* ptr, bool print) {
+void Compilation::dispatch_ready_dependencies(CompilationUnit* ptr, bool print) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(ptr != nullptr);
-  usize i = 0;
-  DependencyListSingle* dep_single = ptr->dependency_list;
 
-  while (dep_single != nullptr) {
-    CompilationUnit* waiting = dep_single->waiting;
-    DependencyListSingle* next = dep_single->next;
-    i += 1;
-    dependency_list_entry.free(dep_single);
-    dep_single = next;
+  const auto remove_dep = [this, ptr, print](const DependencySingle dep) {
+    if (ptr->stage < dep.stage_required) {
+      return false;
+    }
+    
+    ASSERT(ptr->stage == dep.stage_required);
+    this->try_restart(dep.waiting, print);
+    return true;
 
-    waiting->unit_wait_on_count -= 1;
-    try_restart(waiting, print);
-  }
+  };
 
-  ASSERT(i == ptr->depend_list_size);
-  in_flight_units -= 1;
+  ptr->dependency_list.remove_if(remove_dep);
 }
+
 
 //Might be that dependencies were already dispatched
 //Return true if depended
-bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_thread, CompilationUnit* unit) {
+bool maybe_depend(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
   AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(unit != nullptr);
 
-  auto compilation = comp->services.compilation.get();
-
+  // check new compilation units
   bool depended = false;
   FOR(comp_thread->new_depends, id) {
-    CompilationUnit* u = compilation->store.get_unit_if_exists(*id);
-    if (u != nullptr) {
+    CompilationUnit* u = compilation->store.get_unit_if_exists(id->unit);
+    if (u != nullptr && u->stage < id->stage) {
       if (comp_thread->print_options.comp_units) {
         IO::format("Comp unit {} waiting on {}\n",
                      unit->id, u->id);
       }
 
       depended = true;
-      compilation->dependencies.add_dependency_to(unit, u);
+      compilation->add_dependency_to(u, DependencySingle {
+        id->stage, unit
+      });
     }
   }
   comp_thread->new_depends.clear();
@@ -2078,10 +2044,10 @@ bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_threa
   }
 
   if (depended) {
-    compilation->dependencies.in_flight_units -= 1;
+    compilation->in_flight_units -= 1;
     if (comp_thread->print_options.comp_units) {
       IO::format("Comp unit {} now waiting   | Active = {}, In flight = {}\n",
-                   unit->id, compilation->store.active_units.size, compilation->dependencies.in_flight_units);
+                   unit->id, compilation->store.active_units.size, compilation->in_flight_units);
     }
   }
 
@@ -2090,18 +2056,28 @@ bool try_dispatch_dependencies(CompilerGlobals* comp, CompilerThread* comp_threa
 
 void close_compilation_unit(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(unit != nullptr);
 
   UnitID id = unit->id;
 
-  ASSERT(compilation->dependencies.in_flight_units != 0);
-  compilation->dependencies.close_dependency(unit, comp_thread->print_options.comp_units);
-
+  ASSERT(compilation->in_flight_units != 0);
+  compilation->dispatch_ready_dependencies(unit, comp_thread->print_options.comp_units);
+  ASSERT(unit->dependency_list.size == 0);
+  unit->dependency_list.clear();
+  
+  compilation->in_flight_units -= 1;
   compilation->store.free_unit(unit);
 
   if (comp_thread->print_options.comp_units) {
     IO::format("Close Comp unit {}         | Active = {}, In flight = {}\n",
-                 id, compilation->store.active_units.size, compilation->dependencies.in_flight_units);
+                 id, compilation->store.active_units.size, compilation->in_flight_units);
   }
+}
+
+void dispatch_dependencies_of_compilation_unit(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
+  AXLE_TELEMETRY_FUNCTION();
+
+  compilation->dispatch_ready_dependencies(unit, comp_thread->print_options.comp_units);
 }
 
 void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
@@ -2168,200 +2144,202 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   CompilationUnit* unit = nullptr;
 
-  if (comp->pipelines.comp_import.try_pop_front(&unit)) {
-    AXLE_TELEMETRY_SCOPE("Import");
+  if (comp->pipelines.type_check.try_pop_front(&unit)) {
+    AXLE_TELEMETRY_SCOPE("Type Check");
     thread_doing_work(comp, comp_thread);
     if (comp->print_options.work) {
-      IO::format("Work | Import {}\n", unit->id);
+      IO::format("Work | Type Check {}\n", unit->id);
     }
-
-    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-
-    ASSERT(!unit->waiting());
-
-    ASSERT(unit->detail != nullptr);
-    ImportCompilation* imp = (ImportCompilation*)unit->detail;
-
-    ASSERT(unit->ast != nullptr);
-    ASTImport* root = downcast_ast<ASTImport>(unit->ast);
-    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
-
-    compile_import(comp, comp_thread, unit->available_names, root, imp, visit_arr);
-    if (comp_thread->is_panic()) {
-      return;
-    }
-
-    //Finished
-    auto compilation = comp->services.compilation.get();
-
-    compilation->import_compilation.free(imp);
-    close_compilation_unit(comp_thread, compilation._ptr, unit);
-    return;
-  }
-
-  if (comp->pipelines.comp_body.try_pop_front(&unit)) {
-    AXLE_TELEMETRY_SCOPE("Compile Lambda Body");
-    thread_doing_work(comp, comp_thread);
-
-    if (comp->print_options.work) {
-      IO::format("Work | Work {}\n", unit->id);
-    }
-
+    
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
     ASSERT(!unit->waiting());
 
-    LambdaBodyCompilation* lbc = (LambdaBodyCompilation*)unit->detail;
-
     ASSERT(unit->ast != nullptr);
-    ASTLambda* lambda = downcast_ast<ASTLambda>(unit->ast);
+    ASSERT(unit->available_names != nullptr);
     const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
+    ASSERT(visit_arr.size > 0);
 
-    compile_lambda_body(comp, comp_thread, unit->available_names, lambda, lbc, visit_arr);
+    TC::type_check_ast(comp, comp_thread, unit->available_names, visit_arr);
     if (comp_thread->is_panic()) {
       return;
     }
-
-    //Finished
-    auto compilation = comp->services.compilation.get();
-
-    compilation->lambda_body_compilation.free(lbc);
-    close_compilation_unit(comp_thread, compilation._ptr, unit);
-    return;
-  }
-
-  if (comp->pipelines.comp_global.try_pop_front(&unit)) {
-    AXLE_TELEMETRY_SCOPE("Emit Global");
-    thread_doing_work(comp, comp_thread);
-    if (comp->print_options.work) {
-      IO::format("Work | Global {}\n", unit->id);
-    }
-
-    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-
-    ASSERT(!unit->waiting());
-
-    ASSERT(unit->ast != nullptr);
-
-    ASTDecl* decl = downcast_ast<ASTDecl>(unit->ast);
-    GlobalCompilation* global_extra = (GlobalCompilation*)unit->detail;
-    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
-
-    compile_global(comp, comp_thread, unit->available_names, decl, global_extra, visit_arr);
-    if (comp_thread->is_panic()) {
-      return;
-    }
-
-    //Finished
-    auto compilation = comp->services.compilation.get();
-
-    compilation->global_compilation.free(global_extra);
-    close_compilation_unit(comp_thread, compilation._ptr, unit);
-    return;
-  }
-
-  if (comp->pipelines.comp_structure.try_pop_front(&unit)) {
-    AXLE_TELEMETRY_SCOPE("Compile Structure");
-    thread_doing_work(comp, comp_thread);
-    if (comp->print_options.work) {
-      IO::format("Work | Structure {}\n", unit->id);
-    }
-
-    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-
-    ASSERT(!unit->waiting());
-
-    ASSERT(unit->ast != nullptr);
-
-    ASTStructBody* body = downcast_ast<ASTStructBody>(unit->ast);
-    const StructCompilation* struct_extra = (StructCompilation*)unit->detail;
-    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
-
-    compile_structure(comp, comp_thread, unit->available_names, body, visit_arr);
-    if (comp_thread->is_panic()) {
-      return;
-    }
-
-    //Finished
-    auto compilation = comp->services.compilation.get();
-
-    compilation->struct_compilation.free(struct_extra);
-    close_compilation_unit(comp_thread, compilation._ptr, unit);
-    return;
-  }
-
-  if (comp->pipelines.comp_signature.try_pop_front(&unit)) {
-    AXLE_TELEMETRY_SCOPE("Compile Lambda Signature");
-    thread_doing_work(comp, comp_thread);
-
-    if (comp->print_options.work) {
-      IO::format("Work | Signature {}\n", unit->id);
-    }
-
-    ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
-
-    LambdaSigCompilation* lsc = (LambdaSigCompilation*)unit->detail;
-    ASSERT(unit->ast != nullptr);
-    ASTFuncSig* sig = downcast_ast<ASTFuncSig>(unit->ast);
-    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
-
-    compile_lambda_signature(comp, comp_thread, unit->available_names, sig, visit_arr);
-    if (comp_thread->is_panic()) {
-      return;
-    }
-
-    //Finished
-    auto compilation = comp->services.compilation.get();
-
-    CompilationUnit* body_unit;
+    
+    ASSERT(comp_thread->new_depends.size == 0);
+    
     {
-      ASTLambda* lambda = lsc->lambda;
-      IR::Function* func = lsc->func;
-      Namespace* available_names = unit->available_names;
-
-      compilation->lambda_sig_compilation.free(lsc);
-      close_compilation_unit(comp_thread, compilation._ptr, unit);
-
-      //Create the unit for the body
-      LambdaBodyCompilation* lbc = compilation->lambda_body_compilation.allocate();
-      lbc->func = func;
-
-      body_unit = new_compilation_unit(compilation._ptr, COMPILATION_EMIT_TYPE::LAMBDA_BODY, &comp->pipelines.comp_body,
-                                       available_names, lambda, lbc, comp->print_options.comp_units);
+      auto compilation = comp->services.compilation.get();
+      
+      unit->stage = COMPILATION_UNIT_STAGE::EMIT;
+      dispatch_dependencies_of_compilation_unit(comp_thread, compilation._ptr, unit);
     }
-
-    comp->pipelines.depend_check.push_back(body_unit);
-
+    
+    comp->pipelines.emit.push_back(unit);
     return;
   }
 
-  if (comp->pipelines.comp_export.try_pop_front(&unit)) {
-    AXLE_TELEMETRY_SCOPE("Compile Export");
+  if (comp->pipelines.emit.try_pop_front(&unit)) {
+    AXLE_TELEMETRY_SCOPE("Emit");
     thread_doing_work(comp, comp_thread);
-
-    if (comp->print_options.work) {
-      IO::format("Work | Export {}\n", unit->id);
-    }
-
+    
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
     ASSERT(!unit->waiting());
 
-    ExportCompilation* ec = (ExportCompilation*)unit->detail;
+    switch (unit->type) {
+      case COMPILATION_UNIT_TYPE::IMPORT: {
+        AXLE_TELEMETRY_SCOPE("Emit Import");
+        if (comp->print_options.work) {
+          IO::format("Work | Import {}\n", unit->id);
+        }
 
-    ASSERT(unit->ast != nullptr);
-    ASTExport* export_ast = downcast_ast<ASTExport>(unit->ast);
-    const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
+        ASSERT(unit->detail != nullptr);
+        ImportCompilation* imp = (ImportCompilation*)unit->detail;
 
-    compile_export(comp, comp_thread, unit->available_names, export_ast, visit_arr);
-    if (comp_thread->is_panic()) {
-      return;
+        ASSERT(unit->ast != nullptr);
+        ASTImport* root = downcast_ast<ASTImport>(unit->ast);
+
+        compile_import(comp, comp_thread, unit->available_names, root, imp);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        //Finished
+        auto compilation = comp->services.compilation.get();
+        unit->stage = COMPILATION_UNIT_STAGE::DONE;
+
+        compilation->import_compilation.free(imp);
+        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        return;
+      }
+      case COMPILATION_UNIT_TYPE::EXPORT: {
+        AXLE_TELEMETRY_SCOPE("Emit Export");
+        if (comp->print_options.work) {
+          IO::format("Work | Export {}\n", unit->id);
+        }
+
+        ExportCompilation* ec = (ExportCompilation*)unit->detail;
+
+        ASSERT(unit->ast != nullptr);
+        ASTExport* export_ast = downcast_ast<ASTExport>(unit->ast);
+
+        compile_export(comp, comp_thread, export_ast);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        //Finished
+        auto compilation = comp->services.compilation.get();
+        unit->stage = COMPILATION_UNIT_STAGE::DONE;
+
+        compilation->export_compilation.free(ec);
+        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        return;
+      }
+
+      case COMPILATION_UNIT_TYPE::GLOBAL: {
+        AXLE_TELEMETRY_SCOPE("Emit Global");
+        if (comp->print_options.work) {
+          IO::format("Work | Global {}\n", unit->id);
+        }
+
+        ASSERT(unit->ast != nullptr);
+
+        ASTDecl* decl = downcast_ast<ASTDecl>(unit->ast);
+        GlobalCompilation* global_extra = (GlobalCompilation*)unit->detail;
+
+        compile_global(comp, comp_thread, unit->available_names, decl, global_extra);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        //Finished
+        auto compilation = comp->services.compilation.get();
+        unit->stage = COMPILATION_UNIT_STAGE::DONE;
+
+        compilation->global_compilation.free(global_extra);
+        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        return;
+      }
+
+      case COMPILATION_UNIT_TYPE::STRUCTURE: {
+        AXLE_TELEMETRY_SCOPE("Compile Structure");
+        if (comp->print_options.work) {
+          IO::format("Work | Structure {}\n", unit->id);
+        }
+
+        const StructCompilation* struct_extra = (StructCompilation*)unit->detail;
+
+        //Finished
+        auto compilation = comp->services.compilation.get();
+        unit->stage = COMPILATION_UNIT_STAGE::DONE;
+
+        compilation->struct_compilation.free(struct_extra);
+        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        return;
+      }
+
+      case COMPILATION_UNIT_TYPE::LAMBDA_SIG: {
+        AXLE_TELEMETRY_SCOPE("Compile Lambda Signature");
+        if (comp->print_options.work) {
+          IO::format("Work | Signature {}\n", unit->id);
+        }
+
+        LambdaSigCompilation* lsc = (LambdaSigCompilation*)unit->detail;
+        ASSERT(unit->ast != nullptr);
+
+        //Only Job of this is to send off the inner dependency
+        auto compilation = comp->services.compilation.get();
+        unit->stage = COMPILATION_UNIT_STAGE::DONE;
+
+        CompilationUnit* body_unit;
+        {
+          ASTLambda* lambda = lsc->lambda;
+          IR::Function* func = lsc->func;
+          Namespace* available_names = unit->available_names;
+
+          compilation->lambda_sig_compilation.free(lsc);
+          close_compilation_unit(comp_thread, compilation._ptr, unit);
+
+          //Create the unit for the body
+          LambdaBodyCompilation* lbc = compilation->lambda_body_compilation.allocate();
+          lbc->func = func;
+
+          body_unit = new_compilation_unit(compilation._ptr, COMPILATION_UNIT_TYPE::LAMBDA_BODY,
+                                           available_names, lambda, lbc, comp->print_options.comp_units);
+        }
+
+        comp->pipelines.depend_check.push_back(body_unit);
+        return;
+      }
+
+      case COMPILATION_UNIT_TYPE::LAMBDA_BODY: {
+        AXLE_TELEMETRY_SCOPE("Compile Lambda Body");
+        thread_doing_work(comp, comp_thread);
+
+        if (comp->print_options.work) {
+          IO::format("Work | Work {}\n", unit->id);
+        }
+
+        LambdaBodyCompilation* lbc = (LambdaBodyCompilation*)unit->detail;
+
+        ASSERT(unit->ast != nullptr);
+        ASTLambda* lambda = downcast_ast<ASTLambda>(unit->ast);
+
+        compile_lambda_body(comp, comp_thread, lambda, lbc);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        //Finished
+        auto compilation = comp->services.compilation.get();
+        unit->stage = COMPILATION_UNIT_STAGE::DONE;
+
+        compilation->lambda_body_compilation.free(lbc);
+        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        return;
+      }
     }
 
-    //Finished
-    auto compilation = comp->services.compilation.get();
-
-    compilation->export_compilation.free(ec);
-    close_compilation_unit(comp_thread, compilation._ptr, unit);
-    return;
+    INVALID_CODE_PATH("Invalid unit type");
   }
 
   if (comp->pipelines.depend_check.try_pop_front(&unit)) {
@@ -2384,11 +2362,16 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       return;
     }
 
+    auto compilation = comp->services.compilation.get();
+    // dependencies are deferred so
+    // always progress this value
+    unit->stage = COMPILATION_UNIT_STAGE::TYPE_CHECK;
+
     if (comp_thread->is_depends()) {
-      [[maybe_unused]] bool depended = try_dispatch_dependencies(comp, comp_thread, unit);
+      [[maybe_unused]] bool depended = maybe_depend(comp_thread, compilation._ptr, unit);
     }
     else {
-      unit->main_pipe->push_back(unit);
+      comp->pipelines.type_check.push_back(unit);
     }
     return;
   }
@@ -2406,12 +2389,12 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
       auto names = comp->services.names.get();
 
-      const auto found_dep_l = [comp_thread, names = names._ptr, dep_ptr = &compilation->dependencies](const UnfoundNameHolder& dep) -> bool {
+      const auto found_dep_l = [comp_thread, names = names._ptr, compilation = compilation._ptr](const UnfoundNameHolder& dep) -> bool {
         const GlobalName* gn = names->find_global_name(dep.name.ns, dep.name.ident);
 
         if (gn != nullptr) {
           dep.dependency->unfound_wait_on_count -= 1;
-          dep_ptr->try_restart(dep.dependency, comp_thread->print_options.comp_units);
+          compilation->try_restart(dep.dependency, comp_thread->print_options.comp_units);
           return true;
         }
         else {
@@ -2533,35 +2516,28 @@ void compiler_loop_threaded(CompilerGlobals* const comp, CompilerThread* const c
 
 static void free_remaining_compilation_units(Compilation* compilation) {
   for (CompilationUnit* unit : compilation->store.active_units) {
-    auto dep = unit->dependency_list;
-    while (dep != nullptr) {
-      auto next = dep->next;
-      compilation->dependencies.dependency_list_entry.free(dep);
-      dep = next;
-    }
-
-    switch (unit->emit) {
-      case COMPILATION_EMIT_TYPE::STRUCTURE: {
+    switch (unit->type) {
+      case COMPILATION_UNIT_TYPE::STRUCTURE: {
           compilation->struct_compilation.free((const StructCompilation*)unit->detail);
           break;
         }
-      case COMPILATION_EMIT_TYPE::LAMBDA_BODY: {
+      case COMPILATION_UNIT_TYPE::LAMBDA_BODY: {
           compilation->lambda_body_compilation.free((const LambdaBodyCompilation*)unit->detail);
           break;
         }
-      case COMPILATION_EMIT_TYPE::LAMBDA_SIG: {
+      case COMPILATION_UNIT_TYPE::LAMBDA_SIG: {
           compilation->lambda_sig_compilation.free((const LambdaSigCompilation*)unit->detail);
           break;
         }
-      case COMPILATION_EMIT_TYPE::GLOBAL: {
+      case COMPILATION_UNIT_TYPE::GLOBAL: {
           compilation->global_compilation.free((const GlobalCompilation*)unit->detail);
           break;
         }
-      case COMPILATION_EMIT_TYPE::IMPORT: {
+      case COMPILATION_UNIT_TYPE::IMPORT: {
           compilation->import_compilation.free((const ImportCompilation*)unit->detail);
           break;
         }
-      case COMPILATION_EMIT_TYPE::EXPORT: {
+      case COMPILATION_UNIT_TYPE::EXPORT: {
           compilation->export_compilation.free((const ExportCompilation*)unit->detail);
           break;
         }
@@ -2611,15 +2587,20 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
     }
 
     if (comp->work_counter == 0
-        && (compilation->dependencies.in_flight_units > 0
+        && (compilation->in_flight_units > 0
             || compilation->store.active_units.size > 0
             || comp->finished_irs.size > 0
             || files->unparsed_files.size > 0)) {
       comp->work_counter += 1;
 
       Format::ArrayFormatter error = {};
-      Format::format_to(error, "Work still exists but is not accessable according to these counters:\n");
-      Format::format_to(error, "- In flight units: {}\n", compilation->dependencies.in_flight_units);
+      Format::format_to(error,
+          "Work still exists but is not accessable according to the counters\n"
+          "This is potentially due to a threading bug that needs to be fixed\n"
+          "A thread will take work before telling anyone else its doing work\n"
+          "This can lead to the system thinking there is no work in that small amamount of time between it signalling and it doing work\n"
+          "It may also just be something else...\n");
+      Format::format_to(error, "- In flight units: {}\n", compilation->in_flight_units);
       Format::format_to(error, "- Active units: {}\n", compilation->store.active_units.size);
       Format::format_to(error, "- Finished IRs: {}\n", comp->finished_irs.size);
       Format::format_to(error, "- Unparsed files: {}\n", files->unparsed_files.size);
@@ -2634,15 +2615,25 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
         for (; i < end; ++i) {
           CompilationUnit* unit = *i;
           ASSERT(unit != nullptr);
-          ASSERT(unit->main_pipe != nullptr);
-          Axle::ViewArr<const char> debug_name = unit->main_pipe->_debug_name;
-          if (debug_name.data == nullptr) {
-            debug_name = Axle::lit_view_arr("Type unsupported in this mode");
-          }
+          Axle::ViewArr<const char> debug_name = ([](
+              const CompPipes* pipes,
+              const CompilationUnit* unit) {
+            switch (unit->stage) {
+              case COMPILATION_UNIT_STAGE::DONE: return Axle::lit_view_arr("Done");
+
+              case COMPILATION_UNIT_STAGE::DEPEND_CHECK: return pipes->depend_check._debug_name;
+              case COMPILATION_UNIT_STAGE::TYPE_CHECK: return pipes->type_check._debug_name;
+              case COMPILATION_UNIT_STAGE::EMIT: return pipes->emit._debug_name;
+            }
+
+            return Axle::lit_view_arr("Type unsupported in this mode");
+          } (&comp->pipelines, unit));
+
+          ASSERT(debug_name.size > 0);
 
           Format::format_to(error, "- Id: {} | Type: {}\n"
                             "  Waiting on Units: {} | Waiting on Names: {}\n",
-                            unit->id, debug_name, unit->unit_wait_on_count, unit->unfound_wait_on_count);
+                            unit->id, debug_name, unit->unit_wait_on_count.load(), unit->unfound_wait_on_count.load());
         }
       }
 
@@ -2652,29 +2643,13 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       Format::format_to(error, "- Depend Check: {}\n", comp->pipelines.depend_check.size);
       comp->pipelines.depend_check.mutex.release();
 
-      comp->pipelines.comp_structure.mutex.acquire();
-      Format::format_to(error, "- Compile Structure: {}\n", comp->pipelines.comp_structure.size);
-      comp->pipelines.comp_structure.mutex.release();
+      comp->pipelines.type_check.mutex.acquire();
+      Format::format_to(error, "- Type Check: {}\n", comp->pipelines.type_check.size);
+      comp->pipelines.type_check.mutex.release();
 
-      comp->pipelines.comp_body.mutex.acquire();
-      Format::format_to(error, "- Compile Lambda Body: {}\n", comp->pipelines.comp_body.size);
-      comp->pipelines.comp_body.mutex.release();
-
-      comp->pipelines.comp_signature.mutex.acquire();
-      Format::format_to(error, "- Compile Lambda Signature: {}\n", comp->pipelines.comp_signature.size);
-      comp->pipelines.comp_signature.mutex.release();
-
-      comp->pipelines.comp_global.mutex.acquire();
-      Format::format_to(error, "- Compile Global: {}\n", comp->pipelines.comp_global.size);
-      comp->pipelines.comp_global.mutex.release();
-
-      comp->pipelines.comp_import.mutex.acquire();
-      Format::format_to(error, "- Compile Import: {}\n", comp->pipelines.comp_import.size);
-      comp->pipelines.comp_import.mutex.release();
-
-      comp->pipelines.comp_export.mutex.acquire();
-      Format::format_to(error, "- Compile Export: {}\n", comp->pipelines.comp_export.size);
-      comp->pipelines.comp_export.mutex.release();
+      comp->pipelines.emit.mutex.acquire();
+      Format::format_to(error, "- Emit: {}\n", comp->pipelines.emit.size);
+      comp->pipelines.emit.mutex.release();
 
       comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, std::move(error).bake());
       comp->global_panic.set();
@@ -2685,7 +2660,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
     }
   }
 
-  ASSERT(comp->services.compilation.get()->dependencies.in_flight_units == 0);
+  ASSERT(comp->services.compilation.get()->in_flight_units == 0);
   ASSERT(comp->services.compilation.get()->store.active_units.size == 0);
 
   {
