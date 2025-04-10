@@ -162,6 +162,29 @@ TC_STAGE(ARRAY_TYPE_DOWN) {
   return;
 }
 
+TC_STAGE(ARRAY_TYPE_DOWN_LEN) {
+  AXLE_TELEMETRY_FUNCTION();
+  EXPAND_THIS(ASTArrayType, at);
+  
+  ASSERT(at->expr->node_type == comp_thread->builtin_types->t_u64);
+  if (!VC::is_comptime(at->expr->value_category)) {
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
+                              "array size expression must be a compile time constant");
+    return;
+  }
+
+  IR::EvalPromise eval = {};
+  eval.type = comp_thread->builtin_types->t_u64;
+  eval.data = (u8*)&at->array_length;
+
+  IR::eval_ast(comp, comp_thread, at->expr, &eval);
+  if (comp_thread->is_panic()) {
+    return;
+  }
+
+  return;
+}
+
 TC_STAGE(ARRAY_TYPE_UP) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);

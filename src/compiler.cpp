@@ -47,9 +47,18 @@ CompilationUnit* CompilationUnitStore::get_unit_if_exists(u64 id) const {
 
 IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s, const Span& span) {
   AXLE_TELEMETRY_FUNCTION();
+  ir_mutex.acquire();
   label_mutex.acquire();
+  IR::IRStore* ir = ir_builders_single_threaded.insert();
   IR::GlobalLabel label = { label_signature_table.size + 1 };
-  label_signature_table.insert({s, span});
+  
+  ir->completed = false;
+  ir->global_label = label;
+  ir->signature = s;
+
+  label_signature_table.insert({s, span, ir});
+
+  ir_mutex.release();
   label_mutex.release();
 
   return label;
@@ -63,14 +72,11 @@ GlobalLabelInfo CompilerGlobals::get_label_info(IR::GlobalLabel label) {
   return info;
 }
 
-IR::IRStore* CompilerGlobals::new_ir(IR::GlobalLabel label, const SignatureStructure* sig) {
+IR::IRStore* CompilerGlobals::get_ir(IR::GlobalLabel label) {
   AXLE_TELEMETRY_FUNCTION();
-  ir_mutex.acquire();
-  IR::IRStore* ir = ir_builders_single_threaded.insert();
-  ir_mutex.release();
-
-  ir->global_label = label;
-  ir->signature = sig;
+  label_mutex.acquire();
+  IR::IRStore* ir = label_signature_table[label.label - 1].ir;
+  label_mutex.release();
 
   return ir;
 }
@@ -1458,7 +1464,8 @@ static void compile_lambda_body(CompilerGlobals* comp,
   ASSERT(root->node_type.is_valid());
 
   {
-    IR::IRStore* ir = comp->new_ir(l_comp->func->signature.label, l_comp->func->signature.sig_struct);
+    IR::IRStore* ir = comp->get_ir(l_comp->func->signature.label);
+    ASSERT(ir->signature == l_comp->func->signature.sig_struct);
 
 
     ASSERT(root->sig->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
@@ -1727,7 +1734,8 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
     const SignatureStructure* sig = (const SignatureStructure*)comp->builtin_types->t_void_call.structure;
     IR::GlobalLabel label = comp->next_function_label(sig, global->decl.span);
 
-    IR::IRStore* ir = comp->new_ir(label, sig);
+    IR::IRStore* ir = comp->get_ir(label);
+    ASSERT(ir->signature == sig);
 
     {
       Eval::IrBuilder builder;

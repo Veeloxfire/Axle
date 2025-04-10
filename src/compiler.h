@@ -291,7 +291,8 @@ constexpr void copy_compiler_constants(const CompilerConstants* from, CompilerCo
 
 struct GlobalLabelInfo {
   const SignatureStructure* signature;
-  Span span = {};
+  Span span;
+  IR::IRStore* ir;
 };
 
 //Things that may be modified by multiple threads
@@ -337,7 +338,7 @@ struct CompilerGlobals : CompilerConstants {
   IR::GlobalLabel next_function_label(const SignatureStructure* s, const Span& span);
   GlobalLabelInfo get_label_info(IR::GlobalLabel label);
 
-  IR::IRStore* new_ir(IR::GlobalLabel label, const SignatureStructure* sig);
+  IR::IRStore* get_ir(IR::GlobalLabel label);
   IR::Function* new_function();
   Local* new_local();
   Global* new_global();

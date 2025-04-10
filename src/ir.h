@@ -130,6 +130,7 @@ namespace IR {
   };
 
   struct IRStore {
+    bool completed = false;
     const SignatureStructure* signature = nullptr;
 
     GlobalLabel global_label = NULL_GLOBAL_LABEL;

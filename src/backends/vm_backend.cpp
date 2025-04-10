@@ -97,7 +97,7 @@ RealValue VM::StackFrame::get_indirect_value(const IR::P_ARG& arg) {
 
 VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
   AXLE_TELEMETRY_FUNCTION();
-
+  ASSERT(ir->completed);
   ASSERT(ir->control_blocks.size > 0);
 
   u64 total_temporaries = 0;

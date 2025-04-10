@@ -1,5 +1,4 @@
 #pragma once
-#include "type.h"
 #include <Axle/comp_utilities.h>
 
 #include "ast.h"

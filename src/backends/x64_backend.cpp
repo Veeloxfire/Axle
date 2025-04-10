@@ -4681,6 +4681,7 @@ struct BlockResolveOutput {
 void x64_emit_function(CompilerGlobals* comp, CompilerThread* comp_thread, const IR::IRStore* ir, const CallingConvention* convention,
     Backend::ProgramData* program) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(ir->completed);
   //X64::ProgramExtra* extra = static_cast<X64::ProgramExtra*>(program->extra);
 
   ASSERT(ir->global_label != IR::NULL_GLOBAL_LABEL);

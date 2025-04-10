@@ -8,6 +8,7 @@ namespace IO_Single = Axle::IO_Single;
 namespace IR {
   IR::ValueIndex IRStore::new_temporary(const VariableId& v_id, ValueRequirements requirements) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -26,6 +27,7 @@ namespace IR {
 
   IR::ValueIndex IRStore::new_temporary(const Type& t, ValueRequirements requirements) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     IR::ControlBlock* cb = current_control_block();
     ASSERT(cb != nullptr);
 
@@ -40,6 +42,7 @@ namespace IR {
 
   VariableId IRStore::new_variable(const Type& t, ValueRequirements requirements, bool indirect) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     usize i = variables.size;
     variables.insert_uninit(1);
     IR::SSAVar* var = variables.back();
@@ -52,6 +55,7 @@ namespace IR {
 
   u32 IRStore::new_global_reference(const IR::GlobalReference& ref) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     u32 i = (u32)globals_used.size;
     globals_used.insert(ref);
     return i;
@@ -59,6 +63,7 @@ namespace IR {
 
   LocalLabel IRStore::new_control_block() {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     ASSERT(control_blocks.size < 0xffffffff);
 
     control_blocks.insert_uninit(1);
@@ -78,17 +83,20 @@ namespace IR {
   }
 
   void IRStore::start_control_block(LocalLabel label) {
+    ASSERT(!completed);
     ASSERT(label != IR::NULL_LOCAL_LABEL);
     ASSERT(label.label <= control_blocks.size);
     current_block = label;
   }
 
   void IRStore::end_control_block() {
+    ASSERT(!completed);
     //TODO: maybe remove this, currently does nothing
   }
 
   void IRStore::set_current_cf(const CFStart& st) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     ASSERT(st.child != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -99,6 +107,7 @@ namespace IR {
 
   void IRStore::set_current_cf(const CFEnd& e) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     ASSERT(e.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -108,6 +117,7 @@ namespace IR {
   }
   void IRStore::set_current_cf(const CFReturn& r) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     ASSERT(r.parent != IR::NULL_LOCAL_LABEL);
 
     IR::ControlBlock* cb = current_control_block();
@@ -117,6 +127,7 @@ namespace IR {
   }
   void IRStore::set_current_cf(const CFInline& i) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     ASSERT(i.parent != IR::NULL_LOCAL_LABEL);
     ASSERT(i.child != IR::NULL_LOCAL_LABEL);
 
@@ -127,6 +138,7 @@ namespace IR {
   }
   void IRStore::set_current_cf(const CFSplt& s) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     ASSERT(s.parent != IR::NULL_LOCAL_LABEL);
     ASSERT(s.true_branch != IR::NULL_LOCAL_LABEL);
     ASSERT(s.false_branch != IR::NULL_LOCAL_LABEL);
@@ -138,6 +150,7 @@ namespace IR {
   }
   void IRStore::set_current_cf(const CFMerge& m) {
     AXLE_TELEMETRY_FUNCTION();
+    ASSERT(!completed);
     ASSERT(m.parents[0] != IR::NULL_LOCAL_LABEL);
     ASSERT(m.parents[1] != IR::NULL_LOCAL_LABEL);
     ASSERT(m.child != IR::NULL_LOCAL_LABEL);
@@ -149,6 +162,7 @@ namespace IR {
   }
 }
 
+namespace {
 struct Serializer {
   u8* data_base;
   usize remaining_size;
@@ -388,7 +402,7 @@ struct Deserializer {
     c.val = bytes_slice(c.size);
   }
 };
-
+}
 
 usize IR::serialize(u8* data, usize remaining_size, const CODE_V& i) noexcept {
   AXLE_TELEMETRY_FUNCTION();
@@ -726,6 +740,7 @@ Eval::StartupInfo Eval::init_startup(
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(ir != nullptr);
   ASSERT(ir->signature != nullptr);
+  ASSERT(!ir->completed);
 
   builder->ir = ir;
   builder->eval_time = eval_time;
@@ -742,7 +757,9 @@ Eval::StartupInfo Eval::init_startup(
 
 void Eval::end_startup(IrBuilder* builder, const StartupInfo& startup, const IR::Types::StartFunc& start) {
   AXLE_TELEMETRY_FUNCTION();
-  IR::Emit::StartFunc(builder->ir->current_bytecode(), start);
+  IR::IRStore* ir = builder->ir;
+  ASSERT(!ir->completed);
+  IR::Emit::StartFunc(ir->current_bytecode(), start);
 
   builder->reset_variables();
   builder->switch_control_block(startup.first, startup.startup);
@@ -752,6 +769,7 @@ void Eval::end_startup(IrBuilder* builder, const StartupInfo& startup, const IR:
 void Eval::end_builder(Eval::IrBuilder* builder) {
   AXLE_TELEMETRY_FUNCTION();
   IR::IRStore* ir = builder->ir;
+  ASSERT(!ir->completed);
 
   if (ir->current_block != IR::NULL_LOCAL_LABEL) {
     ASSERT(builder->parent != IR::NULL_LOCAL_LABEL);
@@ -759,10 +777,14 @@ void Eval::end_builder(Eval::IrBuilder* builder) {
       builder->parent,
                        });
   }
+
+  ir->completed = true;
 }
 
 void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eval::RuntimeValue& from) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
+  
   ASSERT(to.rvt != RVT::Constant);
 
   ASSERT(to.type.size() > 0);
@@ -836,6 +858,7 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
 
 IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirements reqs, bool indirect) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   IR::VariableId id = ir->new_variable(t, reqs, indirect);
 
   {
@@ -859,6 +882,7 @@ IR::VariableId Eval::IrBuilder::new_variable(const Type& t, IR::ValueRequirement
 
 Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR::ValueRequirements reqs) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   ASSERT(id.variable < ir->variables.size);
   IR::SSAVar& sv = ir->variables.data[id.variable];
   sv.requirements |= reqs;
@@ -899,6 +923,7 @@ Eval::RuntimeValue Eval::IrBuilder::import_variable(const IR::VariableId& id, IR
 
 void Eval::IrBuilder::switch_control_block(IR::LocalLabel index, IR::LocalLabel _parent) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   ir->end_control_block();
   ir->start_control_block(index);
   parent = _parent;
@@ -906,10 +931,12 @@ void Eval::IrBuilder::switch_control_block(IR::LocalLabel index, IR::LocalLabel 
 
 void Eval::IrBuilder::rescope_variables(usize new_size) {
   ASSERT(variables_state.size >= new_size);
+  ASSERT(!ir->completed);
   variables_state.pop_n(variables_state.size - new_size);
 
 }
 void Eval::IrBuilder::reset_variables() {
+  ASSERT(!ir->completed);
   FOR_MUT(variables_state, it) {
     it->imported = false;
   }
@@ -917,6 +944,7 @@ void Eval::IrBuilder::reset_variables() {
 
 IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   switch (rv.rvt) {
     case RVT::Constant: {
         IR::ValueIndex v = ir->new_temporary(rv.type, {});
@@ -954,6 +982,7 @@ IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
 
 Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue& val, const Type& ptr_type) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   switch (val.rvt) {
@@ -1000,6 +1029,7 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
 Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Type& ptr_type) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   switch (val.rvt) {
@@ -1052,6 +1082,7 @@ Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
 Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
                                const Eval::RuntimeValue& val, const Type& ptr_type) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   ASSERT(val.type.struct_type() == STRUCTURE_TYPE::POINTER);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
@@ -1088,6 +1119,7 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
 Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Eval::RuntimeValue& offset, const Type& ptr_type) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   const Type u64_type = offset.type;
   ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
   ASSERT(u64_type.structure->size == 8);
@@ -1172,6 +1204,7 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     const Type& ptr_type,
                                     const Type& u64_type) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(!ir->completed);
   ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
   ASSERT(u64_type.structure->size == 8);
   ASSERT(!u64_type.unchecked_base<IntegerStructure>()->is_signed);
@@ -1243,6 +1276,7 @@ void print_value(const IR::P_ARG& arg) {
 
 void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(builder->completed);
   IO_Single::lock();
   DEFER() { IO_Single::unlock(); };
 
