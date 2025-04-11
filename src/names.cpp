@@ -48,7 +48,9 @@ const GlobalName* add_global_name(CompilerGlobals* comp, CompilerThread* comp_th
     }
   }
 
-  Axle::IO::format("Names | \"{}\" created\n", name);
+  if (comp->print_options.names) {
+    Axle::IO::format("Names | \"{}\" created\n", name);
+  }
 
   return names->add_global_name_impl(&comp_thread->errors, ns, name, g);
 }

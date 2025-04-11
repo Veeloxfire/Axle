@@ -91,6 +91,7 @@ struct APIPrintOptions {
   bool file_loads      = false;
   bool comp_units      = false;
   bool work            = false;
+  bool names           = false;
 };
 
 struct APIOptions {

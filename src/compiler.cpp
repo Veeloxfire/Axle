@@ -1993,8 +1993,10 @@ void try_restart_unit(CompilerGlobals* comp, Compilation* complation,
     complation->in_flight_units += 1;
   }
   else {
-    IO::format("Unit {} still waiting. {} Units, {} Names\n", unit->id,
+    if (comp->print_options.comp_units || comp->print_options.names) {
+      IO::format("Unit {} still waiting. {} Units, {} Names\n", unit->id,
         unit->unit_wait_on_count.load(), unit->unfound_wait_on_count.load());
+    }
   }
 }
 
@@ -2426,7 +2428,8 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     // can only access this while holding names
     if (comp->names_updated || compilation->unfound_names.updated) {
-      if (comp->names_updated) {
+      if (comp->names_updated 
+          && (comp->print_options.work || comp->print_options.names)) {
         IO::print("Checking unfound because names updated\n");
       }
 
@@ -2434,7 +2437,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         const GlobalName* gn = names->find_global_name(dep.name.ns, dep.name.ident);
 
         if (gn != nullptr) {
-          IO::format("Names | found {}\n", dep.name.ident);
+          if (comp->print_options.names) {
+            IO::format("Names | found {}\n", dep.name.ident);
+          }
           ASSERT(dep.dependency->unit_wait_on_count == 0);
           auto r = dep.dependency->unfound_wait_on_count--;
           ASSERT(r != 0);
@@ -2442,7 +2447,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
           return true;
         }
         else {
-          IO::format("Names | missing {}\n", dep.name.ident);
+          if (comp->print_options.names) {
+            IO::format("Names | still missing {}\n", dep.name.ident);
+          }
           return false;
         }
       };
