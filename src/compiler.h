@@ -171,6 +171,7 @@ struct FileLoader {
   Axle::Directory std_lib_directory = {};
 
   Axle::Array<FileImport> unparsed_files = {};
+  Axle::Array<FileAST> parsed_files = {};
 };
 
 struct BuildOptions {
@@ -238,45 +239,54 @@ struct Services {
   Axle::AtomicPtr<Backend::ProgramData> out_program;
   Axle::AtomicPtr<Compilation> compilation;
   Axle::AtomicPtr<NameManager> names;
-
   Axle::AtomicPtr<Structures> structures;
   Axle::AtomicPtr<Axle::StringInterner> strings;
 
-  void get_multiple(Axle::AtomicLock<FileLoader>* files,
-                    Axle::AtomicLock<Compilation>* comp) {
-    file_loader._mutex.acquire();
-    compilation._mutex.acquire();
+  struct ServiceGetter {
+    Axle::AtomicLock<FileLoader>* file_loader = nullptr;
+    Axle::AtomicLock<Backend::ProgramData>* out_program = nullptr;
+    Axle::AtomicLock<Compilation>* compilation = nullptr;
+    Axle::AtomicLock<NameManager>* names = nullptr;
+    Axle::AtomicLock<Structures>* structures = nullptr;
+    Axle::AtomicLock<Axle::StringInterner>* strings = nullptr;
+  };
 
-    files->_mutex = &file_loader._mutex;
-    files->_ptr = file_loader._ptr;
+  void get_multiple(const ServiceGetter& getter) {
+    if (getter.file_loader) {
+      file_loader._mutex.acquire();
+      getter.file_loader->_mutex = &file_loader._mutex;
+      getter.file_loader->_ptr = file_loader._ptr;
+    }
 
-    comp->_mutex = &compilation._mutex;
-    comp->_ptr = compilation._ptr;
-  }
+    if (getter.out_program) {
+      out_program._mutex.acquire();
+      getter.out_program->_mutex = &out_program._mutex;
+      getter.out_program->_ptr = out_program._ptr;
+    }
 
-  void get_multiple(Axle::AtomicLock<Compilation>* comp,
-                    Axle::AtomicLock<NameManager>* nm) {
-    compilation._mutex.acquire();
-    names._mutex.acquire();
-
-
-    comp->_mutex = &compilation._mutex;
-    comp->_ptr = compilation._ptr;
+    if (getter.compilation) {
+      compilation._mutex.acquire();
+      getter.compilation->_mutex = &compilation._mutex;
+      getter.compilation->_ptr = compilation._ptr;
+    }
     
-    nm->_mutex = &names._mutex;
-    nm->_ptr = names._ptr;
-  }
+    if (getter.names) {
+      names._mutex.acquire();
+      getter.names->_mutex = &names._mutex;
+      getter.names->_ptr = names._ptr;
+    }
 
-  void get_multiple(Axle::AtomicLock<Structures>* structs,
-                    Axle::AtomicLock<Axle::StringInterner>* string_int) {
-    structures._mutex.acquire();
-    strings._mutex.acquire();
-
-    structs->_mutex = &structures._mutex;
-    structs->_ptr = structures._ptr;
-
-    string_int->_mutex = &strings._mutex;
-    string_int->_ptr = strings._ptr;
+    if (getter.structures) {
+      structures._mutex.acquire();
+      getter.structures->_mutex = &structures._mutex;
+      getter.structures->_ptr = structures._ptr;
+    }
+    
+    if (getter.strings) {
+      strings._mutex.acquire();
+      getter.strings->_mutex = &strings._mutex;
+      getter.strings->_ptr = strings._ptr;
+    }
   }
 };
 
@@ -318,13 +328,12 @@ struct CompilerGlobals : CompilerConstants {
   IR::GlobalLabel entry_point_label = IR::NULL_GLOBAL_LABEL;
   Axle::AtomicQueue<const IR::IRStore*> finished_irs;
 
-  CompPipes pipelines;
+  CompPipes pipelines = {};
 
-  Namespace* build_file_namespace = {};//needs to be saved for finding main
-  Namespace* builtin_namespace = {};
+  Namespace* build_file_namespace = nullptr;//needs to be saved for finding main
+  Namespace* builtin_namespace = nullptr;
 
   Axle::Array<IR::DynLibraryImport> dyn_lib_imports = {};
-  Axle::Array<FileAST> parsed_files = {};
   Axle::Array<Backend::GlobalData> dynamic_inits = {};
 
   Axle::SpinLockMutex locals_mutex;

@@ -127,11 +127,11 @@ CompilationUnit* new_compilation_unit(CompilerGlobals* comp,
   ASSERT(compilation != nullptr);
   ASSERT(names != nullptr);
   ASSERT(detail != nullptr);
-  ++comp->available_work_counter;
+  auto work_c = ++comp->available_work_counter;
   CompilationUnit* unit = compilation->store.allocate_unit();
   
   if (comp->print_options.work) {
-    IO::format("Work + | New compilation unit {}\n", unit->id);
+    IO::format("Work +  {} | New compilation unit {}\n", work_c, unit->id);
   }
 
   unit->unit_wait_on_count = 0;
@@ -215,7 +215,7 @@ static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     ps = find_or_make_pointer_structure(structures._ptr, strings._ptr, base);
   }
@@ -1361,9 +1361,9 @@ void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
   if (comp->print_options.finished_ir) {
     IR::print_ir(comp, ir);
   }
-  ++comp->available_work_counter;
+  auto work_c = ++comp->available_work_counter;
   if (comp->print_options.work) {
-    Axle::IO::print("Work + | Subitted IR\n");
+    Axle::IO::format("Work + {} | Subitted IR\n", work_c);
   }
   comp->finished_irs.push_back(ir);
 }
@@ -1648,33 +1648,30 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
     return f->file_loc == loc;
   };
 
-  const FileAST* imported_file = comp->parsed_files.find_if(is_correct_file);
+  {
+    Axle::AtomicLock<FileLoader> files = {};
+    Axle::AtomicLock<NameManager> names = {};
+    comp->services.get_multiple({ .file_loader = &files, .names = &names });
 
-  if (imported_file != nullptr) {
-    auto names = comp->services.names.get();
+    const FileAST* imported_file = files->parsed_files.find_if(is_correct_file);
 
-    add_global_import(comp, comp_thread, names._ptr, available_names, imported_file->ns, root->node_span);
-  }
-  else {
-    FileImport file_import = {};
-    file_import.file_loc = std::move(loc);
-    file_import.ns = comp->new_namespace();
-    file_import.span = root->node_span;
-
-    {
-      auto names = comp->services.names.get();
+    if (imported_file != nullptr) {
+      add_global_import(comp, comp_thread, names._ptr, available_names, imported_file->ns, root->node_span);
+    }
+    else {
+      FileImport file_import = {};
+      file_import.file_loc = std::move(loc);
+      file_import.ns = comp->new_namespace();
+      file_import.span = root->node_span;
 
       //Might error but its probs fine to just leave it as the error will be caught at some point
       add_global_import(comp, comp_thread, names._ptr, available_names, file_import.ns, root->node_span);
-    }
 
-    {
-      auto files = comp->services.file_loader.get();
-      ++comp->available_work_counter;
+      auto work_c = ++comp->available_work_counter;
       files->unparsed_files.insert(std::move(file_import));
 
       if (comp->print_options.work) {
-        IO::format("Work + | Added Unparsed File {}\n", file_import.file_loc.full_name);
+        IO::format("Work + {} | Added Unparsed File {}\n", work_c, file_import.file_loc.full_name);
       }
     }
   }
@@ -1800,8 +1797,8 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       }
 
       //Parse
-      comp->parsed_files.insert_uninit(1);
-      FileAST* ast_file = comp->parsed_files.back();
+      file_loader->parsed_files.insert_uninit(1);
+      FileAST* ast_file = file_loader->parsed_files.back();
       ast_file->file_loc = file_import->file_loc;
 
       ast_file->ns = file_import->ns;
@@ -1832,9 +1829,9 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
         return;
       }
 
-      --comp->available_work_counter;
+      auto work_c = --comp->available_work_counter;
       if (comp->print_options.work) {
-          IO::format("Work - | Parsed {} File\n", full_path);
+          IO::format("Work - {} | Parsed {} File\n", work_c, full_path);
       }
     }
     else {
@@ -1970,11 +1967,11 @@ void try_restart_unit(CompilerGlobals* comp, Compilation* complation,
       IO::format("Remove Dependency from unit {} -> starting again\n", unit->id);
     }
       
+    auto work_c = ++comp->available_work_counter;
     if (comp->print_options.work) {
-      IO::format("Work + | Restart unit {}\n", unit->id);
+      IO::format("Work + {} | Restart unit {}\n", work_c, unit->id);
     }
 
-    ++comp->available_work_counter;
     
     switch (unit->stage) {
       case COMPILATION_UNIT_STAGE::DEPEND_CHECK: {
@@ -1994,6 +1991,10 @@ void try_restart_unit(CompilerGlobals* comp, Compilation* complation,
     }
 
     complation->in_flight_units += 1;
+  }
+  else {
+    IO::format("Unit {} still waiting. {} Units, {} Names\n", unit->id,
+        unit->unit_wait_on_count.load(), unit->unfound_wait_on_count.load());
   }
 }
 
@@ -2021,6 +2022,7 @@ void dispatch_ready_dependencies(
     }
     
     ASSERT(ptr->stage == dep.stage_required);
+    --dep.waiting->unit_wait_on_count;
     try_restart_unit(comp, compilation, dep.waiting);
     return true;
 
@@ -2043,8 +2045,22 @@ bool maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilatio
     CompilationUnit* u = compilation->store.get_unit_if_exists(id->unit);
     if (u != nullptr && u->stage < id->stage) {
       if (comp_thread->print_options.comp_units) {
-        IO::format("Comp unit {} waiting on {}\n",
-                     unit->id, u->id);
+        Axle::IO_Single::ScopeLock lock;
+        if (unit->type == COMPILATION_UNIT_TYPE::GLOBAL) {
+          ASTDecl* d = downcast_ast<ASTDecl>(unit->ast);
+          Axle::IO_Single::format("Comp unit {} ({})", d->name, unit->id);
+        }
+        else {
+          Axle::IO_Single::format("Comp unit {}", unit->id);
+        }
+
+        if (u->type == COMPILATION_UNIT_TYPE::GLOBAL) {
+          ASTDecl* d = downcast_ast<ASTDecl>(u->ast);
+          Axle::IO_Single::format(" waiting on {} ({})\n", d->name, u->id);
+        }
+        else {
+          Axle::IO_Single::format(" waiting on {}\n", u->id);
+        }
       }
 
       depended = true;
@@ -2059,11 +2075,11 @@ bool maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilatio
     depended = true;
     
     if (!compilation->unfound_names.updated) {
-      ++comp->available_work_counter;// work for the missing names
+      auto work_c = ++comp->available_work_counter;// work for the missing names
       compilation->unfound_names.updated = true;
 
       if (comp->print_options.work) {
-        IO::format("Work + | new unfound names\n");
+        IO::format("Work + {} | new unfound names\n", work_c);
       }
     }
 
@@ -2087,7 +2103,7 @@ bool maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilatio
 
   if (depended) {
     compilation->in_flight_units -= 1;
-    --comp->available_work_counter;// for the waiting unit
+    auto work_c = --comp->available_work_counter;// for the waiting unit
 
     if (comp_thread->print_options.comp_units) {
       IO::format("Comp unit {} now waiting   | Active = {}, In flight = {}\n",
@@ -2095,7 +2111,7 @@ bool maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilatio
     }
     
     if (comp->print_options.work) {
-      IO::format("Work - | Depending compilation unit {}\n", unit->id);
+      IO::format("Work - {} | Depending compilation unit {}\n", work_c, unit->id);
     }
   }
 
@@ -2122,11 +2138,10 @@ void close_compilation_unit(CompilerGlobals* comp, Compilation* compilation,
                id, compilation->store.active_units.size, compilation->in_flight_units);
   }
   
-
+  auto work_c = --comp->available_work_counter;
   if (comp->print_options.work) {
-    IO::format("Work - | Close compilation unit\n");
+    IO::format("Work - {} | Close compilation unit\n", work_c);
   }
-  --comp->available_work_counter;
 }
 
 void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
@@ -2177,9 +2192,9 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
         ASSERT(!comp_thread->is_depends());
 
-        --comp->available_work_counter;
+        auto work_c = --comp->available_work_counter;
         if (comp->print_options.work) {
-          IO::format("Work - | Output Finished IR\n");
+          IO::format("Work - {} | Output Finished IR\n", work_c);
         }
         return;
       }
@@ -2207,7 +2222,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     ASSERT(!comp_thread->is_depends());
 
     if (comp->print_options.work) {
-      IO::format("Work = | Type Checked {}\n", unit->id);
+      IO::format("Work = {} | Type Checked {}\n", comp->available_work_counter.load(), unit->id);
     }
     
     {
@@ -2395,7 +2410,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       comp->pipelines.type_check.push_back(unit);
 
       if (comp->print_options.work) {
-        IO::format("Work = | Depend Check {}\n", unit->id);
+        IO::format("Work = {} | Depend Check {}\n", comp->available_work_counter.load(), unit->id);
       }
     }
     return;
@@ -2407,19 +2422,27 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     AXLE_TELEMETRY_SCOPE("Check Unfound Names");
     Axle::AtomicLock<Compilation> compilation = {};
     Axle::AtomicLock<NameManager> names = {};
-    comp->services.get_multiple(&compilation, &names);
+    comp->services.get_multiple({ .compilation = &compilation, .names = &names });
 
     // can only access this while holding names
     if (comp->names_updated || compilation->unfound_names.updated) {
+      if (comp->names_updated) {
+        IO::print("Checking unfound because names updated\n");
+      }
+
       const auto found_dep_l = [comp, names = names._ptr, compilation = compilation._ptr](const UnfoundNameHolder& dep) -> bool {
         const GlobalName* gn = names->find_global_name(dep.name.ns, dep.name.ident);
 
         if (gn != nullptr) {
-          dep.dependency->unfound_wait_on_count -= 1;
-          try_restart_unit(comp, compilation ,dep.dependency);
+          IO::format("Names | found {}\n", dep.name.ident);
+          ASSERT(dep.dependency->unit_wait_on_count == 0);
+          auto r = dep.dependency->unfound_wait_on_count--;
+          ASSERT(r != 0);
+          try_restart_unit(comp, compilation, dep.dependency);
           return true;
         }
         else {
+          IO::format("Names | missing {}\n", dep.name.ident);
           return false;
         }
       };
@@ -2429,19 +2452,19 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
       if (comp->names_updated) {
         comp->names_updated = false;
-        --comp->available_work_counter;
+        auto work_c = --comp->available_work_counter;
 
         if (comp->print_options.work) {
-          IO::print("Work - | new names checked\n");
+          IO::format("Work - {} | new names checked\n", work_c);
         }
       }
       
       if (compilation->unfound_names.updated) {
         compilation->unfound_names.updated = false;
-        --comp->available_work_counter;
+        auto work_c = --comp->available_work_counter;
 
         if (comp->print_options.work) {
-          IO::print("Work - | unfound names checked\n");
+          IO::print("Work - {} | unfound names checked\n", work_c);
         }
       }
     }
@@ -2594,7 +2617,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   {
     Axle::AtomicLock<Compilation> compilation;
     Axle::AtomicLock<FileLoader> files;
-    comp->services.get_multiple(&files, &compilation);
+    comp->services.get_multiple({ .file_loader = &files, .compilation = &compilation });
 
     ASSERT(!compilation->unfound_names.updated);
 

@@ -149,7 +149,7 @@ TC_STAGE(ARRAY_TYPE_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     s = find_or_make_array_structure(structures._ptr,
                                      strings._ptr,
@@ -210,7 +210,7 @@ TC_STAGE(PTR_TYPE_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     s = find_or_make_pointer_structure(structures._ptr,
                                        strings._ptr,
@@ -246,7 +246,7 @@ TC_STAGE(SLICE_TYPE_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     s = find_or_make_slice_structure(structures._ptr,
                                        strings._ptr,
@@ -293,7 +293,8 @@ TC_STAGE(LAMBDA_TYPE_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
+
     s = find_or_make_lambda_structure(structures._ptr,
                                       strings._ptr,
                                       comp_thread->build_options.default_calling_convention,
@@ -339,7 +340,7 @@ TC_STAGE(TUPLE_TYPE_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     s = find_or_make_tuple_structure(structures._ptr,
                                      strings._ptr,
@@ -413,7 +414,7 @@ TC_STAGE(FUNCTION_SIGNATURE_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     sig_struct = find_or_make_lambda_structure(structures._ptr,
                                                strings._ptr,
@@ -524,7 +525,7 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
       {
         Axle::AtomicLock<Structures> structures = {};
         Axle::AtomicLock<Axle::StringInterner> strings = {};
-        comp->services.get_multiple(&structures, &strings);
+        comp->services.get_multiple({ .structures = &structures, .strings = &strings});
         member->node_type = to_type(find_or_make_pointer_structure(structures._ptr,
                                                                    strings._ptr,
                                                                    as->base));
@@ -553,7 +554,7 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
       {
         Axle::AtomicLock<Structures> structures = {};
         Axle::AtomicLock<Axle::StringInterner> strings = {};
-        comp->services.get_multiple(&structures, &strings);
+        comp->services.get_multiple({ .structures = &structures, .strings = &strings});
         member->node_type = to_type(find_or_make_pointer_structure(structures._ptr,
                                                                    strings._ptr,
                                                                    as->base));
@@ -644,7 +645,7 @@ TC_STAGE(INDEX_EXPR_DOWN) {
     {
       Axle::AtomicLock<Structures> structures;
       Axle::AtomicLock<Axle::StringInterner> strings;
-      comp->services.get_multiple(&structures, &strings);
+      comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
       index_expr->node_type = to_type(find_or_make_slice_structure(structures._ptr, strings._ptr, t));
     }
@@ -698,7 +699,7 @@ TC_STAGE(TUPLE_LIT_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
     ts = find_or_make_tuple_structure(structures._ptr,
                                       strings._ptr,
                                       view_arr(element_types));
@@ -843,7 +844,7 @@ TC_STAGE(ARRAY_EXPR_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     arr_s = find_or_make_array_structure(structures._ptr,
                                          strings._ptr,
@@ -938,7 +939,7 @@ TC_STAGE(ASCII_STRING_DOWN) {
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     s = find_or_make_array_structure(structures._ptr,
                                      strings._ptr,
@@ -1314,7 +1315,7 @@ static void run_un_up_addr_down(CompilerGlobals* const comp, AST_LOCAL this_node
   {
     Axle::AtomicLock<Structures> structures = {};
     Axle::AtomicLock<Axle::StringInterner> strings = {};
-    comp->services.get_multiple(&structures, &strings);
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
                                          expr->expr->node_type);
@@ -2433,7 +2434,7 @@ TC_STAGE(STRUCT_DOWN) {
     {
       Axle::AtomicLock<Structures> structures = {};
       Axle::AtomicLock<Axle::StringInterner> strings = {};
-      comp->services.get_multiple(&structures, &strings);
+      comp->services.get_multiple({ .structures = &structures, .strings = &strings});
       cmp_s = STRUCTS::new_composite_structure(structures._ptr,
                                                strings._ptr);
     }

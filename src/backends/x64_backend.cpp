@@ -4527,7 +4527,7 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
     Axle::AtomicLock<Axle::StringInterner> strings;
     Axle::AtomicLock<Structures> structs;
 
-    comp->services.get_multiple(&structs, &strings);
+    comp->services.get_multiple({ .structures = &structs, .strings = &strings});
 
 
     lib.path = strings->intern(Axle::lit_view_arr("kernel32.dll"));
