@@ -155,6 +155,7 @@ struct UnfoundNameHolder {
 };
 
 struct UnfoundNames {
+  bool updated = false;
   Axle::Array<UnfoundNameHolder> names = {};
 };
 
@@ -227,8 +228,6 @@ struct Compilation {
 
   u64 in_flight_units = 0;//Units that are not waiting somewhere
 
-  void dispatch_ready_dependencies(CompilationUnit* ptr, bool print);
-  void try_restart(CompilationUnit* ptr, bool print);
   void add_dependency_to(CompilationUnit* waiting_on, const DependencySingle& dep);
 };
 
@@ -253,6 +252,19 @@ struct Services {
 
     comp->_mutex = &compilation._mutex;
     comp->_ptr = compilation._ptr;
+  }
+
+  void get_multiple(Axle::AtomicLock<Compilation>* comp,
+                    Axle::AtomicLock<NameManager>* nm) {
+    compilation._mutex.acquire();
+    names._mutex.acquire();
+
+
+    comp->_mutex = &compilation._mutex;
+    comp->_ptr = compilation._ptr;
+    
+    nm->_mutex = &names._mutex;
+    nm->_ptr = names._ptr;
   }
 
   void get_multiple(Axle::AtomicLock<Structures>* structs,
@@ -294,7 +306,8 @@ struct GlobalLabelInfo {
 
 //Things that may be modified by multiple threads
 struct CompilerGlobals : CompilerConstants {
-  std::atomic_uint32_t work_counter = 0;
+  bool names_updated = false;// only available with names
+  std::atomic_int32_t available_work_counter = 0;
 
   Axle::Signal global_panic;
   Axle::SpinLockMutex global_errors_mutex;
@@ -375,7 +388,6 @@ struct DeferredDependency {
 
 //Things that cannot be modified by other threads
 struct CompilerThread : CompilerConstants {
-  bool doing_work = true;
   u32 thread_id;
 
   Axle::Array<Token> current_stream = {};
@@ -399,13 +411,6 @@ struct CompilerThread : CompilerConstants {
     return errors.report_error(code, span, std::move(msg));
   }
 };
-
-inline constexpr void thread_doing_work(CompilerGlobals* comp, CompilerThread* comp_thread) {
-  if (!comp_thread->doing_work) {
-    comp->work_counter += 1;
-    comp_thread->doing_work = true;
-  }
-}
 
 void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread);
 

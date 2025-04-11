@@ -114,7 +114,8 @@ Namespace* CompilerGlobals::new_namespace() {
   return names;
 }
 
-CompilationUnit* new_compilation_unit(Compilation* const comp,
+CompilationUnit* new_compilation_unit(CompilerGlobals* comp,
+                                      Compilation* const compilation,
                                       COMPILATION_UNIT_TYPE unit_type,
                                       Namespace* names,
                                       AST_LOCAL root,
@@ -123,10 +124,16 @@ CompilationUnit* new_compilation_unit(Compilation* const comp,
   AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(comp != nullptr);
+  ASSERT(compilation != nullptr);
   ASSERT(names != nullptr);
   ASSERT(detail != nullptr);
+  ++comp->available_work_counter;
+  CompilationUnit* unit = compilation->store.allocate_unit();
+  
+  if (comp->print_options.work) {
+    IO::format("Work + | New compilation unit {}\n", unit->id);
+  }
 
-  CompilationUnit* unit = comp->store.allocate_unit();
   unit->unit_wait_on_count = 0;
   unit->unfound_wait_on_count = 0;
   unit->dependency_list = {};
@@ -137,11 +144,11 @@ CompilationUnit* new_compilation_unit(Compilation* const comp,
   unit->ast = root;
   unit->detail = detail;
 
-  comp->in_flight_units += 1;
+  compilation->in_flight_units += 1;
 
   if (print) {
     IO::format("Started Comp Unit {}       | Active = {}, In flight = {}\n",
-                 unit->id, comp->store.active_units.size, comp->in_flight_units);
+                 unit->id, compilation->store.active_units.size, compilation->in_flight_units);
   }
 
 
@@ -1354,6 +1361,10 @@ void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
   if (comp->print_options.finished_ir) {
     IR::print_ir(comp, ir);
   }
+  ++comp->available_work_counter;
+  if (comp->print_options.work) {
+    Axle::IO::print("Work + | Subitted IR\n");
+  }
   comp->finished_irs.push_back(ir);
 }
 
@@ -1570,6 +1581,8 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
                            ASTImport* root, const ImportCompilation* imp) {
   AXLE_TELEMETRY_FUNCTION();
 
+  ASSERT(root->node_type.is_valid());
+
   IR::EvalPromise p = {};
   IR::eval_ast(comp, comp_thread, root->expr_location, &p);
   if (comp_thread->is_panic()) {
@@ -1640,7 +1653,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
   if (imported_file != nullptr) {
     auto names = comp->services.names.get();
 
-    names->add_global_import(&comp_thread->errors, available_names, imported_file->ns, root->node_span);
+    add_global_import(comp, comp_thread, names._ptr, available_names, imported_file->ns, root->node_span);
   }
   else {
     FileImport file_import = {};
@@ -1652,10 +1665,18 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
       auto names = comp->services.names.get();
 
       //Might error but its probs fine to just leave it as the error will be caught at some point
-      names->add_global_import(&comp_thread->errors, available_names, file_import.ns, root->node_span);
+      add_global_import(comp, comp_thread, names._ptr, available_names, file_import.ns, root->node_span);
     }
 
-    comp->services.file_loader.get()->unparsed_files.insert(std::move(file_import));
+    {
+      auto files = comp->services.file_loader.get();
+      ++comp->available_work_counter;
+      files->unparsed_files.insert(std::move(file_import));
+
+      if (comp->print_options.work) {
+        IO::format("Work + | Added Unparsed File {}\n", file_import.file_loc.full_name);
+      }
+    }
   }
 }
 
@@ -1728,7 +1749,7 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
   {
     auto names = comp->services.names.get();
 
-    names->add_global_name(&comp_thread->errors, available_names, global->decl.name, global);
+    add_global_name(comp, comp_thread, names._ptr, available_names, global->decl.name, global);
   }
 }
 
@@ -1810,6 +1831,11 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
       if (comp_thread->is_panic()) {
         return;
       }
+
+      --comp->available_work_counter;
+      if (comp->print_options.work) {
+          IO::format("Work - | Parsed {} File\n", full_path);
+      }
     }
     else {
       comp_thread->report_error(ERROR_CODE::FILE_ERROR, file_import->span,
@@ -1829,7 +1855,7 @@ void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const 
     ImportCompilation* extra = compilation->import_compilation.allocate();
     extra->src_loc = src_loc;
 
-    imp_unit = new_compilation_unit(compilation._ptr,
+    imp_unit = new_compilation_unit(comp, compilation._ptr,
                                     COMPILATION_UNIT_TYPE::IMPORT,
                                     ns, imp,
                                     (void*)extra, comp->print_options.comp_units);
@@ -1847,7 +1873,7 @@ void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExp
     auto compilation = comp->services.compilation.get();
     ExportCompilation* extra = compilation->export_compilation.allocate();
 
-    exp_unit = new_compilation_unit(compilation._ptr,
+    exp_unit = new_compilation_unit(comp, compilation._ptr,
                                     COMPILATION_UNIT_TYPE::EXPORT,
                                     ns, e,
                                     extra, comp->print_options.comp_units);
@@ -1868,7 +1894,7 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDec
     auto compilation = comp->services.compilation.get();
     GlobalCompilation* extra = compilation->global_compilation.allocate();
     extra->global = glob;
-    glob_unit = new_compilation_unit(compilation._ptr,
+    glob_unit = new_compilation_unit(comp, compilation._ptr,
                                      COMPILATION_UNIT_TYPE::GLOBAL,
                                      ns, global,
                                      (void*)extra, comp->print_options.comp_units);
@@ -1904,7 +1930,7 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
     sig_extra->func = func;
     sig_extra->lambda = lambda;
 
-    sig_unit = new_compilation_unit(compilation._ptr,
+    sig_unit = new_compilation_unit(comp, compilation._ptr,
                                     COMPILATION_UNIT_TYPE::LAMBDA_SIG,
                                     ns, func_sig,
                                     sig_extra, comp->print_options.comp_units);
@@ -1922,7 +1948,7 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
     auto compilation = comp->services.compilation.get();
     StructCompilation* struct_extra = compilation->struct_compilation.allocate();
 
-    unit = new_compilation_unit(compilation._ptr,
+    unit = new_compilation_unit(comp, compilation._ptr,
                                 COMPILATION_UNIT_TYPE::STRUCTURE,
                                 ns, struct_body,
                                 struct_extra, comp->print_options.comp_units);
@@ -1934,35 +1960,40 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
   comp->pipelines.depend_check.push_back(unit);
 }
 
-void Compilation::try_restart(CompilationUnit* unit, bool print) {
+void try_restart_unit(CompilerGlobals* comp, Compilation* complation,
+                      CompilationUnit* unit) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(unit != nullptr);
 
   if (!unit->waiting()) {
-    if (print) {
+    if (comp->print_options.comp_units) {
       IO::format("Remove Dependency from unit {} -> starting again\n", unit->id);
     }
+      
+    if (comp->print_options.work) {
+      IO::format("Work + | Restart unit {}\n", unit->id);
+    }
 
-    ASSERT(pipes != nullptr);
+    ++comp->available_work_counter;
     
     switch (unit->stage) {
       case COMPILATION_UNIT_STAGE::DEPEND_CHECK: {
-        pipes->depend_check.push_back(unit);
+        comp->pipelines.depend_check.push_back(unit);
         break;
       }
       case COMPILATION_UNIT_STAGE::TYPE_CHECK: {
-        pipes->type_check.push_back(unit);
+        comp->pipelines.type_check.push_back(unit);
         break;
       }
       case COMPILATION_UNIT_STAGE::EMIT: {
-        pipes->emit.push_back(unit);
+        comp->pipelines.emit.push_back(unit);
         break;
       }
       case COMPILATION_UNIT_STAGE::DONE:
         INVALID_CODE_PATH("Cannot have a done dependency waiting");
     }
 
-    in_flight_units += 1;
+    complation->in_flight_units += 1;
   }
 }
 
@@ -1978,17 +2009,19 @@ void Compilation::add_dependency_to(CompilationUnit* waiting_on,
   waiting_on->dependency_list.insert(dep);
 }
 
-void Compilation::dispatch_ready_dependencies(CompilationUnit* ptr, bool print) {
+void dispatch_ready_dependencies(
+    CompilerGlobals* comp, Compilation* compilation,
+    CompilationUnit* ptr) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(ptr != nullptr);
 
-  const auto remove_dep = [this, ptr, print](const DependencySingle dep) {
+  const auto remove_dep = [comp, compilation, ptr](const DependencySingle dep) {
     if (ptr->stage < dep.stage_required) {
       return false;
     }
     
     ASSERT(ptr->stage == dep.stage_required);
-    this->try_restart(dep.waiting, print);
+    try_restart_unit(comp, compilation, dep.waiting);
     return true;
 
   };
@@ -1999,7 +2032,7 @@ void Compilation::dispatch_ready_dependencies(CompilationUnit* ptr, bool print) 
 
 //Might be that dependencies were already dispatched
 //Return true if depended
-bool maybe_depend(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
+bool maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
   AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(unit != nullptr);
@@ -2024,6 +2057,15 @@ bool maybe_depend(CompilerThread* comp_thread, Compilation* compilation, Compila
 
   if (comp_thread->local_unfound_names.names.size > 0) {
     depended = true;
+    
+    if (!compilation->unfound_names.updated) {
+      ++comp->available_work_counter;// work for the missing names
+      compilation->unfound_names.updated = true;
+
+      if (comp->print_options.work) {
+        IO::format("Work + | new unfound names\n");
+      }
+    }
 
     FOR_MUT(comp_thread->local_unfound_names.names, it) {
       it->dependency = unit;
@@ -2045,39 +2087,46 @@ bool maybe_depend(CompilerThread* comp_thread, Compilation* compilation, Compila
 
   if (depended) {
     compilation->in_flight_units -= 1;
+    --comp->available_work_counter;// for the waiting unit
+
     if (comp_thread->print_options.comp_units) {
       IO::format("Comp unit {} now waiting   | Active = {}, In flight = {}\n",
                    unit->id, compilation->store.active_units.size, compilation->in_flight_units);
+    }
+    
+    if (comp->print_options.work) {
+      IO::format("Work - | Depending compilation unit {}\n", unit->id);
     }
   }
 
   return depended;
 }
 
-void close_compilation_unit(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
+void close_compilation_unit(CompilerGlobals* comp, Compilation* compilation,
+                            CompilationUnit* unit) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(unit != nullptr);
 
   UnitID id = unit->id;
 
   ASSERT(compilation->in_flight_units != 0);
-  compilation->dispatch_ready_dependencies(unit, comp_thread->print_options.comp_units);
+  dispatch_ready_dependencies(comp, compilation, unit);
   ASSERT(unit->dependency_list.size == 0);
   unit->dependency_list.clear();
   
   compilation->in_flight_units -= 1;
   compilation->store.free_unit(unit);
 
-  if (comp_thread->print_options.comp_units) {
+  if (comp->print_options.comp_units) {
     IO::format("Close Comp unit {}         | Active = {}, In flight = {}\n",
-                 id, compilation->store.active_units.size, compilation->in_flight_units);
+               id, compilation->store.active_units.size, compilation->in_flight_units);
   }
-}
+  
 
-void dispatch_dependencies_of_compilation_unit(CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
-  AXLE_TELEMETRY_FUNCTION();
-
-  compilation->dispatch_ready_dependencies(unit, comp_thread->print_options.comp_units);
+  if (comp->print_options.work) {
+    IO::format("Work - | Close compilation unit\n");
+  }
+  --comp->available_work_counter;
 }
 
 void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
@@ -2093,11 +2142,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
       if (file_loader->unparsed_files.size > 0) {
         AXLE_TELEMETRY_SCOPE("Parse Files");
-        thread_doing_work(comp, comp_thread);
-
-        if (comp->print_options.work) {
-          IO::format("Work | Parsing {} Files \n", file_loader->unparsed_files.size);
-        }
 
         compile_current_unparsed_files(comp, comp_thread, file_loader);
         if (comp_thread->is_panic()) {
@@ -2122,11 +2166,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       const IR::IRStore* ir = nullptr;
       if (comp->finished_irs.try_pop_front(&ir)) {
         AXLE_TELEMETRY_SCOPE("Emit IR");
-        thread_doing_work(comp, comp_thread);
-
-        if (comp->print_options.work) {
-          IO::format("Work | Output Finished IR\n");
-        }
 
         comp_thread->platform_interface.emit_function(comp,
                                                       comp_thread, ir,
@@ -2137,6 +2176,11 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         }
 
         ASSERT(!comp_thread->is_depends());
+
+        --comp->available_work_counter;
+        if (comp->print_options.work) {
+          IO::format("Work - | Output Finished IR\n");
+        }
         return;
       }
     }
@@ -2146,10 +2190,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.type_check.try_pop_front(&unit)) {
     AXLE_TELEMETRY_SCOPE("Type Check");
-    thread_doing_work(comp, comp_thread);
-    if (comp->print_options.work) {
-      IO::format("Work | Type Check {}\n", unit->id);
-    }
     
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
     ASSERT(!unit->waiting());
@@ -2164,13 +2204,17 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       return;
     }
     
-    ASSERT(comp_thread->new_depends.size == 0);
+    ASSERT(!comp_thread->is_depends());
+
+    if (comp->print_options.work) {
+      IO::format("Work = | Type Checked {}\n", unit->id);
+    }
     
     {
       auto compilation = comp->services.compilation.get();
       
       unit->stage = COMPILATION_UNIT_STAGE::EMIT;
-      dispatch_dependencies_of_compilation_unit(comp_thread, compilation._ptr, unit);
+      dispatch_ready_dependencies(comp, compilation._ptr, unit);
     }
     
     comp->pipelines.emit.push_back(unit);
@@ -2179,7 +2223,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.emit.try_pop_front(&unit)) {
     AXLE_TELEMETRY_SCOPE("Emit");
-    thread_doing_work(comp, comp_thread);
     
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
     ASSERT(!unit->waiting());
@@ -2187,9 +2230,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     switch (unit->type) {
       case COMPILATION_UNIT_TYPE::IMPORT: {
         AXLE_TELEMETRY_SCOPE("Emit Import");
-        if (comp->print_options.work) {
-          IO::format("Work | Import {}\n", unit->id);
-        }
 
         ASSERT(unit->detail != nullptr);
         ImportCompilation* imp = (ImportCompilation*)unit->detail;
@@ -2207,14 +2247,11 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         unit->stage = COMPILATION_UNIT_STAGE::DONE;
 
         compilation->import_compilation.free(imp);
-        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        close_compilation_unit(comp, compilation._ptr, unit);
         return;
       }
       case COMPILATION_UNIT_TYPE::EXPORT: {
         AXLE_TELEMETRY_SCOPE("Emit Export");
-        if (comp->print_options.work) {
-          IO::format("Work | Export {}\n", unit->id);
-        }
 
         ExportCompilation* ec = (ExportCompilation*)unit->detail;
 
@@ -2231,15 +2268,12 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         unit->stage = COMPILATION_UNIT_STAGE::DONE;
 
         compilation->export_compilation.free(ec);
-        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        close_compilation_unit(comp, compilation._ptr, unit);
         return;
       }
 
       case COMPILATION_UNIT_TYPE::GLOBAL: {
         AXLE_TELEMETRY_SCOPE("Emit Global");
-        if (comp->print_options.work) {
-          IO::format("Work | Global {}\n", unit->id);
-        }
 
         ASSERT(unit->ast != nullptr);
 
@@ -2256,15 +2290,12 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         unit->stage = COMPILATION_UNIT_STAGE::DONE;
 
         compilation->global_compilation.free(global_extra);
-        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        close_compilation_unit(comp, compilation._ptr, unit);
         return;
       }
 
       case COMPILATION_UNIT_TYPE::STRUCTURE: {
         AXLE_TELEMETRY_SCOPE("Compile Structure");
-        if (comp->print_options.work) {
-          IO::format("Work | Structure {}\n", unit->id);
-        }
 
         const StructCompilation* struct_extra = (StructCompilation*)unit->detail;
 
@@ -2273,15 +2304,12 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         unit->stage = COMPILATION_UNIT_STAGE::DONE;
 
         compilation->struct_compilation.free(struct_extra);
-        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        close_compilation_unit(comp, compilation._ptr, unit);
         return;
       }
 
       case COMPILATION_UNIT_TYPE::LAMBDA_SIG: {
         AXLE_TELEMETRY_SCOPE("Compile Lambda Signature");
-        if (comp->print_options.work) {
-          IO::format("Work | Signature {}\n", unit->id);
-        }
 
         LambdaSigCompilation* lsc = (LambdaSigCompilation*)unit->detail;
         ASSERT(unit->ast != nullptr);
@@ -2296,15 +2324,17 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
           IR::Function* func = lsc->func;
           Namespace* available_names = unit->available_names;
 
-          compilation->lambda_sig_compilation.free(lsc);
-          close_compilation_unit(comp_thread, compilation._ptr, unit);
-
           //Create the unit for the body
           LambdaBodyCompilation* lbc = compilation->lambda_body_compilation.allocate();
           lbc->func = func;
 
-          body_unit = new_compilation_unit(compilation._ptr, COMPILATION_UNIT_TYPE::LAMBDA_BODY,
+          body_unit = new_compilation_unit(comp, compilation._ptr, COMPILATION_UNIT_TYPE::LAMBDA_BODY,
                                            available_names, lambda, lbc, comp->print_options.comp_units);
+          
+
+          // Need to do this after so the work counters are valid
+          compilation->lambda_sig_compilation.free(lsc);
+          close_compilation_unit(comp, compilation._ptr, unit);
         }
 
         comp->pipelines.depend_check.push_back(body_unit);
@@ -2313,11 +2343,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
       case COMPILATION_UNIT_TYPE::LAMBDA_BODY: {
         AXLE_TELEMETRY_SCOPE("Compile Lambda Body");
-        thread_doing_work(comp, comp_thread);
-
-        if (comp->print_options.work) {
-          IO::format("Work | Work {}\n", unit->id);
-        }
 
         LambdaBodyCompilation* lbc = (LambdaBodyCompilation*)unit->detail;
 
@@ -2334,7 +2359,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         unit->stage = COMPILATION_UNIT_STAGE::DONE;
 
         compilation->lambda_body_compilation.free(lbc);
-        close_compilation_unit(comp_thread, compilation._ptr, unit);
+        close_compilation_unit(comp, compilation._ptr, unit);
         return;
       }
     }
@@ -2344,11 +2369,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
   if (comp->pipelines.depend_check.try_pop_front(&unit)) {
     AXLE_TELEMETRY_SCOPE("Depend check");
-    thread_doing_work(comp, comp_thread);
-
-    if (comp->print_options.work) {
-      IO::format("Work | Depend Check {}\n", unit->id);
-    }
 
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
@@ -2363,15 +2383,20 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     }
 
     auto compilation = comp->services.compilation.get();
-    // dependencies are deferred so
-    // always progress this value
-    unit->stage = COMPILATION_UNIT_STAGE::TYPE_CHECK;
 
-    if (comp_thread->is_depends()) {
-      [[maybe_unused]] bool depended = maybe_depend(comp_thread, compilation._ptr, unit);
+    bool depended = comp_thread->is_depends();
+    if (depended) {
+      depended = maybe_depend(comp, comp_thread, compilation._ptr, unit);
     }
-    else {
+
+    if (!depended) {
+      // Progress!
+      unit->stage = COMPILATION_UNIT_STAGE::TYPE_CHECK;
       comp->pipelines.type_check.push_back(unit);
+
+      if (comp->print_options.work) {
+        IO::format("Work = | Depend Check {}\n", unit->id);
+      }
     }
     return;
   }
@@ -2379,22 +2404,19 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
   ASSERT(unit == nullptr);//shouldn't have been modified in this time
 
   {
-    auto compilation = comp->services.compilation.get();
+    AXLE_TELEMETRY_SCOPE("Check Unfound Names");
+    Axle::AtomicLock<Compilation> compilation = {};
+    Axle::AtomicLock<NameManager> names = {};
+    comp->services.get_multiple(&compilation, &names);
 
-    //Wait for there to be no compiling to check unfound deps - best chance they exist
-    if (compilation->unfound_names.names.size > 0) {
-      AXLE_TELEMETRY_SCOPE("Check Unfound Names");
-
-      usize num_unfound = compilation->unfound_names.names.size;
-
-      auto names = comp->services.names.get();
-
-      const auto found_dep_l = [comp_thread, names = names._ptr, compilation = compilation._ptr](const UnfoundNameHolder& dep) -> bool {
+    // can only access this while holding names
+    if (comp->names_updated || compilation->unfound_names.updated) {
+      const auto found_dep_l = [comp, names = names._ptr, compilation = compilation._ptr](const UnfoundNameHolder& dep) -> bool {
         const GlobalName* gn = names->find_global_name(dep.name.ns, dep.name.ident);
 
         if (gn != nullptr) {
           dep.dependency->unfound_wait_on_count -= 1;
-          compilation->try_restart(dep.dependency, comp_thread->print_options.comp_units);
+          try_restart_unit(comp, compilation ,dep.dependency);
           return true;
         }
         else {
@@ -2405,32 +2427,34 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       //Remove units if dependency has been found
       compilation->unfound_names.names.remove_if(found_dep_l);
 
-      if (num_unfound != compilation->unfound_names.names.size) {
-        thread_doing_work(comp, comp_thread);
-        return;
+      if (comp->names_updated) {
+        comp->names_updated = false;
+        --comp->available_work_counter;
+
+        if (comp->print_options.work) {
+          IO::print("Work - | new names checked\n");
+        }
+      }
+      
+      if (compilation->unfound_names.updated) {
+        compilation->unfound_names.updated = false;
+        --comp->available_work_counter;
+
+        if (comp->print_options.work) {
+          IO::print("Work - | unfound names checked\n");
+        }
       }
     }
   }
 
 
   //IO::format("---- DEBUG: Did nothing in pass\n");
-
-  if (comp_thread->doing_work) {
-    comp_thread->doing_work = false;
-    comp->work_counter -= 1;
-    return;
-  }
 }
 
 void compiler_loop(CompilerGlobals* const comp, CompilerThread* const comp_thread) {
   AXLE_TELEMETRY_FUNCTION();
 
-  {//force reset
-    comp_thread->doing_work = false;
-    thread_doing_work(comp, comp_thread);
-  }
-
-  while (!comp->is_global_panic() && (comp_thread->doing_work || comp->work_counter > 0)) {
+  while (!comp->is_global_panic() && comp->available_work_counter > 0) {
     try {
       run_compiler_pipes(comp, comp_thread);
     }
@@ -2551,21 +2575,28 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(comp->active_threads >= 1);
+  ASSERT(comp->available_work_counter > 0);
 
   compiler_loop_threaded(comp, comp_thread);
   DEFER(comp) {
     free_remaining_compilation_units(comp->services.compilation.get()._ptr);
   };
+  
+  ASSERT(comp->available_work_counter >= 0);
 
   if (comp->is_global_panic()) {
     return;
   }
 
+  ASSERT(comp->available_work_counter == 0);
+  ASSERT(!comp->names_updated);
 
   {
     Axle::AtomicLock<Compilation> compilation;
     Axle::AtomicLock<FileLoader> files;
     comp->services.get_multiple(&files, &compilation);
+
+    ASSERT(!compilation->unfound_names.updated);
 
     if (compilation->unfound_names.names.size > 0) {
       auto& names = compilation->unfound_names.names;
@@ -2586,12 +2617,10 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
       return;
     }
 
-    if (comp->work_counter == 0
-        && (compilation->in_flight_units > 0
-            || compilation->store.active_units.size > 0
-            || comp->finished_irs.size > 0
-            || files->unparsed_files.size > 0)) {
-      comp->work_counter += 1;
+    if ((compilation->in_flight_units > 0
+        || compilation->store.active_units.size > 0
+        || comp->finished_irs.size > 0
+        || files->unparsed_files.size > 0)) {
 
       Format::ArrayFormatter error = {};
       Format::format_to(error,
@@ -2691,7 +2720,7 @@ void compile_all(CompilerGlobals* const comp, CompilerThread* const comp_thread)
   }
 }
 
-void create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread,
+void create_builtin_named_type(CompilerGlobals* comp, CompilerThread* comp_thread,
                        NameManager* names, const Span& span, Namespace* ns,
                        const Type& type) {
   Global* g = comp->new_global();
@@ -2709,10 +2738,10 @@ void create_named_type(CompilerGlobals* comp, CompilerThread* comp_thread,
 
   Axle::memcpy_ts((Type*)g->decl.init_value, 1, &type, 1);
 
-  names->add_global_name(&comp_thread->errors, ns, type.name, g);
+  names->add_global_name_impl(&comp_thread->errors, ns, type.name, g);
 }
 
-void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
+void create_builtin_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
                              NameManager* names, const Span& span, Namespace* ns,
                              const EnumValue* v) {
   Global* g = comp->new_global();
@@ -2727,11 +2756,16 @@ void create_named_enum_value(CompilerGlobals* comp, CompilerThread* comp_thread,
 
   Axle::memcpy_ts((const EnumValue**)g->decl.init_value, 1, &v, 1);
 
-  names->add_global_name(&comp_thread->errors, ns, v->name, g);
+  names->add_global_name_impl(&comp_thread->errors, ns, v->name, g);
 }
 
 void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThread* comp_thread) {
   AXLE_TELEMETRY_FUNCTION();
+
+  DEFER(comp) {
+    ASSERT(!comp->names_updated);
+    ASSERT(comp->available_work_counter == 0);
+  };
 
   comp_thread->thread_id = 0;//first thread is thread 0
 
@@ -2749,12 +2783,12 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   comp->platform_interface = *options.platform_interface;
 
   const auto register_builtin_type = [names = names._ptr, comp_thread, comp, builtin_namespace](const Type& t) {
-    create_named_type(comp, comp_thread, names, Span{}, builtin_namespace, t);
+    create_builtin_named_type(comp, comp_thread, names, Span{}, builtin_namespace, t);
     ASSERT(!comp_thread->is_panic());
   };
 
   const auto register_builtin_enum_value = [names = names._ptr, comp_thread, comp, builtin_namespace](const EnumValue* v) {
-    create_named_enum_value(comp, comp_thread, names, Span{}, builtin_namespace, v);
+    create_builtin_named_enum_value(comp, comp_thread, names, Span{}, builtin_namespace, v);
     ASSERT(!comp_thread->is_panic());
   };
 
@@ -2793,7 +2827,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     g->decl.init_value = (const u8*)comp->new_constant<const u8*>();
     *(const u8**)g->decl.init_value = 0;//This is disgusting
 
-    names->add_global_name(&comp_thread->errors, builtin_namespace, g->decl.name, g);
+    names->add_global_name_impl(&comp_thread->errors, builtin_namespace, g->decl.name, g);
   }
 
   //Intrinsics

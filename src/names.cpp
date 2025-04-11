@@ -1,28 +1,32 @@
 #include "names.h"
 #include "compiler.h"
 
-GlobalName* NameManager::add_global_name(Errors* errors, Namespace* ns, const Axle::InternString* name, Global* g) const {
+#include <AxleUtil/io.h>
+
+const GlobalName* NameManager::add_global_name_impl(Errors* const errors, Namespace* ns, const Axle::InternString* name, Global* g) const {
   ASSERT(name != nullptr);
   ASSERT(g != nullptr);
   
-  GlobalName* n = find_direct_global_name(ns, name);
+  {
+    const GlobalName* n = find_direct_global_name(ns, name);
 
-  if (n != nullptr) {
-    errors->report_error(ERROR_CODE::NAME_ERROR, g->decl.span,
-                       "Attempted to shadow name '{}'",
-                       name);
-    return nullptr;
+    if (n != nullptr) {
+      errors->report_error(ERROR_CODE::NAME_ERROR, g->decl.span,
+                                "Attempted to shadow name '{}'",
+                                name);
+      return nullptr;
+    }
   }
 
   ns->globals.insert_uninit(1);
-  n = ns->globals.back();
+  GlobalName* n = ns->globals.back();
   n->name = name;
   n->global = g;
 
   return n;
 }
 
-void NameManager::add_global_import(Errors* const errors, Namespace* ns, Namespace* imp, const Span& s) const {
+void NameManager::add_global_import_impl(Errors* const errors, Namespace* ns, const Namespace* imp, const Span& s) const {
   FOR(ns->imported, it) {
     if (*it == imp) {
       errors->report_error(ERROR_CODE::INTERNAL_ERROR, s,
@@ -34,8 +38,36 @@ void NameManager::add_global_import(Errors* const errors, Namespace* ns, Namespa
   ns->imported.insert(imp);
 }
 
-GlobalName* NameManager::find_direct_global_name(Namespace* ns, const Axle::InternString* name) const {
-  FOR_MUT(ns->globals, it) {
+const GlobalName* add_global_name(CompilerGlobals* comp, CompilerThread* comp_thread, NameManager* names, Namespace* ns, const Axle::InternString* name, Global* g) {
+  if (!comp->names_updated) {
+    comp->names_updated = true;
+    ++comp->available_work_counter;
+
+    if (comp->print_options.work) {
+      Axle::IO::print("Work + | Added names\n");
+    }
+  }
+
+  Axle::IO::format("Names | {} found\n", name);
+
+  return names->add_global_name_impl(&comp_thread->errors, ns, name, g);
+}
+
+void add_global_import(CompilerGlobals* comp, CompilerThread* comp_thread, NameManager* names, Namespace* ns, const Namespace* imp, const Span& s) {
+  if (!comp->names_updated) {
+    comp->names_updated = true;
+    ++comp->available_work_counter;
+
+    if (comp->print_options.work) {
+      Axle::IO::print("Work + | Added names\n");
+    }
+  }
+
+  return names->add_global_import_impl(&comp_thread->errors, ns, imp, s);
+}
+
+const GlobalName* NameManager::find_direct_global_name(const Namespace* ns, const Axle::InternString* name) const {
+  FOR(ns->globals, it) {
     if (it->name == name) {
       return it;
     }
@@ -44,10 +76,10 @@ GlobalName* NameManager::find_direct_global_name(Namespace* ns, const Axle::Inte
   return nullptr;
 }
 
-GlobalName* NameManager::find_global_name(Namespace* ns, const Axle::InternString* name) const {
+const GlobalName* NameManager::find_global_name(const Namespace* ns, const Axle::InternString* name) const {
   ASSERT(name != nullptr);
 
-  GlobalName* n = find_direct_global_name(ns, name);
+  const GlobalName* n = find_direct_global_name(ns, name);
   if (n != nullptr) {
     return n;
   }
@@ -63,11 +95,11 @@ GlobalName* NameManager::find_global_name(Namespace* ns, const Axle::InternStrin
 }
 
 
-NameFindItr NameManager::global_name_iterator(Namespace* ns, const Axle::InternString* name) const {
+NameFindItr NameManager::global_name_iterator(const Namespace* ns, const Axle::InternString* name) const {
   return { ns, name, 0, 0 };
 }
 
-GlobalName* NameManager::next_name(NameFindItr& i) const {
+const GlobalName* NameManager::next_name(NameFindItr& i) const {
   const Namespace* ns = i.ns;
   
   if(i.import_index == 0) {

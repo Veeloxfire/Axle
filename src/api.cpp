@@ -77,8 +77,15 @@ int compile_and_write(const APIOptions& options) {
     compiler.build_file_namespace = compiler.new_namespace();
 
     {
+      ++compiler.available_work_counter;
+  
+      if (compiler.print_options.work) {
+        IO::format("Work + | First unparsed file {}\n", loc.full_name);
+      }
+
       auto files = compiler.services.file_loader.get();
       files->unparsed_files.insert(FileImport{ loc, compiler.build_file_namespace, Span{} });//use null span
+
     }
 
     //Compilation

@@ -11,25 +11,28 @@ struct GlobalName {
 
 struct Namespace {
   Axle::Array<GlobalName> globals ={};
-  Axle::Array<Namespace*> imported ={};
+  Axle::Array<const Namespace*> imported ={};
 };
 
 struct NameFindItr {
-  Namespace* ns;
+  const Namespace* ns;
   const Axle::InternString* target;
   usize import_index;
   usize name_index;
 };
 
-//Is a struct because its easier to multithread names this way
 struct NameManager {
-  GlobalName* add_global_name(Errors* const errors, Namespace* ns, const Axle::InternString* name, Global* g) const;
+  const GlobalName* add_global_name_impl(Errors* const errors, Namespace* ns, const Axle::InternString* name, Global* g) const;
 
-  void add_global_import(Errors* const errors, Namespace* ns, Namespace* imp, const Span& s) const;
+  void add_global_import_impl(Errors* const errors, Namespace* ns, const Namespace* imp, const Span& s) const;
 
-  GlobalName* find_global_name(Namespace* ns, const Axle::InternString* name) const;
-  GlobalName* find_direct_global_name(Namespace* ns, const Axle::InternString* name) const;
+  const GlobalName* find_global_name(const Namespace* ns, const Axle::InternString* name) const;
+  const GlobalName* find_direct_global_name(const Namespace* ns, const Axle::InternString* name) const;
 
-  NameFindItr global_name_iterator(Namespace* ns, const Axle::InternString* name) const;
-  GlobalName* next_name(NameFindItr&) const;
+  NameFindItr global_name_iterator(const Namespace* ns, const Axle::InternString* name) const;
+  const GlobalName* next_name(NameFindItr&) const;
 };
+
+const GlobalName* add_global_name(CompilerGlobals* comp, CompilerThread* comp_thread, NameManager* names, Namespace* ns, const Axle::InternString* name, Global* g);
+
+void add_global_import(CompilerGlobals* comp, CompilerThread* comp_thread, NameManager* names, Namespace* ns, const Namespace* imp, const Span& s);
