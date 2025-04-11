@@ -323,7 +323,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
 
         if (sig->sig->sig_struct == nullptr) {
           set_dependency(comp_thread,
-              COMPILATION_UNIT_STAGE::DONE, lambda->function->sig_unit_id);
+              COMPILATION_UNIT_STAGE::EMIT, lambda->function->sig_unit_id);
         }
         
         state.push_visit(a, AST_VISIT_STEP::LAMBDA_EXPR_DOWN);
