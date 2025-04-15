@@ -8,7 +8,7 @@
 struct Typer {
   Type return_type = {};
 
-  Namespace* available_names;
+  const Namespace* available_names;
 };
 
 //Gets the underlying type of a type-node e.g. if its an array type node it gets the cached array type
@@ -2538,18 +2538,28 @@ static void run_step(CompilerGlobals* const comp,
 
 void TC::type_check_ast(CompilerGlobals* const comp,
                         CompilerThread* const comp_thread,
-                        Namespace* const ns,
-                        const Axle::ViewArr<const AstVisit> visit_arr) {
+                        TC::TypeCheckContext& context) {
   AXLE_TELEMETRY_FUNCTION();
+
+  ASSERT(!comp_thread->is_panic());
+  ASSERT(!comp_thread->is_depends());
+  ASSERT(!context.finished());
+
+  usize& index = context.next_index;
+  const Axle::ViewArr<const AstVisit> visit_arr = context.visit_arr;
+  const Namespace* ns = context.ns;
 
   Typer typer = {};
   typer.available_names = ns;
+  
 
-  for (const AstVisit v: visit_arr) {
+  for (; index < visit_arr.size; ++index) {
+    const AstVisit& v = visit_arr[index];
+
     ASSERT(!v.node->node_type.is_valid());// this is what signals completion
 
     run_step(comp, comp_thread, &typer, v.node, v.step);
-    if (comp_thread->is_panic()) {
+    if (comp_thread->is_panic() || comp_thread->is_depends()) {
       return;
     }
 
@@ -2568,4 +2578,6 @@ void TC::type_check_ast(CompilerGlobals* const comp,
   for (const AstVisit v: visit_arr) {
     ASSERT(v.node->node_type.is_valid());// this is what signals completion
   }
+
+  ASSERT(context.finished());
 }

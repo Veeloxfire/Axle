@@ -2216,12 +2216,19 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
     ASSERT(visit_arr.size > 0);
 
-    TC::type_check_ast(comp, comp_thread, unit->available_names, visit_arr);
+    TC::TypeCheckContext context {
+      .next_index = 0,
+      .visit_arr = visit_arr,
+      .ns = unit->available_names,
+    };
+
+    TC::type_check_ast(comp, comp_thread, context);
     if (comp_thread->is_panic()) {
       return;
     }
     
     ASSERT(!comp_thread->is_depends());
+    ASSERT(context.finished());
 
     if (comp->print_options.work) {
       IO::format("Work = {} | Type Checked {}\n", comp->available_work_counter.load(), unit->id);
