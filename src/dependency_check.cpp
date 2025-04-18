@@ -109,6 +109,10 @@ void type_dependency_check_ast_node(
 
   ASSERT(a != NULL_AST_NODE);
 
+#ifdef STACKTRACE_ENABLE
+  Axle::Stacktrace::ScopedExecTrace ast_trace(ast_type_string(a.ast->ast_type));
+#endif
+
   const usize debug_check_size = state.visit_array.size;
   DEFER(&) { ASSERT(!state.generate_visit || state.visit_array.size != debug_check_size); };
 

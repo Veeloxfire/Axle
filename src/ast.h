@@ -494,7 +494,7 @@ struct ASTExport : public AST {
 };
 
 struct FileAST {
-  Axle::GrowingMemoryPool<32 * 1024> ast_data_store = {};
+  Axle::GrowingMemoryPool<32 * 1024> ast_store = {};
   
   Axle::ViewArr<const AST_LOCAL> top_level = {};
 

@@ -1785,6 +1785,7 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
 
 
       Parser parser = {};
+
       parser.file_path = file_import->file_loc;
 
       //Loaded file can pop of the file stack thing
@@ -1817,6 +1818,8 @@ void compile_current_unparsed_files(CompilerGlobals* const comp,
           return;
         }
       }
+
+      ast_file->ast_store = std::move(parser.ast_store);
 
       if (comp->print_options.ast) {
         Axle::IO_Single::lock();
