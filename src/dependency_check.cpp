@@ -9,17 +9,20 @@ namespace Format = Axle::Format;
 namespace {
 struct DependencyChecker {
   Namespace* available_names;
-  u32 num_locals;
   Axle::Array<Local*> locals;
 
   bool generate_visit;
   Axle::Array<AstVisit> visit_array;
 
-  Local* get_local(const Axle::InternString* name);
-  void push_visit(AST_LOCAL a, AST_VISIT_STEP v);
+  Local* get_local(const Axle::InternString* name) noexcept;
+  void push_visit(AST_LOCAL a, AST_VISIT_STEP v) noexcept;
 };
 
-void set_dependency(CompilerThread& comp_thread, COMPILATION_UNIT_STAGE stage, UnitID id) {
+struct EvalDependencyChecker {
+  const Namespace* available_names;
+};
+
+void set_dependency(CompilerThread& comp_thread, COMPILATION_UNIT_STAGE stage, UnitID id) noexcept {
   ASSERT(id != NULL_ID);
 
   comp_thread.new_depends.insert({ stage, id });
@@ -29,7 +32,8 @@ template<typename ... T>
 void set_unfound_name(CompilerThread& comp_thread,
                       UnknownName&& name,
                       ERROR_CODE code, const Span& span,
-                      const Format::FormatString<T...>& f_message, const T& ... ts) {
+                      const Format::FormatString<T...>& f_message, const T& ... ts
+                      ) noexcept {
   AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(name.ident != nullptr);
@@ -44,7 +48,7 @@ void set_unfound_name(CompilerThread& comp_thread,
   dep->as_error.message = format(f_message, ts...);
 }
 
-Local* DependencyChecker::get_local(const Axle::InternString* name) {
+Local* DependencyChecker::get_local(const Axle::InternString* name) noexcept {
   AXLE_TELEMETRY_FUNCTION();
   
   auto i = locals.begin();
@@ -61,16 +65,16 @@ Local* DependencyChecker::get_local(const Axle::InternString* name) {
   return nullptr;
 }
 
-void DependencyChecker::push_visit(AST_LOCAL a, AST_VISIT_STEP v) {
+void DependencyChecker::push_visit(AST_LOCAL a, AST_VISIT_STEP v) noexcept {
   AXLE_TELEMETRY_FUNCTION();
-  ASSERT(ast_visit_step_ast_type(v) == a->ast_type);
+  ASSERT(ast_visit_step_ast_type(v) == a.ast->ast_type);
 
   if (generate_visit) {
     visit_array.insert(AstVisit{ a, v });
   }
 }
 
-Global* test_global_dependency(CompilerGlobals& comp, CompilerThread& comp_thread, DependencyChecker& state, const Span& span, const Axle::InternString* ident) {
+Global* test_global_type_dependency(CompilerGlobals& comp, CompilerThread& comp_thread, DependencyChecker& state, const Span& span, const Axle::InternString* ident) noexcept {
   AXLE_TELEMETRY_FUNCTION();
   
   auto names = comp.services.names.get();
@@ -95,23 +99,25 @@ Global* test_global_dependency(CompilerGlobals& comp, CompilerThread& comp_threa
   }
 }
 
-void dependency_check_ast_node(CompilerGlobals& comp,
-                               CompilerThread& comp_thread,
-                               DependencyChecker& state,
-                               AST_LOCAL a) {
+void type_dependency_check_ast_node(
+  CompilerGlobals& comp,
+  CompilerThread& comp_thread,
+  DependencyChecker& state,
+  AST_LOCAL a
+) noexcept {
   AXLE_TELEMETRY_FUNCTION();
 
-  ASSERT(a != nullptr);
+  ASSERT(a != NULL_AST_NODE);
 
   const usize debug_check_size = state.visit_array.size;
   DEFER(&) { ASSERT(!state.generate_visit || state.visit_array.size != debug_check_size); };
 
-  switch (a->ast_type) {
+  switch (a.ast->ast_type) {
     case AST_TYPE::INVALID: INVALID_CODE_PATH("Invalid node type"); break;
     case AST_TYPE::NAMED_TYPE: {
         ASTNamedType* nt = downcast_ast<ASTNamedType>(a);
 
-        nt->global = test_global_dependency(comp, comp_thread, state, nt->node_span, nt->name);
+        nt->global = test_global_type_dependency(comp, comp_thread, state, nt->node_span, nt->name);
         
         state.push_visit(a, AST_VISIT_STEP::NAMED_TYPE_DOWN);
         return;
@@ -121,8 +127,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::ARRAY_TYPE_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, at->base);
-        dependency_check_ast_node(comp, comp_thread, state, at->expr);
+        type_dependency_check_ast_node(comp, comp_thread, state, at->base);
+        type_dependency_check_ast_node(comp, comp_thread, state, at->expr);
         
         state.push_visit(a, AST_VISIT_STEP::ARRAY_TYPE_DOWN);
         return;
@@ -132,7 +138,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::PTR_TYPE_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, ptr->base);
+        type_dependency_check_ast_node(comp, comp_thread, state, ptr->base);
         
         state.push_visit(a, AST_VISIT_STEP::PTR_TYPE_DOWN);
 
@@ -143,7 +149,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
 
         state.push_visit(a, AST_VISIT_STEP::SLICE_TYPE_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, ptr->base);
+        type_dependency_check_ast_node(comp, comp_thread, state, ptr->base);
         
         state.push_visit(a, AST_VISIT_STEP::SLICE_TYPE_DOWN);
 
@@ -154,11 +160,11 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::LAMBDA_TYPE_UP);
 
-        FOR_AST(lt->args, ty) {
-          dependency_check_ast_node(comp, comp_thread, state, ty);
+        for (AST_LOCAL ty: lt->args) {
+          type_dependency_check_ast_node(comp, comp_thread, state, ty);
         }
 
-        dependency_check_ast_node(comp, comp_thread, state, lt->ret);
+        type_dependency_check_ast_node(comp, comp_thread, state, lt->ret);
         
         state.push_visit(a, AST_VISIT_STEP::LAMBDA_TYPE_DOWN);
 
@@ -170,8 +176,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         state.push_visit(a, AST_VISIT_STEP::TUPLE_TYPE_UP);
         
 
-        FOR_AST(tt->types, ty) {
-          dependency_check_ast_node(comp, comp_thread, state, ty);
+        for (AST_LOCAL ty: tt->types) {
+          type_dependency_check_ast_node(comp, comp_thread, state, ty);
         }
         
         state.push_visit(a, AST_VISIT_STEP::TUPLE_TYPE_DOWN);
@@ -182,11 +188,11 @@ void dependency_check_ast_node(CompilerGlobals& comp,
 
         state.push_visit(a, AST_VISIT_STEP::CAST_UP_TYPE);
 
-        dependency_check_ast_node(comp, comp_thread, state, cast->type);
+        type_dependency_check_ast_node(comp, comp_thread, state, cast->type);
         
         state.push_visit(a, AST_VISIT_STEP::CAST_UP_EXPR);
         
-        dependency_check_ast_node(comp, comp_thread, state, cast->expr);
+        type_dependency_check_ast_node(comp, comp_thread, state, cast->expr);
         
         state.push_visit(a, AST_VISIT_STEP::CAST_DOWN);
         return;
@@ -196,7 +202,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::UNARY_OPERATOR_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, un_op->expr);
+        type_dependency_check_ast_node(comp, comp_thread, state, un_op->expr);
         
         state.push_visit(a, AST_VISIT_STEP::UNARY_OPERATOR_DOWN);
         return;
@@ -206,8 +212,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
 
         state.push_visit(a, AST_VISIT_STEP::BINARY_OPERATOR_UP);
         
-        dependency_check_ast_node(comp, comp_thread, state, bin_op->left);
-        dependency_check_ast_node(comp, comp_thread, state, bin_op->right);
+        type_dependency_check_ast_node(comp, comp_thread, state, bin_op->left);
+        type_dependency_check_ast_node(comp, comp_thread, state, bin_op->right);
         
         state.push_visit(a, AST_VISIT_STEP::BINARY_OPERATOR_DOWN);
         return;
@@ -225,7 +231,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         }
         else {
           ident->id_type = ASTIdentifier::GLOBAL;//is definitely a global
-          ident->global = test_global_dependency(comp, comp_thread, state, ident->node_span, ident->name);
+          ident->global = test_global_type_dependency(comp, comp_thread, state, ident->node_span, ident->name);
         }
 
         return;
@@ -235,12 +241,12 @@ void dependency_check_ast_node(CompilerGlobals& comp,
 
         state.push_visit(a, AST_VISIT_STEP::FUNCTION_CALL_UP_FUNCTION);
         
-        dependency_check_ast_node(comp, comp_thread, state, call->function);
+        type_dependency_check_ast_node(comp, comp_thread, state, call->function);
         
         state.push_visit(a, AST_VISIT_STEP::FUNCTION_CALL_UP_ARGS);
 
-        FOR_AST(call->arguments, it) {
-          dependency_check_ast_node(comp, comp_thread, state, it);
+        for (AST_LOCAL it: call->arguments) {
+          type_dependency_check_ast_node(comp, comp_thread, state, it);
         }
         
         state.push_visit(a, AST_VISIT_STEP::FUNCTION_CALL_DOWN);
@@ -250,18 +256,18 @@ void dependency_check_ast_node(CompilerGlobals& comp,
     case AST_TYPE::TUPLE_LIT: {
         ASTTupleLitExpr* tup = downcast_ast<ASTTupleLitExpr>(a);
 
-        const bool known_type = tup->prefix != nullptr;
+        const bool known_type = tup->prefix != NULL_AST_NODE;
 
         if (known_type) {
           state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_UP_PREFIX);
 
-          dependency_check_ast_node(comp, comp_thread, state, tup->prefix);
+          type_dependency_check_ast_node(comp, comp_thread, state, tup->prefix);
         }
 
         state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_UP_ELEMENTS);
 
-        FOR_AST(tup->elements, it) {
-          dependency_check_ast_node(comp, comp_thread, state, it);
+        for (AST_LOCAL it: tup->elements) {
+          type_dependency_check_ast_node(comp, comp_thread, state, it);
         }
         
         state.push_visit(a, AST_VISIT_STEP::TUPLE_LIT_DOWN);
@@ -270,21 +276,24 @@ void dependency_check_ast_node(CompilerGlobals& comp,
     case AST_TYPE::ARRAY_EXPR: {
         ASTArrayExpr* arr = downcast_ast<ASTArrayExpr>(a);
 
-        const AST_LINKED* l = arr->elements.start;
-        if (l) {
+        if (arr->elements.size > 0) {
+          auto l = arr->elements.begin();
+          const auto e = arr->elements.end();
+          ASSERT(l < e);
+
           state.push_visit(a, AST_VISIT_STEP::ARRAY_EXPR_UP_FIRST);
-          dependency_check_ast_node(comp, comp_thread, state, l->curr);
+          type_dependency_check_ast_node(comp, comp_thread, state, *l);
           
-          l = l->next;
+          ++l;
           
-          if (l) {
+          if (l < e) {
             state.push_visit(a, AST_VISIT_STEP::ARRAY_EXPR_UP_REST);
 
             do {
-              dependency_check_ast_node(comp, comp_thread, state, l->curr);
+              type_dependency_check_ast_node(comp, comp_thread, state, *l);
 
-              l = l->next;
-            }while (l);
+              ++l;
+            }while (l < e);
           }
         }
 
@@ -297,9 +306,9 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::INDEX_EXPR_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, index->expr);
-        FOR_AST(index->arguments, it) {
-          dependency_check_ast_node(comp, comp_thread, state, it);
+        type_dependency_check_ast_node(comp, comp_thread, state, index->expr);
+        for (AST_LOCAL it: index->arguments) {
+          type_dependency_check_ast_node(comp, comp_thread, state, it);
         }
         
         state.push_visit(a, AST_VISIT_STEP::INDEX_EXPR_DOWN);
@@ -310,7 +319,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::MEMBER_ACCESS_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, member->expr);
+        type_dependency_check_ast_node(comp, comp_thread, state, member->expr);
         
         state.push_visit(a, AST_VISIT_STEP::MEMBER_ACCESS_DOWN);
         return;
@@ -348,16 +357,16 @@ void dependency_check_ast_node(CompilerGlobals& comp,
     case AST_TYPE::DECL: {
         ASTDecl* decl = downcast_ast<ASTDecl>(a);
 
-        if (decl->type_ast != 0) {
+        if (decl->type_ast != NULL_AST_NODE) {
           state.push_visit(a, AST_VISIT_STEP::DECL_UP_TYPE);
 
-          dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
+          type_dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
         }
 
-        if (decl->expr != 0) {
+        if (decl->expr != NULL_AST_NODE) {
           state.push_visit(a, AST_VISIT_STEP::DECL_UP_EXPR);
           
-          dependency_check_ast_node(comp, comp_thread, state, decl->expr);
+          type_dependency_check_ast_node(comp, comp_thread, state, decl->expr);
         }
 
         if (decl->decl_type == ASTDecl::TYPE::LOCAL) {
@@ -365,14 +374,13 @@ void dependency_check_ast_node(CompilerGlobals& comp,
             const Local* shadowing = state.get_local(decl->name);
 
             if (shadowing != nullptr) {
-              comp_thread.report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+              comp_thread.report_error(ERROR_CODE::NAME_ERROR, decl->node_span,
                                        "Attempted to shadow the local variable '{}'",
                                        decl->name);
               return;
             }
 
 
-            state.num_locals += 1;
             Local* loc = comp.new_local();
             decl->local_ptr = loc;
 
@@ -390,17 +398,17 @@ void dependency_check_ast_node(CompilerGlobals& comp,
     case AST_TYPE::TYPED_NAME: {
         ASTTypedName* tn = downcast_ast<ASTTypedName>(a);
 
-        if (tn->type != 0) {
+        if (tn->type != NULL_AST_NODE) {
           state.push_visit(a, AST_VISIT_STEP::TYPED_NAME_UP);
 
-          dependency_check_ast_node(comp, comp_thread, state, tn->type);
+          type_dependency_check_ast_node(comp, comp_thread, state, tn->type);
         }
 
         if (tn->local_ptr == nullptr) {
           const Local* shadowing = state.get_local(tn->name);
 
           if (shadowing != nullptr) {
-            comp_thread.report_error(ERROR_CODE::NAME_ERROR, a->node_span,
+            comp_thread.report_error(ERROR_CODE::NAME_ERROR, tn->node_span,
                                      "Attempted to shadow the variable '{}'",
                                      tn->name);
             return;
@@ -422,10 +430,10 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         state.push_visit(a, AST_VISIT_STEP::ASSIGN_UP_LEFT);
         
         ASTAssign* assign = downcast_ast<ASTAssign>(a);
-        dependency_check_ast_node(comp, comp_thread, state, assign->assign_to);
+        type_dependency_check_ast_node(comp, comp_thread, state, assign->assign_to);
         state.push_visit(a, AST_VISIT_STEP::ASSIGN_UP_RIGHT);
         
-        dependency_check_ast_node(comp, comp_thread, state, assign->value);
+        type_dependency_check_ast_node(comp, comp_thread, state, assign->value);
 
 
         return;
@@ -437,8 +445,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
 
         const usize count = state.locals.size;
 
-        FOR_AST(block->block, it) {
-          dependency_check_ast_node(comp, comp_thread, state, it);
+        for (AST_LOCAL it: block->block) {
+          type_dependency_check_ast_node(comp, comp_thread, state, it);
         }
 
         state.locals.pop_n(state.locals.size - count);
@@ -450,16 +458,16 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::IF_ELSE_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, if_else->condition);
+        type_dependency_check_ast_node(comp, comp_thread, state, if_else->condition);
 
         const usize count = state.locals.size;
 
-        dependency_check_ast_node(comp, comp_thread, state, if_else->if_statement);
+        type_dependency_check_ast_node(comp, comp_thread, state, if_else->if_statement);
 
         state.locals.pop_n(state.locals.size - count);
 
-        if (if_else->else_statement != 0) {
-          dependency_check_ast_node(comp, comp_thread, state, if_else->else_statement);
+        if (if_else->else_statement != NULL_AST_NODE) {
+          type_dependency_check_ast_node(comp, comp_thread, state, if_else->else_statement);
           state.locals.pop_n(state.locals.size - count);
         }
 
@@ -470,10 +478,10 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::WHILE_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, while_s->condition);
+        type_dependency_check_ast_node(comp, comp_thread, state, while_s->condition);
 
         const usize count = state.locals.size;
-        dependency_check_ast_node(comp, comp_thread, state, while_s->statement);
+        type_dependency_check_ast_node(comp, comp_thread, state, while_s->statement);
         state.locals.pop_n(state.locals.size - count);
         return;
       }
@@ -482,8 +490,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::RETURN_UP);
 
-        if (ret->expr != nullptr) {
-          dependency_check_ast_node(comp, comp_thread, state, ret->expr);
+        if (ret->expr != NULL_AST_NODE) {
+          type_dependency_check_ast_node(comp, comp_thread, state, ret->expr);
         }
         return;
       }
@@ -492,11 +500,11 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::FUNCTION_SIGNATURE_UP);
 
-        FOR_AST(func_sig->parameters, it) {
-          dependency_check_ast_node(comp, comp_thread, state, it);
+        for (AST_LOCAL it: func_sig->parameters) {
+          type_dependency_check_ast_node(comp, comp_thread, state, it);
         }
 
-        dependency_check_ast_node(comp, comp_thread, state, func_sig->return_type);
+        type_dependency_check_ast_node(comp, comp_thread, state, func_sig->return_type);
         
         state.push_visit(a, AST_VISIT_STEP::FUNCTION_SIGNATURE_DOWN);
 
@@ -507,7 +515,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::IMPORT_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, imp->expr_location);
+        type_dependency_check_ast_node(comp, comp_thread, state, imp->expr_location);
         
         state.push_visit(a, AST_VISIT_STEP::IMPORT_DOWN);
         return;
@@ -517,7 +525,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::EXPORT_SINGLE_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, es->value);
+        type_dependency_check_ast_node(comp, comp_thread, state, es->value);
         
         state.push_visit(a, AST_VISIT_STEP::EXPORT_SINGLE_DOWN);
         return;
@@ -527,8 +535,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::EXPORT_UP);
 
-        FOR_AST(e->export_list, it) {
-          dependency_check_ast_node(comp, comp_thread, state, it);
+        for (AST_LOCAL it: e->export_list) {
+          type_dependency_check_ast_node(comp, comp_thread, state, it);
         }
         return;
       }
@@ -537,7 +545,7 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::LINK_UP);
 
-        dependency_check_ast_node(comp, comp_thread, state, imp->import_type);
+        type_dependency_check_ast_node(comp, comp_thread, state, imp->import_type);
         
         state.push_visit(a, AST_VISIT_STEP::LINK_DOWN);
 
@@ -550,14 +558,13 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         state.push_visit(a, AST_VISIT_STEP::LAMBDA_UP);
 
         ASSERT(state.locals.size == 0);
-        ASSERT(state.num_locals == 0);
 
-        ASSERT(l->sig->node_type.is_valid());
+        ASSERT(l->sig.ast->node_type.is_valid());
         const bool old_visit = state.generate_visit;
         state.generate_visit = false;
-        dependency_check_ast_node(comp, comp_thread, state, l->sig);
+        type_dependency_check_ast_node(comp, comp_thread, state, l->sig);
         state.generate_visit = old_visit;
-        dependency_check_ast_node(comp, comp_thread, state, l->body);
+        type_dependency_check_ast_node(comp, comp_thread, state, l->body);
 
         return;
       }
@@ -566,8 +573,8 @@ void dependency_check_ast_node(CompilerGlobals& comp,
         
         state.push_visit(a, AST_VISIT_STEP::STRUCT_UP);
 
-        FOR_AST(s->elements, it) {
-          dependency_check_ast_node(comp, comp_thread, state, it);
+        for (AST_LOCAL it: s->elements) {
+          type_dependency_check_ast_node(comp, comp_thread, state, it);
         }
         
         state.push_visit(a, AST_VISIT_STEP::STRUCT_DOWN);
@@ -591,21 +598,276 @@ void dependency_check_ast_node(CompilerGlobals& comp,
       }
   }
 
-  comp_thread.report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
-                           "Not yet implemented dependency checking for this node. Node ID: {}", (usize)a->ast_type);
+  comp_thread.report_error(ERROR_CODE::INTERNAL_ERROR, a.ast->node_span,
+                           "Not yet implemented dependency checking for this node. Node ID: {}", (usize)a.ast->ast_type);
+}
+
+void eval_dependency_check_ast_node(
+  CompilerGlobals& comp,
+  CompilerThread& comp_thread,
+  EvalDependencyChecker& state,
+  AST_LOCAL a
+) noexcept {
+  AXLE_TELEMETRY_FUNCTION();
+
+  ASSERT(a != NULL_AST_NODE);
+
+  switch (a.ast->ast_type) {
+    case AST_TYPE::INVALID: INVALID_CODE_PATH("Invalid node type"); break;
+    case AST_TYPE::NAMED_TYPE:
+    case AST_TYPE::ARRAY_TYPE:
+    case AST_TYPE::PTR_TYPE:
+    case AST_TYPE::SLICE_TYPE:
+    case AST_TYPE::LAMBDA_TYPE:
+    case AST_TYPE::TUPLE_TYPE: {
+      return;
+    }
+    case AST_TYPE::CAST: {
+      const ASTCastExpr* cast = downcast_ast<ASTCastExpr>(a);
+
+      ASSERT(cast->type.ast->node_type.is_valid());
+      eval_dependency_check_ast_node(comp, comp_thread, state, cast->expr);
+      return;
+    }
+    case AST_TYPE::UNARY_OPERATOR: {
+      const ASTUnaryOperatorExpr* un_op = downcast_ast<ASTUnaryOperatorExpr>(a);
+
+      eval_dependency_check_ast_node(comp, comp_thread, state, un_op->expr);
+      return;
+    }
+  case AST_TYPE::BINARY_OPERATOR: {
+      const ASTBinaryOperatorExpr* const bin_op = downcast_ast<ASTBinaryOperatorExpr>(a);
+      
+      eval_dependency_check_ast_node(comp, comp_thread, state, bin_op->left);
+      eval_dependency_check_ast_node(comp, comp_thread, state, bin_op->right);
+      return;
+    }
+    case AST_TYPE::IDENTIFIER_EXPR: {
+      return;
+    }
+    case AST_TYPE::FUNCTION_CALL: {
+        ASTFunctionCallExpr* const call = downcast_ast<ASTFunctionCallExpr>(a);
+        
+        eval_dependency_check_ast_node(comp, comp_thread, state, call->function);
+
+        ASSERT(call->label != IR::NULL_GLOBAL_LABEL);
+        
+        UnitID depend_id = comp.get_label_info(call->label).dependency;
+
+        set_dependency(comp_thread, COMPILATION_UNIT_STAGE::EMIT, depend_id);
+        
+        for (AST_LOCAL it: call->arguments) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, it);
+        }
+        
+        return;
+      }
+    case AST_TYPE::TUPLE_LIT: {
+        ASTTupleLitExpr* tup = downcast_ast<ASTTupleLitExpr>(a);
+
+        const bool known_type = tup->prefix != NULL_AST_NODE;
+
+        if (known_type) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, tup->prefix);
+        }
+
+        for (AST_LOCAL it: tup->elements) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, it);
+        }
+        
+        return;
+      }
+    case AST_TYPE::ARRAY_EXPR: {
+        ASTArrayExpr* arr = downcast_ast<ASTArrayExpr>(a);
+
+        for (AST_LOCAL it: arr->elements) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, it);
+        }
+
+        return;
+      }
+    case AST_TYPE::INDEX_EXPR: {
+        ASTIndexExpr* index = downcast_ast<ASTIndexExpr>(a);
+        
+        eval_dependency_check_ast_node(comp, comp_thread, state, index->expr);
+        for (AST_LOCAL it: index->arguments) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, it);
+        }
+        
+        return;
+      }
+    case AST_TYPE::MEMBER_ACCESS: {
+        ASTMemberAccessExpr* member = downcast_ast<ASTMemberAccessExpr>(a);
+        
+        eval_dependency_check_ast_node(comp, comp_thread, state, member->expr);
+        return;
+      }
+    case AST_TYPE::LAMBDA_EXPR: {
+        ASTLambdaExpr* le = downcast_ast<ASTLambdaExpr>(a);
+
+        ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
+        ASTFuncSig* sig = downcast_ast<ASTFuncSig>(lambda->sig);
+
+        ASSERT(sig->sig->sig_struct != nullptr);
+      }
+    case AST_TYPE::STRUCT_EXPR: {
+        ASTStructExpr* se = downcast_ast<ASTStructExpr>(a);
+        ASTStructBody* struct_body = downcast_ast<ASTStructBody>(se->struct_body);
+
+        ASSERT(struct_body->actual_type.is_valid());
+        return;
+      }
+    case AST_TYPE::DECL: {
+        ASTDecl* decl = downcast_ast<ASTDecl>(a);
+
+        if (decl->type_ast != NULL_AST_NODE) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, decl->type_ast);
+        }
+
+        if (decl->expr != NULL_AST_NODE) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, decl->expr);
+        }
+        return;
+      }
+    case AST_TYPE::TYPED_NAME: {
+        ASTTypedName* tn = downcast_ast<ASTTypedName>(a);
+
+        if (tn->type != NULL_AST_NODE) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, tn->type);
+        }
+        return;
+      }
+    case AST_TYPE::ASSIGN: {
+        ASTAssign* assign = downcast_ast<ASTAssign>(a);
+        eval_dependency_check_ast_node(comp, comp_thread, state, assign->assign_to);
+        eval_dependency_check_ast_node(comp, comp_thread, state, assign->value);
+        return;
+      }
+    case AST_TYPE::BLOCK: {
+        ASTBlock* block = downcast_ast<ASTBlock>(a);
+        
+        for (AST_LOCAL it: block->block) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, it);
+        }
+
+        return;
+      }
+    case AST_TYPE::IF_ELSE: {
+        ASTIfElse* if_else = downcast_ast<ASTIfElse>(a);
+
+        eval_dependency_check_ast_node(comp, comp_thread, state, if_else->condition);
+
+        eval_dependency_check_ast_node(comp, comp_thread, state, if_else->if_statement);
+
+        if (if_else->else_statement != NULL_AST_NODE) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, if_else->else_statement);
+        }
+
+        return;
+      }
+    case AST_TYPE::WHILE: {
+        ASTWhile* while_s = downcast_ast<ASTWhile>(a);
+        
+        eval_dependency_check_ast_node(comp, comp_thread, state, while_s->condition);
+
+        eval_dependency_check_ast_node(comp, comp_thread, state, while_s->statement);
+        return;
+      }
+    case AST_TYPE::RETURN: {
+        ASTReturn* ret = downcast_ast<ASTReturn>(a);
+        
+        if (ret->expr != NULL_AST_NODE) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, ret->expr);
+        }
+        return;
+      }
+    case AST_TYPE::FUNCTION_SIGNATURE: {
+        ASTFuncSig* func_sig = downcast_ast<ASTFuncSig>(a);
+        
+        for (AST_LOCAL it: func_sig->parameters) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, it);
+        }
+
+        eval_dependency_check_ast_node(comp, comp_thread, state, func_sig->return_type);
+        
+        return;
+      }
+    case AST_TYPE::IMPORT: {
+        ASTImport* imp = downcast_ast<ASTImport>(a);
+        
+        eval_dependency_check_ast_node(comp, comp_thread, state, imp->expr_location);
+        return;
+      }
+    case AST_TYPE::EXPORT_SINGLE: {
+        ASTExportSingle* es = downcast_ast<ASTExportSingle>(a);
+        
+        eval_dependency_check_ast_node(comp, comp_thread, state, es->value);
+        return;
+      }
+    case AST_TYPE::EXPORT: {
+        ASTExport* e = downcast_ast<ASTExport>(a);
+        
+        for (AST_LOCAL it: e->export_list) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, it);
+        }
+        return;
+      }
+    case AST_TYPE::LINK: {
+        ASTLink* imp = downcast_ast<ASTLink>(a);
+        
+        eval_dependency_check_ast_node(comp, comp_thread, state, imp->import_type);
+        
+        return;
+      }
+
+    case AST_TYPE::LAMBDA: {
+        ASTLambda* l = downcast_ast<ASTLambda>(a);
+        
+        ASSERT(l->sig.ast->node_type.is_valid());
+        eval_dependency_check_ast_node(comp, comp_thread, state, l->sig);
+        eval_dependency_check_ast_node(comp, comp_thread, state, l->body);
+
+        return;
+      }
+    case AST_TYPE::STRUCT: {
+        ASTStructBody* s = downcast_ast<ASTStructBody>(a);
+        
+        for (AST_LOCAL it: s->elements) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, it);
+        }
+
+        return;
+      }
+
+    case AST_TYPE::ASCII_CHAR: {
+        return;
+      }
+
+    case AST_TYPE::ASCII_STRING: {
+        return;
+      }
+
+    case AST_TYPE::NUMBER: {
+        return;
+      }
+  }
+
+  comp_thread.report_error(ERROR_CODE::INTERNAL_ERROR, a.ast->node_span,
+                           "Not yet implemented dependency checking for this node. Node ID: {}", (usize)a.ast->ast_type);
 }
 }
 
-Axle::OwnedArr<AstVisit>
-  DC::dependency_check_ast(CompilerGlobals* const comp,
-                           CompilerThread* const comp_thread,
-                           Namespace* const available_names,
-                           AST_LOCAL a) {
+Axle::OwnedArr<AstVisit> DC::type_dependency_check_ast(
+  CompilerGlobals* const comp,
+  CompilerThread* const comp_thread,
+  Namespace* const available_names,
+  AST_LOCAL a
+) noexcept {
   DependencyChecker checker = {};
   checker.generate_visit = true;
   checker.available_names = available_names;
 
-  dependency_check_ast_node(*comp, *comp_thread, checker, a);
+  type_dependency_check_ast_node(*comp, *comp_thread, checker, a);
 
 #if 0
   {
@@ -622,4 +884,16 @@ Axle::OwnedArr<AstVisit>
 #endif
 
   return Axle::bake_arr(std::move(checker.visit_array));
+}
+
+void DC::eval_dependency_check_ast(
+  CompilerGlobals* const comp,
+  CompilerThread* const comp_thread,
+  const Namespace* const available_names,
+  AST_LOCAL a
+) noexcept {
+  EvalDependencyChecker checker = {};
+  checker.available_names = available_names;
+
+  eval_dependency_check_ast_node(*comp, *comp_thread, checker, a);
 }

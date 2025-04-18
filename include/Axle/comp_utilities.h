@@ -3,6 +3,8 @@
 #include <AxleUtil/formattable.h>
 #include <AxleUtil/stacktrace.h>
 
+#include <compare>
+
 using namespace Axle::Primitives;
 
 //Important forward declarations
@@ -18,48 +20,13 @@ namespace Axle {
   struct InternString;
 };
 
-using AST_LOCAL = AST*;
+struct AST_LOCAL {
+  AST* ast;
 
-struct AST_LINKED {
-  AST_LOCAL curr = 0;
-  AST_LINKED* next = 0;
+  constexpr auto operator<=>(const AST_LOCAL&) const = default;
 };
 
-struct AST_ARR {
-  AST_LINKED* start = 0;
-  usize count = 0;
-};
-
-#define FOR_AST(arr, it) \
-  for(auto [_l, it] = _start_ast_iterate(arr); _l; _step_ast_iterate(_l, it))
-
-struct AST_ITERATE_HOLDER {
-  AST_LINKED* l;
-  AST_LOCAL loc;
-};
-
-constexpr AST_ITERATE_HOLDER _start_ast_iterate(const AST_ARR& a) {
-  if (a.start == nullptr) {
-    return { nullptr, 0 };
-  }
-  else {
-    ASSERT(a.start != nullptr);
-    ASSERT(a.start->curr != nullptr);
-    return {
-      a.start,
-        a.start->curr,
-    };
-  }
-}
-
-constexpr void _step_ast_iterate(AST_LINKED*& _l, AST_LOCAL& loc) {
-  _l = _l->next;
-  if (_l != nullptr) {
-    loc = _l->curr;
-    ASSERT(loc != nullptr);
-  }
-}
-
+inline constexpr AST_LOCAL NULL_AST_NODE = { nullptr };
 
 #define COMPCODEINC \
   MOD(NO_ERRORS)\

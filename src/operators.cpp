@@ -57,16 +57,20 @@ static Eval::RuntimeValue un_op_impl(CompilerGlobals* comp,
 }
 
 Eval::RuntimeValue BinOpArgs::emit_add_ints() {
+  ASSERT(info.op_full == BinOpFull::add_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::Add>(ir, left, right, info->dest_type, IR::Emit::Add);
+  return bin_op_impl<IR::Types::Add>(ir, left, right, info.dest_type, IR::Emit::Add);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
-  Type ptr_type = info->dest_type;
+  ASSERT(info.op_full == BinOpFull::add_int_to_ptr);
+  
+  Type ptr_type = info.dest_type;
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   const Type lt = left.effective_type();
@@ -77,7 +81,7 @@ Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
   Eval::RuntimeValue ptr_val;
   const Type size_type = comp->builtin_types->t_u64;
 
-  if (info->main_side == MainSide::LEFT) {
+  if (info.main_side == MainSide::LEFT) {
     ASSERT(ptr_type == lt);
     ASSERT(size_type == rt);
 
@@ -85,7 +89,7 @@ Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
     ptr_val = left;
   }
   else {
-    ASSERT(info->main_side == MainSide::RIGHT);
+    ASSERT(info.main_side == MainSide::RIGHT);
     ASSERT(ptr_type == rt);
     ASSERT(size_type == lt);
 
@@ -110,20 +114,24 @@ Eval::RuntimeValue BinOpArgs::emit_add_int_to_ptr() {
 }
 
 Eval::RuntimeValue BinOpArgs::emit_sub_ints() {
+  ASSERT(info.op_full == BinOpFull::sub_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::Sub>(ir, left, right, info->dest_type, IR::Emit::Sub);
+  return bin_op_impl<IR::Types::Sub>(ir, left, right, info.dest_type, IR::Emit::Sub);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_sub_ptrs() {
+  ASSERT(info.op_full == BinOpFull::sub_ptrs);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
-  ASSERT(info->dest_type == comp->builtin_types->t_u64);
+  ASSERT(lt == info.dest_type);
+  ASSERT(info.dest_type == comp->builtin_types->t_u64);
   Type size_type = comp->builtin_types->t_u64;
 
   const auto* ptr = lt.unchecked_base<PointerStructure>();
@@ -142,102 +150,124 @@ Eval::RuntimeValue BinOpArgs::emit_sub_ptrs() {
 }
 
 Eval::RuntimeValue BinOpArgs::emit_mul_ints() {
+  ASSERT(info.op_full == BinOpFull::mul_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::Mul>(ir, left, right, info->dest_type, IR::Emit::Mul);
+  return bin_op_impl<IR::Types::Mul>(ir, left, right, info.dest_type, IR::Emit::Mul);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_div_ints() {
+  ASSERT(info.op_full == BinOpFull::div_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::Div>(ir, left, right, info->dest_type, IR::Emit::Div);
+  return bin_op_impl<IR::Types::Div>(ir, left, right, info.dest_type, IR::Emit::Div);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_mod_ints() {
+  ASSERT(info.op_full == BinOpFull::mod_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::Mod>(ir, left, right, info->dest_type, IR::Emit::Mod);
+  return bin_op_impl<IR::Types::Mod>(ir, left, right, info.dest_type, IR::Emit::Mod);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_eq_ints() {
+  ASSERT(info.op_full == BinOpFull::eq_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(info->dest_type == comp->builtin_types->t_bool);
+  ASSERT(info.dest_type == comp->builtin_types->t_bool);
 
-  return bin_op_impl<IR::Types::Eq>(ir, left, right, info->dest_type, IR::Emit::Eq);
+  return bin_op_impl<IR::Types::Eq>(ir, left, right, info.dest_type, IR::Emit::Eq);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_neq_ints() {
+  ASSERT(info.op_full == BinOpFull::neq_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(info->dest_type == comp->builtin_types->t_bool);
+  ASSERT(info.dest_type == comp->builtin_types->t_bool);
 
-  return bin_op_impl<IR::Types::Neq>(ir, left, right, info->dest_type, IR::Emit::Neq);
+  return bin_op_impl<IR::Types::Neq>(ir, left, right, info.dest_type, IR::Emit::Neq);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_lesser_ints() {
+  ASSERT(info.op_full == BinOpFull::lesser_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(info->dest_type == comp->builtin_types->t_bool);
+  ASSERT(info.dest_type == comp->builtin_types->t_bool);
 
-  return bin_op_impl<IR::Types::Less>(ir, left, right, info->dest_type, IR::Emit::Less);
+  return bin_op_impl<IR::Types::Less>(ir, left, right, info.dest_type, IR::Emit::Less);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_greater_ints() {
+  ASSERT(info.op_full == BinOpFull::greater_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(info->dest_type == comp->builtin_types->t_bool);
+  ASSERT(info.dest_type == comp->builtin_types->t_bool);
 
-  return bin_op_impl<IR::Types::Great>(ir, left, right, info->dest_type, IR::Emit::Great);
+  return bin_op_impl<IR::Types::Great>(ir, left, right, info.dest_type, IR::Emit::Great);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_or_ints() {
+  ASSERT(info.op_full == BinOpFull::or_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::Or>(ir, left, right, info->dest_type, IR::Emit::Or);
+  return bin_op_impl<IR::Types::Or>(ir, left, right, info.dest_type, IR::Emit::Or);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_or_enums() {
+  ASSERT(info.op_full == BinOpFull::or_enums);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::Or>(ir, left, right, info->dest_type, IR::Emit::Or);
+  return bin_op_impl<IR::Types::Or>(ir, left, right, info.dest_type, IR::Emit::Or);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_and_ints() {
+  ASSERT(info.op_full == BinOpFull::and_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::And>(ir, left, right, info->dest_type, IR::Emit::And);
+  return bin_op_impl<IR::Types::And>(ir, left, right, info.dest_type, IR::Emit::And);
 }
 
 Eval::RuntimeValue BinOpArgs::emit_xor_ints() {
+  ASSERT(info.op_full == BinOpFull::xor_ints);
+  
   const Type lt = left.effective_type();
   const Type rt = right.effective_type();
   ASSERT(lt == rt);
-  ASSERT(lt == info->dest_type);
+  ASSERT(lt == info.dest_type);
 
-  return bin_op_impl<IR::Types::Xor>(ir, left, right, info->dest_type, IR::Emit::Xor);
+  return bin_op_impl<IR::Types::Xor>(ir, left, right, info.dest_type, IR::Emit::Xor);
 }
 
 #if 0
@@ -347,9 +377,11 @@ static Eval::RuntimeValue constant_fold_neg(CompilerGlobals* comp, const u8* dat
 }
 
 Eval::RuntimeValue UnOpArgs::emit_neg_int() {
+  ASSERT(info.op_full == UnOpFull::neg_int);
+
   const Type pet = prim.effective_type();
-  ASSERT(info->src_type == pet);
-  ASSERT(info->dest_type == pet);
+  ASSERT(info.src_type == pet);
+  ASSERT(info.dest_type == pet);
 
   ASSERT(TYPE_TESTS::is_signed_int(pet));
 
@@ -357,10 +389,14 @@ Eval::RuntimeValue UnOpArgs::emit_neg_int() {
 }
 
 Eval::RuntimeValue UnOpArgs::emit_address() {
-  return Eval::addrof(ir, prim, info->dest_type);
+  ASSERT(info.op_full == UnOpFull::address);
+  
+  return Eval::addrof(ir, prim, info.dest_type);
 }
 
 Eval::RuntimeValue UnOpArgs::emit_deref_ptr() {
-  return Eval::deref(ir, prim, info->src_type);
+  ASSERT(info.op_full == UnOpFull::deref_ptr);
+  
+  return Eval::deref(ir, prim, info.src_type);
 }
 

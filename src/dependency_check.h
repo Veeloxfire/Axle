@@ -6,9 +6,17 @@
 #include "ast.h"
 
 namespace DC {
-  Axle::OwnedArr<AstVisit>
-    dependency_check_ast(CompilerGlobals* const comp,
-                         CompilerThread* const comp_thread,
-                         Namespace* const available_names,
-                         AST_LOCAL a);
+  Axle::OwnedArr<AstVisit> type_dependency_check_ast(
+    CompilerGlobals* const comp,
+    CompilerThread* const comp_thread,
+    Namespace* const available_names,
+    AST_LOCAL a
+  ) noexcept;
+
+  void eval_dependency_check_ast(
+    CompilerGlobals* const comp,
+    CompilerThread* const comp_thread,
+    const Namespace* const available_names,
+    AST_LOCAL a
+  ) noexcept;
 }

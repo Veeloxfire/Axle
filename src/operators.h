@@ -2,23 +2,17 @@
 #include <AxleUtil/utility.h>
 #include <Axle/comp_utilities.h>
 #include "ir.h"
-
-enum struct MainSide : uint8_t {
-  LEFT, RIGHT
-};
-
-struct BinOpEmitInfo;
-struct UnOpEmitInfo;
+#include "ir_ast_info.h"
 
 struct BinOpArgs {
-  const BinOpEmitInfo* info;
+  BinOpEmitInfo info;
   CompilerGlobals* comp;
   IR::IRStore* ir;
 
   const Eval::RuntimeValue& left;
   const Eval::RuntimeValue& right;
 
-  Eval::RuntimeValue emit();
+  constexpr Eval::RuntimeValue emit();
 
   //Emits
   Eval::RuntimeValue emit_add_ints();
@@ -44,12 +38,12 @@ struct BinOpArgs {
 };
 
 struct UnOpArgs {
-  const UnOpEmitInfo* info;
+  UnOpEmitInfo info;
   CompilerGlobals* comp;
   IR::IRStore* ir;
   const Eval::RuntimeValue& prim;
 
-  Eval::RuntimeValue emit();
+  constexpr Eval::RuntimeValue emit();
 
   //Emits
   Eval::RuntimeValue emit_neg_int();
@@ -57,25 +51,35 @@ struct UnOpArgs {
   Eval::RuntimeValue emit_deref_ptr();
 };
 
-using BINARY_OPERATOR_FUNCTION = Axle::MEMBER<BinOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
-using UNARY_OPERATOR_FUNCTION = Axle::MEMBER<UnOpArgs>::FUNCTION_PTR<Eval::RuntimeValue>;
 
-struct BinOpEmitInfo {
-  MainSide main_side;
-  Type dest_type;
-  BINARY_OPERATOR_FUNCTION func = nullptr;
-};
+inline constexpr Eval::RuntimeValue BinOpArgs::emit() {
+  switch (info.op_full) {
+    case BinOpFull::add_ints: return emit_add_ints();
+    case BinOpFull::add_int_to_ptr: return emit_add_int_to_ptr();
+    case BinOpFull::sub_ints: return emit_sub_ints();
+    case BinOpFull::sub_ptrs: return emit_sub_ptrs();
+    case BinOpFull::mul_ints: return emit_mul_ints();
+    case BinOpFull::div_ints: return emit_div_ints();
+    case BinOpFull::mod_ints: return emit_mod_ints();
+    case BinOpFull::eq_ints: return emit_eq_ints();
+    case BinOpFull::neq_ints: return emit_neq_ints();
+    case BinOpFull::lesser_ints: return emit_lesser_ints();
+    case BinOpFull::greater_ints: return emit_greater_ints();
+    case BinOpFull::or_ints: return emit_or_ints();
+    case BinOpFull::or_enums: return emit_or_enums();
+    case BinOpFull::xor_ints: return emit_xor_ints();
+    case BinOpFull::and_ints: return emit_and_ints();
+  }
 
-struct UnOpEmitInfo {
-  Type src_type;
-  Type dest_type;
-  UNARY_OPERATOR_FUNCTION func = nullptr;
-};
-
-inline Eval::RuntimeValue BinOpArgs::emit() {
-  return (this->*(info->func))();
+  INVALID_CODE_PATH("Invalid binary operator");
 }
 
-inline Eval::RuntimeValue UnOpArgs::emit() {
-  return (this->*(info->func))();
+inline constexpr Eval::RuntimeValue UnOpArgs::emit() {
+  switch (info.op_full) {
+    case UnOpFull::neg_int: return emit_neg_int();
+    case UnOpFull::address: return emit_address();
+    case UnOpFull::deref_ptr: return emit_deref_ptr();
+  }
+  
+  INVALID_CODE_PATH("Invalid unary operator");
 }

@@ -14,25 +14,24 @@ struct Typer {
 //Gets the underlying type of a type-node e.g. if its an array type node it gets the cached array type
 //Errors if it was not a type
 static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
-  ASSERT(a->node_type == comp_thread->builtin_types->t_type);
-  ASSERT(VC::is_comptime(a->value_category));
+  ASSERT(a.ast->node_type == comp_thread->builtin_types->t_type);
+  ASSERT(VC::is_comptime(a.ast->value_category));
 
 // putting in all switch cases even with default
 #pragma warning(push)
 #pragma warning(disable: 4061)
 
-  switch (a->ast_type) {
-    case AST_TYPE::NAMED_TYPE: return static_cast<ASTNamedType*>(a)->actual_type;
-    case AST_TYPE::ARRAY_TYPE: return static_cast<ASTArrayType*>(a)->actual_type;
-    case AST_TYPE::PTR_TYPE: return static_cast<ASTPtrType*>(a)->actual_type;
-    case AST_TYPE::SLICE_TYPE: return static_cast<ASTSliceType*>(a)->actual_type;
-    case AST_TYPE::LAMBDA_TYPE: return static_cast<ASTLambdaType*>(a)->actual_type;
-    case AST_TYPE::TUPLE_TYPE: return static_cast<ASTTupleType*>(a)->actual_type;
-    case AST_TYPE::STRUCT: return static_cast<ASTStructBody*>(a)->actual_type;
+  switch (a.ast->ast_type) {
+    case AST_TYPE::NAMED_TYPE: return downcast_ast<ASTNamedType>(a)->actual_type;
+    case AST_TYPE::ARRAY_TYPE: return downcast_ast<ASTArrayType>(a)->actual_type;
+    case AST_TYPE::PTR_TYPE: return downcast_ast<ASTPtrType>(a)->actual_type;
+    case AST_TYPE::SLICE_TYPE: return downcast_ast<ASTSliceType>(a)->actual_type;
+    case AST_TYPE::LAMBDA_TYPE: return downcast_ast<ASTLambdaType>(a)->actual_type;
+    case AST_TYPE::TUPLE_TYPE: return downcast_ast<ASTTupleType>(a)->actual_type;
+    case AST_TYPE::STRUCT: return downcast_ast<ASTStructBody>(a)->actual_type;
     case AST_TYPE::STRUCT_EXPR: {
-        AST_LOCAL body = static_cast<ASTStructExpr*>(a)->struct_body;
-        ASSERT(body->ast_type == AST_TYPE::STRUCT);
-        return static_cast<ASTStructBody*>(body)->actual_type;
+        AST_LOCAL body = downcast_ast<ASTStructExpr>(a)->struct_body;
+        return downcast_ast<ASTStructBody>(body)->actual_type;
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
         ASTIdentifier* ident = downcast_ast<ASTIdentifier>(a);
@@ -40,7 +39,7 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
           case ASTIdentifier::LOCAL: {
               const Local* l = ident->local;
               if (!VC::is_comptime(l->decl.value_category)) {
-                comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
+                comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, ident->node_span,
                                           "Runtime types are invalid");
                 return {};
               }
@@ -55,7 +54,7 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
           case ASTIdentifier::GLOBAL: {
               const Global* g = ident->global;
               if (!VC::is_comptime(g->decl.value_category)) {
-                comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
+                comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, ident->node_span,
                                           "Runtime types are invalid");
                 return {};
               }
@@ -69,14 +68,14 @@ static Type get_type_value(CompilerThread* const comp_thread, AST_LOCAL a) {
             }
         }
 
-        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, a->node_span,
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, ident->node_span,
                                   "Invalid identifier type");
         return {};
       }
 
     default: {
-        comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a->node_span,
-                                  "Invalid type node: {}", ast_type_string(a->ast_type));
+        comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, a.ast->node_span,
+                                  "Invalid type node: {}", ast_type_string(a.ast->ast_type));
         return {};
       }
   }
@@ -127,8 +126,8 @@ TC_STAGE(ARRAY_TYPE_DOWN) {
     return;
   }
 
-  ASSERT(at->expr->node_type == comp_thread->builtin_types->t_u64);
-  ASSERT(VC::is_comptime(at->expr->value_category));
+  ASSERT(at->expr.ast->node_type == comp_thread->builtin_types->t_u64);
+  ASSERT(VC::is_comptime(at->expr.ast->value_category));
 
   IR::EvalPromise eval = {};
   eval.type = comp_thread->builtin_types->t_u64;
@@ -140,7 +139,7 @@ TC_STAGE(ARRAY_TYPE_DOWN) {
   }
 
   if (at->array_length == 0) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr.ast->node_span,
                               "Length of array must be larger than 0");
     return;
   }
@@ -166,9 +165,9 @@ TC_STAGE(ARRAY_TYPE_DOWN_LEN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTArrayType, at);
   
-  ASSERT(at->expr->node_type == comp_thread->builtin_types->t_u64);
-  if (!VC::is_comptime(at->expr->value_category)) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr->node_span,
+  ASSERT(at->expr.ast->node_type == comp_thread->builtin_types->t_u64);
+  if (!VC::is_comptime(at->expr.ast->value_category)) {
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr.ast->node_span,
                               "array size expression must be a compile time constant");
     return;
   }
@@ -191,8 +190,8 @@ TC_STAGE(ARRAY_TYPE_UP) {
   
   at->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  at->base->node_infer_type = comp_thread->builtin_types->t_type;
-  at->expr->node_infer_type = comp_thread->builtin_types->t_u64;
+  at->base.ast->node_infer_type = comp_thread->builtin_types->t_type;
+  at->expr.ast->node_infer_type = comp_thread->builtin_types->t_u64;
 
   return;
 }
@@ -228,7 +227,7 @@ TC_STAGE(PTR_TYPE_UP) {
   
   ptr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  ptr->base->node_infer_type = comp_thread->builtin_types->t_type;
+  ptr->base.ast->node_infer_type = comp_thread->builtin_types->t_type;
 
   return;
 }
@@ -264,7 +263,7 @@ TC_STAGE(SLICE_TYPE_UP) {
   
   ptr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  ptr->base->node_infer_type = comp_thread->builtin_types->t_type;
+  ptr->base.ast->node_infer_type = comp_thread->builtin_types->t_type;
 
   return;
 }
@@ -273,9 +272,9 @@ TC_STAGE(LAMBDA_TYPE_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTLambdaType, lt);
   Axle::Array<Type> args = {};
-  args.reserve_total(lt->args.count);
+  args.reserve_total(lt->args.size);
 
-  FOR_AST(lt->args, i) {
+  for (AST_LOCAL i: lt->args) {
     Type i_type = get_type_value(comp_thread, i);
     if (comp_thread->is_panic()) {
       return;
@@ -312,11 +311,11 @@ TC_STAGE(LAMBDA_TYPE_UP) {
   
   lt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  FOR_AST(lt->args, ty) {
-    ty->node_infer_type = comp_thread->builtin_types->t_type;
+  for (AST_LOCAL ty: lt->args) {
+    ty.ast->node_infer_type = comp_thread->builtin_types->t_type;
   }
 
-  lt->ret->node_infer_type = comp_thread->builtin_types->t_type;
+  lt->ret.ast->node_infer_type = comp_thread->builtin_types->t_type;
 
   return;
 }
@@ -325,9 +324,9 @@ TC_STAGE(TUPLE_TYPE_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTupleType, tt);
   Axle::Array<Type> args = {};
-  args.reserve_total(tt->types.count);
+  args.reserve_total(tt->types.size);
 
-  FOR_AST(tt->types, i) {
+  for (AST_LOCAL i: tt->types) {
     Type i_type = get_type_value(comp_thread, i);
     if (comp_thread->is_panic()) {
       return;
@@ -358,8 +357,8 @@ TC_STAGE(TUPLE_TYPE_UP) {
   
   tt->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  FOR_AST(tt->types, ty) {
-    ty->node_infer_type = comp_thread->builtin_types->t_type;
+  for (AST_LOCAL ty: tt->types) {
+    ty.ast->node_infer_type = comp_thread->builtin_types->t_type;
   }
 
   return;
@@ -399,10 +398,10 @@ TC_STAGE(FUNCTION_SIGNATURE_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFuncSig, ast_sig);
   Axle::Array<Type> params = {};
-  params.reserve_total(ast_sig->parameters.count);
+  params.reserve_total(ast_sig->parameters.size);
 
-  FOR_AST(ast_sig->parameters, i) {
-    params.insert(i->node_type);
+  for (AST_LOCAL i: ast_sig->parameters) {
+    params.insert(i.ast->node_type);
   }
 
   Type ret_type = get_type_value(comp_thread, ast_sig->return_type);
@@ -422,7 +421,7 @@ TC_STAGE(FUNCTION_SIGNATURE_DOWN) {
                                                bake_arr(std::move(params)), ret_type);
   }
 
-  ast_sig->sig->label = comp->next_function_label(sig_struct, ast_sig->node_span);
+  ast_sig->sig->label = comp->next_function_label(sig_struct, ast_sig->node_span, NULL_ID);
 
   ast_sig->node_type = comp_thread->builtin_types->t_void;
   ast_sig->sig->sig_struct = sig_struct;
@@ -436,11 +435,11 @@ TC_STAGE(FUNCTION_SIGNATURE_UP) {
 
   ast_sig->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  FOR_AST(ast_sig->parameters, i) {
-    i->node_infer_type = {};
+  for (AST_LOCAL i: ast_sig->parameters) {
+    i.ast->node_infer_type = {};
   }
 
-  ast_sig->return_type->node_infer_type = comp_thread->builtin_types->t_type;
+  ast_sig->return_type.ast->node_infer_type = comp_thread->builtin_types->t_type;
 
   return;
 }
@@ -456,8 +455,8 @@ TC_STAGE(LAMBDA_UP) {
   const SignatureStructure* sig_struct = ast_sig->sig->sig_struct;
   ASSERT(sig_struct != nullptr);//should be done in the signature unit
   
-  FOR_AST(ast_sig->parameters, it) {
-    ASSERT(it->ast_type == AST_TYPE::TYPED_NAME);
+  for (AST_LOCAL it: ast_sig->parameters) {
+    ASSERT(it.ast->ast_type == AST_TYPE::TYPED_NAME);
 
     ASTTypedName* tn = downcast_ast<ASTTypedName>(it);
     ASSERT(tn != nullptr);
@@ -469,7 +468,7 @@ TC_STAGE(LAMBDA_UP) {
   lambda->node_type = to_type(sig_struct);
 
   typer->return_type = sig_struct->return_type;
-  lambda->body->node_infer_type = {};
+  lambda->body.ast->node_infer_type = {};
 
   return;
 }
@@ -479,12 +478,12 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
   EXPAND_THIS(ASTMemberAccessExpr, member);
 
   AST_LOCAL base = member->expr;
-  ASSERT(base->node_type.is_valid());
+  ASSERT(base.ast->node_type.is_valid());
 
-  STRUCTURE_TYPE struct_type = base->node_type.struct_type();
+  STRUCTURE_TYPE struct_type = base.ast->node_type.struct_type();
 
   if (struct_type == STRUCTURE_TYPE::COMPOSITE) {
-    const Type& cmp_t = base->node_type;
+    const Type& cmp_t = base.ast->node_type;
 
     const auto* cs = cmp_t.unchecked_base<CompositeStructure>();
 
@@ -511,12 +510,12 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
     same_category(member, base);
   }
   else if (struct_type == STRUCTURE_TYPE::FIXED_ARRAY) {
-    const Type& arr_t = base->node_type;
+    const Type& arr_t = base.ast->node_type;
 
     const ArrayStructure* as = arr_t.unchecked_base<ArrayStructure>();
 
     if (member->name == comp_thread->important_names.ptr) {
-      if (!VC::is_addressable(base->value_category)) {
+      if (!VC::is_addressable(base.ast->value_category)) {
         comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, member->node_span,
                                   "Cannot get a pointer to a value with no address (this was likely a temporary)");
         return;
@@ -546,7 +545,7 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
     }
   }
   else if (struct_type == STRUCTURE_TYPE::SLICE) {
-    const Type& slice_t = base->node_type;
+    const Type& slice_t = base.ast->node_type;
 
     const SliceStructure* as = slice_t.unchecked_base<SliceStructure>();
 
@@ -576,7 +575,7 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
   else {
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, member->node_span,
                               "Type '{}' does not have any members (it is not a composite type)",
-                              base->node_type.name);
+                              base.ast->node_type.name);
     return;
   }
 
@@ -591,7 +590,7 @@ TC_STAGE(MEMBER_ACCESS_UP) {
   member->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   AST_LOCAL base = member->expr;
-  base->node_infer_type = {};
+  base.ast->node_infer_type = {};
 
   return;
 }
@@ -601,12 +600,12 @@ TC_STAGE(INDEX_EXPR_DOWN) {
   EXPAND_THIS(ASTIndexExpr, index_expr);
 
   AST_LOCAL base = index_expr->expr;
-  const usize arg_count = index_expr->arguments.count;
+  const usize arg_count = index_expr->arguments.size;
 
   same_category(index_expr, base);
-  FOR_AST(index_expr->arguments, it) {
+  for (AST_LOCAL it: index_expr->arguments) {
     reduce_category(index_expr, it);
-    ASSERT(it->node_type == comp_thread->builtin_types->t_u64);
+    ASSERT(it.ast->node_type == comp_thread->builtin_types->t_u64);
   }
 
   constexpr auto index_or_slice_base = [](const Type& t) {
@@ -622,25 +621,25 @@ TC_STAGE(INDEX_EXPR_DOWN) {
   };
 
   if(arg_count == 1) {
-    if (!TYPE_TESTS::can_index(base->node_type)) {
-      comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
+    if (!TYPE_TESTS::can_index(base.ast->node_type)) {
+      comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base.ast->node_span,
           "Cannot take index of type: {}",
-          base->node_type.name);
+          base.ast->node_type.name);
       return;
     }
 
-    index_expr->node_type = index_or_slice_base(base->node_type);
+    index_expr->node_type = index_or_slice_base(base.ast->node_type);
     return;
   }
   else if(arg_count == 0 || arg_count == 2) {
-    if (!TYPE_TESTS::can_slice(base->node_type)) {
-      comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
+    if (!TYPE_TESTS::can_slice(base.ast->node_type)) {
+      comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base.ast->node_span,
           "Cannot take slice of type: {}",
-          base->node_type.name);
+          base.ast->node_type.name);
       return;
     }
 
-    const Type t = index_or_slice_base(base->node_type);
+    const Type t = index_or_slice_base(base.ast->node_type);
    
     {
       Axle::AtomicLock<Structures> structures;
@@ -652,7 +651,7 @@ TC_STAGE(INDEX_EXPR_DOWN) {
     return;
   }
   else {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base->node_span,
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, base.ast->node_span,
           "Cannot index with {} arguments", arg_count);
     return;
   }
@@ -666,9 +665,9 @@ TC_STAGE(INDEX_EXPR_UP) {
 
   AST_LOCAL base = index_expr->expr;
 
-  base->node_infer_type = {};
-  FOR_AST(index_expr->arguments, it) {
-    it->node_infer_type = comp_thread->builtin_types->t_u64;
+  base.ast->node_infer_type = {};
+  for (AST_LOCAL it: index_expr->arguments) {
+    it.ast->node_infer_type = comp_thread->builtin_types->t_u64;
   }
 
   return;
@@ -679,7 +678,7 @@ TC_STAGE(TUPLE_LIT_DOWN) {
   EXPAND_THIS(ASTTupleLitExpr, tup);
 
   if (tup->node_infer_type.is_valid()) {
-    FOR_AST(tup->elements, it) {
+    for (AST_LOCAL it: tup->elements) {
       reduce_category(tup, it);
     }
 
@@ -688,11 +687,11 @@ TC_STAGE(TUPLE_LIT_DOWN) {
   }
 
   Axle::Array<Type> element_types = {};
-  element_types.reserve_total(tup->elements.count);
+  element_types.reserve_total(tup->elements.size);
 
-  FOR_AST(tup->elements, it) {
+  for (AST_LOCAL it: tup->elements) {
     reduce_category(tup, it);
-    element_types.insert(it->node_type);
+    element_types.insert(it.ast->node_type);
   }
 
   const Structure* ts;
@@ -715,7 +714,7 @@ TC_STAGE(TUPLE_LIT_UP_ELEMENTS) {
 
   ASSERT(!tup->node_type.is_valid());
 
-  if (tup->prefix) {
+  if (tup->prefix != NULL_AST_NODE) {
     const Type infer_type = tup->node_infer_type;
     
     Type prefix_type = get_type_value(comp_thread, tup->prefix);
@@ -742,20 +741,20 @@ TC_STAGE(TUPLE_LIT_UP_ELEMENTS) {
     if (st == STRUCTURE_TYPE::COMPOSITE) {
       const CompositeStructure* cs = infer_type.unchecked_base<CompositeStructure>();
 
-      if (cs->elements.size != tup->elements.count) {
+      if (cs->elements.size != tup->elements.size) {
         comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, tup->node_span,
                                   "'{}' expected {} elements. Received: {}",
-                                  infer_type.name, cs->elements.size, tup->elements.count);
+                                  infer_type.name, cs->elements.size, tup->elements.size);
         return;
       }
 
       auto cs_i = cs->elements.begin();
       const auto cs_end = cs->elements.end();
 
-      FOR_AST(tup->elements, it) {
+      for (AST_LOCAL it: tup->elements) {
         ASSERT(cs_i != cs_end);
 
-        it->node_infer_type = cs_i->type;
+        it.ast->node_infer_type = cs_i->type;
 
         cs_i++;
       }
@@ -766,10 +765,10 @@ TC_STAGE(TUPLE_LIT_UP_ELEMENTS) {
     else if (st == STRUCTURE_TYPE::TUPLE) {
       const TupleStructure* ts = infer_type.unchecked_base<TupleStructure>();
 
-      if (ts->elements.size != tup->elements.count) {
+      if (ts->elements.size != tup->elements.size) {
         comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, tup->node_span,
                                   "'{}' expected {} elements. Received: {}",
-                                  infer_type.name, ts->elements.size, tup->elements.count);
+                                  infer_type.name, ts->elements.size, tup->elements.size);
         return;
       }
 
@@ -777,10 +776,10 @@ TC_STAGE(TUPLE_LIT_UP_ELEMENTS) {
       const auto ts_end = ts->elements.end();
 
 
-      FOR_AST(tup->elements, it) {
+      for (AST_LOCAL it: tup->elements) {
         ASSERT(ts_i != ts_end);
 
-        it->node_infer_type = ts_i->type;
+        it.ast->node_infer_type = ts_i->type;
 
         ts_i++;
       }
@@ -795,8 +794,8 @@ TC_STAGE(TUPLE_LIT_UP_ELEMENTS) {
     }
   }
   else {
-    FOR_AST(tup->elements, it) {
-      it->node_infer_type = {};
+    for (AST_LOCAL it: tup->elements) {
+      it.ast->node_infer_type = {};
     }
   }
 }
@@ -807,8 +806,8 @@ TC_STAGE(TUPLE_LIT_UP_PREFIX) {
 
   tup->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  if (tup->prefix != nullptr) {
-    tup->prefix->node_infer_type = comp_thread->builtin_types->t_type;
+  if (tup->prefix != NULL_AST_NODE) {
+    tup->prefix.ast->node_infer_type = comp_thread->builtin_types->t_type;
   }
 }
 
@@ -818,24 +817,29 @@ TC_STAGE(ARRAY_EXPR_DOWN) {
 
   if (arr_expr->node_infer_type.is_valid()) {
 
-    FOR_AST(arr_expr->elements, it) {
+    for (AST_LOCAL it: arr_expr->elements) {
       reduce_category(arr_expr, it);
     }
 
     arr_expr->node_type = arr_expr->node_infer_type;
   }
 
-  AST_LINKED* l = arr_expr->elements.start;
-  ASSERT(l);
+  auto l = arr_expr->elements.begin();
+  const auto e = arr_expr->elements.end();
 
-  AST_LOCAL first = l->curr;
-  const Type base = first->node_type;
+  ASSERT(l < e);
+
+  AST_LOCAL first = *l;
+  ++l;
+  
+  const Type base = first.ast->node_type;
   ASSERT(base.is_valid());
 
   reduce_category(arr_expr, first);
 
-  for (; l; l = l->next) {
-    AST_LOCAL it = l->curr;
+
+  for (; l < e; ++l) {
+    AST_LOCAL it = *l;
 
     reduce_category(arr_expr, it);
   }
@@ -848,7 +852,7 @@ TC_STAGE(ARRAY_EXPR_DOWN) {
 
     arr_s = find_or_make_array_structure(structures._ptr,
                                          strings._ptr,
-                                         base, arr_expr->elements.count);
+                                         base, arr_expr->elements.size);
   }
 
   //Create the type
@@ -864,18 +868,20 @@ TC_STAGE(ARRAY_EXPR_UP_REST) {
     return;// already covered
   }
 
-  AST_LINKED* l = arr_expr->elements.start;
-  ASSERT(l);
+  auto l = arr_expr->elements.begin();
+  const auto e = arr_expr->elements.end();
 
-  AST_LOCAL base_test = l->curr;
+  ASSERT(l < e);
 
-  const Type base = base_test->node_type;
-  l = l->next;
+  AST_LOCAL base_test = *l;
+  ++l;
 
-  for (; l; l = l->next) {
-    AST_LOCAL it = l->curr;
+  const Type base = base_test.ast->node_type;
 
-    it->node_infer_type = base;
+  for (; l < e; ++l) {
+    AST_LOCAL it = *l;
+
+    it.ast->node_infer_type = base;
   }
 }
 
@@ -897,25 +903,23 @@ TC_STAGE(ARRAY_EXPR_UP_FIRST) {
 
     const ArrayStructure* as = infer_type.unchecked_base<ArrayStructure>();
 
-    if (as->length != arr_expr->elements.count) {
+    if (as->length != arr_expr->elements.size) {
       comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, arr_expr->node_span,
                                 "Array expected size {}. Actual size: {}",
-                                as->length, arr_expr->elements.count);
+                                as->length, arr_expr->elements.size);
       return;
     }
 
     Type base = as->base;
 
-    FOR_AST(arr_expr->elements, it) {
-      it->node_infer_type = base;
+    for (AST_LOCAL it: arr_expr->elements) {
+      it.ast->node_infer_type = base;
     }
   }
   else {
-    AST_LINKED* l = arr_expr->elements.start;
-
-    if (l) {
-      AST_LOCAL base_test = l->curr;
-      base_test->node_infer_type = {};
+    if (arr_expr->elements.size > 0) {
+      AST_LOCAL base_test = arr_expr->elements[0];
+      base_test.ast->node_infer_type = {};
     }
   }
 }
@@ -1018,9 +1022,11 @@ TC_STAGE(EXPORT_SINGLE_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTExportSingle, es);
 
-  if (es->value->node_type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
+  const Type& es_type = es->value.ast->node_type;
+
+  if (es_type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, es->node_span,
-                              "Cannot export a non-function. Found: \"{}\"", es->value->node_type.name);
+                              "Cannot export a non-function. Found: \"{}\"", es_type.name);
     return;
   }
 
@@ -1033,7 +1039,7 @@ TC_STAGE(EXPORT_SINGLE_UP) {
   EXPAND_THIS(ASTExportSingle, es);
 
   es->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
-  es->value->node_infer_type = {};
+  es->value.ast->node_infer_type = {};
 
   return;
 }
@@ -1043,8 +1049,8 @@ TC_STAGE(EXPORT_UP) {
   EXPAND_THIS(ASTExport, e);
   e->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  FOR_AST(e->export_list, it) {
-    it->node_infer_type = {};
+  for (AST_LOCAL it: e->export_list) {
+    it.ast->node_infer_type = {};
   }
 
   e->node_type = comp_thread->builtin_types->t_void;
@@ -1077,7 +1083,7 @@ TC_STAGE(LINK_DOWN) {
       IR::DynLibraryImport import_lib = {};
       import_lib.name = imp->name;
       import_lib.path = imp->lib_file;
-      import_lib.label = comp->next_function_label(t.unchecked_base<SignatureStructure>(), imp->node_span);
+      import_lib.label = comp->next_function_label(t.unchecked_base<SignatureStructure>(), imp->node_span, NULL_ID);
 
       comp->dyn_lib_imports.insert(std::move(import_lib));
       imp->import_index = comp->dyn_lib_imports.size;
@@ -1095,7 +1101,7 @@ TC_STAGE(LINK_UP) {
   EXPAND_THIS(ASTLink, imp);
   imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  imp->import_type->node_infer_type = comp_thread->builtin_types->t_type;
+  imp->import_type.ast->node_infer_type = comp_thread->builtin_types->t_type;
 
   return;
 }
@@ -1142,7 +1148,7 @@ TC_STAGE(CAST_DOWN) {
   }
   ASSERT(cast_to.is_valid());
 
-  const Type cast_from = cast->expr->node_type;
+  const Type cast_from = cast->expr.ast->node_type;
   ASSERT(cast_from.is_valid());
 
   cast->node_type = cast_to;
@@ -1167,7 +1173,7 @@ TC_STAGE(CAST_DOWN) {
           const auto* to_ptr = cast_to.unchecked_base<PointerStructure>();
 
           if (from_arr->base == to_ptr->base) {
-            if (!VC::is_addressable(cast->expr->value_category)) {
+            if (!VC::is_addressable(cast->expr.ast->value_category)) {
               comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, cast->node_span,
                                         "Value is not addressible");
               return;
@@ -1251,7 +1257,7 @@ TC_STAGE(CAST_UP_EXPR) {
   EXPAND_THIS(ASTCastExpr, cast);
   AST_LOCAL expr = cast->expr;
 
-  expr->node_infer_type = {};
+  expr.ast->node_infer_type = {};
 
   return;
 }
@@ -1263,7 +1269,7 @@ TC_STAGE(CAST_UP_TYPE) {
 
   AST_LOCAL ty = cast->type;
 
-  ty->node_infer_type = comp_thread->builtin_types->t_type;
+  ty.ast->node_infer_type = comp_thread->builtin_types->t_type;
 
   return;
 }
@@ -1279,7 +1285,7 @@ static void run_un_up_neg_down(CompilerThread* const comp_thread,
   expr->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   reduce_category(expr, prim);
 
-  Type ty = prim->node_type;
+  Type ty = prim.ast->node_type;
 
   if (ty.struct_type() != STRUCTURE_TYPE::INTEGER) {
     comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
@@ -1298,7 +1304,7 @@ static void run_un_up_neg_down(CompilerThread* const comp_thread,
   }
 
   expr->node_type = ty;
-  expr->emit_info = { prim->node_type, expr->node_type, &UnOpArgs::emit_neg_int };
+  expr->emit_info = { prim.ast->node_type, expr->node_type, UnOpFull::neg_int };
   return;
 }
 
@@ -1318,11 +1324,11 @@ static void run_un_up_addr_down(CompilerGlobals* const comp, AST_LOCAL this_node
     comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
-                                         expr->expr->node_type);
+                                         expr->expr.ast->node_type);
   }
 
   expr->node_type = to_type(ptr);
-  expr->emit_info = { prim->node_type, expr->node_type, &UnOpArgs::emit_address };
+  expr->emit_info = { prim.ast->node_type, expr->node_type, UnOpFull::address };
   return;
 }
 
@@ -1333,8 +1339,8 @@ static void run_un_up_deref_down(CompilerThread* const comp_thread, AST_LOCAL th
 
   AST_LOCAL prim = expr->expr;
 
-  if (prim->node_type.struct_type() == STRUCTURE_TYPE::POINTER) {
-    const auto* ptr = prim->node_type.unchecked_base<PointerStructure>();
+  if (prim.ast->node_type.struct_type() == STRUCTURE_TYPE::POINTER) {
+    const auto* ptr = prim.ast->node_type.unchecked_base<PointerStructure>();
 
     if (ptr->is_mut) {
       expr->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
@@ -1344,7 +1350,7 @@ static void run_un_up_deref_down(CompilerThread* const comp_thread, AST_LOCAL th
     }
 
     expr->node_type = ptr->base;
-    expr->emit_info = { prim->node_type, expr->node_type, &UnOpArgs::emit_deref_ptr };
+    expr->emit_info = { prim.ast->node_type, expr->node_type, UnOpFull::deref_ptr };
     return;
   }
   else {
@@ -1352,7 +1358,7 @@ static void run_un_up_deref_down(CompilerThread* const comp_thread, AST_LOCAL th
 
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
                               "No unary operator '{}' exists for type: '{}'",
-                              op_string, prim->node_type.name);
+                              op_string, prim.ast->node_type.name);
 
     return;
   }
@@ -1362,7 +1368,7 @@ TC_STAGE(UNARY_OPERATOR_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTUnaryOperatorExpr, expr);
 
-  ASSERT(expr->expr->node_type.is_valid());
+  ASSERT(expr->expr.ast->node_type.is_valid());
 
   switch(expr->op) {
     case UNARY_OPERATOR::NEG: {
@@ -1395,7 +1401,7 @@ TC_STAGE(UNARY_OPERATOR_UP) {
             if (is->is_signed) {
               //Can infer
 
-              prim->node_infer_type = infer_type;
+              prim.ast->node_infer_type = infer_type;
               return;
             }
           }
@@ -1404,18 +1410,18 @@ TC_STAGE(UNARY_OPERATOR_UP) {
           return;
         }
         else {
-          prim->node_infer_type = {};
+          prim.ast->node_infer_type = {};
           return;
         }
       }
     case UNARY_OPERATOR::ADDRESS: {
         //TODO: can we infer anything here??
-        prim->node_infer_type = {};
+        prim.ast->node_infer_type = {};
         return;
       }
     case UNARY_OPERATOR::DEREF: {
         //TODO: can we infer anything here
-        prim->node_infer_type = {};
+        prim.ast->node_infer_type = {};
         return;
       }
   }
@@ -1437,8 +1443,8 @@ void type_check_binary_operator(CompilerGlobals* comp,
   AST_LOCAL left_ast = expr->left;
   AST_LOCAL right_ast = expr->right;
 
-  const Type& left = left_ast->node_type;
-  const Type& right = right_ast->node_type;
+  const Type& left = left_ast.ast->node_type;
+  const Type& right = right_ast.ast->node_type;
 
 #pragma warning(push)
 #pragma warning(disable: 4061)
@@ -1453,7 +1459,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_add_ints;
+                      expr->emit_info.op_full = BinOpFull::add_ints;
                       return;
                     }
                     break;
@@ -1465,7 +1471,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = right;
                       expr->emit_info.main_side = MainSide::RIGHT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_add_int_to_ptr;
+                      expr->emit_info.op_full = BinOpFull::add_int_to_ptr;
                       return;
                     }
                     break;
@@ -1484,7 +1490,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                   expr->node_type = left;
                   expr->emit_info.main_side = MainSide::LEFT;
                   expr->emit_info.dest_type = expr->node_type;
-                  expr->emit_info.func = &BinOpArgs::emit_add_int_to_ptr;
+                  expr->emit_info.op_full = BinOpFull::add_int_to_ptr;
                   return;
                 }
               }
@@ -1507,7 +1513,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_sub_ints;
+                      expr->emit_info.op_full = BinOpFull::sub_ints;
                       return;
                     }
                     break;
@@ -1526,7 +1532,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = comp->builtin_types->t_u64;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_sub_ptrs;
+                      expr->emit_info.op_full = BinOpFull::sub_ptrs;
                       return;
                     }
                     break;
@@ -1553,7 +1559,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_mul_ints;
+                      expr->emit_info.op_full = BinOpFull::mul_ints;
                       return;
                     }
                     break;
@@ -1580,7 +1586,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_div_ints;
+                      expr->emit_info.op_full = BinOpFull::div_ints;
                       return;
                     }
                     break;
@@ -1611,7 +1617,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_mod_ints;
+                      expr->emit_info.op_full = BinOpFull::mod_ints;
                       return;
                     }
                     break;
@@ -1639,7 +1645,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                 expr->node_type = comp_thread->builtin_types->t_bool;
                 expr->emit_info.main_side = MainSide::LEFT;
                 expr->emit_info.dest_type = expr->node_type;
-                expr->emit_info.func = &BinOpArgs::emit_eq_ints;
+                expr->emit_info.op_full = BinOpFull::eq_ints;
                 return;
               }
 
@@ -1653,7 +1659,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = comp_thread->builtin_types->t_bool;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_eq_ints;
+                      expr->emit_info.op_full = BinOpFull::eq_ints;
                       return;
                     }
                     break;
@@ -1672,7 +1678,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = comp_thread->builtin_types->t_bool;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_eq_ints;
+                      expr->emit_info.op_full = BinOpFull::eq_ints;
                       return;
                     }
                     break;
@@ -1701,7 +1707,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                 expr->node_type = comp_thread->builtin_types->t_bool;
                 expr->emit_info.main_side = MainSide::LEFT;
                 expr->emit_info.dest_type = expr->node_type;
-                expr->emit_info.func = &BinOpArgs::emit_neq_ints;
+                expr->emit_info.op_full = BinOpFull::neq_ints;
                 return;
               }
 
@@ -1715,7 +1721,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = comp_thread->builtin_types->t_bool;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_neq_ints;
+                      expr->emit_info.op_full = BinOpFull::neq_ints;
                       return;
                     }
                     break;
@@ -1734,7 +1740,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = comp_thread->builtin_types->t_bool;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_neq_ints;
+                      expr->emit_info.op_full = BinOpFull::neq_ints;
                       return;
                     }
                     break;
@@ -1761,7 +1767,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                     expr->node_type = comp_thread->builtin_types->t_bool;
                     expr->emit_info.main_side = MainSide::LEFT;
                     expr->emit_info.dest_type = expr->node_type;
-                    expr->emit_info.func = &BinOpArgs::emit_lesser_ints;
+                    expr->emit_info.op_full = BinOpFull::lesser_ints;
 
                     return;
                   }
@@ -1787,7 +1793,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = comp_thread->builtin_types->t_bool;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_greater_ints;
+                      expr->emit_info.op_full = BinOpFull::greater_ints;
 
                       return;
                     }
@@ -1816,7 +1822,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                 expr->node_type = left;
                 expr->emit_info.main_side = MainSide::LEFT;
                 expr->emit_info.dest_type = expr->node_type;
-                expr->emit_info.func = &BinOpArgs::emit_or_ints;
+                expr->emit_info.op_full = BinOpFull::or_ints;
                 return;
               }
 
@@ -1830,7 +1836,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_or_ints;
+                      expr->emit_info.op_full = BinOpFull::or_ints;
                       return;
                     }
                     break;
@@ -1857,7 +1863,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_xor_ints;
+                      expr->emit_info.op_full = BinOpFull::xor_ints;
                       return;
                     }
                     break;
@@ -1885,7 +1891,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                 expr->node_type = left;
                 expr->emit_info.main_side = MainSide::LEFT;
                 expr->emit_info.dest_type = expr->node_type;
-                expr->emit_info.func = &BinOpArgs::emit_and_ints;
+                expr->emit_info.op_full = BinOpFull::and_ints;
                 return;
               }
 
@@ -1899,7 +1905,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_side = MainSide::LEFT;
                       expr->emit_info.dest_type = expr->node_type;
-                      expr->emit_info.func = &BinOpArgs::emit_and_ints;
+                      expr->emit_info.op_full = BinOpFull::and_ints;
                       return;
                     }
                     break;
@@ -1932,7 +1938,7 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->node_type = left;
                       expr->emit_info.main_op = MainOp::LEFT;
                       expr->emit_info.main_type = left;
-                      expr->emit_info.func = &BinOpArgs::emit_shift_l_64_by_8;
+                      expr->emit_info.op_full = BinOpFull::shift_l_64_by_8;
                       return;
                     }
                     break;
@@ -1969,10 +1975,10 @@ void type_check_binary_operator(CompilerGlobals* comp,
                       expr->emit_info.main_type = left;
 
                       if (int_l->is_signed) {
-                        expr->emit_info.func = &BinOpArgs::emit_shift_r_i64_by_8;
+                        expr->emit_info.op_full = BinOpFull::shift_r_i64_by_8;
                       }
                       else {
-                        expr->emit_info.func = &BinOpArgs::emit_shift_r_u64_by_8;
+                        expr->emit_info.op_full = BinOpFull::shift_r_u64_by_8;
                       }
                       return;
                     }
@@ -2009,8 +2015,8 @@ TC_STAGE(BINARY_OPERATOR_DOWN) {
   AST_LOCAL left = bin_op->left;
   AST_LOCAL right = bin_op->right;
 
-  ASSERT(left->node_type.is_valid());
-  ASSERT(right->node_type.is_valid());
+  ASSERT(left.ast->node_type.is_valid());
+  ASSERT(right.ast->node_type.is_valid());
 
   reduce_category(bin_op, left);
   reduce_category(bin_op, right);
@@ -2031,8 +2037,8 @@ TC_STAGE(BINARY_OPERATOR_UP) {
 
   //TODO: Can we do type inference?
 
-  left->node_infer_type = {};
-  right->node_infer_type = {};
+  left.ast->node_infer_type = {};
+  right.ast->node_infer_type = {};
 
   return;
 }
@@ -2041,20 +2047,20 @@ TC_STAGE(IMPORT_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTImport, imp);
   AST_LOCAL expr = imp->expr_location;
-  ASSERT(expr->node_type.is_valid());
+  ASSERT(expr.ast->node_type.is_valid());
 
-  if (expr->node_type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+  if (expr.ast->node_type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr.ast->node_span,
                               "#{} expression must be a character array\n"
                               "Instead found: {}",
-                              comp_thread->intrinsics.import, expr->node_type.name);
+                              comp_thread->intrinsics.import, expr.ast->node_type.name);
     return;
   }
 
-  const auto* array_type = expr->node_type.unchecked_base<ArrayStructure>();
+  const auto* array_type = expr.ast->node_type.unchecked_base<ArrayStructure>();
 
   if (array_type->base != comp_thread->builtin_types->t_ascii) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr.ast->node_span,
                               "#{} expression must be a character array\n"
                               "Expected base type: {}\n"
                               "Instead found: {}",
@@ -2062,8 +2068,8 @@ TC_STAGE(IMPORT_DOWN) {
     return;
   }
 
-  if (!VC::is_comptime(expr->value_category)) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr->node_span,
+  if (!VC::is_comptime(expr.ast->value_category)) {
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, expr.ast->node_span,
                               "#{} expression must be a compile time constant",
                               comp_thread->intrinsics.import);
     return;
@@ -2079,7 +2085,7 @@ TC_STAGE(IMPORT_UP) {
   imp->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   
   AST_LOCAL expr = imp->expr_location;
-  expr->node_infer_type = {};
+  expr.ast->node_infer_type = {};
 
   return;
 }
@@ -2122,12 +2128,12 @@ static void check_call_arguments(CompilerThread* const comp_thread,
 
   CallSignature sig = {};
 
-  sig.arguments.reserve_total(call->arguments.count);
+  sig.arguments.reserve_total(call->arguments.size);
 
   //Load all the types
-  FOR_AST(call->arguments, it) {
-    ASSERT(it->node_type.is_valid());
-    sig.arguments.insert({ it->node_type });
+  for (AST_LOCAL it: call->arguments) {
+    ASSERT(it.ast->node_type.is_valid());
+    sig.arguments.insert({ it.ast->node_type });
   }
 
   bool matches = test_function_overload(&sig, sig_struct);
@@ -2142,10 +2148,10 @@ TC_STAGE(FUNCTION_CALL_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
-  const Type& func_type = call->function->node_type;
+  const Type& func_type = call->function.ast->node_type;
   call->sig = func_type.unchecked_base<SignatureStructure>();
 
-  FOR_AST(call->arguments, it) {
+  for (AST_LOCAL it: call->arguments) {
     reduce_category(call, it);
   }
 
@@ -2159,10 +2165,10 @@ TC_STAGE(FUNCTION_CALL_DOWN) {
 
   const size_t size = sig->parameter_types.size;
 
-  if (call->arguments.count != size) {
+  if (call->arguments.size != size) {
     comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, call->node_span,
                               "Compiler linked a function with {} parameters for a call with {} arguments!",
-                              size, call->arguments.count);
+                              size, call->arguments.size);
     return;
   }
 
@@ -2192,18 +2198,18 @@ TC_STAGE(FUNCTION_CALL_UP_ARGS) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
-  const Type& func_type = call->function->node_type;
+  const Type& func_type = call->function.ast->node_type;
   if (func_type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
-    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->function->node_span,
+    comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, call->function.ast->node_span,
                               "Attempted to call a non-function. Found type {}", func_type.name);
     return;
   }
 
-  ASSERT(VC::is_comptime(call->function->value_category));
+  ASSERT(VC::is_comptime(call->function.ast->value_category));
 
-  FOR_AST(call->arguments, it) {
+  for (AST_LOCAL it: call->arguments) {
     //TODO: try to infer arguments
-    it->node_infer_type = {};
+    it.ast->node_infer_type = {};
   }
 }
 
@@ -2213,7 +2219,7 @@ TC_STAGE(FUNCTION_CALL_UP_FUNCTION) {
 
   call->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
 
-  call->function->node_infer_type = {};
+  call->function.ast->node_infer_type = {};
 
   return;
 }
@@ -2223,16 +2229,16 @@ TC_STAGE(ASSIGN_UP_RIGHT) {
   EXPAND_THIS(ASTAssign, assign);
 
   AST_LOCAL assign_to = assign->assign_to;
-  ASSERT(assign_to->node_type.is_valid());
-  ASSERT(!assign->value->node_type.is_valid());
+  ASSERT(assign_to.ast->node_type.is_valid());
+  ASSERT(!assign->value.ast->node_type.is_valid());
 
-  if (!VC::is_mutable(assign_to->value_category)) {
-    comp_thread->report_error(ERROR_CODE::CONST_ERROR, assign_to->node_span,
+  if (!VC::is_mutable(assign_to.ast->value_category)) {
+    comp_thread->report_error(ERROR_CODE::CONST_ERROR, assign_to.ast->node_span,
                               "Cannot assign to \"const\" expression");
     return;
   }
 
-  assign->value->node_infer_type = assign_to->node_type;
+  assign->value.ast->node_infer_type = assign_to.ast->node_type;
 
   assign->node_type = comp_thread->builtin_types->t_void;
 }
@@ -2243,8 +2249,8 @@ TC_STAGE(ASSIGN_UP_LEFT) {
   
   AST_LOCAL assign_to = assign->assign_to;
   
-  ASSERT(!assign_to->node_type.is_valid());
-  assign_to->node_infer_type = {};
+  ASSERT(!assign_to.ast->node_type.is_valid());
+  assign_to.ast->node_infer_type = {};
 
   return;
 }
@@ -2256,14 +2262,14 @@ TC_STAGE(DECL_DOWN) {
   AST_LOCAL decl_expr = ast_decl->expr;
 
   if (!ast_decl->type.is_valid()) {
-    ASSERT(decl_expr != nullptr);
-    ast_decl->type = ast_decl->expr->node_type;
+    ASSERT(decl_expr != NULL_AST_NODE);
+    ast_decl->type = ast_decl->expr.ast->node_type;
   }
 
   ASSERT(ast_decl->type.is_valid());
 
   if (ast_decl->compile_time_const
-      && (decl_expr == nullptr || !VC::is_comptime(decl_expr->value_category))) {
+      && (decl_expr == NULL_AST_NODE || !VC::is_comptime(decl_expr.ast->value_category))) {
     comp_thread->report_error(ERROR_CODE::CONST_ERROR, ast_decl->node_span,
                               "Compile time declaration '{}' must be initialized by a compile time expression",
                               ast_decl->name);
@@ -2299,8 +2305,8 @@ TC_STAGE(DECL_DOWN) {
     decl->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
   }
 
-  if (VC::is_comptime(decl->value_category) || VC::is_comptime(decl_expr->value_category)) {
-    if (!VC::is_comptime(decl_expr->value_category)) {
+  if (VC::is_comptime(decl->value_category) || VC::is_comptime(decl_expr.ast->value_category)) {
+    if (!VC::is_comptime(decl_expr.ast->value_category)) {
       comp_thread->report_error(ERROR_CODE::CONST_ERROR, ast_decl->node_span,
                                 "Cannot initialize a compile time constant with "
                                 "a non compile time constant value");
@@ -2334,7 +2340,7 @@ TC_STAGE(DECL_UP_EXPR) {
   EXPAND_THIS(ASTDecl, decl);
 
   Type expr_type = {};
-  if (decl->type_ast != nullptr) {
+  if (decl->type_ast != NULL_AST_NODE) {
     decl->type = get_type_value(comp_thread, decl->type_ast);
     if (comp_thread->is_panic()) {
       return;
@@ -2346,8 +2352,8 @@ TC_STAGE(DECL_UP_EXPR) {
     decl->type = {};
   }
 
-  if (decl->expr != nullptr) {
-    decl->expr->node_infer_type = expr_type;
+  if (decl->expr != NULL_AST_NODE) {
+    decl->expr.ast->node_infer_type = expr_type;
   }
 
   return;
@@ -2357,8 +2363,8 @@ TC_STAGE(DECL_UP_TYPE) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, decl);
 
-  if (decl->type_ast != nullptr) {
-    decl->type_ast->node_infer_type = comp_thread->builtin_types->t_type;
+  if (decl->type_ast != NULL_AST_NODE) {
+    decl->type_ast.ast->node_infer_type = comp_thread->builtin_types->t_type;
   }
 }
 
@@ -2366,11 +2372,11 @@ TC_STAGE(IF_ELSE_UP) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTIfElse, if_else);
   
-  if_else->condition->node_infer_type = comp_thread->builtin_types->t_bool;
-  if_else->if_statement->node_infer_type = {};
+  if_else->condition.ast->node_infer_type = comp_thread->builtin_types->t_bool;
+  if_else->if_statement.ast->node_infer_type = {};
 
-  if (if_else->else_statement != 0) {
-    if_else->else_statement->node_infer_type = {};
+  if (if_else->else_statement != NULL_AST_NODE) {
+    if_else->else_statement.ast->node_infer_type = {};
   }
 
   if_else->node_type = comp_thread->builtin_types->t_void;
@@ -2381,8 +2387,8 @@ TC_STAGE(WHILE_UP) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTWhile, while_loop);
 
-  while_loop->condition->node_infer_type = comp_thread->builtin_types->t_bool;
-  while_loop->statement->node_infer_type = {};
+  while_loop->condition.ast->node_infer_type = comp_thread->builtin_types->t_bool;
+  while_loop->statement.ast->node_infer_type = {};
 
   while_loop->node_type = comp_thread->builtin_types->t_void;
   return;
@@ -2392,8 +2398,8 @@ TC_STAGE(BLOCK_UP) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTBlock, block);
   
-  FOR_AST(block->block, it) {
-    it->node_infer_type = {};
+  for (AST_LOCAL it: block->block) {
+    it.ast->node_infer_type = {};
   }
 
   block->node_type = comp_thread->builtin_types->t_void;
@@ -2406,8 +2412,8 @@ TC_STAGE(RETURN_UP) {
   
   ASSERT(typer->return_type.is_valid());
 
-  if (ret->expr != nullptr) {
-    ret->expr->node_infer_type = typer->return_type;
+  if (ret->expr != NULL_AST_NODE) {
+    ret->expr.ast->node_infer_type = typer->return_type;
 
     ret->node_type = comp_thread->builtin_types->t_void;
     return;
@@ -2442,10 +2448,10 @@ TC_STAGE(STRUCT_DOWN) {
     uint32_t current_alignment = 0;
 
     Axle::Array<StructElement> elements = {};
-    elements.reserve_total(body->elements.count);
+    elements.reserve_total(body->elements.size);
 
-    FOR_AST(body->elements, it) {
-      ASTTypedName* tn = (ASTTypedName*)it;
+    for (AST_LOCAL it: body->elements) {
+      ASTTypedName* tn = downcast_ast<ASTTypedName>(it);
 
       elements.insert_uninit(1);
       auto* b = elements.back();
@@ -2482,8 +2488,8 @@ TC_STAGE(STRUCT_UP) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTStructBody, body);
 
-  FOR_AST(body->elements, it) {
-    it->node_infer_type = {};
+  for (AST_LOCAL it: body->elements) {
+    it.ast->node_infer_type = {};
   }
 }
 
@@ -2512,7 +2518,7 @@ TC_STAGE(TYPED_NAME_UP) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTypedName, name);
   
-  name->type->node_infer_type = comp_thread->builtin_types->t_type;
+  name->type.ast->node_infer_type = comp_thread->builtin_types->t_type;
 
   return;
 }
@@ -2526,8 +2532,8 @@ static void run_step(CompilerGlobals* const comp,
   switch (step) {
 #define MOD(s, a, ...) case AST_VISIT_STEP:: s : \
     static_assert(AST_TYPE:: a == ast_visit_step_ast_type(AST_VISIT_STEP:: s)); \
-    ASSERT(node->ast_type == AST_TYPE:: a); \
-    ASSERT(node->ast_type == ast_visit_step_ast_type(AST_VISIT_STEP:: s)); \
+    ASSERT(node.ast->ast_type == AST_TYPE:: a); \
+    ASSERT(node.ast->ast_type == ast_visit_step_ast_type(AST_VISIT_STEP:: s)); \
     return run_step_impl<AST_VISIT_STEP:: s>(comp, comp_thread, typer, node);
       AST_VISIT_STEP_MOD;
 #undef MOD
@@ -2556,7 +2562,7 @@ void TC::type_check_ast(CompilerGlobals* const comp,
   for (; index < visit_arr.size; ++index) {
     const AstVisit& v = visit_arr[index];
 
-    ASSERT(!v.node->node_type.is_valid());// this is what signals completion
+    ASSERT(!v.node.ast->node_type.is_valid());// this is what signals completion
 
     run_step(comp, comp_thread, &typer, v.node, v.step);
     if (comp_thread->is_panic() || comp_thread->is_depends()) {
@@ -2564,19 +2570,20 @@ void TC::type_check_ast(CompilerGlobals* const comp,
     }
 
     AST_LOCAL n = v.node;
-    if (n->node_type.is_valid()
-     && n->node_infer_type.is_valid()
-     && n->node_infer_type != n->node_type) {
-      const Type& expected = n->node_infer_type;
-      const Type& actual = n->node_type;
-      comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, n->node_span,
+    const Type& n_type = n.ast->node_type;
+    const Type& n_infer = n.ast->node_infer_type;
+    if (n_type.is_valid() && n_infer.is_valid()
+        && n_infer != n_type) {
+      const Type& expected = n.ast->node_infer_type;
+      const Type& actual = n.ast->node_type;
+      comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, n.ast->node_span,
                                 "Expected type: {}. Actual type: {}", expected.name, actual.name);
       return;
     }
   }
 
   for (const AstVisit v: visit_arr) {
-    ASSERT(v.node->node_type.is_valid());// this is what signals completion
+    ASSERT(v.node.ast->node_type.is_valid());// this is what signals completion
   }
 
   ASSERT(context.finished());

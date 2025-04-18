@@ -663,10 +663,6 @@ namespace Eval {
 }
 
 namespace CASTS {
-  using CAST_FUNCTION = Eval::RuntimeValue(*) (IR::IRStore* const ir,
-                                            const Type& to,
-                                            const Eval::RuntimeValue& val);
-
   Eval::RuntimeValue int_to_int(IR::IRStore* const ir,
                                 const Type& to,
                                 const Eval::RuntimeValue& val);

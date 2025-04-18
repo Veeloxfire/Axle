@@ -1,13 +1,15 @@
 #pragma once
 #include <AxleUtil/utility.h>
 #include <AxleUtil/strings.h>
+#include <AxleUtil/files.h>
 
 #include <Axle/comp_utilities.h>
 
-#include "operators.h"
 #include "type.h"
-#include "ir.h"
-#include "parser.h"
+#include "errors.h"
+#include "ir_ast_info.h"
+
+struct Namespace;
 
 #define AST_TYPE_MOD \
 MOD(NAMED_TYPE) \
@@ -158,20 +160,28 @@ struct AstVisit {
 };
 
 struct AST {
-  AST_TYPE ast_type;
-  VALUE_CATEGORY value_category;
+  AST_TYPE ast_type = AST_TYPE::INVALID;
+  VALUE_CATEGORY value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   Type node_type = {};
   Type node_infer_type = {};
   Span node_span = {};
 
-  constexpr AST() = default;
+  u32 start_visit = 0;
+  u32 end_visit = 0;
 };
 
 template<typename T>
-constexpr T* downcast_ast(AST* ast) {
-  ASSERT(ast->ast_type == T::EXPECTED_AST_TYPE);
-  return static_cast<T*>(ast);
+concept IsASTDataNode = requires(T* t_ptr, AST* data_ptr) {
+  { static_cast<AST*>(t_ptr) } -> Axle::IS_SAME_TYPE<AST*>;
+  { static_cast<T*>(data_ptr) } -> Axle::IS_SAME_TYPE<T*>;
+  { T::EXPECTED_AST_TYPE };
+};
+
+template<IsASTDataNode T>
+constexpr T* downcast_ast(AST_LOCAL ast) {
+  ASSERT(ast.ast->ast_type == T::EXPECTED_AST_TYPE);
+  return static_cast<T*>(ast.ast);
 }
 
 struct ASTNamedType : public AST {
@@ -187,44 +197,46 @@ struct ASTArrayType : public AST {
 
   Type actual_type = {};
   u64 array_length = 0;
-  AST_LOCAL base = 0;
-  AST_LOCAL expr = 0;
+  AST_LOCAL base = NULL_AST_NODE;
+  AST_LOCAL expr = NULL_AST_NODE;
 };
 
 struct ASTPtrType : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::PTR_TYPE;
 
   Type actual_type = {};
-  AST_LOCAL base = 0;
+  AST_LOCAL base = NULL_AST_NODE;
 };
 
 struct ASTSliceType : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::SLICE_TYPE;
 
   Type actual_type = {};
-  AST_LOCAL base = 0;
+  AST_LOCAL base = NULL_AST_NODE;
 };
 
 struct ASTLambdaType : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LAMBDA_TYPE;
 
   Type actual_type = {};
-  AST_LOCAL ret = 0;
-  AST_ARR args = {};
+  AST_LOCAL ret = NULL_AST_NODE;
+  Axle::ViewArr<const AST_LOCAL> args = {};
 };
 
 struct ASTTupleType : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::TUPLE_TYPE;
+  
   Type actual_type = {};
-  AST_ARR types = {};
+  Axle::ViewArr<const AST_LOCAL> types = {};
 };
 
 struct ASTBinaryOperatorExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::BINARY_OPERATOR;
+  
   BINARY_OPERATOR op;
 
-  AST_LOCAL left = 0;
-  AST_LOCAL right = 0;
+  AST_LOCAL left = NULL_AST_NODE;
+  AST_LOCAL right = NULL_AST_NODE;
 
   BinOpEmitInfo emit_info = {};
 };
@@ -232,38 +244,39 @@ struct ASTBinaryOperatorExpr : public AST {
 struct ASTTupleLitExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::TUPLE_LIT;
   AST_LOCAL prefix;
-  AST_ARR elements = {};
+  Axle::ViewArr<const AST_LOCAL> elements = {};
 };
 
 struct ASTFunctionCallExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::FUNCTION_CALL;
   AST_LOCAL function;
 
-  AST_ARR arguments = {};
+  Axle::ViewArr<const AST_LOCAL> arguments = {};
 
   const SignatureStructure* sig = nullptr;
   IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
 };
 
+
 struct ASTUnaryOperatorExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::UNARY_OPERATOR;
   UNARY_OPERATOR op;
-  AST_LOCAL expr = 0;
+  AST_LOCAL expr = NULL_AST_NODE;
 
   UnOpEmitInfo emit_info = {};
 };
 
 struct ASTCastExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::CAST;
-  AST_LOCAL type = 0;
-  AST_LOCAL expr = 0;
+  AST_LOCAL type = NULL_AST_NODE;
+  AST_LOCAL expr = NULL_AST_NODE;
   CASTS::CAST_FUNCTION emit = nullptr;
 };
 
 struct ASTIndexExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::INDEX_EXPR;
-  AST_LOCAL expr = 0;
-  AST_ARR arguments = {};
+  AST_LOCAL expr = NULL_AST_NODE;
+  Axle::ViewArr<const AST_LOCAL> arguments = {};
 };
 
 struct ASTNumber : public AST {
@@ -274,7 +287,7 @@ struct ASTNumber : public AST {
 
 struct ASTArrayExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::ARRAY_EXPR;
-  AST_ARR elements = {};
+  Axle::ViewArr<const AST_LOCAL> elements = {};
 };
 
 struct ASTIdentifier : public AST {
@@ -310,7 +323,7 @@ namespace Axle::Format {
 
 struct ASTMemberAccessExpr : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::MEMBER_ACCESS;
-  AST_LOCAL expr = 0;
+  AST_LOCAL expr = NULL_AST_NODE;
 
   uint32_t offset = 0;
   const Axle::InternString* name = nullptr;
@@ -328,7 +341,7 @@ struct ASTAsciiChar : public AST {
 
 struct ASTBlock : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::BLOCK;
-  AST_ARR block = {};
+  Axle::ViewArr<const AST_LOCAL> block = {};
 };
 
 struct ASTTypedName : public AST {
@@ -366,8 +379,8 @@ struct ASTFuncSig : public AST {
   IR::FunctionSignature* sig = nullptr;
   const CallingConvention* convention = nullptr;
 
-  AST_LOCAL return_type = 0;
-  AST_ARR parameters = {};
+  AST_LOCAL return_type = NULL_AST_NODE;
+  Axle::ViewArr<const AST_LOCAL> parameters = {};
 };
 
 struct PrintCallSignature {
@@ -383,16 +396,16 @@ namespace Axle::Format {
 
       res.load_char_raw('(');
 
-      auto l = call->arguments.start;
+      if (call->arguments.size > 0) {
+        const AST* loc = call->arguments.begin();
+        const AST* end = call->arguments.end();
 
-      if (l) {
-        FormatArg<const Axle::InternString*>::load_string(res, l->curr->node_type.name);
-        l = l->next;
+        FormatArg<const Axle::InternString*>::load_string(res,  loc->node_type.name);
+        loc += 1;
 
-        while (l) {
+        for(; loc < end; ++loc) {
           res.load_string_raw(", ");
-          FormatArg<const Axle::InternString*>::load_string(res, l->curr->node_type.name);
-          l = l->next;
+          FormatArg<const Axle::InternString*>::load_string(res, loc->node_type.name);
         }
       }
 
@@ -422,42 +435,42 @@ struct ASTLambda : public AST {
 struct ASTStructBody : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::STRUCT;
   UnitID unit_id;
-  AST_ARR elements = {};
+  Axle::ViewArr<const AST_LOCAL> elements = {};
   Type actual_type = {};
 };
 
 struct ASTWhile : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::WHILE;
-  AST_LOCAL condition = 0;
-  AST_LOCAL statement = 0;
+  AST_LOCAL condition = NULL_AST_NODE;
+  AST_LOCAL statement = NULL_AST_NODE;
 };
 
 struct ASTIfElse : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::IF_ELSE;
-  AST_LOCAL condition = 0;
-  AST_LOCAL if_statement = 0;
-  AST_LOCAL else_statement = 0;
+  AST_LOCAL condition = NULL_AST_NODE;
+  AST_LOCAL if_statement = NULL_AST_NODE;
+  AST_LOCAL else_statement = NULL_AST_NODE;
 };
 
 struct ASTReturn : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::RETURN;
-  AST_LOCAL expr = 0;
+  AST_LOCAL expr = NULL_AST_NODE;
 };
 
 struct ASTAssign : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::ASSIGN;
-  AST_LOCAL assign_to = 0;
-  AST_LOCAL value = 0;
+  AST_LOCAL assign_to = NULL_AST_NODE;
+  AST_LOCAL value = NULL_AST_NODE;
 };
 
 struct ASTImport : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::IMPORT;
-  AST_LOCAL expr_location = 0;
+  AST_LOCAL expr_location = NULL_AST_NODE;
 };
 
 struct ASTLink : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LINK;
-  AST_LOCAL import_type = 0;
+  AST_LOCAL import_type = NULL_AST_NODE;
 
   bool dynamic = false;
 
@@ -470,18 +483,20 @@ struct ASTLink : public AST {
 struct ASTExportSingle : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::EXPORT_SINGLE;
   const Axle::InternString* name = nullptr;
-  AST_LOCAL value = 0;
+  AST_LOCAL value = NULL_AST_NODE;
 
   usize export_index = 0;
 };
 
 struct ASTExport : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::EXPORT;
-  AST_ARR export_list = {};
+  Axle::ViewArr<const AST_LOCAL> export_list = {};
 };
 
 struct FileAST {
-  AST_ARR top_level = {};
+  Axle::GrowingMemoryPool<32 * 1024> ast_data_store = {};
+  
+  Axle::ViewArr<const AST_LOCAL> top_level = {};
 
   Namespace* ns = nullptr;
   Axle::FileLocation file_loc = {};
@@ -496,11 +511,15 @@ struct Printer {
 void print_full_ast(const FileAST* file);
 void print_full_ast(AST_LOCAL expr);
 
-constexpr void same_category(AST_LOCAL low, AST_LOCAL high) {
+constexpr void same_category(AST* low, const AST* high) {
   low->value_category = high->value_category;
 }
 
-constexpr void reduce_category(AST_LOCAL low, AST_LOCAL high) {
+constexpr void same_category(AST* low, AST_LOCAL high) {
+  same_category(low, high.ast);
+}
+
+constexpr void reduce_category(AST* low, const AST* high) {
   switch (high->value_category) {
     case VALUE_CATEGORY::TEMPORARY_CONSTANT:
     case VALUE_CATEGORY::VARIABLE_CONSTANT: return;
@@ -527,4 +546,8 @@ constexpr void reduce_category(AST_LOCAL low, AST_LOCAL high) {
   }
 
   INVALID_CODE_PATH("Invalid value category");
+}
+
+constexpr void reduce_category(AST* low, AST_LOCAL high) {
+  reduce_category(low, high.ast);
 }

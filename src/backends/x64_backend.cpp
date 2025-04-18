@@ -4539,7 +4539,7 @@ void x64_init(CompilerGlobals* comp, CompilerThread* comp_thread,
         &X64::CONVENTION_microsoft_x64,
         std::move(params), comp->builtin_types->t_void);
   }
-  lib.label = comp->next_function_label(type, Span{});
+  lib.label = comp->next_function_label(type, Span{}, NULL_ID);
 
 
   x64_emit_dyn_library_function(comp_thread, &lib, type->calling_convention, program);

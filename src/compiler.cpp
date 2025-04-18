@@ -45,7 +45,7 @@ CompilationUnit* CompilationUnitStore::get_unit_if_exists(u64 id) const {
   return nullptr;
 }
 
-IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s, const Span& span) {
+IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s, const Span& span, UnitID dependency) {
   AXLE_TELEMETRY_FUNCTION();
   ir_mutex.acquire();
   label_mutex.acquire();
@@ -56,7 +56,7 @@ IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s
   ir->global_label = label;
   ir->signature = s;
 
-  label_signature_table.insert({s, span, ir});
+  label_signature_table.insert({s, span, ir, dependency});
 
   ir_mutex.release();
   label_mutex.release();
@@ -119,8 +119,7 @@ CompilationUnit* new_compilation_unit(CompilerGlobals* comp,
                                       COMPILATION_UNIT_TYPE unit_type,
                                       Namespace* names,
                                       AST_LOCAL root,
-                                      void* detail,
-                                      bool print) {
+                                      void* detail) noexcept {
   AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(comp != nullptr);
@@ -146,7 +145,7 @@ CompilationUnit* new_compilation_unit(CompilerGlobals* comp,
 
   compilation->in_flight_units += 1;
 
-  if (print) {
+  if (comp->print_options.comp_units) {
     IO::format("Started Comp Unit {}       | Active = {}, In flight = {}\n",
                  unit->id, compilation->store.active_units.size, compilation->in_flight_units);
   }
@@ -238,10 +237,10 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
   bool has_return = sig_struct->return_type != comp_thread->builtin_types->t_void;
 
   Axle::Array<IR::V_ARG> args;
-  args.reserve_total(call->arguments.count + (usize)has_return);
+  args.reserve_total(call->arguments.size + (usize)has_return);
 
-  FOR_AST(call->arguments, it) {
-    bool indirect = Eval::must_pass_type_by_reference(call->sig->calling_convention, it->node_type.structure);
+  for (AST_LOCAL it: call->arguments) {
+    bool indirect = Eval::must_pass_type_by_reference(call->sig->calling_convention, it.ast->node_type.structure);
 
     NodeEval arg_eval = NodeEval::new_value(it);
     if (indirect) {
@@ -265,7 +264,7 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
     args.insert(v_arg);
   }
 
-  ASSERT(args.size == call->arguments.count);
+  ASSERT(args.size == call->arguments.size);
 
 
   if (has_return) {
@@ -395,11 +394,11 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
   AXLE_TELEMETRY_FUNCTION();
 
   AST_LOCAL expr = eval.expr;
-  ASSERT(expr->node_type.is_valid());
+  ASSERT(expr.ast->node_type.is_valid());
 
-  switch (expr->ast_type) {
+  switch (expr.ast->ast_type) {
     case AST_TYPE::NAMED_TYPE: {
-        ASTNamedType* nt = (ASTNamedType*)expr;
+        ASTNamedType* nt = downcast_ast<ASTNamedType>(expr);
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
@@ -410,7 +409,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
     case AST_TYPE::ARRAY_TYPE: {
-        ASTArrayType* nt = (ASTArrayType*)expr;
+        ASTArrayType* nt = downcast_ast<ASTArrayType>(expr);
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
@@ -421,7 +420,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
     case AST_TYPE::PTR_TYPE: {
-        ASTPtrType* nt = (ASTPtrType*)expr;
+        ASTPtrType* nt = downcast_ast<ASTPtrType>(expr);
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
@@ -432,7 +431,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
     case AST_TYPE::SLICE_TYPE: {
-        ASTSliceType* nt = (ASTSliceType*)expr;
+        ASTSliceType* nt = downcast_ast<ASTSliceType>(expr);
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
@@ -443,7 +442,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
     case AST_TYPE::LAMBDA_TYPE: {
-        ASTLambdaType* nt = (ASTLambdaType*)expr;
+        ASTLambdaType* nt = downcast_ast<ASTLambdaType>(expr);
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
@@ -454,7 +453,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
     case AST_TYPE::TUPLE_TYPE: {
-        ASTTupleType* nt = (ASTTupleType*)expr;
+        ASTTupleType* nt = downcast_ast<ASTTupleType>(expr);
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
@@ -465,8 +464,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
     case AST_TYPE::STRUCT_EXPR: {
-        ASTStructExpr* se = (ASTStructExpr*)expr;
-        ASTStructBody* s = (ASTStructBody*)se->struct_body;
+        ASTStructExpr* se = downcast_ast<ASTStructExpr>(expr);
+        ASTStructBody* s = downcast_ast<ASTStructBody>(se->struct_body);
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
@@ -477,8 +476,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
       }
     case AST_TYPE::LAMBDA_EXPR: {
-        ASTLambdaExpr* le = (ASTLambdaExpr*)expr;
-        ASTLambda* l = (ASTLambda*)le->lambda;
+        ASTLambdaExpr* le = downcast_ast<ASTLambdaExpr>(expr);
+        ASTLambda* l = downcast_ast<ASTLambda>(le->lambda);
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
@@ -491,10 +490,10 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)label, le->node_type);
       }
     case AST_TYPE::MEMBER_ACCESS: {
-        ASTMemberAccessExpr* member_e = (ASTMemberAccessExpr*)expr;
+        ASTMemberAccessExpr* member_e = downcast_ast<ASTMemberAccessExpr>(expr);
         AST_LOCAL m_base = member_e->expr;
 
-        STRUCTURE_TYPE st = m_base->node_type.struct_type();
+        STRUCTURE_TYPE st = m_base.ast->node_type.struct_type();
         if (st == STRUCTURE_TYPE::COMPOSITE) {
           Eval::RuntimeValue obj = compile_bytecode(comp, comp_thread,
                                                     builder, eval.forward(m_base));
@@ -524,7 +523,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           }
           else if (member_e->name == comp->important_names.len) {
             ASSERT(!eval.requirements.has_address());
-            const ArrayStructure* as = m_base->node_type.unchecked_base<ArrayStructure>();
+            const ArrayStructure* as = m_base.ast->node_type.unchecked_base<ArrayStructure>();
 
             u64 val = as->length;
 
@@ -536,7 +535,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             return Eval::as_constant(val_c, comp_thread->builtin_types->t_u64);
           }
           else {
-            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, member_e->node_span,
                                       "No semantics supported for the member \"{}\" on an array", member_e->name);
             return Eval::no_value();
           }
@@ -570,24 +569,25 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                     indirect_type, comp->builtin_types->t_u64);
           }
           else {
-            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, member_e->node_span,
                                       "No semantics supported for the member \"{}\" on an array", member_e->name);
             return Eval::no_value();
           }
         }
         else {
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                                    "Type \"{}\" does not support member access", m_base->node_type.name);
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, member_e->node_span,
+                                    "Type \"{}\" does not support member access", m_base.ast->node_type.name);
           return Eval::no_value();
         }
       }
     case AST_TYPE::INDEX_EXPR: {
-        const Type base_type = expr->node_type;
+        ASTIndexExpr* const index = downcast_ast<ASTIndexExpr>(expr);
+        AST_LOCAL index_expr = index->expr;
+        
+        const Type base_type = index->node_type;
         const size_t base_size = base_type.size();
 
 
-        ASTIndexExpr* index = (ASTIndexExpr*)expr;
-        AST_LOCAL index_expr = index->expr;
         
         Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
             builder, eval.forward(index_expr, IR::ValueRequirements::Address));
@@ -595,12 +595,12 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           return Eval::no_value();
         }
 
-        const usize count = index->arguments.count;
+        const usize count = index->arguments.size;
 
         if(count == 1) {
-          ASSERT(TYPE_TESTS::can_index(index_expr->node_type));
+          ASSERT(TYPE_TESTS::can_index(index_expr.ast->node_type));
 
-          AST_LOCAL index_index = index->arguments.start->curr;
+          AST_LOCAL index_index = index->arguments[0];
 
           Eval::RuntimeValue index_val = compile_bytecode(comp, comp_thread,
               builder, NodeEval::new_value(index_index));
@@ -615,11 +615,11 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           {
             emit_info.dest_type = comp_thread->builtin_types->t_u64;
             emit_info.main_side = MainSide::LEFT;
-            emit_info.func = &BinOpArgs::emit_mul_ints;
+            emit_info.op_full = BinOpFull::mul_ints;
           }
 
           BinOpArgs args = {
-            &emit_info,
+            emit_info,
             comp,
             builder->ir,
             index_val,
@@ -633,22 +633,22 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           return Eval::sub_object(builder->ir, arr, offset, t);
         }
         else if(count == 0) {
-          const Type& index_type = index_expr->node_type;
+          const Type& index_type = index_expr.ast->node_type;
           if (index_type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
-            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, index->node_span,
               "For now can only slice fixed arrays: {}", count);
             return Eval::no_value();
           }
           const ArrayStructure* as = index_type.unchecked_base<ArrayStructure>();
 
-          ASSERT(expr->node_type.struct_type() == STRUCTURE_TYPE::SLICE);
-          const SliceStructure* slice_s = expr->node_type.unchecked_base<SliceStructure>();
+          ASSERT(index->node_type.struct_type() == STRUCTURE_TYPE::SLICE);
+          const SliceStructure* slice_s = index->node_type.unchecked_base<SliceStructure>();
 
           const Type ptr_t = generate_pointer_type(comp, slice_s->base);
 
-          IR::ValueIndex v = builder->ir->new_temporary(expr->node_type, eval.requirements);
+          IR::ValueIndex v = builder->ir->new_temporary(index->node_type, eval.requirements);
 
-          Eval::RuntimeValue slice = Eval::as_direct(v, expr->node_type);
+          Eval::RuntimeValue slice = Eval::as_direct(v, index->node_type);
 
           Eval::RuntimeValue ptr_member = slice;
           ptr_member.value.offset = 0;
@@ -680,41 +680,42 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           return slice;
         }
         else if (count == 2) {
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, index->node_span,
               "Slices with values are not implemented yet");
           return Eval::no_value();
         }
         else {
-          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+          comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, index->node_span,
               "Invalid number of index parameters: {}", count);
           return Eval::no_value();
         }
       }
     case AST_TYPE::TUPLE_LIT: {
-        ASSERT(expr->node_type.struct_type() == STRUCTURE_TYPE::COMPOSITE);
+        ASTTupleLitExpr* const lit = downcast_ast<ASTTupleLitExpr>(expr);
+        
+        ASSERT(lit->node_type.struct_type() == STRUCTURE_TYPE::COMPOSITE);
 
-        const auto* cpst = expr->node_type.unchecked_base<CompositeStructure>();
+        const auto* cpst = lit->node_type.unchecked_base<CompositeStructure>();
 
         ASSERT(!eval.requirements.has_address());
-        ASTTupleLitExpr* lit = (ASTTupleLitExpr*)expr;
 
         Eval::RuntimeValue tup_lit = {};
         u8* tup_constant = nullptr;
 
 
-        const bool is_constant = VC::is_comptime(expr->value_category);
+        const bool is_constant = VC::is_comptime(lit->value_category);
         if (is_constant) {
           tup_constant = comp->new_constant(cpst->size);
-          tup_lit = Eval::as_constant(tup_constant, expr->node_type);
+          tup_lit = Eval::as_constant(tup_constant, lit->node_type);
         }
         else {
-          IR::ValueIndex v = builder->ir->new_temporary(expr->node_type, eval.requirements);
-          tup_lit = Eval::as_direct(v, expr->node_type);
+          IR::ValueIndex v = builder->ir->new_temporary(lit->node_type, eval.requirements);
+          tup_lit = Eval::as_direct(v, lit->node_type);
         }
 
         auto i_t = cpst->elements.begin();
 
-        FOR_AST(lit->elements, it) {
+        for (AST_LOCAL it: lit->elements) {
           Eval::RuntimeValue v = compile_bytecode(comp, comp_thread, builder, NodeEval::new_value(it));
           if (comp_thread->is_panic()) {
             return Eval::no_value();
@@ -742,30 +743,31 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return tup_lit;
       }
     case AST_TYPE::ARRAY_EXPR: {
-        const auto* const arr_type = expr->node_type.unchecked_base<ArrayStructure>();
+        ASTArrayExpr* arr_expr = downcast_ast<ASTArrayExpr>(expr);
+        
+        const auto* const arr_type = arr_expr->node_type.unchecked_base<ArrayStructure>();
 
         const Type base_type = arr_type->base;
 
-        ASTArrayExpr* arr_expr = (ASTArrayExpr*)expr;
 
         ASSERT(!eval.requirements.has_address());
 
         Eval::RuntimeValue arr = {};
         u8* arr_constant = nullptr;
 
-        const bool is_constant = VC::is_comptime(expr->value_category);
+        const bool is_constant = VC::is_comptime(arr_expr->value_category);
         if (is_constant) {
           arr_constant = comp->new_constant(arr_type->size);
-          arr = Eval::as_constant(arr_constant, expr->node_type);
+          arr = Eval::as_constant(arr_constant, arr_expr->node_type);
         }
         else {
-          IR::ValueIndex v = builder->ir->new_temporary(expr->node_type, eval.requirements);
-          arr = Eval::as_direct(v, expr->node_type);
+          IR::ValueIndex v = builder->ir->new_temporary(arr_expr->node_type, eval.requirements);
+          arr = Eval::as_direct(v, arr_expr->node_type);
         }
 
         usize count = 0;
 
-        FOR_AST(arr_expr->elements, it) {
+        for (AST_LOCAL it: arr_expr->elements) {
           Eval::RuntimeValue el = compile_bytecode(comp, comp_thread, builder, NodeEval::new_value(it));
           if (comp_thread->is_panic()) {
             return Eval::no_value();
@@ -798,7 +800,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return arr;
       }
     case AST_TYPE::ASCII_CHAR: {
-        ASTAsciiChar* ch = (ASTAsciiChar*)expr;
+        ASTAsciiChar* ch = downcast_ast<ASTAsciiChar>(expr);
         ASSERT(!eval.requirements.has_address());
 
         char* char_c = comp->new_constant<char>();
@@ -807,10 +809,10 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)char_c, ch->node_type);
       }
     case AST_TYPE::ASCII_STRING: {
-        ASTAsciiString* st = (ASTAsciiString*)expr;
+        ASTAsciiString* st = downcast_ast<ASTAsciiString>(expr);
         ASSERT(!eval.requirements.has_address());
 
-        const auto* const arr_type = expr->node_type.unchecked_base<ArrayStructure>();
+        const auto* const arr_type = st->node_type.unchecked_base<ArrayStructure>();
 
         const size_t size = arr_type->size;
         char* string_c = (char*)comp->new_constant(size);
@@ -819,10 +821,10 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)string_c, st->node_type);
       }
     case AST_TYPE::NUMBER: {
-        ASTNumber* num = (ASTNumber*)expr;
+        ASTNumber* num = downcast_ast<ASTNumber>(expr);
         ASSERT(!eval.requirements.has_address());
 
-        const size_t size = expr->node_type.structure->size;
+        const size_t size = num->node_type.structure->size;
 
         uint8_t* val_c = comp->new_constant(size);
         Axle::memcpy_ts(val_c, size, (uint8_t*)&num->num_value, size);
@@ -830,7 +832,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant(val_c, num->node_type);
       }
     case AST_TYPE::IDENTIFIER_EXPR: {
-        ASTIdentifier* ident = (ASTIdentifier*)expr;
+        ASTIdentifier* ident = downcast_ast<ASTIdentifier>(expr);
 
         if (ident->id_type == ASTIdentifier::LOCAL) {
           Local* local = ident->local;
@@ -861,12 +863,12 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           }
         }
 
-        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, ident->node_span,
                                   "Invalid or missing identifier type: {}", ident->id_type);
         return Eval::no_value();
       }
     case AST_TYPE::LINK: {
-        const ASTLink* li = (ASTLink*)expr;
+        const ASTLink* li = downcast_ast<ASTLink>(expr);
         ASSERT(!eval.requirements.has_address());
 
         const IR::DynLibraryImport& imp = comp->dyn_lib_imports[li->import_index - 1];
@@ -879,7 +881,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return Eval::as_constant((const u8*)label_holder, li->node_type);
       }
     case AST_TYPE::CAST: {
-        const ASTCastExpr* const cast = (ASTCastExpr*)expr;
+        const ASTCastExpr* const cast = downcast_ast<ASTCastExpr>(expr);
         ASSERT(!eval.requirements.has_address());
 
         Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread,
@@ -893,7 +895,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return res;
       }
     case AST_TYPE::UNARY_OPERATOR: {
-        const ASTUnaryOperatorExpr* const un_op = (ASTUnaryOperatorExpr*)expr;
+        const ASTUnaryOperatorExpr* const un_op = downcast_ast<ASTUnaryOperatorExpr>(expr);
         ASSERT(!eval.requirements.has_address());
 
         Eval::RuntimeValue ref;
@@ -921,7 +923,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         }
 
         UnOpArgs args = {
-          &un_op->emit_info,
+          un_op->emit_info,
           comp,
           builder->ir,
           ref,
@@ -930,7 +932,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         return args.emit();
       }
     case AST_TYPE::BINARY_OPERATOR: {
-        const ASTBinaryOperatorExpr* const bin_op = (ASTBinaryOperatorExpr*)expr;
+        const ASTBinaryOperatorExpr* const bin_op = downcast_ast<ASTBinaryOperatorExpr>(expr);
         AST_LOCAL left = bin_op->left;
         AST_LOCAL right = bin_op->right;
 
@@ -947,7 +949,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         }
 
         BinOpArgs args = {
-          &bin_op->emit_info,
+          bin_op->emit_info,
           comp,
           builder->ir,
           temp_left,
@@ -977,8 +979,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
     default: {
         //Invalid enum type
         //probably just didnt get around to supporting it
-        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr->node_span,
-                                  "Invalid expression type: {}", ast_type_string(expr->ast_type));
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, expr.ast->node_span,
+                                  "Invalid expression type: {}", ast_type_string(expr.ast->ast_type));
         return Eval::no_value();
       }
   }
@@ -992,9 +994,9 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 
   //TODD: warnings for inaccessible statements
 
-  switch (statement->ast_type) {
+  switch (statement.ast->ast_type) {
     case AST_TYPE::ASSIGN: {
-        ASTAssign* assign = (ASTAssign*)statement;
+        ASTAssign* assign = downcast_ast<ASTAssign>(statement);
 
         Eval::RuntimeValue a = compile_bytecode(comp, comp_thread,
                                                 builder, NodeEval::new_value(assign->assign_to));
@@ -1009,11 +1011,11 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         return;
       }
     case AST_TYPE::BLOCK: {
-        ASTBlock* block = (ASTBlock*)statement;
+        ASTBlock* block = downcast_ast<ASTBlock>(statement);
 
         usize scope_size = builder->variables_state.size;
 
-        FOR_AST(block->block, it) {
+        for (AST_LOCAL it: block->block) {
           compile_bytecode_of_statement(comp, comp_thread, builder, it);
           if (comp_thread->is_panic()) {
             return;
@@ -1025,9 +1027,9 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         return;
       }
     case AST_TYPE::RETURN: {
-        ASTReturn* ret = (ASTReturn*)statement;
+        ASTReturn* ret = downcast_ast<ASTReturn>(statement);
 
-        if (ret->expr != nullptr) {
+        if (ret->expr != NULL_AST_NODE) {
           Eval::RuntimeValue r = compile_bytecode(comp, comp_thread,
                                                   builder, NodeEval::new_value(ret->expr));
           if (comp_thread->is_panic()) {
@@ -1059,7 +1061,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         return;
       }
     case AST_TYPE::WHILE: {
-        ASTWhile* const while_loop = (ASTWhile*)statement;
+        ASTWhile* const while_loop = downcast_ast<ASTWhile>(statement);
 
         IR::LocalLabel parent = builder->ir->current_block;
 
@@ -1148,7 +1150,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         return;
       }
     case AST_TYPE::IF_ELSE: {
-        ASTIfElse* const if_else = (ASTIfElse*)statement;
+        ASTIfElse* const if_else = downcast_ast<ASTIfElse>(statement);
 
         const IR::LocalLabel parent = builder->ir->current_block;
         const IR::LocalLabel split_label = builder->ir->new_control_block();
@@ -1216,7 +1218,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         IR::LocalLabel else_end_parent = split_label;
         IR::LocalLabel else_end = else_label;
 
-        if (if_else->else_statement != 0) {
+        if (if_else->else_statement != NULL_AST_NODE) {
           builder->switch_control_block(else_end, else_end_parent);
 
           compile_bytecode_of_statement(comp, comp_thread, builder, if_else->else_statement);
@@ -1283,7 +1285,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
         return;
       }
     case AST_TYPE::DECL: {
-        ASTDecl* const decl = (ASTDecl*)statement;
+        ASTDecl* const decl = downcast_ast<ASTDecl>(statement);
 
         ASSERT(decl->decl_type == ASTDecl::TYPE::LOCAL);//globals are done elsewhere (maybe move that to here?)
         Local* const local = decl->local_ptr;
@@ -1350,8 +1352,8 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     default: {
         //Invalid enum type
         //probably just didnt get around to supporting it
-        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, statement->node_span,
-            "Invalid statement type: {}", ast_type_string(statement->ast_type));
+        comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, statement.ast->node_span,
+            "Invalid statement type: {}", ast_type_string(statement.ast->ast_type));
         return;
     }
   }
@@ -1371,8 +1373,8 @@ void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
 void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, IR::EvalPromise* eval) {
   AXLE_TELEMETRY_FUNCTION();
 
-  if (!VC::is_comptime(root->value_category)) {
-    comp_thread->report_error(ERROR_CODE::VM_ERROR, root->node_span, "Cannot evaluate a non-comptime expression");
+  if (!VC::is_comptime(root.ast->value_category)) {
+    comp_thread->report_error(ERROR_CODE::VM_ERROR, root.ast->node_span, "Cannot evaluate a non-comptime expression");
     return;
   }
 
@@ -1399,7 +1401,7 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
   ASSERT(expr_ir.completed);
 
   const Type ref_type = ref.effective_type();
-  ASSERT(ref_type == root->node_type);
+  ASSERT(ref_type == root.ast->node_type);
 
   if (!eval->type.is_valid()) {
     eval->type = ref_type;
@@ -1452,10 +1454,10 @@ static void compile_lambda_body(CompilerGlobals* comp,
     ASSERT(ir->signature == l_comp->func->signature.sig_struct);
 
 
-    ASSERT(root->sig->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
-    ASTFuncSig* func_sig = static_cast<ASTFuncSig*>(root->sig);
+    ASSERT(root->sig.ast->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
+    ASTFuncSig* func_sig = downcast_ast<ASTFuncSig>(root->sig);
     
-    ASSERT(ir->signature->parameter_types.size == func_sig->parameters.count);
+    ASSERT(ir->signature->parameter_types.size == func_sig->parameters.size);
 
     {
       Eval::IrBuilder builder;
@@ -1471,11 +1473,11 @@ static void compile_lambda_body(CompilerGlobals* comp,
           const Type* const parameters_end = signature->parameter_types.end();
           IR::V_ARG* va = args.mut_begin();
 
-          FOR_AST(func_sig->parameters, p) {
+          for (AST_LOCAL p: func_sig->parameters) {
             ASSERT(parameters < parameters_end);
-            ASSERT(p->node_type == *parameters);
-            ASSERT(p->ast_type == AST_TYPE::TYPED_NAME);
-            ASTTypedName* n = (ASTTypedName*)p;
+            ASSERT(p.ast->node_type == *parameters);
+            ASSERT(p.ast->ast_type == AST_TYPE::TYPED_NAME);
+            ASTTypedName* n = downcast_ast<ASTTypedName>(p);
             Local* local_ptr = n->local_ptr;
 
             const bool indirect = Eval::must_pass_type_by_reference(
@@ -1515,8 +1517,9 @@ static void compile_lambda_body(CompilerGlobals* comp,
       }
 
       {
-        AST_ARR arr = ((ASTBlock*)root->body)->block;
-        FOR_AST(arr, i) {
+        Axle::ViewArr<const AST_LOCAL> arr
+          = downcast_ast<ASTBlock>(root->body)->block;
+        for (AST_LOCAL i: arr) {
           compile_bytecode_of_statement(comp, comp_thread, &builder, i);
           if (comp_thread->is_panic()) {
             return;
@@ -1543,9 +1546,9 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread,  
 
   Axle::Array<Backend::DynExport> exports = {};
 
-  FOR_AST(root->export_list, it) {
-    ASSERT(it->ast_type == AST_TYPE::EXPORT_SINGLE);
-    const ASTExportSingle* es = static_cast<const ASTExportSingle*>(it);
+  for (AST_LOCAL it: root->export_list) {
+    ASSERT(it.ast->ast_type == AST_TYPE::EXPORT_SINGLE);
+    const ASTExportSingle* es = downcast_ast<ASTExportSingle>(it);
 
     IR::EvalPromise eval = {};
     IR::eval_ast(comp, comp_thread, es->value, &eval);
@@ -1556,7 +1559,7 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread,  
     ASSERT(eval.type.is_valid());
 
     if (eval.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
-      comp_thread->report_error(ERROR_CODE::LINK_ERROR, it->node_span,
+      comp_thread->report_error(ERROR_CODE::LINK_ERROR, it.ast->node_span,
                                 "Can only export functions. Found: {}", eval.type.name);
       return;
     }
@@ -1705,7 +1708,7 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
   }
   else if (global->decl.init_value == nullptr) {
     const SignatureStructure* sig = (const SignatureStructure*)comp->builtin_types->t_void_call.structure;
-    IR::GlobalLabel label = comp->next_function_label(sig, global->decl.span);
+    IR::GlobalLabel label = comp->next_function_label(sig, global->decl.span, NULL_ID);
 
     IR::IRStore* ir = comp->get_ir(label);
     ASSERT(ir->signature == sig);
@@ -1854,8 +1857,8 @@ void add_comp_unit_for_import(CompilerGlobals* const comp, Namespace* ns, const 
 
     imp_unit = new_compilation_unit(comp, compilation._ptr,
                                     COMPILATION_UNIT_TYPE::IMPORT,
-                                    ns, imp,
-                                    (void*)extra, comp->print_options.comp_units);
+                                    ns, { imp },
+                                    (void*)extra);
   }
 
   ASSERT(imp_unit != nullptr);
@@ -1872,8 +1875,8 @@ void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExp
 
     exp_unit = new_compilation_unit(comp, compilation._ptr,
                                     COMPILATION_UNIT_TYPE::EXPORT,
-                                    ns, e,
-                                    extra, comp->print_options.comp_units);
+                                    ns, { e },
+                                    extra);
   }
 
   ASSERT(exp_unit != nullptr);
@@ -1893,8 +1896,8 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDec
     extra->global = glob;
     glob_unit = new_compilation_unit(comp, compilation._ptr,
                                      COMPILATION_UNIT_TYPE::GLOBAL,
-                                     ns, global,
-                                     (void*)extra, comp->print_options.comp_units);
+                                     ns, { global },
+                                     extra);
   }
 
   glob->decl.name = global->name;
@@ -1915,7 +1918,7 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
 
   func->declaration = lambda;
 
-  ASTFuncSig* func_sig = (ASTFuncSig*)(lambda->sig);
+  ASTFuncSig* func_sig = downcast_ast<ASTFuncSig>(lambda->sig);
   func_sig->sig = &func->signature;
   func_sig->convention = comp->build_options.default_calling_convention;
 
@@ -1929,8 +1932,8 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
 
     sig_unit = new_compilation_unit(comp, compilation._ptr,
                                     COMPILATION_UNIT_TYPE::LAMBDA_SIG,
-                                    ns, func_sig,
-                                    sig_extra, comp->print_options.comp_units);
+                                    ns, { func_sig },
+                                    sig_extra);
 
     func->sig_unit_id = sig_unit->id;
   }
@@ -1947,8 +1950,8 @@ void add_comp_unit_for_struct(CompilerGlobals* const comp, Namespace* ns, ASTStr
 
     unit = new_compilation_unit(comp, compilation._ptr,
                                 COMPILATION_UNIT_TYPE::STRUCTURE,
-                                ns, struct_body,
-                                struct_extra, comp->print_options.comp_units);
+                                ns, { struct_body },
+                                struct_extra);
 
     struct_body->unit_id = unit->id;
   }
@@ -2211,7 +2214,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
     ASSERT(!unit->waiting());
 
-    ASSERT(unit->ast != nullptr);
+    ASSERT(unit->ast != NULL_AST_NODE);
     ASSERT(unit->available_names != nullptr);
     const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
     ASSERT(visit_arr.size > 0);
@@ -2258,7 +2261,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         ASSERT(unit->detail != nullptr);
         ImportCompilation* imp = (ImportCompilation*)unit->detail;
 
-        ASSERT(unit->ast != nullptr);
+        ASSERT(unit->ast != NULL_AST_NODE);
         ASTImport* root = downcast_ast<ASTImport>(unit->ast);
 
         compile_import(comp, comp_thread, unit->available_names, root, imp);
@@ -2279,7 +2282,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
         ExportCompilation* ec = (ExportCompilation*)unit->detail;
 
-        ASSERT(unit->ast != nullptr);
+        ASSERT(unit->ast != NULL_AST_NODE);
         ASTExport* export_ast = downcast_ast<ASTExport>(unit->ast);
 
         compile_export(comp, comp_thread, export_ast);
@@ -2299,7 +2302,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       case COMPILATION_UNIT_TYPE::GLOBAL: {
         AXLE_TELEMETRY_SCOPE("Emit Global");
 
-        ASSERT(unit->ast != nullptr);
+        ASSERT(unit->ast != NULL_AST_NODE);
 
         ASTDecl* decl = downcast_ast<ASTDecl>(unit->ast);
         GlobalCompilation* global_extra = (GlobalCompilation*)unit->detail;
@@ -2336,7 +2339,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         AXLE_TELEMETRY_SCOPE("Compile Lambda Signature");
 
         LambdaSigCompilation* lsc = (LambdaSigCompilation*)unit->detail;
-        ASSERT(unit->ast != nullptr);
+        ASSERT(unit->ast != NULL_AST_NODE);
 
         //Only Job of this is to send off the inner dependency
         auto compilation = comp->services.compilation.get();
@@ -2353,7 +2356,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
           lbc->func = func;
 
           body_unit = new_compilation_unit(comp, compilation._ptr, COMPILATION_UNIT_TYPE::LAMBDA_BODY,
-                                           available_names, lambda, lbc, comp->print_options.comp_units);
+                                           available_names, { lambda }, lbc);
           
 
           // Need to do this after so the work counters are valid
@@ -2370,7 +2373,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
         LambdaBodyCompilation* lbc = (LambdaBodyCompilation*)unit->detail;
 
-        ASSERT(unit->ast != nullptr);
+        ASSERT(unit->ast != NULL_AST_NODE);
         ASTLambda* lambda = downcast_ast<ASTLambda>(unit->ast);
 
         compile_lambda_body(comp, comp_thread, lambda, lbc);
@@ -2397,11 +2400,11 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     ASSERT(!comp_thread->is_depends() && !comp_thread->is_panic());
 
     ASSERT(!unit->waiting());
-    ASSERT(unit->ast != nullptr);
+    ASSERT(unit->ast != NULL_AST_NODE);
     ASSERT(unit->available_names != nullptr);
 
     unit->visit_arr
-      = DC::dependency_check_ast(comp, comp_thread, unit->available_names, unit->ast);
+      = DC::type_dependency_check_ast(comp, comp_thread, unit->available_names, unit->ast);
     if (comp_thread->is_panic()) {
       return;
     }

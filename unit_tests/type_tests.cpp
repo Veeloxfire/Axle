@@ -8,16 +8,16 @@ struct Group {
   VALUE_CATEGORY low_start;
   VALUE_CATEGORY low_end;
 };
-static void test_reduce_vc(AxleTest::TestErrors* test_errors, AST_LOCAL low, AST_LOCAL high, const Group& g) {
+static void test_reduce_vc(AxleTest::TestErrors* test_errors, AST* low, AST_LOCAL high, const Group& g) {
   low->value_category = g.low_start;
-  high->value_category = g.high_start;
+  high.ast->value_category = g.high_start;
 
   reduce_category(low, high);
 
-  TEST_EQ(g.high_start, high->value_category);
+  TEST_EQ(g.high_start, high.ast->value_category);
   TEST_EQ(g.low_end, low->value_category);
 }
-#define TEST_REDUCE_VC(group) test_reduce_vc(test_errors, &low, &high, (group)); if(test_errors->is_panic()) return
+#define TEST_REDUCE_VC(group) test_reduce_vc(test_errors, &low, { &high }, (group)); if(test_errors->is_panic()) return
 
 TEST_FUNCTION(Types, ValueCategory) {
   AST high = {};

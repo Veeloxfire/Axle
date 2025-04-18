@@ -312,6 +312,7 @@ struct GlobalLabelInfo {
   const SignatureStructure* signature;
   Span span;
   IR::IRStore* ir;
+  UnitID dependency;
 };
 
 //Things that may be modified by multiple threads
@@ -354,7 +355,7 @@ struct CompilerGlobals : CompilerConstants {
   Axle::SpinLockMutex constants_mutex;
   Axle::ArenaAllocator constants_single_threaded = {};
 
-  IR::GlobalLabel next_function_label(const SignatureStructure* s, const Span& span);
+  IR::GlobalLabel next_function_label(const SignatureStructure* s, const Span& span, UnitID dependency);
   GlobalLabelInfo get_label_info(IR::GlobalLabel label);
 
   IR::IRStore* get_ir(IR::GlobalLabel label);

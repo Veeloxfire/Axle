@@ -6,6 +6,7 @@
 #include <AxleUtil/memory.h>
 
 #include "errors.h"
+#include "ast.h"
 
 #define AXLE_TOKEN_KEYWORDS \
 MODIFY(Return, "return") \
@@ -136,10 +137,8 @@ struct Namespace;
 struct Parser {
   Lexer lexer = {};
 
-  Axle::MemoryPool ast_store ={};
-  Axle::Array<AST_LOCAL> eval_order = {};
-  Axle::Array<AST_LOCAL> infer_order = {};
-
+  Axle::GrowingMemoryPool<32 * 1024> ast_store = {};
+  
   TokenStream stream;
   Namespace* current_namespace;
 
@@ -148,13 +147,26 @@ struct Parser {
   Token next ={};
 
   Axle::FileLocation file_path = {};
-  constexpr const Axle::InternString* full_path() const { return file_path.full_name; }
+  constexpr const Axle::InternString* full_path() const noexcept { return file_path.full_name; }
 };
 
-template<typename T>
-T* ast_alloc(Parser* p) {
-  static_assert(Axle::A_can_cast_to_B<T, AST>, "Only allocate ast nodes using this");
-  return p->ast_store.push<T>();
+template<IsASTDataNode T>
+T* ast_alloc(Parser* p) noexcept {
+  return p->ast_store.allocate<T>();
+}
+
+inline Axle::ViewArr<const AST_LOCAL>
+  ast_bake_arr(Parser* p, Axle::Array<AST_LOCAL>&& param_arr) noexcept {
+  Axle::Array<AST_LOCAL> arr = std::move(param_arr);
+
+  if (arr.size == 0) return { nullptr, 0 };
+  
+  AST_LOCAL* l = p->ast_store.allocate_n<AST_LOCAL>(arr.size);
+
+  Axle::ViewArr<AST_LOCAL> out_arr = { l, arr.size };
+
+  Axle::memcpy_ts(out_arr, const_view_arr(arr));
+  return out_arr;
 }
 
 struct CompilerGlobals;
