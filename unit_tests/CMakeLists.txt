@@ -1,11 +1,3 @@
-if(NOT DEFINED AxleUtilINCLUDE)
-  message(FATAL_ERROR "Require AxleUtilINCLUDE (axle util include path) to be provided")
-endif()
-
-if(NOT DEFINED AxleUtilBIN)
-  message(FATAL_ERROR "Require AxleUtilBIN (axle util library path) to be provided")
-endif()
-
 if(AxleTRACING)
   message(FATAL_ERROR "Cannot trace the unit tests")
 endif()
@@ -31,8 +23,7 @@ add_dependencies(UnitTestsServer UnitTestsClient)
 target_compile_definitions(UnitTestsServer PRIVATE UNIT_TEST_CLIENT_EXE="UnitTestsClient$<CONFIG>.exe")
 target_compile_definitions(UnitTestsClient PRIVATE STACKTRACE_ENABLE)
 
-target_include_directories(UnitTestsClient PRIVATE "${PROJECT_SOURCE_DIR}/src" $"${PROJECT_SOURCE_DIR}/include" ${AxleUtilINCLUDE})
-target_include_directories(UnitTestsServer PRIVATE ${AxleUtilINCLUDE})
+target_include_directories(UnitTestsClient PRIVATE "${PROJECT_SOURCE_DIR}/src" $"${PROJECT_SOURCE_DIR}/include")
 
 target_sources(UnitTestsServer PRIVATE
   "${PROJECT_SOURCE_DIR}/unit_tests/test_server_main.cpp"
@@ -47,5 +38,5 @@ target_sources(UnitTestsClient PRIVATE
   "${PROJECT_SOURCE_DIR}/unit_tests/type_tests.cpp"
   "${PROJECT_SOURCE_DIR}/unit_tests/vm_tests.cpp"
 )
-target_link_libraries(UnitTestsServer "${AxleUtilBIN}/AxleTestServer$<CONFIG>.lib" "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
-target_link_libraries(UnitTestsClient AxleCompiler "${AxleUtilBIN}/AxleTestClient$<CONFIG>.lib")
+target_link_libraries(UnitTestsServer AxleUtil::TestServer AxleUtil::Core)
+target_link_libraries(UnitTestsClient AxleCompiler AxleUtil::TestClient)

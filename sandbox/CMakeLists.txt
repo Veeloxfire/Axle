@@ -11,14 +11,6 @@ foreach(config_type ${CMAKE_CONFIGURATION_TYPES})
   )
 endforeach()
 
-if(NOT DEFINED AxleUtilINCLUDE)
-  message(FATAL_ERROR "Require AxleUtilINCLUDE (axle util include path) to be provided")
-endif()
-
-if(NOT DEFINED AxleUtilBIN)
-  message(FATAL_ERROR "Require AxleUtilBIN (axle util library path) to be provided")
-endif()
-
 option(AxleTRACING "Enable tracing" OFF)
 if(AxleTRACING) 
   if(NOT DEFINED TracerINCLUDE)
@@ -35,5 +27,5 @@ if(AxleTRACING)
   target_link_libraries(AxleSandbox "${TracerBIN}/Tracer.lib")
 endif()
 
-target_include_directories(AxleSandbox PRIVATE "${PROJECT_SOURCE_DIR}/sandbox/src" ${AxleUtilINCLUDE})
-target_link_libraries(AxleSandbox AxleCompiler "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
+target_include_directories(AxleSandbox PRIVATE "${PROJECT_SOURCE_DIR}/sandbox/src")
+target_link_libraries(AxleSandbox AxleCompiler AxleUtil::Core)

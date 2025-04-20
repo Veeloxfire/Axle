@@ -4,6 +4,12 @@ project(AxleCompiler)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+if (DEFINED CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND DEFINED ENV{CMAKE_INSTALL_PREFIX})
+  set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE $ENV{CMAKE_INSTALL_PREFIX})
+endif()
+
+message("Install Prefix: ${CMAKE_INSTALL_PREFIX}")
+
 foreach(config_type ${CMAKE_CONFIGURATION_TYPES})
   string(TOUPPER ${config_type} config_upper)
   if(NOT DEFINED "CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper}")
@@ -19,12 +25,7 @@ endforeach()
 
 option(AxleTRACING "Enable tracing" OFF)
 
-if(NOT DEFINED AxleUtilINCLUDE)
-  message(FATAL_ERROR "Requires AxleUtilINCLUDE to compile")
-endif()
-if(NOT DEFINED AxleUtilBIN)
-  message(FATAL_ERROR "Requires AxleUtilBIN to compile")
-endif()
+find_package(AxleUtil)
 
 set(AxleINCLUDE "${PROJECT_SOURCE_DIR}/include")
 set(AxleSRC "${PROJECT_SOURCE_DIR}/src")
@@ -51,9 +52,9 @@ endif()
 
 target_compile_options(AxleCompiler PUBLIC ${CxxFlags})
 
-target_link_libraries(AxleCompiler PUBLIC "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
+target_link_libraries(AxleCompiler PUBLIC AxleUtil::Core)
 target_include_directories(AxleCompiler PUBLIC ${AxleINCLUDE})
-target_include_directories(AxleCompiler PUBLIC "${PROJECT_SOURCE_DIR}/src" ${AxleUtilINCLUDE})
+target_include_directories(AxleCompiler PRIVATE "${PROJECT_SOURCE_DIR}/src")
 
 if(AxleTRACING)
   if(NOT DEFINED TracerINCLUDE)

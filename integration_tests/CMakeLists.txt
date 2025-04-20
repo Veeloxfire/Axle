@@ -1,11 +1,3 @@
-if(NOT DEFINED AxleUtilINCLUDE)
-  message(FATAL_ERROR "Require AxleUtilINCLUDE (axle util include path) to be provided")
-endif()
-
-if(NOT DEFINED AxleUtilBIN)
-  message(FATAL_ERROR "Require AxleUtilBIN (axle util library path) to be provided")
-endif()
-
 if(NOT DEFINED TesterINCLUDE)
   message(FATAL_ERROR "Require TesterINCLUDE (tester include path) to be provided")
 endif()
@@ -41,10 +33,8 @@ target_compile_definitions(IntegrationTestsClient PRIVATE
 )
 
 target_compile_definitions(IntegrationTestsClient PRIVATE STACKTRACE_ENABLE)
+target_include_directories(IntegrationTestsClient PRIVATE "${PROJECT_SOURCE_DIR}/integration_tests/src" ${TesterINCLUDE})
 
-target_include_directories(IntegrationTestsClient PRIVATE ${AxleUtilINCLUDE} "${PROJECT_SOURCE_DIR}/integration_tests/src" ${TesterINCLUDE})
-
-target_include_directories(IntegrationTestsServer PRIVATE ${AxleUtilINCLUDE})
 
 target_sources(IntegrationTestsServer PRIVATE
   "${PROJECT_SOURCE_DIR}/integration_tests/src/test_server_main.cpp"
@@ -55,8 +45,8 @@ target_sources(IntegrationTestsClient PRIVATE
   "${PROJECT_SOURCE_DIR}/integration_tests/src/tests.cpp"
 )
 
-target_link_libraries(IntegrationTestsServer "${AxleUtilBIN}/AxleTestServer$<CONFIG>.lib" "${AxleUtilBIN}/AxleUtil$<CONFIG>.lib")
-target_link_libraries(IntegrationTestsClient AxleCompiler TesterLib "${AxleUtilBIN}/AxleTestClient$<CONFIG>.lib")
+target_link_libraries(IntegrationTestsServer AxleUtil::TestServer AxleUtil::Core)
+target_link_libraries(IntegrationTestsClient AxleCompiler TesterLib AxleUtil::TestClient)
 
 add_custom_target(CopyDLL ALL
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:TesterDll>/Tester.dll" "${PROJECT_SOURCE_DIR}/integration_tests/out/")
