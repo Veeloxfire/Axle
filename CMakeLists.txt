@@ -33,6 +33,7 @@ set(AxleHeaders
   "${AxleINCLUDE}/Axle/comp_utilities.h"
   "${AxleINCLUDE}/Axle/api.h"
   "${AxleINCLUDE}/Axle/calling_convention.h"
+  "${AxleINCLUDE}/Axle/tracing_wrapper.h"
   "${AxleINCLUDE}/Axle/backends/x64_backend.h"
   "${AxleINCLUDE}/Axle/backends/PE_file_format.h")
 
