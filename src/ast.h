@@ -397,15 +397,15 @@ namespace Axle::Format {
       res.load_char_raw('(');
 
       if (call->arguments.size > 0) {
-        const AST* loc = call->arguments.begin();
-        const AST* end = call->arguments.end();
+        const AST_LOCAL* loc = call->arguments.begin();
+        const AST_LOCAL* const end = call->arguments.end();
 
-        FormatArg<const Axle::InternString*>::load_string(res,  loc->node_type.name);
+        FormatArg<const Axle::InternString*>::load_string(res,  loc->ast->node_type.name);
         loc += 1;
 
         for(; loc < end; ++loc) {
           res.load_string_raw(", ");
-          FormatArg<const Axle::InternString*>::load_string(res, loc->node_type.name);
+          FormatArg<const Axle::InternString*>::load_string(res, loc->ast->node_type.name);
         }
       }
 
