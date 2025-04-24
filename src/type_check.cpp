@@ -383,9 +383,7 @@ TC_STAGE(LAMBDA_EXPR_DOWN) {
   EXPAND_THIS(ASTLambdaExpr, le);
   
   ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
-  ASTFuncSig* ast_sig = downcast_ast<ASTFuncSig>(lambda->sig);
-
-  const SignatureStructure* sig_struct = ast_sig->sig->sig_struct;
+  const SignatureStructure* sig_struct = lambda->function->sig_struct;
   ASSERT(sig_struct != nullptr);//should be done in the signature unit
 
   le->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
@@ -421,10 +419,10 @@ TC_STAGE(FUNCTION_SIGNATURE_DOWN) {
                                                bake_arr(std::move(params)), ret_type);
   }
 
-  ast_sig->sig->label = comp->next_function_label(sig_struct, ast_sig->node_span, NULL_ID);
-
+  ast_sig->ir_function->label = comp->next_function_label(sig_struct, ast_sig->node_span, NULL_ID);
+  ast_sig->ir_function->sig_struct = sig_struct;
+  
   ast_sig->node_type = comp_thread->builtin_types->t_void;
-  ast_sig->sig->sig_struct = sig_struct;
 
   return;
 }
@@ -450,9 +448,9 @@ TC_STAGE(LAMBDA_UP) {
 
   lambda->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
-  ASTFuncSig* ast_sig = downcast_ast<ASTFuncSig>(lambda->sig);
+  ASTFuncSig* ast_sig = lambda->sig;
 
-  const SignatureStructure* sig_struct = ast_sig->sig->sig_struct;
+  const SignatureStructure* sig_struct = ast_sig->ir_function->sig_struct;
   ASSERT(sig_struct != nullptr);//should be done in the signature unit
   
   for (AST_LOCAL it: ast_sig->parameters) {

@@ -166,19 +166,13 @@ namespace IR {
     void set_current_cf(const CFMerge&);
   };
 
-  struct FunctionSignature {
-    const ASTFuncSig* declaration = nullptr;
+  struct Function {
+    const ASTLambda* lambda_declaration = nullptr;
+    const ASTFuncSig* sig_declaration = nullptr;
     const SignatureStructure* sig_struct = nullptr;
 
-    const Axle::InternString* name = {};
-
     IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
-  };
 
-  struct Function {
-    const ASTLambda* declaration = nullptr;
-
-    FunctionSignature signature = {};
     UnitID sig_unit_id = 0;
   };
 
@@ -558,7 +552,7 @@ namespace Axle::Format {
   struct FormatArg<PrintFuncSignature> {
     template<Formatter F>
     constexpr static void load_string(F& res, PrintFuncSignature p_func) {
-      return load_string(res, PrintSignatureType{ p_func.func->signature.sig_struct });
+      return load_string(res, PrintSignatureType{ p_func.func->sig_struct });
     }
   };
 }

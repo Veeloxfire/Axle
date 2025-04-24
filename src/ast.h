@@ -376,7 +376,7 @@ struct ASTDecl : public AST {
 
 struct ASTFuncSig : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::FUNCTION_SIGNATURE;
-  IR::FunctionSignature* sig = nullptr;
+  IR::Function* ir_function = nullptr;
   const CallingConvention* convention = nullptr;
 
   AST_LOCAL return_type = NULL_AST_NODE;
@@ -428,7 +428,7 @@ struct ASTLambda : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LAMBDA;
   IR::Function* function = nullptr;
 
-  AST_LOCAL sig = {};
+  ASTFuncSig* sig = nullptr;
   AST_LOCAL body = {};
 };
 

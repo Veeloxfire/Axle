@@ -2173,9 +2173,11 @@ static AST_LOCAL parse_lambda(CompilerGlobals* const comp, CompilerThread* const
     return NULL_AST_NODE;
   }
 
+  ASTFuncSig* sig_downcast = downcast_ast<ASTFuncSig>(sig);
+
   ASTLambda* l = ast_alloc<ASTLambda>(parser);
   l->ast_type = AST_TYPE::LAMBDA;
-  l->sig = sig;
+  l->sig = sig_downcast;
   l->body = body;
 
   //Load to a compilation unit
@@ -2577,7 +2579,7 @@ static void print_ast(Printer* const printer, AST_LOCAL a) noexcept {
       }
     case AST_TYPE::LAMBDA: {
         ASTLambda* ld = downcast_ast<ASTLambda>(a);
-        print_ast(printer, ld->sig);
+        print_ast(printer, {ld->sig});
         print_ast(printer, ld->body);
         return;
       }

@@ -483,7 +483,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(!eval.requirements.has_address());
 
         IR::GlobalLabel* label = comp->new_constant<IR::GlobalLabel>();
-        *label = l->function->signature.label;
+        *label = l->function->label;
 
         ASSERT(le->node_type.struct_type() == STRUCTURE_TYPE::LAMBDA);
 
@@ -1450,12 +1450,12 @@ static void compile_lambda_body(CompilerGlobals* comp,
   ASSERT(root->node_type.is_valid());
 
   {
-    IR::IRStore* ir = comp->get_ir(l_comp->func->signature.label);
-    ASSERT(ir->signature == l_comp->func->signature.sig_struct);
+    IR::IRStore* ir = comp->get_ir(l_comp->func->label);
+    ASSERT(ir->signature == l_comp->func->sig_struct);
 
 
-    ASSERT(root->sig.ast->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
-    ASTFuncSig* func_sig = downcast_ast<ASTFuncSig>(root->sig);
+    ASSERT(root->sig->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
+    ASTFuncSig* func_sig = root->sig;
     
     ASSERT(ir->signature->parameter_types.size == func_sig->parameters.size);
 
@@ -1919,10 +1919,10 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
   IR::Function* const func = comp->new_function();
   lambda->function = func;
 
-  func->declaration = lambda;
+  func->lambda_declaration = lambda;
 
-  ASTFuncSig* func_sig = downcast_ast<ASTFuncSig>(lambda->sig);
-  func_sig->sig = &func->signature;
+  ASTFuncSig* func_sig = lambda->sig;
+  func_sig->ir_function = func;
   func_sig->convention = comp->build_options.default_calling_convention;
 
   //Set the compilation units

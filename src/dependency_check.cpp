@@ -332,9 +332,9 @@ void type_dependency_check_ast_node(
         ASTLambdaExpr* le = downcast_ast<ASTLambdaExpr>(a);
 
         ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
-        ASTFuncSig* sig = downcast_ast<ASTFuncSig>(lambda->sig);
+        ASTFuncSig* sig = lambda->sig;
 
-        if (sig->sig->sig_struct == nullptr) {
+        if (sig->ir_function->sig_struct == nullptr) {
           set_dependency(comp_thread,
               COMPILATION_UNIT_STAGE::EMIT, lambda->function->sig_unit_id);
         }
@@ -563,10 +563,10 @@ void type_dependency_check_ast_node(
 
         ASSERT(state.locals.size == 0);
 
-        ASSERT(l->sig.ast->node_type.is_valid());
+        ASSERT(l->sig->node_type.is_valid());
         const bool old_visit = state.generate_visit;
         state.generate_visit = false;
-        type_dependency_check_ast_node(comp, comp_thread, state, l->sig);
+        type_dependency_check_ast_node(comp, comp_thread, state, {l->sig});
         state.generate_visit = old_visit;
         type_dependency_check_ast_node(comp, comp_thread, state, l->body);
 
@@ -710,9 +710,7 @@ void eval_dependency_check_ast_node(
         ASTLambdaExpr* le = downcast_ast<ASTLambdaExpr>(a);
 
         ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
-        ASTFuncSig* sig = downcast_ast<ASTFuncSig>(lambda->sig);
-
-        ASSERT(sig->sig->sig_struct != nullptr);
+        ASSERT(lambda->function->sig_struct != nullptr);
       }
     case AST_TYPE::STRUCT_EXPR: {
         ASTStructExpr* se = downcast_ast<ASTStructExpr>(a);
@@ -827,8 +825,8 @@ void eval_dependency_check_ast_node(
     case AST_TYPE::LAMBDA: {
         ASTLambda* l = downcast_ast<ASTLambda>(a);
         
-        ASSERT(l->sig.ast->node_type.is_valid());
-        eval_dependency_check_ast_node(comp, comp_thread, state, l->sig);
+        ASSERT(l->sig->node_type.is_valid());
+        eval_dependency_check_ast_node(comp, comp_thread, state, {l->sig});
         eval_dependency_check_ast_node(comp, comp_thread, state, l->body);
 
         return;
