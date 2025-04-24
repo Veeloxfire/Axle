@@ -3,7 +3,7 @@
 #include "compiler.h"
 #include "type.h"
 
-#include "tracing_wrapper.h"
+#include <Axle/tracing_wrapper.h>
 
 namespace Format = Axle::Format;
 

@@ -4,7 +4,7 @@
 #include <Axle/backends/PE_file_format.h>
 #include "compiler.h"
 #include "backends.h"
-#include "tracing_wrapper.h"
+#include <Axle/tracing_wrapper.h>
 #include <ctime>
 
 namespace FILES = Axle::FILES;

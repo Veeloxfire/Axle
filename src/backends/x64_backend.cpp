@@ -8,7 +8,7 @@
 #include "ir.h"
 #include "compiler.h"
 
-#include "tracing_wrapper.h"
+#include <Axle/tracing_wrapper.h>
 
 namespace IO_Single = Axle::IO_Single;
 

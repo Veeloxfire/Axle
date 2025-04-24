@@ -5,7 +5,7 @@
 #include <AxleUtil/memory.h>
 #include <AxleUtil/io.h>
 
-#include "tracing_wrapper.h"
+#include <Axle/tracing_wrapper.h>
 
 namespace IO_Single = Axle::IO_Single;
 

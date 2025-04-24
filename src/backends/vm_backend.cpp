@@ -1,7 +1,7 @@
 #include "ir.h"
 #include "type.h"
 
-#include "tracing_wrapper.h"
+#include <Axle/tracing_wrapper.h>
 
 #include "compiler.h"
 

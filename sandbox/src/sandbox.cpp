@@ -5,7 +5,7 @@
 #include <Axle/api.h>
 #include <Axle/backends/x64_backend.h>
 #include <Axle/backends/PE_file_format.h>
-#include "tracing_wrapper.h"
+#include <Axle/tracing_wrapper.h>
 
 namespace IO = Axle::IO;
 

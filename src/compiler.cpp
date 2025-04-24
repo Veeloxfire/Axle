@@ -11,7 +11,7 @@
 #include "type_check.h"
 #include "dependency_check.h"
 
-#include "tracing_wrapper.h"
+#include <Axle/tracing_wrapper.h>
 
 namespace IO = Axle::IO;
 namespace Format = Axle::Format;

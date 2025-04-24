@@ -3,7 +3,7 @@
 #include "type.h"
 #include "errors.h"
 
-#include "tracing_wrapper.h"
+#include <Axle/tracing_wrapper.h>
 
 namespace IR {
   struct EvalPromise {
