@@ -132,6 +132,7 @@ void type_dependency_check_ast_node(
 
         type_dependency_check_ast_node(comp, comp_thread, state, at->base);
         type_dependency_check_ast_node(comp, comp_thread, state, at->expr);
+        state.push_visit(a, AST_VISIT_STEP::ARRAY_TYPE_DOWN_LEN);
         
         state.push_visit(a, AST_VISIT_STEP::ARRAY_TYPE_DOWN);
         return;
