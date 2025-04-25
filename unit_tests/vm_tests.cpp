@@ -5,20 +5,32 @@
 #include "backends.h"
 #include "type.h"
 
+#include "compiler.h"
+
 template<typename T>
 void run_test_for_integer(AxleTest::TestErrors* test_errors,
-                          const BuiltinTypes* builtin_types,
+                          BuiltinTypes* builtin_types,
                           const Type& int_t) {
   AXLE_TELEMETRY_FUNCTION();
   
-  IR::IRStore ir = {};
-  ir.signature = builtin_types->t_void_call.unchecked_base<SignatureStructure>();
-  ir.global_label = { 1 };
+  CompilerGlobals comp;
+  comp.builtin_types = builtin_types;
+  CompilerThread comp_thread;
+  comp_thread.builtin_types = builtin_types;
+
+  const SignatureStructure* void_sig =
+    builtin_types->t_void_call.unchecked_base<SignatureStructure>();
+
+  IR::GlobalLabel label = comp.next_function_label(void_sig, {}, NULL_ID);
+  
+  IR::IRStore& ir = *comp.get_ir(label);
 
   IR::LocalLabel start_cf = ir.new_control_block();
   IR::LocalLabel end_cf = ir.new_control_block();
   ir.start_control_block(start_cf);
   ir.set_current_cf(IR::CFStart{ end_cf });
+  ir.start_control_block(end_cf);
+  ir.set_current_cf(IR::CFEnd{ start_cf });
 
   Eval::RuntimeValue v0 = Eval::as_direct(ir.new_temporary(int_t, {}), int_t);
   {
@@ -99,25 +111,19 @@ void run_test_for_integer(AxleTest::TestErrors* test_errors,
     IR::Emit::Mod(ir.current_bytecode(), mod);
   }
 
-  ir.start_control_block(end_cf);
-  ir.set_current_cf(IR::CFEnd{ start_cf });
-
   ir.completed = true;
 
   {
-    Errors errors = {};
-
-    const VM::Env env = {
-      builtin_types,
-      &errors,
-    };
     auto sf = VM::new_stack_frame(&ir);
-    VM::exec(&env, &sf);
+    VM::exec(&comp, &comp_thread, &sf);
 
-    if (errors.is_panic()) {
-      test_errors->first_error = std::move(errors.error_messages.data[0].message);
+    if (comp_thread.is_panic()) {
+      test_errors->first_error = std::move(comp_thread.errors.error_messages.data[0].message);
       return;
     }
+
+    TEST_EQ(static_cast<const IR::ControlBlock*>(&ir.control_blocks[end_cf.label - 1]),
+            sf.current_block);
 
     VM::StackFrame::RealValue res_val = sf.get_value(IR::v_arg(v4.value.index, v4.value.offset, v4.type));
 
@@ -172,3 +178,278 @@ TEST_FUNCTION(VM, basic_math) {
   TEST_CHECK_ERRORS();
 }
 
+TEST_FUNCTION(VM, parameters_and_returns) {
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
+
+  BuiltinTypes builtin_types = STRUCTS::create_builtins(&structures, &strings);
+
+  constexpr CallingConvention test_convention = {
+    .name = Axle::lit_view_arr("test_convention"),
+  };
+
+  CompilerGlobals comp;
+  comp.builtin_types = &builtin_types;
+  CompilerThread comp_thread;
+  comp_thread.builtin_types = &builtin_types;
+
+  const SignatureStructure* sig = [&structures, &strings, &builtin_types, &test_convention]() {
+    Axle::OwnedArr<Type> params = Axle::new_arr<Type>(2);
+    params[0] = builtin_types.t_u64;
+    params[1] = builtin_types.t_u64;
+
+    return find_or_make_lambda_structure(&structures, &strings, &test_convention, 
+        std::move(params), builtin_types.t_u64);
+  }();
+
+  IR::GlobalLabel label = comp.next_function_label(sig, {}, NULL_ID);
+  
+  IR::IRStore& ir = *comp.get_ir(label);
+
+  IR::LocalLabel start_cf = ir.new_control_block();
+  IR::LocalLabel ret_cf = ir.new_control_block();
+  ir.start_control_block(start_cf);
+  ir.set_current_cf(IR::CFStart{ ret_cf });
+
+  IR::VariableId a = ir.new_variable(builtin_types.t_u64, {}, false);
+  IR::VariableId b = ir.new_variable(builtin_types.t_u64, {}, false);
+  {
+    IR::V_ARG args[2] = {
+      IR::v_arg(ir.new_temporary(a, {}), 0, builtin_types.t_u64),
+      IR::v_arg(ir.new_temporary(b, {}), 0, builtin_types.t_u64),
+    };
+
+    IR::Types::StartFunc fnc;
+    fnc.n_values = 2;
+    fnc.values = args;
+
+    IR::Emit::StartFunc(ir.current_bytecode(), fnc);
+  }
+
+  TEST_EQ(static_cast<usize>(2), ir.current_control_block()->temporaries.size);
+
+  ir.start_control_block(ret_cf);
+
+  IR::ValueIndex ret_dest = ir.new_temporary(builtin_types.t_u64, {});
+
+  {
+    IR::Types::Div div;
+    div.left = IR::v_arg(ir.new_temporary(a, {}), 0, builtin_types.t_u64);
+    div.right = IR::v_arg(ir.new_temporary(b, {}), 0, builtin_types.t_u64);
+    div.to = IR::v_arg(ret_dest, 0, builtin_types.t_u64);
+
+    IR::Emit::Div(ir.current_bytecode(), div);
+  }
+  
+  ir.set_current_cf(IR::CFReturn{ start_cf, ret_dest });
+  TEST_EQ(static_cast<usize>(3), ir.current_control_block()->temporaries.size);
+  
+  TEST_EQ(static_cast<usize>(2), ir.variables.size);
+  ir.completed = true;
+
+  constexpr u64 EXPECTED = 1834;
+  constexpr u64 B_VAL = 9123;
+  constexpr u64 A_VAL = EXPECTED * B_VAL;
+  static_assert(EXPECTED == A_VAL / B_VAL);
+
+  {
+    auto sf = VM::new_stack_frame(&ir);
+    TEST_EQ(true, sf.has_return);
+    TEST_EQ(static_cast<u32>(2), sf.num_parameters);
+
+    {
+      auto p_a = sf.get_parameter(0);
+      TEST_EQ(builtin_types.t_u64, p_a.t);
+      TEST_EQ(sf.bytes.data, p_a.ptr);
+      Axle::serialize_le(Axle::view_arr(p_a), static_cast<u64>(A_VAL));
+    }
+    {
+      auto p_b = sf.get_parameter(1);
+      TEST_EQ(builtin_types.t_u64, p_b.t);
+      TEST_EQ(sf.bytes.data + 8, p_b.ptr);
+      Axle::serialize_le(Axle::view_arr(p_b), static_cast<u64>(B_VAL));
+    }
+
+    VM::exec(&comp, &comp_thread, &sf);
+
+    if (comp_thread.is_panic()) {
+      test_errors->first_error = std::move(comp_thread.errors.error_messages.data[0].message);
+      return;
+    }
+
+    VM::StackFrame::RealValue res_val = sf.get_return_value();
+    TEST_EQ(builtin_types.t_u64, res_val.t);
+    TEST_EQ(sf.bytes.data + 16, res_val.ptr);
+
+    u64 out_val = 0;
+    Axle::deserialize_le(Axle::view_arr(res_val), out_val);
+
+    TEST_EQ(EXPECTED, out_val);
+  }
+}
+
+TEST_FUNCTION(VM, calls) {
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
+
+  BuiltinTypes builtin_types = STRUCTS::create_builtins(&structures, &strings);
+
+  constexpr CallingConvention test_convention = {
+    .name = Axle::lit_view_arr("test_convention"),
+  };
+
+  CompilerGlobals comp;
+  comp.builtin_types = &builtin_types;
+  CompilerThread comp_thread;
+  comp_thread.builtin_types = &builtin_types;
+
+  const SignatureStructure* sig = [&structures, &strings, &builtin_types, &test_convention]() {
+    Axle::OwnedArr<Type> params = Axle::new_arr<Type>(2);
+    params[0] = builtin_types.t_u64;
+    params[1] = builtin_types.t_u64;
+
+    return find_or_make_lambda_structure(&structures, &strings, &test_convention, 
+        std::move(params), builtin_types.t_u64);
+  }();
+
+  IR::GlobalLabel label_a = comp.next_function_label(sig, {}, NULL_ID);
+  IR::GlobalLabel label_b = comp.next_function_label(sig, {}, NULL_ID);
+  
+  // Function that does the math
+  {
+    IR::IRStore& ir = *comp.get_ir(label_a);
+
+    IR::LocalLabel start_cf = ir.new_control_block();
+    IR::LocalLabel ret_cf = ir.new_control_block();
+    ir.start_control_block(start_cf);
+    ir.set_current_cf(IR::CFStart{ ret_cf });
+
+    IR::VariableId a = ir.new_variable(builtin_types.t_u64, {}, false);
+    IR::VariableId b = ir.new_variable(builtin_types.t_u64, {}, false);
+    {
+      IR::V_ARG args[2] = {
+        IR::v_arg(ir.new_temporary(a, {}), 0, builtin_types.t_u64),
+        IR::v_arg(ir.new_temporary(b, {}), 0, builtin_types.t_u64),
+      };
+
+      IR::Types::StartFunc fnc;
+      fnc.n_values = 2;
+      fnc.values = args;
+
+      IR::Emit::StartFunc(ir.current_bytecode(), fnc);
+    }
+
+    TEST_EQ(static_cast<usize>(2), ir.current_control_block()->temporaries.size);
+
+    ir.start_control_block(ret_cf);
+
+    IR::ValueIndex ret_dest = ir.new_temporary(builtin_types.t_u64, {});
+
+    {
+      IR::Types::Div div;
+      div.left = IR::v_arg(ir.new_temporary(a, {}), 0, builtin_types.t_u64);
+      div.right = IR::v_arg(ir.new_temporary(b, {}), 0, builtin_types.t_u64);
+      div.to = IR::v_arg(ret_dest, 0, builtin_types.t_u64);
+
+      IR::Emit::Div(ir.current_bytecode(), div);
+    }
+    
+    ir.set_current_cf(IR::CFReturn{ start_cf, ret_dest });
+    TEST_EQ(static_cast<usize>(3), ir.current_control_block()->temporaries.size);
+    
+    TEST_EQ(static_cast<usize>(2), ir.variables.size);
+    ir.completed = true;
+  }
+
+  // Function that calls another function
+  {
+    IR::IRStore& ir = *comp.get_ir(label_b);
+
+    IR::LocalLabel start_cf = ir.new_control_block();
+    IR::LocalLabel ret_cf = ir.new_control_block();
+    ir.start_control_block(start_cf);
+    ir.set_current_cf(IR::CFStart{ ret_cf });
+
+    IR::VariableId a = ir.new_variable(builtin_types.t_u64, {}, false);
+    IR::VariableId b = ir.new_variable(builtin_types.t_u64, {}, false);
+    {
+      IR::V_ARG args[2] = {
+        IR::v_arg(ir.new_temporary(a, {}), 0, builtin_types.t_u64),
+        IR::v_arg(ir.new_temporary(b, {}), 0, builtin_types.t_u64),
+      };
+
+      IR::Types::StartFunc fnc;
+      fnc.n_values = 2;
+      fnc.values = args;
+
+      IR::Emit::StartFunc(ir.current_bytecode(), fnc);
+    }
+
+    TEST_EQ(static_cast<usize>(2), ir.current_control_block()->temporaries.size);
+
+    ir.start_control_block(ret_cf);
+
+    IR::ValueIndex ret_dest = ir.new_temporary(builtin_types.t_u64, {});
+
+    {
+      IR::V_ARG args_and_ret[3] = {
+        IR::v_arg(ir.new_temporary(a, {}), 0, builtin_types.t_u64),
+        IR::v_arg(ir.new_temporary(b, {}), 0, builtin_types.t_u64),
+        IR::v_arg(ret_dest, 0, builtin_types.t_u64),
+      };
+
+      IR::Types::Call call;
+      call.label = label_a;
+      call.values = args_and_ret;
+      call.n_values = 3;
+
+      IR::Emit::Call(ir.current_bytecode(), call);
+    }
+    
+    ir.set_current_cf(IR::CFReturn{ start_cf, ret_dest });
+    TEST_EQ(static_cast<usize>(3), ir.current_control_block()->temporaries.size);
+    
+    TEST_EQ(static_cast<usize>(2), ir.variables.size);
+    ir.completed = true;
+  }
+
+  constexpr u64 EXPECTED = 1834;
+  constexpr u64 B_VAL = 9123;
+  constexpr u64 A_VAL = EXPECTED * B_VAL;
+  static_assert(EXPECTED == A_VAL / B_VAL);
+
+  {
+    auto sf = VM::new_stack_frame(comp.get_ir(label_b));
+    TEST_EQ(true, sf.has_return);
+    TEST_EQ(static_cast<u32>(2), sf.num_parameters);
+
+    {
+      auto p_a = sf.get_parameter(0);
+      TEST_EQ(builtin_types.t_u64, p_a.t);
+      TEST_EQ(sf.bytes.data, p_a.ptr);
+      Axle::serialize_le(Axle::view_arr(p_a), static_cast<u64>(A_VAL));
+    }
+    {
+      auto p_b = sf.get_parameter(1);
+      TEST_EQ(builtin_types.t_u64, p_b.t);
+      TEST_EQ(sf.bytes.data + 8, p_b.ptr);
+      Axle::serialize_le(Axle::view_arr(p_b), static_cast<u64>(B_VAL));
+    }
+
+    VM::exec(&comp, &comp_thread, &sf);
+
+    if (comp_thread.is_panic()) {
+      test_errors->first_error = std::move(comp_thread.errors.error_messages.data[0].message);
+      return;
+    }
+
+    VM::StackFrame::RealValue res_val = sf.get_return_value();
+    TEST_EQ(builtin_types.t_u64, res_val.t);
+    TEST_EQ(sf.bytes.data + 16, res_val.ptr);
+
+    u64 out_val = 0;
+    Axle::deserialize_le(Axle::view_arr(res_val), out_val);
+
+    TEST_EQ(EXPECTED, out_val);
+  }
+}

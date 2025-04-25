@@ -137,7 +137,7 @@ namespace IR {
     LocalLabel current_block = NULL_LOCAL_LABEL;
 
     Axle::Array<SSAVar> variables = {};
-    u32 max_stack;
+    u32 max_stack = 0;
 
     Axle::Array<GlobalReference> globals_used = {};
     Axle::Array<LocalLabel> control_flow_labels = {};
@@ -693,12 +693,19 @@ namespace VM {
   };
 
   struct StackFrame {
-    Axle::OwnedArr<u8> bytes;
-    Axle::OwnedArr<Value> temporaries = {};
-    Value return_val;
+    u32 num_parameters = 0;
+    bool has_return = false;
+    u32 num_variables = 0;
+
+    u64 variables_offset = 0;
+
+    Axle::OwnedArr<u8> bytes = {};
+    Axle::OwnedArr<Value> values = {};
+    Axle::OwnedArr<u32> block_temporary_offsets = {};
 
     const IR::IRStore* ir;
     const IR::ControlBlock* current_block;
+    u32 current_block_temporaries_offset;
     const u8* IP;
     const u8* IP_END;
 
@@ -707,18 +714,18 @@ namespace VM {
       Type t;
     };
 
+    void jump_to_label(IR::LocalLabel label);
+
+    RealValue get_parameter(u32 i);
+    RealValue get_return_value();
+
     RealValue get_value(const IR::V_ARG& arg);
     RealValue get_indirect_value(const IR::P_ARG& arg);
   };
 
-  struct Env {
-    const BuiltinTypes* builtin_types;
-    Errors* errors;
-  };
-
   StackFrame new_stack_frame(const IR::IRStore* ir);
 
-  void exec(const Env* env, StackFrame* stack_frame);
+  void exec(CompilerGlobals* comp, CompilerThread* comp_thread, StackFrame* stack_frame);
   
   void eval_negate(IR::Format format, Axle::ViewArr<u8> out, Axle::ViewArr<const u8> in);
 }

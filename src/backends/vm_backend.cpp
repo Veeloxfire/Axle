@@ -51,9 +51,33 @@ static constexpr auto vm_types_info = load_types_info();
 
 using RealValue = VM::StackFrame::RealValue;
 
+RealValue VM::StackFrame::get_parameter(u32 param_c) {
+  AXLE_TELEMETRY_FUNCTION();
+  ASSERT(param_c < num_parameters);
+  const auto& val_info = values[param_c];
+
+  return {
+    bytes.data + val_info.data_offset,
+    val_info.type,
+  };
+}
+
+RealValue VM::StackFrame::get_return_value() {
+  AXLE_TELEMETRY_FUNCTION();
+  ASSERT(has_return);
+  const auto& val_info = values[num_parameters];
+
+  return {
+    bytes.data + val_info.data_offset,
+    val_info.type,
+  };
+}
+
 RealValue VM::StackFrame::get_value(const IR::V_ARG& arg) {
+  AXLE_TELEMETRY_FUNCTION();
   const u32 i = arg.val.index;
-  const auto& val_info = temporaries[i];
+  ASSERT(i < current_block->temporaries.size);
+  const auto& val_info = values[i + current_block_temporaries_offset];
 
   return {
     bytes.data + val_info.data_offset,
@@ -64,17 +88,18 @@ RealValue VM::StackFrame::get_value(const IR::V_ARG& arg) {
 RealValue VM::StackFrame::get_indirect_value(const IR::P_ARG& arg) {
   AXLE_TELEMETRY_FUNCTION();
   const u32 i = arg.ptr.index;
-  const auto& val_info = temporaries[i];
+  ASSERT(i < current_block->temporaries.size);
+  const auto& val_info = values[i + current_block_temporaries_offset];
 
   ASSERT(val_info.type.struct_type() == STRUCTURE_TYPE::POINTER);
   const auto* pt = val_info.type.unchecked_base<PointerStructure>();
 
   const u8* src = bytes.data + val_info.data_offset;
-  const u8* ptr = nullptr;
+  u8* ptr = nullptr;
   memcpy_s(&ptr, sizeof(ptr), src, sizeof(ptr));
 
   return {
-    bytes.data + val_info.data_offset,
+    ptr,
     pt->base,
   };
 }
@@ -99,30 +124,90 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(ir->completed);
   ASSERT(ir->control_blocks.size > 0);
+  
+  const SignatureStructure* signature = ir->signature;
+
+  const u32 num_parameters = static_cast<u32>(signature->parameter_types.size);
+  
+  const Type return_type = ir->signature->return_type;
+  const bool has_return = return_type.struct_type() != STRUCTURE_TYPE::VOID;
+
+  const u32 num_variables = static_cast<u32>(ir->variables.size);
 
   u64 total_temporaries = 0;
+
   FOR(ir->control_blocks, b) {
     total_temporaries += b->temporaries.size;
   }
 
-  Axle::OwnedArr temporaries = Axle::new_arr<VM::Value>(total_temporaries);
+  const u64 total_values = num_parameters + has_return + num_variables + total_temporaries;
 
-  const u32 size_base = ir->max_stack;
+  Axle::OwnedArr values = Axle::new_arr<VM::Value>(total_values);
 
-  u32 size_needed = size_base;
-  u64 temporaries_counter = 0;
+  u32 size_needed = ir->max_stack;
+  
+  u32 values_counter = 0;
 
-  FOR(ir->control_blocks, it) {
+  for (Type ty: signature->parameter_types) {
+    auto& vm_temp = values[values_counter];
+    size_needed = Axle::ceil_to_n(size_needed, ty.structure->alignment);
+
+    vm_temp.data_offset = size_needed;
+    vm_temp.type = ty;
+
+    size_needed += ty.size();
+    values_counter += 1;
+  }
+
+  if (has_return) {
+    auto& vm_temp = values[values_counter];
+    size_needed = Axle::ceil_to_n(size_needed, return_type.structure->alignment);
+
+    vm_temp.data_offset = size_needed;
+    vm_temp.type = return_type;
+
+    size_needed += return_type.size();
+    values_counter += 1;
+  }
+
+  const u64 variables_offset = values_counter;
+
+  for (const IR::SSAVar& var: ir->variables) {
+    auto& vm_temp = values[values_counter];
+    size_needed = Axle::ceil_to_n(size_needed, var.type.structure->alignment);
+
+    vm_temp.data_offset = size_needed;
+    vm_temp.type = var.type;
+
+    size_needed += var.type.size();
+    values_counter += 1;
+  }
+
+  ASSERT(values_counter == num_parameters + has_return + num_variables);
+  
+  const u32 size_base = size_needed;
+
+  Axle::OwnedArr<u32> temp_offsets = Axle::new_arr<u32>(ir->control_blocks.size);
+
+  const usize num_control_blocks = ir->control_blocks.size;
+  for (usize cb = 0; cb < num_control_blocks; ++cb) {
+    const IR::ControlBlock* it = &ir->control_blocks[cb];
+    temp_offsets[cb] = values_counter;
+
     u32 temp_size_needed = size_base;
     const usize num_temps = it->temporaries.size;
+
+    ASSERT(values_counter + num_temps <= total_values);
+
     for (usize i = 0; i < num_temps; ++i) {
       const auto& temp = it->temporaries.data[i];
-      auto& vm_temp = temporaries[i + temporaries_counter];
+      auto& vm_temp = values[i + values_counter];
 
       if (temp.is_variable) {
         const auto& var = ir->variables.data[temp.var_id.variable];
-        vm_temp.type = temp.type;
-        vm_temp.data_offset = var.stack_offset;
+        ASSERT(var.type == temp.type);
+        // Copy the variable location
+        vm_temp = values[variables_offset + temp.var_id.variable];
       }
       else {
         temp_size_needed = Axle::ceil_to_n(temp_size_needed, temp.type.structure->alignment);
@@ -132,22 +217,31 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
       }
     }
 
-    temporaries_counter += num_temps;
+    values_counter += static_cast<u32>(num_temps);
 
     if (temp_size_needed > size_needed) size_needed = temp_size_needed;
   }
 
-  ASSERT(temporaries_counter == total_temporaries);
+  ASSERT(values_counter == total_values);
+  ASSERT(temp_offsets[0] == num_parameters + has_return + num_variables);
 
-  VM::StackFrame vm = {};
-  vm.bytes = Axle::new_arr<u8>(size_needed);
-  vm.temporaries = std::move(temporaries);
-  vm.ir = ir;
-  vm.current_block = ir->control_blocks.data;
-  vm.IP = vm.current_block->bytecode.begin();
-  vm.IP_END = vm.current_block->bytecode.end();
+  const u32 first_offset = temp_offsets[0];
+  const IR::ControlBlock* first_block = ir->control_blocks.data;
 
-  return vm;
+  return VM::StackFrame {
+    .num_parameters = num_parameters,
+    .has_return = has_return,
+    .num_variables = num_variables,
+    .variables_offset = num_parameters + has_return,
+    .bytes = Axle::new_arr<u8>(size_needed),
+    .values = std::move(values),
+    .block_temporary_offsets = std::move(temp_offsets),
+    .ir = ir,
+    .current_block = first_block,
+    .current_block_temporaries_offset = first_offset,
+    .IP = first_block->bytecode.begin(),
+    .IP_END = first_block->bytecode.end(),
+  };
 }
 
 static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
@@ -192,10 +286,23 @@ static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
   }
 }
 
-void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
-  AXLE_TELEMETRY_FUNCTION();
 
-  Errors* errors = env->errors;
+void VM::StackFrame::jump_to_label(IR::LocalLabel l) {
+  AXLE_TELEMETRY_FUNCTION();
+  ASSERT(l != IR::NULL_LOCAL_LABEL);
+  const IR::ControlBlock* next = ir->control_blocks.data + (l.label - 1);
+  const u32 offset = block_temporary_offsets[(l.label - 1)];
+
+  ASSERT(offset + next->temporaries.size <= values.size);
+
+  current_block = next;
+  current_block_temporaries_offset = offset;
+  IP = next->bytecode.begin();
+  IP_END = next->bytecode.end();
+};
+
+void VM::exec(CompilerGlobals* comp, CompilerThread* comp_thread, VM::StackFrame* stack_frame) {
+  AXLE_TELEMETRY_FUNCTION();
 
   while (true) {
     while (stack_frame->IP < stack_frame->IP_END) {
@@ -296,9 +403,28 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             IR::Types::StartFunc start;
             stack_frame->IP = IR::Read::StartFunc(stack_frame->IP, stack_frame->IP_END, start);
 
-            if (start.n_values != 0) {
-              errors->report_error(ERROR_CODE::VM_ERROR, Span{}, "Functions do not support parameters in vm");
-              return;
+            ASSERT(start.values == nullptr);
+
+            const SignatureStructure* sig = stack_frame->ir->signature;
+            ASSERT(sig->parameter_types.size == stack_frame->num_parameters);
+            ASSERT(start.n_values == stack_frame->num_parameters);
+
+            for (u32 i = 0; i < start.n_values; ++i) {
+              IR::V_ARG arg;
+              stack_frame->IP += IR::deserialize(stack_frame->IP, stack_frame->IP_END - stack_frame->IP, arg);
+
+              const Type param_ty = sig->parameter_types[i];
+
+              RealValue incoming_param = stack_frame->get_parameter(i);
+              ASSERT(param_ty == incoming_param.t);
+
+              RealValue arg_val = stack_frame->get_value(arg);
+
+              //TODO: fix
+              ASSERT(!Eval::must_pass_type_by_reference(sig->calling_convention, param_ty.structure));
+
+              copy_values(Axle::view_arr(arg_val), arg.format,
+                          Axle::view_arr(incoming_param), param_ty.struct_format());
             }
             break;
           }
@@ -338,7 +464,7 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             case IR::Format::pointer: \
             case IR::Format::slice: \
             default: { \
-              errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
+              comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
               return; \
             } \
           } \
@@ -370,8 +496,8 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
             ASSERT(t_format == f_format);
             Axle::ViewArr<u8> to_ser = Axle::view_arr(to);
 
-            visit_ir_type(NegVisitor{errors, to_ser}, f_format, Axle::view_arr(from));
-            if(errors->is_panic()) {
+            visit_ir_type(NegVisitor{&comp_thread->errors, to_ser}, f_format, Axle::view_arr(from));
+            if(comp_thread->is_panic()) {
               return;
             }
         } break;
@@ -392,16 +518,75 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
               Axle::serialize_le<i8>(to_ser, static_cast<u8>(!static_cast<bool>(raw)));
             }
             else {
-              errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary logical not (only supported format is uint8)");
+              comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for unary logical not (only supported format is uint8)");
+              return;
+            }
+          } break;
+        
+        case IR::OpCode::Call: {
+            IR::Types::Call op;
+            stack_frame->IP = IR::Read::Call(stack_frame->IP, stack_frame->IP_END, op);
+
+            ASSERT(op.values == nullptr);
+
+            GlobalLabelInfo label_info = comp->get_label_info(op.label);
+            const IR::IRStore* store = label_info.ir;
+            ASSERT(store != nullptr);
+            ASSERT(store->completed);
+
+            StackFrame callframe = new_stack_frame(store);
+
+            const SignatureStructure* sig = label_info.signature;
+            ASSERT(stack_frame->num_parameters == sig->parameter_types.size);
+            const u32 num_params = stack_frame->num_parameters;
+          
+            const bool has_return = sig->return_type != comp_thread->builtin_types->t_void;
+
+            ASSERT(op.n_values == num_params + has_return);
+
+            for (u32 p = 0; p < sig->parameter_types.size; ++p) {
+              IR::V_ARG arg;
+              stack_frame->IP += IR::deserialize(stack_frame->IP, stack_frame->IP_END - stack_frame->IP, arg);
+
+              const Type& ty = sig->parameter_types[p];
+              IR::Format format = ty.struct_format();
+              
+              RealValue p_val = callframe.get_parameter(p);
+              RealValue a_val = stack_frame->get_value(arg);
+
+              //TODO: fix
+              ASSERT(!Eval::must_pass_type_by_reference(sig->calling_convention, ty.structure));
+
+              copy_values(Axle::view_arr(p_val), format,
+                          Axle::view_arr(a_val), arg.format);
+            }
+
+            // Recurse
+            exec(comp, comp_thread, &callframe);
+            if (comp_thread->is_panic()) {
+              return;
+            }
+
+            ASSERT(has_return == callframe.has_return);
+            if (has_return) {
+              IR::V_ARG arg;
+              stack_frame->IP += IR::deserialize(stack_frame->IP, stack_frame->IP_END - stack_frame->IP, arg);
+              
+              auto call_ret = callframe.get_return_value();
+              auto op_ret = stack_frame->get_value(arg);
+
+              const Type& ty = sig->return_type;
+              IR::Format format = ty.struct_format();
+
+              copy_values(Axle::view_arr(op_ret), arg.format,
+                          Axle::view_arr(call_ret), format);
             }
           } break;
 
         case IR::OpCode::AddrOf:
         case IR::OpCode::AddrOfLoad:
-        case IR::OpCode::AddrOfGlobal:
-        case IR::OpCode::Call:
-        default: {
-            errors->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
+        case IR::OpCode::AddrOfGlobal: {
+            comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                                       "Encountered invalid/unsupported instruction during ir execution\n"
                                       "Code: {}\nName: '{}'",
                                       (u8)opcode, IR::opcode_string(opcode));
@@ -410,47 +595,53 @@ void VM::exec(const Env* env, VM::StackFrame* stack_frame) {
       }
     }
 
-    const auto goto_block = [&](IR::LocalLabel l) {
-      ASSERT(l != IR::NULL_LOCAL_LABEL);
-      const IR::IRStore* ir = stack_frame->ir;
-      const IR::ControlBlock* next = ir->control_blocks.data + (l.label - 1);
-
-      stack_frame->current_block = next;
-      stack_frame->IP = next->bytecode.begin();
-      stack_frame->IP_END = next->bytecode.end();
-    };
-
     switch (stack_frame->current_block->cf_type) {
       case IR::ControlFlowType::Start: {
-          goto_block(stack_frame->current_block->cf_start.child);
+          stack_frame->jump_to_label(stack_frame->current_block->cf_start.child);
           break;
         }
       case IR::ControlFlowType::End: {
+          ASSERT(!stack_frame->has_return);
           return;
         }
       case IR::ControlFlowType::Return: {
-          errors->report_error(ERROR_CODE::INTERNAL_ERROR, Span{}, "Currently don't support returning values");
+          ASSERT(stack_frame->has_return);
+          
+          auto ret_index = stack_frame->current_block->cf_return.val;
+          
+          const Type return_type = stack_frame->ir->signature->return_type;
+          const IR::Format format = return_type.struct_format();
+
+          RealValue curr_ret_val = stack_frame->get_value(
+            IR::v_arg(ret_index, 0, return_type)
+          );
+
+          RealValue stackframe_ret_val = stack_frame->get_return_value();
+          
+          copy_values(Axle::view_arr(stackframe_ret_val), format,
+                      Axle::view_arr(curr_ret_val), format);
+
           return;
         }
 
       case IR::ControlFlowType::Inline: {
-          goto_block(stack_frame->current_block->cf_inline.child);
+          stack_frame->jump_to_label(stack_frame->current_block->cf_inline.child);
           break;
         }
       case IR::ControlFlowType::Split: {
           auto val = stack_frame->get_value(
             IR::v_arg(stack_frame->current_block->cf_split.condition,
                       0,
-                      env->builtin_types->t_bool)
+                      comp_thread->builtin_types->t_bool)
           );
 
           ASSERT(val.t.struct_format() == IR::Format::uint8);
 
           if (*val.ptr) {
-            goto_block(stack_frame->current_block->cf_split.true_branch);
+            stack_frame->jump_to_label(stack_frame->current_block->cf_split.true_branch);
           }
           else {
-            goto_block(stack_frame->current_block->cf_split.false_branch);
+            stack_frame->jump_to_label(stack_frame->current_block->cf_split.false_branch);
           }
           break;
         }

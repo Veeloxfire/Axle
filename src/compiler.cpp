@@ -1426,9 +1426,8 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
     expr_ir.completed = true;
 
     {
-      VM::Env env = { comp_thread->builtin_types, &comp_thread->errors };
       VM::StackFrame vm = VM::new_stack_frame(&expr_ir);
-      VM::exec(&env, &vm);
+      VM::exec(comp, comp_thread, &vm);
       if (comp_thread->is_panic()) {
         return;
       }
