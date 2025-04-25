@@ -22,7 +22,7 @@ TEST_FUNCTION(names, add_names) {
                                 errors.error_messages[0].message);
       return;
     }
-   
+    
     TEST_NEQ(gn, static_cast<const GlobalName*>(nullptr));
     TEST_EQ(gn->name, n0_name);
     TEST_EQ(gn->global, &n0_g);

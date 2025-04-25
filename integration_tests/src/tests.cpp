@@ -99,7 +99,7 @@ constexpr auto arrays_main() -> uint64_t {
 }
 
 constexpr auto operations_optim() -> uint64_t {
-  return 1llu + static_cast<uint64_t>(-2ll) * 3llu / 4llu;
+  return 1ll + -2ll * 3ll / 4ll;
 }
 
 constexpr auto operations_unsigned_cpp() -> uint64_t {

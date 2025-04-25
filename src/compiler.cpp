@@ -1458,6 +1458,11 @@ static void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOC
   ASSERT(expr_ir.completed);
 
   {
+    if (comp->print_options.comptime_exec
+        && comp->print_options.finished_ir) {
+      IR::print_ir(comp, &expr_ir);
+    }
+
     VM::StackFrame vm = VM::new_stack_frame(&expr_ir);
     VM::exec(comp, comp_thread, &vm);
     if (comp_thread->is_panic()) {
@@ -1469,6 +1474,10 @@ static void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOC
 
     Axle::memcpy_ts(Axle::ViewArr{eval.data, eval.type.size()},
                     Axle::view_arr(return_value));
+
+    if (comp->print_options.comptime_exec) {
+      IO::format("Exec Result | {} | {}", eval.type.name, Axle::PrintList{eval.data, eval.type.size()});
+    }
   }
 }
 

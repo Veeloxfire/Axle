@@ -1280,7 +1280,7 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
   IO_Single::lock();
   DEFER() { IO_Single::unlock(); };
 
-  {
+  if (builder->global_label != NULL_GLOBAL_LABEL) {
     const GlobalLabelInfo l_info = comp->get_label_info(builder->global_label);
     if(l_info.span.full_path != nullptr) {
       IO_Single::format("== Format block GL{} | {}({}:{}) ==\n",
@@ -1290,6 +1290,9 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
     else {
       IO_Single::format("== Function block GL{} ==\n", builder->global_label.label - 1);
     }
+  }
+  else {
+    IO_Single::print("== Anonymous block ==\n");
   }
 
   IO_Single::format("Signature =  {}\n", PrintSignatureType{ builder->signature });
