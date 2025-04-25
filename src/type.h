@@ -429,7 +429,6 @@ struct BuiltinTypes {
   Type t_i64  ={};
 
   Type t_void_ptr ={};
-  Type t_void_call = {};
   Type t_ascii ={};
 
   Type t_bool ={};

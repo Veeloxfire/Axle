@@ -91,6 +91,7 @@ MOD(DECL_UP_EXPR, DECL) \
 MOD(DECL_DOWN, DECL) \
 MOD(NUMBER_DOWN, NUMBER) \
 MOD(FUNCTION_CALL_UP_FUNCTION, FUNCTION_CALL) \
+MOD(FUNCTION_CALL_DOWN_FUNCTION, FUNCTION_CALL) \
 MOD(FUNCTION_CALL_UP_ARGS, FUNCTION_CALL) \
 MOD(FUNCTION_CALL_DOWN, FUNCTION_CALL) \
 MOD(TUPLE_LIT_UP_PREFIX, TUPLE_LIT) \
@@ -376,7 +377,6 @@ struct ASTDecl : public AST {
 
 struct ASTFuncSig : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::FUNCTION_SIGNATURE;
-  IR::Function* ir_function = nullptr;
   const CallingConvention* convention = nullptr;
 
   AST_LOCAL return_type = NULL_AST_NODE;
@@ -426,8 +426,9 @@ struct ASTStructExpr : public AST {
 
 struct ASTLambda : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::LAMBDA;
-  IR::Function* function = nullptr;
+  IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
 
+  UnitID sig_unit_id = NULL_ID;
   ASTFuncSig* sig = nullptr;
   AST_LOCAL body = {};
 };
@@ -519,20 +520,20 @@ constexpr void same_category(AST* low, AST_LOCAL high) {
   same_category(low, high.ast);
 }
 
-constexpr void reduce_category(AST* low, const AST* high) {
-  switch (high->value_category) {
+constexpr void reduce_category(VALUE_CATEGORY* low, VALUE_CATEGORY high) {
+  switch (high) {
     case VALUE_CATEGORY::TEMPORARY_CONSTANT:
     case VALUE_CATEGORY::VARIABLE_CONSTANT: return;
 
     case VALUE_CATEGORY::TEMPORARY_IMMUTABLE:
     case VALUE_CATEGORY::VARIABLE_IMMUTABLE:
     case VALUE_CATEGORY::VARIABLE_MUTABLE:
-      switch (low->value_category) {
+      switch (*low) {
         case VALUE_CATEGORY::TEMPORARY_CONSTANT:
-          low->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
+          *low = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
           return;
         case VALUE_CATEGORY::VARIABLE_CONSTANT:
-          low->value_category = VALUE_CATEGORY::VARIABLE_IMMUTABLE;
+          *low = VALUE_CATEGORY::VARIABLE_IMMUTABLE;
           return;
 
         case VALUE_CATEGORY::TEMPORARY_IMMUTABLE:
@@ -548,6 +549,10 @@ constexpr void reduce_category(AST* low, const AST* high) {
   INVALID_CODE_PATH("Invalid value category");
 }
 
+constexpr void reduce_category(AST* low, const AST* high) {
+  reduce_category(&low->value_category, high->value_category);
+}
+
 constexpr void reduce_category(AST* low, AST_LOCAL high) {
-  reduce_category(low, high.ast);
+  reduce_category(&low->value_category, high.ast->value_category);
 }

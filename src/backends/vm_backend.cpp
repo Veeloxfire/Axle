@@ -244,10 +244,9 @@ VM::StackFrame VM::new_stack_frame(const IR::IRStore* ir) {
   };
 }
 
-static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
-                        Axle::ViewArr<const u8> from, IR::Format f_format) {
+void VM::copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
+                     Axle::ViewArr<const u8> from, IR::Format f_format) {
   AXLE_TELEMETRY_FUNCTION();
-  ASSERT(f_format != IR::Format::opaque && t_format != IR::Format::opaque);
   
   constexpr auto int_dispatch = []<typename T>(Axle::ViewArr<u8> to, IR::Format t_format, Axle::ViewArr<const u8> from) {
     T i;
@@ -261,12 +260,15 @@ static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
       case IR::Format::sint16: return Axle::serialize_le<i16>(to, static_cast<i16>(i));
       case IR::Format::uint32: return Axle::serialize_le<u32>(to, static_cast<u32>(i));
       case IR::Format::sint32: return Axle::serialize_le<i32>(to, static_cast<i32>(i));
-      case IR::Format::uint64: return Axle::serialize_le<u64>(to, static_cast<u64>(i));
-      case IR::Format::sint64: return Axle::serialize_le<i64>(to, static_cast<i64>(i));
-      case IR::Format::opaque:
+      
       case IR::Format::pointer:
+      case IR::Format::uint64: return Axle::serialize_le<u64>(to, static_cast<u64>(i));
+
+      case IR::Format::sint64: return Axle::serialize_le<i64>(to, static_cast<i64>(i));
+      
       case IR::Format::slice:
-      default: INVALID_CODE_PATH("Unsupported copy");
+      case IR::Format::opaque:
+        INVALID_CODE_PATH("Unsupported copy");
     }
   };
 
@@ -277,12 +279,27 @@ static void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
     case IR::Format::sint16: return int_dispatch.operator()<i16>(to, t_format, from);
     case IR::Format::uint32: return int_dispatch.operator()<u32>(to, t_format, from);
     case IR::Format::sint32: return int_dispatch.operator()<i32>(to, t_format, from);
-    case IR::Format::uint64: return int_dispatch.operator()<u64>(to, t_format, from);
-    case IR::Format::sint64: return int_dispatch.operator()<i64>(to, t_format, from);
-    case IR::Format::opaque:
+    
     case IR::Format::pointer:
-    case IR::Format::slice:
-    default: INVALID_CODE_PATH("Unsupported copy");
+    case IR::Format::uint64: return int_dispatch.operator()<u64>(to, t_format, from);
+    
+    case IR::Format::sint64: return int_dispatch.operator()<i64>(to, t_format, from);
+
+    case IR::Format::slice: {
+      ASSERT(t_format == IR::Format::slice);
+      ASSERT(from.size == 16);
+      ASSERT(to.size == 16);
+
+      Axle::memcpy_ts(to, from);
+      return;
+    }
+
+    case IR::Format::opaque: {
+      ASSERT(t_format == IR::Format::opaque);
+      ASSERT(to.size == from.size);
+
+      Axle::memcpy_ts(to, from);
+    }
   }
 }
 

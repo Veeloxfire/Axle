@@ -7,9 +7,14 @@
 
 #include "compiler.h"
 
+static constexpr CallingConvention TEST_CONVENTION {
+  .name = Axle::lit_view_arr("TEST_CONVENTION"),
+};
+
 template<typename T>
 void run_test_for_integer(AxleTest::TestErrors* test_errors,
                           BuiltinTypes* builtin_types,
+                          const SignatureStructure* empty_sig,
                           const Type& int_t) {
   AXLE_TELEMETRY_FUNCTION();
   
@@ -18,10 +23,7 @@ void run_test_for_integer(AxleTest::TestErrors* test_errors,
   CompilerThread comp_thread;
   comp_thread.builtin_types = builtin_types;
 
-  const SignatureStructure* void_sig =
-    builtin_types->t_void_call.unchecked_base<SignatureStructure>();
-
-  IR::GlobalLabel label = comp.next_function_label(void_sig, {}, NULL_ID);
+  IR::GlobalLabel label = comp.new_ir_function(empty_sig, {}, UnitID{1});
   
   IR::IRStore& ir = *comp.get_ir(label);
 
@@ -144,36 +146,46 @@ TEST_FUNCTION(VM, basic_math) {
 
   BuiltinTypes builtin_types = STRUCTS::create_builtins(&structures, &strings);
 
+  const SignatureStructure* empty_sig = find_or_make_lambda_structure(&structures, &strings, &TEST_CONVENTION, {}, builtin_types.t_void);
+
   //Check for all integer types
   run_test_for_integer<u8>(test_errors, &builtin_types,
+                           empty_sig,
                            builtin_types.t_u8);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<i8>(test_errors, &builtin_types,
+                           empty_sig,
                            builtin_types.t_i8);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<u16>(test_errors, &builtin_types,
+                           empty_sig,
                            builtin_types.t_u16);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<i16>(test_errors, &builtin_types,
+                           empty_sig,
                            builtin_types.t_i16);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<u32>(test_errors, &builtin_types,
+                           empty_sig,
                            builtin_types.t_u32);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<i32>(test_errors, &builtin_types,
+                           empty_sig,
                            builtin_types.t_i32);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<u64>(test_errors, &builtin_types,
+                           empty_sig,
                            builtin_types.t_u64);
   TEST_CHECK_ERRORS();
 
   run_test_for_integer<i64>(test_errors, &builtin_types,
+                           empty_sig,
                            builtin_types.t_i64);
   TEST_CHECK_ERRORS();
 }
@@ -184,25 +196,21 @@ TEST_FUNCTION(VM, parameters_and_returns) {
 
   BuiltinTypes builtin_types = STRUCTS::create_builtins(&structures, &strings);
 
-  constexpr CallingConvention test_convention = {
-    .name = Axle::lit_view_arr("test_convention"),
-  };
-
   CompilerGlobals comp;
   comp.builtin_types = &builtin_types;
   CompilerThread comp_thread;
   comp_thread.builtin_types = &builtin_types;
 
-  const SignatureStructure* sig = [&structures, &strings, &builtin_types, &test_convention]() {
+  const SignatureStructure* sig = [&structures, &strings, &builtin_types]() {
     Axle::OwnedArr<Type> params = Axle::new_arr<Type>(2);
     params[0] = builtin_types.t_u64;
     params[1] = builtin_types.t_u64;
 
-    return find_or_make_lambda_structure(&structures, &strings, &test_convention, 
+    return find_or_make_lambda_structure(&structures, &strings, &TEST_CONVENTION, 
         std::move(params), builtin_types.t_u64);
   }();
 
-  IR::GlobalLabel label = comp.next_function_label(sig, {}, NULL_ID);
+  IR::GlobalLabel label = comp.new_ir_function(sig, {}, UnitID{1});
   
   IR::IRStore& ir = *comp.get_ir(label);
 
@@ -294,26 +302,22 @@ TEST_FUNCTION(VM, calls) {
 
   BuiltinTypes builtin_types = STRUCTS::create_builtins(&structures, &strings);
 
-  constexpr CallingConvention test_convention = {
-    .name = Axle::lit_view_arr("test_convention"),
-  };
-
   CompilerGlobals comp;
   comp.builtin_types = &builtin_types;
   CompilerThread comp_thread;
   comp_thread.builtin_types = &builtin_types;
 
-  const SignatureStructure* sig = [&structures, &strings, &builtin_types, &test_convention]() {
+  const SignatureStructure* sig = [&structures, &strings, &builtin_types]() {
     Axle::OwnedArr<Type> params = Axle::new_arr<Type>(2);
     params[0] = builtin_types.t_u64;
     params[1] = builtin_types.t_u64;
 
-    return find_or_make_lambda_structure(&structures, &strings, &test_convention, 
+    return find_or_make_lambda_structure(&structures, &strings, &TEST_CONVENTION, 
         std::move(params), builtin_types.t_u64);
   }();
 
-  IR::GlobalLabel label_a = comp.next_function_label(sig, {}, NULL_ID);
-  IR::GlobalLabel label_b = comp.next_function_label(sig, {}, NULL_ID);
+  IR::GlobalLabel label_a = comp.new_ir_function(sig, {}, UnitID{1});
+  IR::GlobalLabel label_b = comp.new_ir_function(sig, {}, UnitID{2});
   
   // Function that does the math
   {

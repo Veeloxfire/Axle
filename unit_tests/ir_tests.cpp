@@ -1,15 +1,21 @@
 #include "ir.h"
+#include <Axle/calling_convention.h>
 
 #include <AxleTest/unit_tests.h>
+
+static constexpr CallingConvention TEST_CONVENTION {
+  .name = Axle::lit_view_arr("TEST_CONVENTION"),
+};
 
 #define SETUP_TEST_TYPES(strings, structures, builtin_types)\
 Axle::StringInterner strings = {};\
 Structures structures = {8,8};\
-BuiltinTypes builtin_types = STRUCTS::create_builtins(&structures, &strings)
+BuiltinTypes builtin_types = STRUCTS::create_builtins(&structures, &strings);\
+const SignatureStructure* s_void_call = find_or_make_lambda_structure(&structures, &strings, &TEST_CONVENTION, {}, builtin_types.t_void)
 
 #define SETUP_TEST_IR(ir, start_block)\
 IR::IRStore ir = {};\
-ir.signature = builtin_types.t_void_call.unchecked_base<SignatureStructure>();\
+ir.signature = s_void_call;\
 ir.global_label = { 1 };\
 IR::LocalLabel start_block = ir.new_control_block();\
 ir.start_control_block(start_block)
@@ -21,7 +27,7 @@ TEST_FUNCTION(IR, control_flow) {
   TEST_EQ(IR::NULL_GLOBAL_LABEL, ir.global_label);
   TEST_EQ(static_cast<const SignatureStructure*>(nullptr), ir.signature);
 
-  ir.signature = builtin_types.t_void_call.unchecked_base<SignatureStructure>();
+  ir.signature = s_void_call;
   ir.global_label = { 1 };
   
   TEST_EQ(IR::NULL_LOCAL_LABEL, ir.current_block);

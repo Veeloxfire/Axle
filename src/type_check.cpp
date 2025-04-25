@@ -8,7 +8,7 @@
 struct Typer {
   Type return_type = {};
 
-  const Namespace* available_names;
+  Namespace* available_names;
 };
 
 //Gets the underlying type of a type-node e.g. if its an array type node it gets the cached array type
@@ -129,15 +129,6 @@ TC_STAGE(ARRAY_TYPE_DOWN) {
   ASSERT(at->expr.ast->node_type == comp_thread->builtin_types->t_u64);
   ASSERT(VC::is_comptime(at->expr.ast->value_category));
 
-  IR::EvalPromise eval = {};
-  eval.type = comp_thread->builtin_types->t_u64;
-  eval.data = (u8*)&at->array_length;
-
-  IR::eval_ast(comp, comp_thread, at->expr, &eval);
-  if (comp_thread->is_panic()) {
-    return;
-  }
-
   if (at->array_length == 0) {
     comp_thread->report_error(ERROR_CODE::TYPE_CHECK_ERROR, at->expr.ast->node_span,
                               "Length of array must be larger than 0");
@@ -172,15 +163,12 @@ TC_STAGE(ARRAY_TYPE_DOWN_LEN) {
     return;
   }
 
-  IR::EvalPromise eval = {};
-  eval.type = comp_thread->builtin_types->t_u64;
-  eval.data = (u8*)&at->array_length;
+  VM::EvalPromise eval {
+    .data = (u8*)&at->array_length,
+    .type = comp_thread->builtin_types->t_u64,
+  };
 
-  IR::eval_ast(comp, comp_thread, at->expr, &eval);
-  if (comp_thread->is_panic()) {
-    return;
-  }
-
+  VM::dispatch_eval_ast(comp, comp_thread, typer->available_names, at->expr, eval);
   return;
 }
 
@@ -383,12 +371,11 @@ TC_STAGE(LAMBDA_EXPR_DOWN) {
   EXPAND_THIS(ASTLambdaExpr, le);
   
   ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
-  const SignatureStructure* sig_struct = lambda->function->sig_struct;
-  ASSERT(sig_struct != nullptr);//should be done in the signature unit
+  ASSERT(lambda->sig->node_type.is_valid());
+  const SignatureStructure* sig_struct = lambda->sig->node_type.unchecked_base<SignatureStructure>();
 
   le->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
   le->node_type = to_type(sig_struct);
-
   return;
 }
 
@@ -419,11 +406,7 @@ TC_STAGE(FUNCTION_SIGNATURE_DOWN) {
                                                bake_arr(std::move(params)), ret_type);
   }
 
-  ast_sig->ir_function->label = comp->next_function_label(sig_struct, ast_sig->node_span, NULL_ID);
-  ast_sig->ir_function->sig_struct = sig_struct;
-  
-  ast_sig->node_type = comp_thread->builtin_types->t_void;
-
+  ast_sig->node_type = to_type(sig_struct);
   return;
 }
 
@@ -449,9 +432,9 @@ TC_STAGE(LAMBDA_UP) {
   lambda->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   ASTFuncSig* ast_sig = lambda->sig;
+  ASSERT(ast_sig->node_type.is_valid());
 
-  const SignatureStructure* sig_struct = ast_sig->ir_function->sig_struct;
-  ASSERT(sig_struct != nullptr);//should be done in the signature unit
+  const SignatureStructure* sig_struct = ast_sig->node_type.unchecked_base<SignatureStructure>();
   
   for (AST_LOCAL it: ast_sig->parameters) {
     ASSERT(it.ast->ast_type == AST_TYPE::TYPED_NAME);
@@ -1081,7 +1064,7 @@ TC_STAGE(LINK_DOWN) {
       IR::DynLibraryImport import_lib = {};
       import_lib.name = imp->name;
       import_lib.path = imp->lib_file;
-      import_lib.label = comp->next_function_label(t.unchecked_base<SignatureStructure>(), imp->node_span, NULL_ID);
+      import_lib.label = comp->new_runtime_link_function(t.unchecked_base<SignatureStructure>(), imp->node_span);
 
       comp->dyn_lib_imports.insert(std::move(import_lib));
       imp->import_index = comp->dyn_lib_imports.size;
@@ -2146,53 +2129,43 @@ TC_STAGE(FUNCTION_CALL_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
-  const Type& func_type = call->function.ast->node_type;
-  call->sig = func_type.unchecked_base<SignatureStructure>();
+  ASSERT(call->label != IR::NULL_GLOBAL_LABEL);
 
-  for (AST_LOCAL it: call->arguments) {
-    reduce_category(call, it);
-  }
+  const Type& func_type = call->function.ast->node_type;
+  const auto* sig = func_type.unchecked_base<SignatureStructure>();
+  call->sig = sig;
 
   check_call_arguments(comp_thread, call);
   if (comp_thread->is_panic()) {
     return;
   }
+  
+  ASSERT(call->arguments.size == sig->parameter_types.size);
 
-  const auto* sig = call->sig;
-  ASSERT(sig);
-
-  const size_t size = sig->parameter_types.size;
-
-  if (call->arguments.size != size) {
-    comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, call->node_span,
-                              "Compiler linked a function with {} parameters for a call with {} arguments!",
-                              size, call->arguments.size);
-    return;
+  for (AST_LOCAL it: call->arguments) {
+    reduce_category(call, it);
   }
-
-  IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
-  {
-    IR::EvalPromise eval = {};
-    eval.type = func_type;
-    eval.data = (u8*)&label;
-
-    IR::eval_ast(comp, comp_thread, call->function, &eval);
-    if (comp_thread->is_panic()) {
-      return;
-    }
-  }
-
-
-  ASSERT(label != IR::NULL_GLOBAL_LABEL);
-  call->label = label;
+  
+  GlobalLabelInfo label_info = comp->get_label_info(call->label);
+  reduce_category(&call->value_category, label_info.get_call_category());
 
   //Last thing to do it set return type
   call->node_type = sig->return_type;
-
   return;
 }
 
 TC_STAGE(FUNCTION_CALL_UP_ARGS) {
+  AXLE_TELEMETRY_FUNCTION();
+  EXPAND_THIS(ASTFunctionCallExpr, call);
+
+  for (AST_LOCAL it: call->arguments) {
+    //TODO: try to infer arguments
+    it.ast->node_infer_type = {};
+  }
+  return;
+}
+
+TC_STAGE(FUNCTION_CALL_DOWN_FUNCTION) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
@@ -2205,17 +2178,20 @@ TC_STAGE(FUNCTION_CALL_UP_ARGS) {
 
   ASSERT(VC::is_comptime(call->function.ast->value_category));
 
-  for (AST_LOCAL it: call->arguments) {
-    //TODO: try to infer arguments
-    it.ast->node_infer_type = {};
-  }
+  VM::EvalPromise eval {
+    .data = (u8*)&(call->label),
+    .type = func_type,
+  };
+
+  VM::dispatch_eval_ast(comp, comp_thread, typer->available_names, call->function, eval);
+  return;
 }
 
 TC_STAGE(FUNCTION_CALL_UP_FUNCTION) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTFunctionCallExpr, call);
 
-  call->value_category = VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
+  call->value_category = VALUE_CATEGORY::TEMPORARY_CONSTANT;
 
   call->function.ast->node_infer_type = {};
 
@@ -2303,6 +2279,11 @@ TC_STAGE(DECL_DOWN) {
     decl->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
   }
 
+  ast_decl->value_category = decl->value_category;
+  ast_decl->node_type = comp_thread->builtin_types->t_void;
+
+  ASSERT(VC::is_variable(decl->value_category));
+  
   if (VC::is_comptime(decl->value_category) || VC::is_comptime(decl_expr.ast->value_category)) {
     if (!VC::is_comptime(decl_expr.ast->value_category)) {
       comp_thread->report_error(ERROR_CODE::CONST_ERROR, ast_decl->node_span,
@@ -2311,25 +2292,18 @@ TC_STAGE(DECL_DOWN) {
       return;
     }
 
-    IR::EvalPromise p = {};
-    p.data = nullptr;
-    p.type = decl->type;
+    u8* init_val = comp->new_constant(decl->type.size());
+    decl->init_value = init_val;
 
-    IR::eval_ast(comp, comp_thread, decl_expr, &p);
-    if (comp_thread->is_panic()) {
-      return;
-    }
+    VM::EvalPromise p {
+      .data = init_val,
+      .type = decl->type,
+    };
 
-    ASSERT(p.data != nullptr);
-    ASSERT(p.type == decl->type);
-
-    decl->init_value = p.data;
+    VM::dispatch_eval_ast(comp, comp_thread, typer->available_names, decl_expr, p);
+    return;
   }
 
-  ASSERT(VC::is_variable(decl->value_category));
-
-  ast_decl->value_category = decl->value_category;
-  ast_decl->node_type = comp_thread->builtin_types->t_void;
   return;
 }
 
@@ -2551,7 +2525,7 @@ void TC::type_check_ast(CompilerGlobals* const comp,
 
   usize& index = context.next_index;
   const Axle::ViewArr<const AstVisit> visit_arr = context.visit_arr;
-  const Namespace* ns = context.ns;
+  Namespace* ns = context.ns;
 
   Typer typer = {};
   typer.available_names = ns;
@@ -2563,7 +2537,7 @@ void TC::type_check_ast(CompilerGlobals* const comp,
     ASSERT(!v.node.ast->node_type.is_valid());// this is what signals completion
 
     run_step(comp, comp_thread, &typer, v.node, v.step);
-    if (comp_thread->is_panic() || comp_thread->is_depends()) {
+    if (comp_thread->is_panic()) {
       return;
     }
 
@@ -2578,10 +2552,17 @@ void TC::type_check_ast(CompilerGlobals* const comp,
                                 "Expected type: {}. Actual type: {}", expected.name, actual.name);
       return;
     }
+
+    if (comp_thread->is_depends()) {
+      index += 1;// go to next
+      return;
+    }
   }
 
   for (const AstVisit v: visit_arr) {
     ASSERT(v.node.ast->node_type.is_valid());// this is what signals completion
+    ASSERT(!v.node.ast->node_infer_type.is_valid()
+        || v.node.ast->node_type == v.node.ast->node_infer_type);
   }
 
   ASSERT(context.finished());

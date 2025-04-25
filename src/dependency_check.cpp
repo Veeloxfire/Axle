@@ -19,7 +19,6 @@ struct DependencyChecker {
 };
 
 struct EvalDependencyChecker {
-  const Namespace* available_names;
 };
 
 void set_dependency(CompilerThread& comp_thread, COMPILATION_UNIT_STAGE stage, UnitID id) noexcept {
@@ -247,6 +246,8 @@ void type_dependency_check_ast_node(
         
         type_dependency_check_ast_node(comp, comp_thread, state, call->function);
         
+        state.push_visit(a, AST_VISIT_STEP::FUNCTION_CALL_DOWN_FUNCTION);
+        
         state.push_visit(a, AST_VISIT_STEP::FUNCTION_CALL_UP_ARGS);
 
         for (AST_LOCAL it: call->arguments) {
@@ -332,12 +333,9 @@ void type_dependency_check_ast_node(
         ASTLambdaExpr* le = downcast_ast<ASTLambdaExpr>(a);
 
         ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
-        ASTFuncSig* sig = lambda->sig;
 
-        if (sig->ir_function->sig_struct == nullptr) {
-          set_dependency(comp_thread,
-              COMPILATION_UNIT_STAGE::EMIT, lambda->function->sig_unit_id);
-        }
+        set_dependency(comp_thread,
+            COMPILATION_UNIT_STAGE::DONE, lambda->sig_unit_id);
         
         state.push_visit(a, AST_VISIT_STEP::LAMBDA_EXPR_DOWN);
 
@@ -655,8 +653,13 @@ void eval_dependency_check_ast_node(
         eval_dependency_check_ast_node(comp, comp_thread, state, call->function);
 
         ASSERT(call->label != IR::NULL_GLOBAL_LABEL);
+
+        GlobalLabelInfo label_info = comp.get_label_info(call->label);
+
+        ASSERT(VC::is_comptime(label_info.get_call_category()));
         
-        UnitID depend_id = comp.get_label_info(call->label).dependency;
+        UnitID depend_id = label_info.dependency;
+        ASSERT(depend_id != NULL_ID);
 
         set_dependency(comp_thread, COMPILATION_UNIT_STAGE::EMIT, depend_id);
         
@@ -710,7 +713,8 @@ void eval_dependency_check_ast_node(
         ASTLambdaExpr* le = downcast_ast<ASTLambdaExpr>(a);
 
         ASTLambda* lambda = downcast_ast<ASTLambda>(le->lambda);
-        ASSERT(lambda->function->sig_struct != nullptr);
+        ASSERT(lambda->label != IR::NULL_GLOBAL_LABEL);
+        return;
       }
     case AST_TYPE::STRUCT_EXPR: {
         ASTStructExpr* se = downcast_ast<ASTStructExpr>(a);
@@ -891,11 +895,9 @@ Axle::OwnedArr<AstVisit> DC::type_dependency_check_ast(
 void DC::eval_dependency_check_ast(
   CompilerGlobals* const comp,
   CompilerThread* const comp_thread,
-  const Namespace* const available_names,
   AST_LOCAL a
 ) noexcept {
   EvalDependencyChecker checker = {};
-  checker.available_names = available_names;
 
   eval_dependency_check_ast_node(*comp, *comp_thread, checker, a);
 }

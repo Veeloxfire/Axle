@@ -16,7 +16,6 @@ namespace DC {
   void eval_dependency_check_ast(
     CompilerGlobals* const comp,
     CompilerThread* const comp_thread,
-    const Namespace* const available_names,
     AST_LOCAL a
   ) noexcept;
 }

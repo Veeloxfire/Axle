@@ -407,6 +407,7 @@ BuiltinTypes STRUCTS::create_builtins(Structures* structures, Axle::StringIntern
 
     s_type->size = sizeof(Type);
     s_type->alignment = alignof(Type);
+    s_type->ir_format = IR::Format::opaque;
 
 
     builtin_types.t_type = to_type(s_type);
@@ -449,12 +450,6 @@ BuiltinTypes STRUCTS::create_builtins(Structures* structures, Axle::StringIntern
     Structure* const s_void_ptr = STRUCTS::new_pointer_structure(structures, strings, 
                                                                  builtin_types.t_void);
     builtin_types.t_void_ptr = to_type(s_void_ptr);
-  }
-
-  {
-    Structure* const s_void_call = STRUCTS::new_lambda_structure(structures, strings,
-                                                                 nullptr, {}, builtin_types.t_void);
-    builtin_types.t_void_call = to_type(s_void_call);
   }
 
   {

@@ -1,18 +1,10 @@
 #pragma once
 #include <AxleUtil/utility.h>
 #include "type.h"
-#include "errors.h"
 
 #include <Axle/tracing_wrapper.h>
 
 namespace IR {
-  struct EvalPromise {
-    u8* data;
-    Type type;
-  };
-
-  void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, EvalPromise* eval);
-
   struct ValueIndex {
     u32 index;
   };
@@ -164,16 +156,6 @@ namespace IR {
     void set_current_cf(const CFInline&);
     void set_current_cf(const CFSplt&);
     void set_current_cf(const CFMerge&);
-  };
-
-  struct Function {
-    const ASTLambda* lambda_declaration = nullptr;
-    const ASTFuncSig* sig_declaration = nullptr;
-    const SignatureStructure* sig_struct = nullptr;
-
-    IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
-
-    UnitID sig_unit_id = 0;
   };
 
 #define OPCODES_MOD \
@@ -506,10 +488,6 @@ MOD(Not, CODE_V_V)
 #undef OPCODES_MOD
 }
 
-struct PrintFuncSignature {
-  const IR::Function* func;
-};
-
 namespace Axle::Format {
   template<>
   struct FormatArg<IR::ValueIndex> {
@@ -545,14 +523,6 @@ namespace Axle::Format {
     constexpr static void load_string(F& res, IR::OpCode op) {
       const Axle::ViewArr<const char> str = IR::opcode_string(op);
       return res.load_string(str.data, str.size);
-    }
-  };
-
-  template<>
-  struct FormatArg<PrintFuncSignature> {
-    template<Formatter F>
-    constexpr static void load_string(F& res, PrintFuncSignature p_func) {
-      return load_string(res, PrintSignatureType{ p_func.func->sig_struct });
     }
   };
 }
@@ -724,6 +694,9 @@ namespace VM {
   };
 
   StackFrame new_stack_frame(const IR::IRStore* ir);
+  
+  void copy_values(Axle::ViewArr<u8> to, IR::Format t_format,
+                   Axle::ViewArr<const u8> from, IR::Format f_format);
 
   void exec(CompilerGlobals* comp, CompilerThread* comp_thread, StackFrame* stack_frame);
   

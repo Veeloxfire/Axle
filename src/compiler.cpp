@@ -45,8 +45,10 @@ CompilationUnit* CompilationUnitStore::get_unit_if_exists(u64 id) const {
   return nullptr;
 }
 
-IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s, const Span& span, UnitID dependency) {
+IR::GlobalLabel CompilerGlobals::new_ir_function(const SignatureStructure* s, const Span& span, UnitID dependency) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(dependency != NULL_ID);
+
   ir_mutex.acquire();
   label_mutex.acquire();
   IR::IRStore* ir = ir_builders_single_threaded.insert();
@@ -57,6 +59,39 @@ IR::GlobalLabel CompilerGlobals::next_function_label(const SignatureStructure* s
   ir->signature = s;
 
   label_signature_table.insert({s, span, ir, dependency});
+
+  ir_mutex.release();
+  label_mutex.release();
+
+  return label;
+}
+
+IR::GlobalLabel CompilerGlobals::new_runtime_link_function(const SignatureStructure* s, const Span& span) {
+  AXLE_TELEMETRY_FUNCTION();
+
+  label_mutex.acquire();
+  IR::GlobalLabel label = { label_signature_table.size + 1 };
+  
+  label_signature_table.insert({s, span, nullptr, NULL_ID});
+
+  label_mutex.release();
+
+  return label;
+}
+
+IR::GlobalLabel CompilerGlobals::new_runtime_ir_function(const SignatureStructure* s, const Span& span) {
+  AXLE_TELEMETRY_FUNCTION();
+
+  ir_mutex.acquire();
+  label_mutex.acquire();
+  IR::IRStore* ir = ir_builders_single_threaded.insert();
+  IR::GlobalLabel label = { label_signature_table.size + 1 };
+  
+  ir->completed = false;
+  ir->global_label = label;
+  ir->signature = s;
+
+  label_signature_table.insert({s, span, ir});
 
   ir_mutex.release();
   label_mutex.release();
@@ -79,14 +114,6 @@ IR::IRStore* CompilerGlobals::get_ir(IR::GlobalLabel label) {
   label_mutex.release();
 
   return ir;
-}
-
-IR::Function* CompilerGlobals::new_function() {
-  AXLE_TELEMETRY_FUNCTION();
-  functions_mutex.acquire();
-  IR::Function* func = functions_single_threaded.insert();
-  functions_mutex.release();
-  return func;
 }
 
 Local* CompilerGlobals::new_local() {
@@ -142,6 +169,8 @@ CompilationUnit* new_compilation_unit(CompilerGlobals* comp,
   unit->available_names = names;
   unit->ast = root;
   unit->detail = detail;
+  unit->next_tc_index = 0;
+  unit->visit_arr = {};
 
   compilation->in_flight_units += 1;
 
@@ -481,13 +510,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
-
-        IR::GlobalLabel* label = comp->new_constant<IR::GlobalLabel>();
-        *label = l->function->label;
-
         ASSERT(le->node_type.struct_type() == STRUCTURE_TYPE::LAMBDA);
 
-        return Eval::as_constant((const u8*)label, le->node_type);
+        return Eval::as_constant((const u8*)&l->label, le->node_type);
       }
     case AST_TYPE::MEMBER_ACCESS: {
         ASTMemberAccessExpr* member_e = downcast_ast<ASTMemberAccessExpr>(expr);
@@ -1360,6 +1385,8 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
 }
 
 void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
+  ASSERT(ir->completed);
+
   if (comp->print_options.finished_ir) {
     IR::print_ir(comp, ir);
   }
@@ -1370,16 +1397,25 @@ void submit_ir(CompilerGlobals* comp, IR::IRStore* ir) {
   comp->finished_irs.push_back(ir);
 }
 
-void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, IR::EvalPromise* eval) {
+static void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL root, const VM::EvalPromise& eval) {
   AXLE_TELEMETRY_FUNCTION();
+  ASSERT(eval.type.is_valid());
+  ASSERT(eval.data != nullptr);
+  ASSERT(VC::is_comptime(root.ast->value_category));
 
-  if (!VC::is_comptime(root.ast->value_category)) {
-    comp_thread->report_error(ERROR_CODE::VM_ERROR, root.ast->node_span, "Cannot evaluate a non-comptime expression");
-    return;
-  }
+  const SignatureStructure* sig = [comp, ty = eval.type]()->const SignatureStructure*
+  {
+    Axle::AtomicLock<Structures> structures = {};
+    Axle::AtomicLock<Axle::StringInterner> strings = {};
+    comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
+    return find_or_make_lambda_structure(structures._ptr, strings._ptr,
+        comp->build_options.default_calling_convention,
+        {}, ty);
+  }();
+  
   IR::IRStore expr_ir = {};
-  expr_ir.signature = comp_thread->builtin_types->t_void_call.unchecked_base<SignatureStructure>();
+  expr_ir.signature = sig;
 
   Eval::IrBuilder builder;
   {
@@ -1392,65 +1428,117 @@ void IR::eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOCAL 
     Eval::end_startup(&builder, startup, start);
   }
 
-  Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(root));
+  Eval::RuntimeValue res = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(root));
   if (comp_thread->is_panic()) {
     return;
+  }
+
+  if (res.rvt == Eval::RVT::Constant) {
+    ASSERT(res.type == res.effective_type());
+
+    VM::copy_values(Axle::ViewArr{eval.data, eval.type.size()}, eval.type.struct_format(),
+                    Axle::ViewArr{res.constant, res.type.size()}, res.type.struct_format());
+    return;
+  }
+  else {
+    IR::ValueIndex ret_val = builder.ir->new_temporary(eval.type, {});
+    Eval::assign(builder.ir, Eval::as_direct(ret_val, eval.type), res);
+
+    builder.ir->set_current_cf(IR::CFReturn{
+      builder.parent,
+      ret_val,
+    });
+
+    builder.ir->end_control_block();
+    builder.ir->current_block = IR::NULL_LOCAL_LABEL;
+    builder.parent = IR::NULL_LOCAL_LABEL;
   }
 
   Eval::end_builder(&builder);
   ASSERT(expr_ir.completed);
 
-  const Type ref_type = ref.effective_type();
-  ASSERT(ref_type == root.ast->node_type);
-
-  if (!eval->type.is_valid()) {
-    eval->type = ref_type;
-  }
-  else {
-    ASSERT(eval->type == ref_type);
-  }
-
-  const Type& type = ref_type;
-  
-  if (eval->data == nullptr) {
-    eval->data = comp->new_constant(type.size());
-  }
-
-  if (ref.rvt == Eval::RVT::Constant) {
-    Axle::memcpy_ts(eval->data, type.size(), ref.constant, type.size());
-  }
-  else {
-    // should be okay to do this
-    expr_ir.completed = false;
-    IR::V_ARG out = Eval::load_v_arg(&expr_ir, ref);
-    expr_ir.completed = true;
-
-    {
-      VM::StackFrame vm = VM::new_stack_frame(&expr_ir);
-      VM::exec(comp, comp_thread, &vm);
-      if (comp_thread->is_panic()) {
-        return;
-      }
-
-      auto res = vm.get_value(out);
-      ASSERT(res.t == type);
-
-      Axle::memcpy_ts(eval->data, type.size(), res.ptr, type.size());
+  {
+    VM::StackFrame vm = VM::new_stack_frame(&expr_ir);
+    VM::exec(comp, comp_thread, &vm);
+    if (comp_thread->is_panic()) {
+      return;
     }
+
+    auto return_value = vm.get_return_value();
+    ASSERT(return_value.t == eval.type);
+
+    Axle::memcpy_ts(Axle::ViewArr{eval.data, eval.type.size()},
+                    Axle::view_arr(return_value));
   }
 }
+
+void VM::dispatch_eval_ast(
+    CompilerGlobals* comp, CompilerThread* comp_thread,
+    Namespace* ns,
+    AST_LOCAL root, EvalPromise eval) {
+  ASSERT(eval.type.is_valid());
+  ASSERT(eval.data != nullptr);
+
+  if (!VC::is_comptime(root.ast->value_category)) {
+    comp_thread->report_error(ERROR_CODE::VM_ERROR, root.ast->node_span, "Cannot evaluate a non-comptime expression");
+    return;
+  }
+
+  ASSERT(!comp_thread->is_depends());
+  DC::eval_dependency_check_ast(comp, comp_thread, root);
+  if (comp_thread->is_depends()) {
+    ASSERT(comp_thread->local_unfound_names.names.size == 0);
+
+    UnitID eval_id = NULL_ID;
+    {
+      auto compilation = comp->services.compilation.get();
+
+      EvalPromise* store_promise = compilation->eval_promises.allocate();
+      *store_promise = eval;
+
+      CompilationUnit* eval_unit
+        = new_compilation_unit(comp, compilation._ptr,
+                               COMPILATION_UNIT_TYPE::EVAL,
+                               ns, { root },
+                               (void*)store_promise);
+
+      ASSERT(eval_unit->id != NULL_ID);
+      eval_id = eval_unit->id;
+      // Don't need to recheck anythings else on this
+      eval_unit->stage = COMPILATION_UNIT_STAGE::EMIT;
+
+      // TODO: maybe be smarter about ones that have finished
+      // even though its *very unlikely*
+      [[maybe_unused]] bool depended
+        = Compilation::maybe_depend(comp, comp_thread, compilation._ptr, eval_unit);
+
+      compilation->pipes->emit.push_back(eval_unit);
+    }
+
+    comp_thread->new_depends.insert({ COMPILATION_UNIT_STAGE::DONE, eval_id });
+    ASSERT(comp_thread->is_depends());
+
+    return;
+  }
+  else {
+    eval_ast(comp, comp_thread, root, eval);
+  }
+}
+
 
 static void compile_lambda_body(CompilerGlobals* comp,
                                 CompilerThread* comp_thread,
                                 ASTLambda* root,
-                                const LambdaBodyCompilation* l_comp) {
+                                const LambdaBodyCompilation*) {
   AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(root->node_type.is_valid());
+  ASSERT(root->label != IR::NULL_GLOBAL_LABEL);
 
   {
-    IR::IRStore* ir = comp->get_ir(l_comp->func->label);
-    ASSERT(ir->signature == l_comp->func->sig_struct);
+    IR::IRStore* ir = comp->get_ir(root->label);
+    ASSERT(ir->signature == root->node_type.structure);
+    ASSERT(root->sig->node_type == root->node_type);
 
 
     ASSERT(root->sig->ast_type == AST_TYPE::FUNCTION_SIGNATURE);
@@ -1533,7 +1621,8 @@ static void compile_lambda_body(CompilerGlobals* comp,
 }
 
 
-static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread,                           ASTExport* root) {
+static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread,
+                           Namespace* ns, ASTExport* root) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(root->node_type.is_valid());
   
@@ -1549,26 +1638,31 @@ static void compile_export(CompilerGlobals* comp, CompilerThread* comp_thread,  
     ASSERT(it.ast->ast_type == AST_TYPE::EXPORT_SINGLE);
     const ASTExportSingle* es = downcast_ast<ASTExportSingle>(it);
 
-    IR::EvalPromise eval = {};
-    IR::eval_ast(comp, comp_thread, es->value, &eval);
+    AST_LOCAL es_value = es->value;
+
+    ASSERT(es_value.ast->node_type.is_valid());
+    if (es_value.ast->node_type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
+      comp_thread->report_error(ERROR_CODE::LINK_ERROR, it.ast->node_span,
+                                "Can only export functions. Found: {}", es_value.ast->node_type.name);
+      return;
+    }
+
+    IR::GlobalLabel label = IR::NULL_GLOBAL_LABEL;
+
+    VM::EvalPromise eval = {
+      .data = (u8*)&label,
+      .type = es_value.ast->node_type,
+    };
+
+    VM::dispatch_eval_ast(comp, comp_thread, ns, es->value, eval);
+    ASSERT(!comp_thread->is_depends());
     if (comp_thread->is_panic()) {
       return;
     }
 
-    ASSERT(eval.type.is_valid());
-
-    if (eval.type.struct_type() != STRUCTURE_TYPE::LAMBDA) {
-      comp_thread->report_error(ERROR_CODE::LINK_ERROR, it.ast->node_span,
-                                "Can only export functions. Found: {}", eval.type.name);
-      return;
-    }
-
-    ASSERT(eval.data != nullptr);
-    IR::GlobalLabel label = *(const IR::GlobalLabel*)eval.data;
-
     exports.insert(Backend::DynExport{
       es->name,
-        label,
+      label,
     });
   }
 
@@ -1585,34 +1679,33 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
 
   ASSERT(root->node_type.is_valid());
 
-  IR::EvalPromise p = {};
-  IR::eval_ast(comp, comp_thread, root->expr_location, &p);
-  if (comp_thread->is_panic()) {
+  Axle::OwnedArr<char> path;
+
+  const Type loc_str_type = root->expr_location.ast->node_type;
+
+  if (loc_str_type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
+    const ArrayStructure* arr = loc_str_type.unchecked_base<ArrayStructure>();
+    if (arr->base != comp->builtin_types->t_ascii) {
+      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, root->node_span, "Invalid type for import \"{}\"", loc_str_type.name);
+      return;
+    }
+
+    ASSERT(arr->length == arr->size);
+    path = Axle::new_arr<char>(arr->length);
+  }
+  else {
+    comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, root->node_span, "Invalid type for import \"{}\"", loc_str_type.name);
     return;
   }
 
-  Axle::ViewArr<const char> path;
+  VM::EvalPromise eval = {
+    .data = (u8*)path.data,
+    .type = loc_str_type,
+  };
 
-  if (p.type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
-    const ArrayStructure* arr = p.type.unchecked_base<ArrayStructure>();
-    if (arr->base != comp->builtin_types->t_ascii) {
-      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, root->node_span, "Invalid type for import \"{}\"", p.type.name);
-      return;
-    }
-
-    path = { (const char*)p.data, arr->size };
-  }/*
-  else if (p.type.struct_type() == STRUCTURE_TYPE::POINTER) {
-    const PointerStructure* ptr = p.type.unchecked_base<PointerStructure>();
-    if (ptr->base != comp->builtin_types->t_ascii) {
-      comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, root->node_span, "Invalid type for import \"{}\"", p.type.name);
-      return;
-    }
-
-    path = { (const char*)p.data, arr->size };
-  }*/
-  else {
-    comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, root->node_span, "Invalid type for import \"{}\"", p.type.name);
+  VM::dispatch_eval_ast(comp, comp_thread, available_names, root->expr_location, eval);
+  ASSERT(!comp_thread->is_depends());
+  if (comp_thread->is_panic()) {
     return;
   }
 
@@ -1629,7 +1722,7 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
   };
 
   for (const Axle::InternString* base : paths_to_try) {
-    Axle::AllocFilePath try_path = format_file_path(view_arr(base), path);
+    Axle::AllocFilePath try_path = format_file_path(view_arr(base), view_arr(path));
 
     if (Axle::FILES::exists(const_view_arr(try_path.raw))) {
       auto strings = comp->services.strings.get();
@@ -1706,8 +1799,9 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
     }
   }
   else if (global->decl.init_value == nullptr) {
-    const SignatureStructure* sig = (const SignatureStructure*)comp->builtin_types->t_void_call.structure;
-    IR::GlobalLabel label = comp->next_function_label(sig, global->decl.span, NULL_ID);
+    const SignatureStructure* sig = comp_thread->s_global_init_call;
+
+    IR::GlobalLabel label = comp->new_runtime_ir_function(sig, global->decl.span);
 
     IR::IRStore* ir = comp->get_ir(label);
     ASSERT(ir->signature == sig);
@@ -1914,14 +2008,7 @@ void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDec
 void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLambda* lambda) noexcept {
   AXLE_TELEMETRY_FUNCTION();
 
-  //Setup the function object
-  IR::Function* const func = comp->new_function();
-  lambda->function = func;
-
-  func->lambda_declaration = lambda;
-
   ASTFuncSig* func_sig = lambda->sig;
-  func_sig->ir_function = func;
   func_sig->convention = comp->build_options.default_calling_convention;
 
   //Set the compilation units
@@ -1929,7 +2016,6 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
   {
     auto compilation = comp->services.compilation.get();
     LambdaSigCompilation* sig_extra = compilation->lambda_sig_compilation.allocate();
-    sig_extra->func = func;
     sig_extra->lambda = lambda;
 
     sig_unit = new_compilation_unit(comp, compilation._ptr,
@@ -1937,7 +2023,7 @@ void add_comp_unit_for_lambda(CompilerGlobals* const comp, Namespace* ns, ASTLam
                                     ns, { func_sig },
                                     sig_extra);
 
-    func->sig_unit_id = sig_unit->id;
+    lambda->sig_unit_id = sig_unit->id;
   }
 
   comp->pipelines.depend_check.push_back(sig_unit);
@@ -2038,10 +2124,9 @@ void dispatch_ready_dependencies(
   ptr->dependency_list.remove_if(remove_dep);
 }
 
-
 //Might be that dependencies were already dispatched
 //Return true if depended
-bool maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
+bool Compilation::maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
   AXLE_TELEMETRY_FUNCTION();
 
   ASSERT(unit != nullptr);
@@ -2221,32 +2306,47 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
     const Axle::ViewArr<const AstVisit> visit_arr = const_view_arr(unit->visit_arr);
     ASSERT(visit_arr.size > 0);
 
-    TC::TypeCheckContext context {
-      .next_index = 0,
-      .visit_arr = visit_arr,
-      .ns = unit->available_names,
-    };
+    while(true) {
+      TC::TypeCheckContext context {
+        .next_index = unit->next_tc_index,
+        .visit_arr = visit_arr,
+        .ns = unit->available_names,
+      };
 
-    TC::type_check_ast(comp, comp_thread, context);
-    if (comp_thread->is_panic()) {
-      return;
-    }
-    
-    ASSERT(!comp_thread->is_depends());
-    ASSERT(context.finished());
+      TC::type_check_ast(comp, comp_thread, context);
+      if (comp_thread->is_panic()) {
+        return;
+      }
 
-    if (comp->print_options.work) {
-      IO::format("Work = {} | Type Checked {}\n", comp->available_work_counter.load(), unit->id);
-    }
-    
-    {
+      // save just in case not finished
+      unit->next_tc_index = context.next_index;
+
       auto compilation = comp->services.compilation.get();
-      
-      unit->stage = COMPILATION_UNIT_STAGE::EMIT;
-      dispatch_ready_dependencies(comp, compilation._ptr, unit);
+
+      if (comp_thread->is_depends()) {
+        ASSERT(!context.finished());
+        bool depended = Compilation::maybe_depend(comp, comp_thread, compilation._ptr, unit);
+        
+        if (depended) break;
+      }
+      else {
+        ASSERT(context.finished());
+        
+        // Progress!
+        unit->stage = COMPILATION_UNIT_STAGE::EMIT;
+        dispatch_ready_dependencies(comp, compilation._ptr, unit);
+
+        compilation.release();
+        
+        comp->pipelines.emit.push_back(unit);
+
+        if (comp->print_options.work) {
+          IO::format("Work = {} | Type Checked {}\n", comp->available_work_counter.load(), unit->id);
+        }
+        break;
+      }
     }
     
-    comp->pipelines.emit.push_back(unit);
     return;
   }
 
@@ -2287,7 +2387,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         ASSERT(unit->ast != NULL_AST_NODE);
         ASTExport* export_ast = downcast_ast<ASTExport>(unit->ast);
 
-        compile_export(comp, comp_thread, export_ast);
+        compile_export(comp, comp_thread, unit->available_names, export_ast);
         if (comp_thread->is_panic()) {
           return;
         }
@@ -2343,28 +2443,35 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         LambdaSigCompilation* lsc = (LambdaSigCompilation*)unit->detail;
         ASSERT(unit->ast != NULL_AST_NODE);
 
+        ASTFuncSig* sig = downcast_ast<ASTFuncSig>(unit->ast);
+        const SignatureStructure* sig_struct = sig->node_type.unchecked_base<SignatureStructure>();
+
         //Only Job of this is to send off the inner dependency
         auto compilation = comp->services.compilation.get();
         unit->stage = COMPILATION_UNIT_STAGE::DONE;
-
+        
+        ASTLambda* lambda = lsc->lambda;
         CompilationUnit* body_unit;
         {
-          ASTLambda* lambda = lsc->lambda;
-          IR::Function* func = lsc->func;
+          ASSERT(lambda->sig == sig);
+          ASSERT(lambda->label == IR::NULL_GLOBAL_LABEL);
           Namespace* available_names = unit->available_names;
 
           //Create the unit for the body
           LambdaBodyCompilation* lbc = compilation->lambda_body_compilation.allocate();
-          lbc->func = func;
 
           body_unit = new_compilation_unit(comp, compilation._ptr, COMPILATION_UNIT_TYPE::LAMBDA_BODY,
                                            available_names, { lambda }, lbc);
+
+
           
 
           // Need to do this after so the work counters are valid
           compilation->lambda_sig_compilation.free(lsc);
           close_compilation_unit(comp, compilation._ptr, unit);
         }
+        
+        lambda->label = comp->new_ir_function(sig_struct, lambda->node_span, body_unit->id);
 
         comp->pipelines.depend_check.push_back(body_unit);
         return;
@@ -2388,6 +2495,27 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
         unit->stage = COMPILATION_UNIT_STAGE::DONE;
 
         compilation->lambda_body_compilation.free(lbc);
+        close_compilation_unit(comp, compilation._ptr, unit);
+        return;
+      }
+
+      case COMPILATION_UNIT_TYPE::EVAL: {
+        AXLE_TELEMETRY_SCOPE("Compile Eval");
+
+        VM::EvalPromise* promise = (VM::EvalPromise*)unit->detail;
+
+        ASSERT(unit->ast != NULL_AST_NODE);
+
+        eval_ast(comp, comp_thread, unit->ast, *promise);
+        if (comp_thread->is_panic()) {
+          return;
+        }
+
+        //Finished
+        auto compilation = comp->services.compilation.get();
+        unit->stage = COMPILATION_UNIT_STAGE::DONE;
+
+        compilation->eval_promises.free(promise);
         close_compilation_unit(comp, compilation._ptr, unit);
         return;
       }
@@ -2415,7 +2543,7 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
 
     bool depended = comp_thread->is_depends();
     if (depended) {
-      depended = maybe_depend(comp, comp_thread, compilation._ptr, unit);
+      depended = Compilation::maybe_depend(comp, comp_thread, compilation._ptr, unit);
     }
 
     if (!depended) {
@@ -2605,6 +2733,10 @@ static void free_remaining_compilation_units(Compilation* compilation) {
         }
       case COMPILATION_UNIT_TYPE::EXPORT: {
           compilation->export_compilation.free((const ExportCompilation*)unit->detail);
+          break;
+        }
+      case COMPILATION_UNIT_TYPE::EVAL: {
+          compilation->eval_promises.free((const VM::EvalPromise*)unit->detail);
           break;
         }
     }
@@ -2851,7 +2983,6 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
   register_builtin_type(builtin_types->t_i64);
   
   register_builtin_type(builtin_types->t_void_ptr);
-  register_builtin_type(builtin_types->t_void_call);
   register_builtin_type(builtin_types->t_ascii);
   
   register_builtin_type(builtin_types->t_bool);
@@ -2870,6 +3001,47 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     *(const u8**)g->decl.init_value = 0;//This is disgusting
 
     names->add_global_name_impl(&comp_thread->errors, builtin_namespace, g->decl.name, g);
+  }
+
+
+  {
+    const auto list = comp->platform_interface.valid_calling_conventions;
+    const auto num = comp->platform_interface.num_calling_conventions;
+
+    if (options.build.default_calling_convention >= num) {
+      Format::ArrayFormatter error_message = {};
+      Format::format_to(error_message, "\"[{}]\" was not a valid calling convention for system \"{}\"\n",
+                      options.build.default_calling_convention,
+                      comp->platform_interface.system_name);
+
+      if (num > 0) {
+        Format::format_to(error_message, "{} options are available:", num);
+
+        for (usize i = 0; i < num; ++i) {
+          const CallingConvention* cc = list[i];
+          ASSERT(cc != nullptr);
+          Format::format_to(error_message, "\n[{}] = \"{}\"", i, cc->name);
+        }
+      }
+      else {
+        Format::format_to(error_message, "No calling conventions available");
+      }
+
+      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, std::move(error_message).bake());
+      return;
+    }
+    else {
+      comp->build_options.default_calling_convention = list[options.build.default_calling_convention];
+    }
+  }
+
+  {
+    ASSERT(comp->build_options.default_calling_convention != nullptr);
+
+    SignatureStructure* const s_void_call = STRUCTS::new_lambda_structure(
+        structures._ptr, strings._ptr,
+        comp->build_options.default_calling_convention, {}, builtin_types->t_void);
+    comp->s_global_init_call = s_void_call;
   }
 
   //Intrinsics
@@ -2998,37 +3170,6 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
       comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{},
                                 "lib folder was invalid: {}", comp->build_options.lib_folder);
       return;
-    }
-  }
-
-  {
-    const auto list = comp->platform_interface.valid_calling_conventions;
-    const auto num = comp->platform_interface.num_calling_conventions;
-
-    if (options.build.default_calling_convention >= num) {
-      Format::ArrayFormatter error_message = {};
-      Format::format_to(error_message, "\"[{}]\" was not a valid calling convention for system \"{}\"\n",
-                      options.build.default_calling_convention,
-                      comp->platform_interface.system_name);
-
-      if (num > 0) {
-        Format::format_to(error_message, "{} options are available:", num);
-
-        for (usize i = 0; i < num; ++i) {
-          const CallingConvention* cc = list[i];
-          ASSERT(cc != nullptr);
-          Format::format_to(error_message, "\n[{}] = \"{}\"", i, cc->name);
-        }
-      }
-      else {
-        Format::format_to(error_message, "No calling conventions available");
-      }
-
-      comp_thread->report_error(ERROR_CODE::UNFOUND_DEPENDENCY, Span{}, std::move(error_message).bake());
-      return;
-    }
-    else {
-      comp->build_options.default_calling_convention = list[options.build.default_calling_convention];
     }
   }
 }

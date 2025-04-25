@@ -33,16 +33,6 @@ struct Local {
   IR::VariableId variable_id = {};
 };
 
-struct Pipe : Axle::AtomicQueue<CompilationUnit*> {
-  Axle::ViewArr<const char> _debug_name;
-};
-
-struct ComptimeExec {
-  AST_LOCAL ast;
-  u8* dest;
-  Type type;
-};
-
 struct Global {
   Decl decl = {};
   
@@ -50,12 +40,25 @@ struct Global {
   u32 dynamic_init_index = 0;
 };
 
+namespace VM {
+  struct EvalPromise {
+    u8* data;
+    Type type;
+  };
+
+  void dispatch_eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* ns, AST_LOCAL root, EvalPromise eval);
+}
+
 enum struct COMPILATION_UNIT_TYPE : uint8_t {
-  STRUCTURE, LAMBDA_BODY, LAMBDA_SIG, GLOBAL, IMPORT, EXPORT
+  STRUCTURE, LAMBDA_BODY, LAMBDA_SIG, GLOBAL, IMPORT, EXPORT, EVAL,
 };
 
 enum struct COMPILATION_UNIT_STAGE : uint8_t {
   DEPEND_CHECK, TYPE_CHECK, EMIT, DONE,
+};
+
+struct Pipe : Axle::AtomicQueue<CompilationUnit*> {
+  Axle::ViewArr<const char> _debug_name;
 };
 
 struct CompPipes {
@@ -85,6 +88,7 @@ struct CompilationUnit {
 
   Namespace* available_names;
   AST_LOCAL ast;
+  usize next_tc_index;
   Axle::OwnedArr<AstVisit> visit_arr;
 
   void* detail;
@@ -96,12 +100,9 @@ struct GlobalCompilation {
   Global* global;
 };
 
-struct LambdaBodyCompilation {
-  IR::Function* func;
-};
+struct LambdaBodyCompilation {};
 
 struct LambdaSigCompilation {
-  IR::Function* func;
   ASTLambda* lambda;
 };
 
@@ -226,10 +227,12 @@ struct Compilation {
   Axle::FreelistBlockAllocator<GlobalCompilation> global_compilation = {};
   Axle::FreelistBlockAllocator<ExportCompilation> export_compilation = {};
   Axle::FreelistBlockAllocator<ImportCompilation> import_compilation = {};
+  Axle::FreelistBlockAllocator<VM::EvalPromise> eval_promises = {};
 
   u64 in_flight_units = 0;//Units that are not waiting somewhere
 
   void add_dependency_to(CompilationUnit* waiting_on, const DependencySingle& dep);
+  static bool maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit);
 };
 
 
@@ -297,6 +300,7 @@ struct CompilerConstants {
   Backend::PlatformInterface platform_interface = {};
 
   BuiltinTypes* builtin_types = nullptr;
+  const SignatureStructure* s_global_init_call = nullptr;
 
   Intrinsics intrinsics = {};
   ImportantNames important_names = {};
@@ -313,6 +317,15 @@ struct GlobalLabelInfo {
   Span span;
   IR::IRStore* ir;
   UnitID dependency;
+
+  constexpr VALUE_CATEGORY get_call_category() const noexcept {
+    if (ir != nullptr && dependency != NULL_ID) {
+      return VALUE_CATEGORY::TEMPORARY_CONSTANT;
+    }
+    else {
+      return VALUE_CATEGORY::TEMPORARY_IMMUTABLE;
+    }
+  }
 };
 
 //Things that may be modified by multiple threads
@@ -341,8 +354,6 @@ struct CompilerGlobals : CompilerConstants {
   Axle::BucketArray<Local> locals_single_threaded = {};
   Axle::SpinLockMutex globals_mutex;
   Axle::BucketArray<Global> globals_single_threaded = {};
-  Axle::SpinLockMutex functions_mutex;
-  Axle::BucketArray<IR::Function> functions_single_threaded = {};
   Axle::SpinLockMutex namespaces_mutex;
   Axle::BucketArray<Namespace> namespaces_single_threaded = {};
 
@@ -355,11 +366,12 @@ struct CompilerGlobals : CompilerConstants {
   Axle::SpinLockMutex constants_mutex;
   Axle::ArenaAllocator constants_single_threaded = {};
 
-  IR::GlobalLabel next_function_label(const SignatureStructure* s, const Span& span, UnitID dependency);
+  IR::GlobalLabel new_ir_function(const SignatureStructure* s, const Span& span, UnitID dependency);
+  IR::GlobalLabel new_runtime_link_function(const SignatureStructure* s, const Span& span);
+  IR::GlobalLabel new_runtime_ir_function(const SignatureStructure* s, const Span& span);
   GlobalLabelInfo get_label_info(IR::GlobalLabel label);
 
   IR::IRStore* get_ir(IR::GlobalLabel label);
-  IR::Function* new_function();
   Local* new_local();
   Global* new_global();
   Namespace* new_namespace();
@@ -405,7 +417,6 @@ struct CompilerThread : CompilerConstants {
 
   UnfoundNames local_unfound_names;
   Axle::Array<DeferredDependency> new_depends;
-  Axle::Array<CompilationUnit*> new_units;
 
   inline constexpr bool is_panic() const { return errors.is_panic(); }
   inline bool is_depends() const {
