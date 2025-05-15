@@ -3492,7 +3492,7 @@ enum struct NeedIntermediate : u8 {
 
 struct VisitRes {
   NeedIntermediate ni;
-  Type t;
+  IR::Format val_format;
 };
 
 static VisitRes visit_ordered_value(const Axle::ViewArr<RegisterMapping>& mappings,
@@ -3501,10 +3501,9 @@ static VisitRes visit_ordered_value(const Axle::ViewArr<RegisterMapping>& mappin
     const IR::V_ARG& v_arg, u32 expr_id) {
   ASSERT(lifetimes.size == mappings.size);
   const u32 t_index = resolver->local_temp_id(v_arg.val);
-  const IR::SSATemp& t = resolver->local_temporaries[t_index];
 
   const MapType map_type = mappings[t_index].map_type;
-  if (map_type == MapType::Memory) return { NeedIntermediate::Yes, t.type };//ignored- assumed its a memory location
+  if (map_type == MapType::Memory) return { NeedIntermediate::Yes, v_arg.format };//ignored- assumed its a memory location
 
   ValueLifetime& ov = lifetimes[t_index];
   ASSERT(v_arg.offset == 0);//For now we don't worry about this
@@ -3522,7 +3521,7 @@ static VisitRes visit_ordered_value(const Axle::ViewArr<RegisterMapping>& mappin
     ov.last_use = expr_id;
   }
 
-  return { NeedIntermediate::No, t.type };
+  return { NeedIntermediate::No, v_arg.format };
 }
 
 static VisitRes visit_ordered_value(const Axle::ViewArr<RegisterMapping>& mappings,
@@ -3531,10 +3530,9 @@ static VisitRes visit_ordered_value(const Axle::ViewArr<RegisterMapping>& mappin
     const IR::P_ARG& v_arg, u32 expr_id) {
   ASSERT(lifetimes.size == mappings.size);
   const u32 t_index = resolver->local_temp_id(v_arg.ptr);
-  const IR::SSATemp& t = resolver->local_temporaries[t_index];
 
   const MapType map_type = mappings[t_index].map_type;
-  if (map_type == MapType::Memory) return { NeedIntermediate::Yes, t.type };//ignored- assumed its a memory location
+  if (map_type == MapType::Memory) return { NeedIntermediate::Yes, v_arg.val_format };//ignored- assumed its a memory location
 
   ValueLifetime& ov = lifetimes[t_index];
   ASSERT(v_arg.ptr_offset == 0);//For now we don't worry about this
@@ -3552,7 +3550,7 @@ static VisitRes visit_ordered_value(const Axle::ViewArr<RegisterMapping>& mappin
     ov.last_use = expr_id;
   }
 
-  return { NeedIntermediate::No, t.type };
+  return { NeedIntermediate::No, v_arg.val_format };
 }
 
 void new_intermediate(Axle::Array<RegisterMapping>& intermediates, u32 expr_id) {
@@ -3942,8 +3940,9 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         VisitRes left = visit_ordered_value(values, lifetimes, resolver, bin_op.left, expr_id);
         VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
         VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id + 1);
+
         /*always a left register needed*/
-        switch (left.t.struct_format()) {
+        switch (left.val_format) {
           case IR::Format::uint8:
           case IR::Format::sint8: {
             new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
@@ -3970,7 +3969,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
             comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                 "Invalid Mul operands\n"
                 "Left: {}, Right: {}",
-                left.t, right.t);
+                left.val_format, right.val_format);
             return {};
           }
         }
@@ -3989,10 +3988,10 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
         VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id + 1);
 
-        ASSERT(left.t.struct_format() == right.t.struct_format());
-        ASSERT(to.t.struct_format() == right.t.struct_format());
+        ASSERT(left.val_format == right.val_format);
+        ASSERT(to.val_format == right.val_format);
         /*always a left register needed*/
-        switch (left.t.struct_format()) {
+        switch (left.val_format) {
           case IR::Format::uint8:
           case IR::Format::sint8: {
             new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
@@ -4016,7 +4015,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
             comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                 "Invalid Div/Mod operands\n"
                 "Left: {}, Right: {}",
-                left.t, right.t);
+                left.val_format, right.val_format);
             return {};
           }
         }
@@ -4035,10 +4034,10 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
         VisitRes right = visit_ordered_value(values, lifetimes, resolver, bin_op.right, expr_id);
         VisitRes to = visit_ordered_value(values, lifetimes, resolver, bin_op.to, expr_id + 1);
 
-        ASSERT(left.t.struct_format() == right.t.struct_format());
-        ASSERT(to.t.struct_format() == right.t.struct_format());
+        ASSERT(left.val_format == right.val_format);
+        ASSERT(to.val_format == right.val_format);
         /*always a left register needed*/
-        switch (left.t.struct_format()) {
+        switch (left.val_format) {
           case IR::Format::uint8:
           case IR::Format::sint8: {
             new_fixed_intermediate(intermediates, expr_id, X64::rax.REG);
@@ -4062,7 +4061,7 @@ ResolvedMappings resolve_values(CompilerGlobals* comp,
             comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                 "Invalid Div/Mod operands\n"
                 "Left: {}, Right: {}",
-                left.t, right.t);
+                left.val_format, right.val_format);
             return {};
           }
         }
