@@ -28,7 +28,7 @@ static Eval::RuntimeValue bin_op_impl(IR::IRStore* const ir,
   return Eval::as_direct(to, dest_type);
 }
 
-using UN_CONSTANT_FOLD = Eval::RuntimeValue(*)(CompilerGlobals*, const u8*, const Type&);
+using UN_CONSTANT_FOLD = Eval::RuntimeValue(*)(CompilerGlobals*, const Eval::ConstantValue&);
 
 template<typename UN_OP_TYPE>
 static Eval::RuntimeValue un_op_impl(CompilerGlobals* comp,
@@ -40,7 +40,7 @@ static Eval::RuntimeValue un_op_impl(CompilerGlobals* comp,
   AXLE_TELEMETRY_FUNCTION();
   
   if (constant_fold != nullptr && from_in.rvt == Eval::RVT::Constant) {
-    return constant_fold(comp, from_in.constant, from_in.type);
+    return constant_fold(comp, from_in.constant);
   }
 
   IR::V_ARG from = Eval::load_v_arg(ir, from_in);
@@ -360,20 +360,20 @@ namespace {
   };
 }
 
-static Eval::RuntimeValue constant_fold_neg(CompilerGlobals* comp, const u8* data, const Type& type) {
-  ASSERT(type.is_valid());
-  ASSERT(TYPE_TESTS::is_signed_int(type));
+static Eval::RuntimeValue constant_fold_neg(CompilerGlobals* comp, const Eval::ConstantValue& constant) {
+  ASSERT(constant.type.is_valid());
+  ASSERT(TYPE_TESTS::is_signed_int(constant.type));
 
-  const auto* const int_t = type.unchecked_base<IntegerStructure>();
+  const auto* const int_t = constant.type.unchecked_base<IntegerStructure>();
 
-  u8* out = comp->new_constant(type.size());
+  u8* out = comp->new_constant(constant.type.size());
 
-  const Axle::ViewArr<const u8> in_ser {data, type.size()};
-  Axle::ViewArr<u8> out_ser = {out, type.size()};
+  const Axle::ViewArr<const u8> in_ser = Axle::view_arr(constant);
+  Axle::ViewArr<u8> out_ser = {out, constant.type.size()};
 
   visit_ir_type(NegVisitor{out_ser}, int_t->ir_format, in_ser);
 
-  return Eval::as_constant(out, type);
+  return Eval::as_constant(out, constant.type);
 }
 
 Eval::RuntimeValue UnOpArgs::emit_neg_int() {

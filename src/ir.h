@@ -539,26 +539,53 @@ namespace Eval {
     Constant, Direct, Indirect
   };
 
+  struct ConstantValue {
+    const u8* constant;
+    Type type;
+  };
+
+  struct DirectValue {
+    IR::ValueIndex index;
+    u32 offset;
+    Type type;
+  };
+
+  struct IndirectValue {
+    IR::ValueIndex index;
+    u32 offset;
+    Type type;
+  };
+
   struct RuntimeValue {
     RVT rvt;
-    Type type;
 
     union {
-      const u8* constant;
-      struct {
-        IR::ValueIndex index;
-        u32 offset;
-      } value;
+      ConstantValue constant;
+      DirectValue direct;
+      IndirectValue indirect;
     };
 
-    constexpr const Type& effective_type() const {
-      if (rvt == RVT::Indirect) {
-        ASSERT(type.struct_type() == STRUCTURE_TYPE::POINTER);
-        return type.unchecked_base<PointerStructure>()->base;
+    constexpr const Type& effective_type() const noexcept {
+      switch (rvt) {
+        case RVT::Constant: return constant.type;
+        case RVT::Direct: return direct.type;
+        case RVT::Indirect: {
+          ASSERT(indirect.type.struct_type() == STRUCTURE_TYPE::POINTER);
+          return indirect.type.unchecked_base<PointerStructure>()->base;
+        }
       }
-      else {
-        return type;
+
+      INVALID_CODE_PATH("Invalid rvt");
+    }
+
+    constexpr const Type& real_type() const noexcept {
+      switch (rvt) {
+        case RVT::Constant: return constant.type;
+        case RVT::Direct: return direct.type;
+        case RVT::Indirect: return indirect.type;
       }
+
+      INVALID_CODE_PATH("Invalid rvt");
     }
   };
 
@@ -626,6 +653,20 @@ namespace Eval {
   RuntimeValue arr_to_ptr(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type);
 }
 
+namespace IR {
+  constexpr C_ARG c_arg(const Eval::ConstantValue& cv) noexcept {
+    return c_arg(cv.constant, cv.type);
+  }
+
+  constexpr V_ARG v_arg(const Eval::DirectValue& dv) noexcept {
+    return v_arg(dv.index, dv.offset, dv.type);
+  }
+
+  constexpr P_ARG p_arg(const Eval::IndirectValue& idv) noexcept {
+    return p_arg(idv.index, idv.offset, idv.type);
+  }
+}
+
 namespace CASTS {
   Eval::RuntimeValue int_to_int(IR::IRStore* const ir,
                                 const Type& to,
@@ -655,6 +696,18 @@ namespace Axle::Format {
       }
 
       INVALID_CODE_PATH("Invalid rvt type");
+    }
+  };
+}
+
+namespace Axle {
+  template<>
+  struct Viewable<Eval::ConstantValue> {
+    using ViewT = const u8;
+    
+    template<typename U>
+    [[nodiscard]] static constexpr ViewArr<U> view(const Eval::ConstantValue& v) {
+      return { v.constant, v.type.size() };
     }
   };
 }

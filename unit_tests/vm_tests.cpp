@@ -127,7 +127,8 @@ void run_test_for_integer(AxleTest::TestErrors* test_errors,
     TEST_EQ(static_cast<const IR::ControlBlock*>(&ir.control_blocks[end_cf.label - 1]),
             sf.current_block);
 
-    VM::StackFrame::RealValue res_val = sf.get_value(IR::v_arg(v4.value.index, v4.value.offset, v4.type));
+    TEST_EQ(Eval::RVT::Direct, v4.rvt);
+    VM::StackFrame::RealValue res_val = sf.get_value(IR::v_arg(v4.direct));
 
     TEST_EQ(res_val.t, int_t);
 

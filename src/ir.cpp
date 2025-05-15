@@ -698,35 +698,31 @@ usize IR::deserialize(const u8* data, usize remaining_size, CODE_L& i) noexcept 
 }
 
 Eval::RuntimeValue Eval::no_value() {
-  return {};
+  return {
+    .rvt = RVT::Constant,
+    .constant = { .constant = nullptr, .type = Type{} }
+  };
 }
 
 Eval::RuntimeValue Eval::as_direct(IR::ValueIndex val, const Type& type) {
-  Eval::RuntimeValue r = {};
-  r.rvt = RVT::Direct;
-  r.type = type;
-  r.value = { val, 0 };
-
-  return r;
+  return Eval::RuntimeValue {
+    .rvt = RVT::Direct,
+    .direct = { .index = val, .offset = 0, .type = type },
+  };
 }
 
 Eval::RuntimeValue Eval::as_indirect(IR::ValueIndex val, const Type& type) {
-  ASSERT(type.struct_type() == STRUCTURE_TYPE::POINTER);
-  Eval::RuntimeValue r = {};
-  r.rvt = RVT::Indirect;
-  r.type = type;
-  r.value = { val, 0 };
-
-  return r;
+  return Eval::RuntimeValue {
+    .rvt = RVT::Indirect,
+    .indirect = { .index = val, .offset = 0, .type = type },
+  };
 }
 
 Eval::RuntimeValue Eval::as_constant(const u8* constant, const Type& type) {
-  Eval::RuntimeValue r = {};
-  r.rvt = RVT::Constant;
-  r.type = type;
-  r.constant = constant;
-
-  return r;
+  return Eval::RuntimeValue {
+    .rvt = RVT::Constant,
+    .constant = { .constant = constant, .type = type },
+  };
 }
 
 bool Eval::must_pass_type_by_reference(const CallingConvention* conv, const Structure* s) {
@@ -787,34 +783,36 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
   
   ASSERT(to.rvt != RVT::Constant);
 
-  ASSERT(to.type.size() > 0);
-  ASSERT(from.type.size() > 0);
+  ASSERT(to.effective_type().size() > 0);
+  ASSERT(from.effective_type().size() > 0);
 
   switch (to.rvt) {
     case Eval::RVT::Constant: INVALID_CODE_PATH("Cannot assign to a constant"); return;
 
     case Eval::RVT::Direct: {
+        const IR::V_ARG to_arg = IR::v_arg(to.direct);
+
         switch (from.rvt) {
           case Eval::RVT::Constant: {
               IR::Types::Set set = {};
-              set.data = IR::c_arg(from.constant, from.type);
-              set.to = IR::v_arg(to.value.index, to.value.offset, to.type);
+              set.data = IR::c_arg(from.constant);
+              set.to = to_arg;
 
               IR::Emit::Set(ir->current_bytecode(), set);
               return;
             }
           case Eval::RVT::Direct: {
               IR::Types::Copy ccd = {};
-              ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
-              ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
+              ccd.from = IR::v_arg(from.direct);
+              ccd.to = to_arg;
 
               IR::Emit::Copy(ir->current_bytecode(), ccd);
               return;
             }
           case Eval::RVT::Indirect: {
               IR::Types::CopyLoad ccd = {};
-              ccd.from = IR::p_arg(from.value.index, from.value.offset, from.type);
-              ccd.to = IR::v_arg(to.value.index, to.value.offset, to.type);
+              ccd.from = IR::p_arg(from.indirect);
+              ccd.to = to_arg;
 
               IR::Emit::CopyLoad(ir->current_bytecode(), ccd);
               return;
@@ -823,29 +821,31 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
         break;
       }
     case Eval::RVT::Indirect: {
-        ASSERT(to.type.unchecked_base<PointerStructure>()->mut);
+        const IndirectValue& indirect = to.indirect;
+        ASSERT(indirect.type.unchecked_base<PointerStructure>()->mut);
+        const IR::P_ARG to_arg = IR::p_arg(indirect);
 
         switch (from.rvt) {
           case Eval::RVT::Constant: {
               IR::Types::SetStore set = {};
-              set.data = IR::c_arg(from.constant, from.type);
-              set.to = IR::p_arg(to.value.index, to.value.offset, to.type);
+              set.data = IR::c_arg(from.constant);
+              set.to = to_arg;
 
               IR::Emit::SetStore(ir->current_bytecode(), set);
               return;
             }
           case Eval::RVT::Direct: {
               IR::Types::CopyStore ccd = {};
-              ccd.from = IR::v_arg(from.value.index, from.value.offset, from.type);
-              ccd.to = IR::p_arg(to.value.index, to.value.offset, to.type);
+              ccd.from = IR::v_arg(from.direct);
+              ccd.to = to_arg;
 
               IR::Emit::CopyStore(ir->current_bytecode(), ccd);
               return;
             }
           case Eval::RVT::Indirect: {
               IR::Types::CopyLoadStore ccd = {};
-              ccd.from = IR::p_arg(from.value.index, from.value.offset, from.type);
-              ccd.to = IR::p_arg(to.value.index, to.value.offset, to.type);
+              ccd.from = IR::p_arg(from.indirect);
+              ccd.to = to_arg;
 
               IR::Emit::CopyLoadStore(ir->current_bytecode(), ccd);
               return;
@@ -949,29 +949,31 @@ IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
   ASSERT(!ir->completed);
   switch (rv.rvt) {
     case RVT::Constant: {
-        IR::ValueIndex v = ir->new_temporary(rv.type, {});
+        const ConstantValue& constant = rv.constant;
+        IR::ValueIndex v = ir->new_temporary(constant.type, {});
 
         IR::Types::Set set = {};
-        set.to = IR::v_arg(v, 0, rv.type);
-        set.data = IR::c_arg(rv.constant, rv.type);
+        set.to = IR::v_arg(v, 0, constant.type);
+        set.data = IR::c_arg(constant);
 
         IR::Emit::Set(ir->current_bytecode(), set);
 
-        return IR::v_arg(v, 0, rv.type);
+        return IR::v_arg(v, 0, constant.type);
       }
 
     case RVT::Direct: {
-        return IR::v_arg(rv.value.index, rv.value.offset, rv.type);
+        return IR::v_arg(rv.direct);
       }
     case RVT::Indirect: {
-        ASSERT(rv.type.struct_type() == STRUCTURE_TYPE::POINTER);
-        const auto* ptr_t = rv.type.unchecked_base<PointerStructure>();
+        const IndirectValue& indirect = rv.indirect;
+        ASSERT(indirect.type.struct_type() == STRUCTURE_TYPE::POINTER);
+        const auto* ptr_t = indirect.type.unchecked_base<PointerStructure>();
         const Type copy_t = ptr_t->base;
         IR::ValueIndex v = ir->new_temporary(copy_t, {});
 
         IR::Types::CopyLoad cpy = {};
         cpy.to = IR::v_arg(v, 0, copy_t);
-        cpy.from = IR::p_arg(rv.value.index, rv.value.offset, rv.type);
+        cpy.from = IR::p_arg(indirect);
 
         IR::Emit::CopyLoad(ir->current_bytecode(), cpy);
 
@@ -993,18 +995,19 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
       }
 
     case RVT::Direct: {
-        ASSERT(val.type == ptr_type.unchecked_base<PointerStructure>()->base);
+        const DirectValue& direct = val.direct;
+        ASSERT(direct.type == ptr_type.unchecked_base<PointerStructure>()->base);
 
         {
           const auto* cb = ir->current_control_block();
-          ASSERT(cb->temporaries.size > val.value.index.index);
-          ASSERT(cb->temporaries.data[val.value.index.index].requirements.has_address());
+          ASSERT(cb->temporaries.size > direct.index.index);
+          ASSERT(cb->temporaries.data[direct.index.index].requirements.has_address());
         }
 
         IR::ValueIndex v = ir->new_temporary(ptr_type, req);
 
         IR::Types::AddrOf addr = {};
-        addr.from = IR::v_arg(val.value.index, val.value.offset, val.type);
+        addr.from = IR::v_arg(direct);
         addr.to = IR::v_arg(v, 0, ptr_type);
 
         IR::Emit::AddrOf(ir->current_bytecode(), addr);
@@ -1012,8 +1015,9 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
         return Eval::as_direct(v, ptr_type);
       }
     case RVT::Indirect: {
-        ASSERT(val.type.struct_type() == STRUCTURE_TYPE::POINTER);
-        ASSERT(val.type == ptr_type);
+        const IndirectValue& indirect = val.indirect;
+        ASSERT(indirect.type.struct_type() == STRUCTURE_TYPE::POINTER);
+        ASSERT(indirect.type == ptr_type);
 
         const auto* ip = ptr_type.unchecked_base<PointerStructure>();
 
@@ -1042,19 +1046,20 @@ Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
         INVALID_CODE_PATH("Cannot take the address of a constant");
       }
     case RVT::Direct: {
-        ASSERT(val.type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY);
-        ASSERT(val.type.unchecked_base<ArrayStructure>()->base == ptr_type.unchecked_base<PointerStructure>()->base);
+        const DirectValue& direct = val.direct;
+        ASSERT(direct.type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY);
+        ASSERT(direct.type.unchecked_base<ArrayStructure>()->base == ptr_type.unchecked_base<PointerStructure>()->base);
 
         {
           const auto* cb = ir->current_control_block();
-          ASSERT(cb->temporaries.size > val.value.index.index);
-          ASSERT(cb->temporaries.data[val.value.index.index].requirements.has_address());
+          ASSERT(cb->temporaries.size > direct.index.index);
+          ASSERT(cb->temporaries.data[direct.index.index].requirements.has_address());
         }
 
         IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         IR::Types::AddrOf addr = {};
-        addr.from = IR::v_arg(val.value.index, val.value.offset, val.type);
+        addr.from = IR::v_arg(direct);
         addr.to = IR::v_arg(v, 0, ptr_type);
 
         IR::Emit::AddrOf(ir->current_bytecode(), addr);
@@ -1062,20 +1067,23 @@ Eval::RuntimeValue Eval::arr_to_ptr(IR::IRStore* const ir,
         return Eval::as_direct(v, ptr_type);
       }
     case RVT::Indirect: {
-        ASSERT(val.type.struct_type() == STRUCTURE_TYPE::POINTER);
+        const IndirectValue& indirect = val.indirect;
+        ASSERT(indirect.type.struct_type() == STRUCTURE_TYPE::POINTER);
 
-        const auto* ip = val.type.unchecked_base<PointerStructure>();
+        const auto* ip = indirect.type.unchecked_base<PointerStructure>();
         const Type& to_type = ip->base;
 
         ASSERT(to_type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY);
         ASSERT(to_type.unchecked_base<ArrayStructure>()->base == ptr_type.unchecked_base<PointerStructure>()->base);
 
-        const auto* ptr_s = ptr_type.unchecked_base<PointerStructure>();
-
-        Eval::RuntimeValue res = val;
-        res.rvt = RVT::Direct;
-        res.type = ptr_s->base;
-        return res;
+        return Eval::RuntimeValue {
+          .rvt = RVT::Direct,
+          .direct = DirectValue {
+            .index = indirect.index,
+            .offset = indirect.offset,
+            .type = ptr_type,
+          }
+        };
       }
   }
 
@@ -1088,7 +1096,7 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
                                const Eval::RuntimeValue& val, const Type& ptr_type) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(!ir->completed);
-  ASSERT(val.type.struct_type() == STRUCTURE_TYPE::POINTER);
+  ASSERT(val.effective_type().struct_type() == STRUCTURE_TYPE::POINTER);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
 
   switch (val.rvt) {
@@ -1097,19 +1105,26 @@ Eval::RuntimeValue Eval::deref(IR::IRStore* const ir,
       }
 
     case RVT::Direct: {
-        ASSERT(val.type == ptr_type);
+        const DirectValue& direct = val.direct;
+        ASSERT(direct.type == ptr_type);
 
-        Eval::RuntimeValue res = val;
-        res.rvt = RVT::Indirect;
-        return res;
+        return Eval::RuntimeValue {
+          .rvt = RVT::Indirect,
+          .indirect = IndirectValue {
+            .index = direct.index,
+            .offset = direct.offset,
+            .type = direct.type,
+          }
+        };
       }
     case RVT::Indirect: {
-        ASSERT(val.type.unchecked_base<PointerStructure>()->base == ptr_type);
+        const IndirectValue& indirect = val.indirect;
+        ASSERT(indirect.type.unchecked_base<PointerStructure>()->base == ptr_type);
 
         IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
         IR::Types::AddrOfLoad addr = {};
-        addr.from = IR::p_arg(val.value.index, val.value.offset, val.type);
+        addr.from = IR::p_arg(indirect);
         addr.to = IR::v_arg(v, 0, ptr_type);
 
         IR::Emit::AddrOfLoad(ir->current_bytecode(), addr);
@@ -1125,7 +1140,7 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
                                     const Eval::RuntimeValue& val, const Eval::RuntimeValue& offset, const Type& ptr_type) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(!ir->completed);
-  const Type u64_type = offset.type;
+  const Type u64_type = offset.effective_type();
   ASSERT(u64_type.struct_type() == STRUCTURE_TYPE::INTEGER);
   ASSERT(u64_type.structure->size == 8);
   ASSERT(!u64_type.unchecked_base<IntegerStructure>()->is_signed);
@@ -1139,17 +1154,17 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
     //Special cases for a constant sub-object
 
     u64 offset_v = 0;
-    memcpy_s(&offset_v, sizeof(offset_v), offset.constant, sizeof(offset_v));
+    memcpy_s(&offset_v, sizeof(offset_v), offset.constant.constant, sizeof(offset_v));
 
     switch (val.rvt) {
       case RVT::Constant: {
-          return Eval::as_constant(val.constant + offset_v, base);
+          return Eval::as_constant(val.constant.constant + offset_v, base);
         }
 
       case RVT::Direct: {
           Eval::RuntimeValue res = val;
-          res.type = base;
-          res.value.offset += (u32)offset_v;
+          res.direct.type = base;
+          res.direct.offset += (u32)offset_v;
 
           return res;
         }
@@ -1170,17 +1185,17 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
 
         ptr_arg = IR::v_arg(v, 0, ptr_type);
 
-        ASSERT(ir->current_control_block()->temporaries.data[val.value.index.index].requirements.has_address());
+        ASSERT(ir->current_control_block()->temporaries.data[val.direct.index.index].requirements.has_address());
 
         IR::Types::AddrOf addrof = {};
-        addrof.from = IR::v_arg(val.value.index, val.value.offset, val.type);
+        addrof.from = IR::v_arg(val.direct);
         addrof.to = ptr_arg;
 
         IR::Emit::AddrOf(ir->current_bytecode(), addrof);
         break;
       }
     case RVT::Indirect: {
-        ptr_arg = IR::v_arg(val.value.index, val.value.offset, val.type);
+        ptr_arg = IR::v_arg(val.indirect.index, val.indirect.offset, val.indirect.type);
         break;
       }
     default: {
@@ -1222,20 +1237,20 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
 
   switch (val.rvt) {
     case RVT::Constant: {
-      return Eval::as_constant(val.constant + offset, base);
+      return Eval::as_constant(val.constant.constant + offset, base);
     }
 
     case RVT::Direct: {
       Eval::RuntimeValue res = val;
-      res.type = base;
-      res.value.offset += (u32)offset;
+      res.direct.type = base;
+      res.direct.offset += (u32)offset;
 
       return res;
     }
     case RVT::Indirect: {
       if(offset == 0) {
         RuntimeValue new_val = val;
-        new_val.type = ptr_type;
+        new_val.indirect.type = ptr_type;
         return new_val;
       }
       else {
@@ -1245,7 +1260,7 @@ Eval::RuntimeValue Eval::sub_object(IR::IRStore* const ir,
         const IR::V_ARG offset_arg = Eval::load_v_arg(ir, offset_v);
 
         IR::Types::Add add = {};
-        add.left = IR::v_arg(val.value.index, val.value.offset, val.type);
+        add.left = IR::v_arg(val.indirect.index, val.indirect.offset, val.indirect.type);
         add.right = offset_arg;
         add.to = IR::v_arg(v, 0, ptr_type);
 

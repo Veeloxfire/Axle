@@ -303,12 +303,12 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
 
     if (indirect) {
       const Type ptr_type = generate_pointer_type(comp,
-          { .mut = false, .base = val.type});
+          { .mut = false, .base = val.effective_type() });
 
       val = Eval::addrof(builder->ir, val, ptr_type, {});
     }
 
-    ASSERT(!Eval::must_pass_type_by_reference(call->sig->calling_convention, val.type.structure));
+    ASSERT(!Eval::must_pass_type_by_reference(call->sig->calling_convention, val.real_type().structure));
 
     IR::V_ARG v_arg = Eval::load_v_arg(ir, val);
     args.insert(v_arg);
@@ -376,7 +376,7 @@ Eval::RuntimeValue CASTS::no_op(IR::IRStore* const ir,
                                 IR::ValueRequirements req) {
   AXLE_TELEMETRY_FUNCTION();
   
-  ASSERT(val.type.is_valid());
+  ASSERT(val.real_type().is_valid());
 
   IR::ValueIndex out = ir->new_temporary(to, req);
 
@@ -394,7 +394,7 @@ Eval::RuntimeValue CASTS::take_address(IR::IRStore* const ir,
                                        IR::ValueRequirements req) {
   AXLE_TELEMETRY_FUNCTION();
   
-  ASSERT(val.type.is_valid());
+  ASSERT(val.real_type().is_valid());
   return Eval::addrof(ir, val, to, req);
 }
 
@@ -739,13 +739,13 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           Eval::RuntimeValue slice = Eval::as_direct(v, index->node_type);
 
           Eval::RuntimeValue ptr_member = slice;
-          ptr_member.value.offset = 0;
-          ptr_member.type = ptr_t;
+          ptr_member.direct.offset = 0;
+          ptr_member.direct.type = ptr_t;
           
           Eval::RuntimeValue len_member = slice;
-          len_member.value.offset = ptr_t.size();
+          len_member.direct.offset = ptr_t.size();
           ASSERT(ptr_t.size() == 8);
-          len_member.type = comp_thread->builtin_types->t_u64;
+          len_member.direct.type = comp_thread->builtin_types->t_u64;
 
           {
             Eval::RuntimeValue ptr = Eval::arr_to_ptr(builder->ir, arr, ptr_t);
@@ -814,14 +814,14 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             ASSERT(v.rvt == Eval::RVT::Constant);
             const Type v_type = v.effective_type();
             ASSERT(v_type == i_t->type);
-            memcpy_s(tup_constant + i_t->offset, i_t->type.size(), v.constant, v_type.size());
+            memcpy_s(tup_constant + i_t->offset, i_t->type.size(), v.constant.constant, v_type.size());
           }
           else {
             ASSERT(tup_lit.rvt == Eval::RVT::Direct);
 
             Eval::RuntimeValue member = tup_lit;
-            member.value.offset = i_t->offset;
-            member.type = i_t->type;
+            member.direct.offset = i_t->offset;
+            member.direct.type = i_t->type;
 
             Eval::assign(builder->ir, member, v);
           }
@@ -870,14 +870,14 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             ASSERT(el.rvt == Eval::RVT::Constant);
             ASSERT(arr.rvt == Eval::RVT::Constant);
             ASSERT(el_type == arr_type->base);
-            memcpy_s(arr_constant + offset, base_type.size(), el.constant, base_type.size());
+            memcpy_s(arr_constant + offset, base_type.size(), el.constant.constant, base_type.size());
           }
           else {
             ASSERT(arr.rvt == Eval::RVT::Direct);
 
             Eval::RuntimeValue element_ref = arr;
-            element_ref.value.offset = (u32)offset;
-            element_ref.type = base_type;
+            element_ref.direct.offset = (u32)offset;
+            element_ref.direct.type = base_type;
 
             Eval::assign(builder->ir, element_ref, el);
           }
@@ -1498,10 +1498,8 @@ static void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOC
   }
 
   if (res.rvt == Eval::RVT::Constant) {
-    ASSERT(res.type == res.effective_type());
-
     VM::copy_values(Axle::ViewArr{eval.data, eval.type.size()}, eval.type.struct_format(),
-                    Axle::ViewArr{res.constant, res.type.size()}, res.type.struct_format());
+                    Axle::view_arr(res.constant), res.constant.type.struct_format());
     return;
   }
   else {
