@@ -364,7 +364,7 @@ struct CompilerGlobals : CompilerConstants {
   Axle::Array<GlobalLabelInfo> label_signature_table = {};
 
   Axle::SpinLockMutex constants_mutex;
-  Axle::ArenaAllocator constants_single_threaded = {};
+  Axle::GrowingMemoryPool<1024> constants_single_threaded = {};
 
   IR::GlobalLabel new_ir_function(const SignatureStructure* s, const Span& span, UnitID dependency);
   IR::GlobalLabel new_runtime_link_function(const SignatureStructure* s, const Span& span);
@@ -377,25 +377,18 @@ struct CompilerGlobals : CompilerConstants {
   Namespace* new_namespace();
 
   template<typename T>
-  T* new_constant() {
-    //constants_mutex.acquire();
-    //T* t = constants_single_threaded.alloc_no_construct<T>();
-    //constants_mutex.release();
-    return (T*)malloc(sizeof(T));
+  T* new_global_constant() {
+    constants_mutex.acquire();
+    T* t = constants_single_threaded.allocate<T>();
+    constants_mutex.release();
+    return t;
   }
 
-  inline u8* new_constant(usize size) {
-    //constants_mutex.acquire();
-    //u8* t = constants_single_threaded.alloc_no_construct(size);
-    //constants_mutex.release();
-    return (u8*)malloc(size);
-  }
-
-  void free_constant(void* ptr) {
-    //constants_mutex.acquire();
-    //constants_single_threaded.free_no_destruct(ptr);
-    //constants_mutex.release();
-    free(ptr);
+  inline u8* new_global_constant(const Type& t) {
+    constants_mutex.acquire();
+    u8* v = (u8*)constants_single_threaded.alloc_raw(t.size(), t.structure->alignment);
+    constants_mutex.release();
+    return v;
   }
 
   inline bool is_global_panic() const {

@@ -2334,7 +2334,7 @@ TC_STAGE(DECL_DOWN) {
       return;
     }
 
-    u8* init_val = comp->new_constant(decl->type.size());
+    u8* init_val = comp->new_global_constant(decl->type);
     decl->init_value = init_val;
 
     VM::EvalPromise p {

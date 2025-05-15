@@ -6,8 +6,8 @@
 
 struct BinOpArgs {
   BinOpEmitInfo info;
-  CompilerGlobals* comp;
-  IR::IRStore* ir;
+  CompilerThread* comp_thread;
+  Eval::IrBuilder* builder;
 
   const Eval::RuntimeValue& left;
   const Eval::RuntimeValue& right;
@@ -39,8 +39,8 @@ struct BinOpArgs {
 
 struct UnOpArgs {
   UnOpEmitInfo info;
-  CompilerGlobals* comp;
-  IR::IRStore* ir;
+  CompilerThread* comp_thread;
+  Eval::IrBuilder* builder;
   const Eval::RuntimeValue& prim;
 
   constexpr Eval::RuntimeValue emit();

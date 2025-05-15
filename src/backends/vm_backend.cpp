@@ -25,6 +25,53 @@ namespace {
   };
 }
 
+void VM::eval_negate(Errors *errors, IR::Format format, Axle::ViewArr<u8> out, Axle::ViewArr<const u8> in) {
+  visit_ir_type(NegVisitor{errors, out}, format, in);
+}
+
+#define EVAL_FN(name, op_symbol) \
+void VM:: name (Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right) { \
+  constexpr auto do_op = []<typename T>(auto& ser, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right) { \
+    T l, r;\
+    bool res_l = Axle::deserialize_le<T>(left, l); \
+    ASSERT(res_l); \
+    bool res_r = Axle::deserialize_le<T>(right, r); \
+    ASSERT(res_r); \
+    Axle::serialize_le<T>(ser, static_cast<T>(l op_symbol r)); \
+  }; \
+  switch (format) \
+  { \
+    case IR::Format::uint8: do_op.operator()<u8>(to, Axle::view_arr(left), Axle::view_arr(right)); break; \
+    case IR::Format::sint8: do_op.operator()<i8>(to, Axle::view_arr(left), Axle::view_arr(right)); break; \
+    case IR::Format::uint16: do_op.operator()<u16>(to, Axle::view_arr(left), Axle::view_arr(right)); break; \
+    case IR::Format::sint16: do_op.operator()<i16>(to, Axle::view_arr(left), Axle::view_arr(right)); break; \
+    case IR::Format::uint32: do_op.operator()<u32>(to, Axle::view_arr(left), Axle::view_arr(right)); break; \
+    case IR::Format::sint32: do_op.operator()<i32>(to, Axle::view_arr(left), Axle::view_arr(right)); break; \
+    case IR::Format::uint64: do_op.operator()<u64>(to, Axle::view_arr(left), Axle::view_arr(right)); break; \
+    case IR::Format::sint64: do_op.operator()<i64>(to, Axle::view_arr(left), Axle::view_arr(right)); break; \
+    case IR::Format::opaque: \
+    case IR::Format::pointer: \
+    case IR::Format::slice: \
+    default: { \
+      errors->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
+      return; \
+    } \
+  } \
+}
+
+EVAL_FN(eval_add, +);
+EVAL_FN(eval_sub, -);
+EVAL_FN(eval_mul, *);
+EVAL_FN(eval_div, / );
+EVAL_FN(eval_mod, % );
+EVAL_FN(eval_eq, == );
+EVAL_FN(eval_neq, != );
+EVAL_FN(eval_less, < );
+EVAL_FN(eval_great, > );
+EVAL_FN(eval_and, &);
+EVAL_FN(eval_or, | );
+EVAL_FN(eval_xor, ^);
+
 constexpr auto load_types_info() {
   struct FormatData {
     usize sizes[9];
@@ -446,10 +493,10 @@ void VM::exec(CompilerGlobals* comp, CompilerThread* comp_thread, VM::StackFrame
             break;
           }
 
-#define BIN_OP_CASE(name, op_symbol) \
-      case IR::OpCode:: name: { \
-          IR::Types:: name op; \
-          stack_frame->IP = IR::Read:: name(stack_frame->IP, stack_frame->IP_END, op); \
+#define BIN_OP_CASE(op_name, eval_name) \
+      case IR::OpCode:: op_name: { \
+          IR::Types:: op_name op; \
+          stack_frame->IP = IR::Read:: op_name(stack_frame->IP, stack_frame->IP_END, op); \
           auto to = stack_frame->get_value(op.to); \
           auto left = stack_frame->get_value(op.left); \
           auto right = stack_frame->get_value(op.right); \
@@ -458,48 +505,25 @@ void VM::exec(CompilerGlobals* comp, CompilerThread* comp_thread, VM::StackFrame
           const IR::Format r_format = right.t.struct_format(); \
           ASSERT(r_format == t_format); \
           ASSERT(l_format == t_format); \
-          Axle::ViewArr<u8> to_ser = Axle::view_arr(to); \
-          constexpr auto do_op = []<typename T>(auto& ser, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right) { \
-            T l, r;\
-            bool res_l = Axle::deserialize_le<T>(left, l); \
-            ASSERT(res_l); \
-            bool res_r = Axle::deserialize_le<T>(right, r); \
-            ASSERT(res_r); \
-            Axle::serialize_le<T>(ser, static_cast<T>(l op_symbol r)); \
-          }; \
-          switch (t_format) \
-          { \
-            case IR::Format::uint8: do_op.operator()<u8>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
-            case IR::Format::sint8: do_op.operator()<i8>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
-            case IR::Format::uint16: do_op.operator()<u16>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
-            case IR::Format::sint16: do_op.operator()<i16>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
-            case IR::Format::uint32: do_op.operator()<u32>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
-            case IR::Format::sint32: do_op.operator()<i32>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
-            case IR::Format::uint64: do_op.operator()<u64>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
-            case IR::Format::sint64: do_op.operator()<i64>(to_ser, Axle::view_arr(left), Axle::view_arr(right)); break; \
-            case IR::Format::opaque: \
-            case IR::Format::pointer: \
-            case IR::Format::slice: \
-            default: { \
-              comp_thread->report_error(ERROR_CODE::IR_ERROR, Span{}, "Unsupported format for binary operator " #op_symbol); \
-              return; \
-            } \
+          VM:: eval_name (&comp_thread->errors, t_format, Axle::view_arr(to), Axle::view_arr(left), Axle::view_arr(right)); \
+          if (comp_thread->is_panic()) { \
+            return; \
           } \
         } break
 
           //Binary Operators
-          BIN_OP_CASE(Add, +);
-          BIN_OP_CASE(Sub, -);
-          BIN_OP_CASE(Mul, *);
-          BIN_OP_CASE(Div, / );
-          BIN_OP_CASE(Mod, % );
-          BIN_OP_CASE(Eq, == );
-          BIN_OP_CASE(Neq, != );
-          BIN_OP_CASE(Less, < );
-          BIN_OP_CASE(Great, > );
-          BIN_OP_CASE(And, &);
-          BIN_OP_CASE(Or, | );
-          BIN_OP_CASE(Xor, ^);
+          BIN_OP_CASE(Add, eval_add);
+          BIN_OP_CASE(Sub, eval_sub);
+          BIN_OP_CASE(Mul, eval_mul);
+          BIN_OP_CASE(Div, eval_div);
+          BIN_OP_CASE(Mod, eval_mod);
+          BIN_OP_CASE(Eq, eval_eq);
+          BIN_OP_CASE(Neq, eval_neq);
+          BIN_OP_CASE(Less, eval_less);
+          BIN_OP_CASE(Great, eval_great);
+          BIN_OP_CASE(And, eval_and);
+          BIN_OP_CASE(Or, eval_or);
+          BIN_OP_CASE(Xor, eval_xor);
 
 #undef BIN_OP_CASE
 
@@ -511,9 +535,8 @@ void VM::exec(CompilerGlobals* comp, CompilerThread* comp_thread, VM::StackFrame
             const IR::Format t_format = to.t.struct_format();
             const IR::Format f_format = from.t.struct_format();
             ASSERT(t_format == f_format);
-            Axle::ViewArr<u8> to_ser = Axle::view_arr(to);
 
-            visit_ir_type(NegVisitor{&comp_thread->errors, to_ser}, f_format, Axle::view_arr(from));
+            VM::eval_negate(&comp_thread->errors, f_format, Axle::view_arr(to), Axle::view_arr(from));
             if(comp_thread->is_panic()) {
               return;
             }

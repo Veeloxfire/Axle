@@ -602,6 +602,17 @@ namespace Eval {
     Axle::Array<VariableState> variables_state;
     u32 curr_stack = 0;
 
+    Axle::GrowingMemoryPool<1024> constants;
+
+    template<typename T>
+    T* new_constant() {
+      return constants.allocate<T>();  
+    }
+
+    inline u8* new_constant(const Type& ty) {
+      return (u8*)constants.alloc_raw(ty.size(), ty.structure->alignment);
+    }
+
     IR::VariableId new_variable(const Type& t, IR::ValueRequirements reqs, bool indirect);
     RuntimeValue import_variable(const IR::VariableId& id, IR::ValueRequirements reqs);
 
@@ -712,6 +723,8 @@ namespace Axle {
   };
 }
 
+struct Errors;
+
 namespace VM {
   struct Value {
     u32 data_offset = 0;
@@ -756,7 +769,20 @@ namespace VM {
 
   void exec(CompilerGlobals* comp, CompilerThread* comp_thread, StackFrame* stack_frame);
   
-  void eval_negate(IR::Format format, Axle::ViewArr<u8> out, Axle::ViewArr<const u8> in);
+  void eval_negate(Errors* errors, IR::Format format, Axle::ViewArr<u8> out, Axle::ViewArr<const u8> in);
+
+  void eval_add(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_sub(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_mul(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_div(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_mod(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_eq(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_neq(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_less(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_great(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_and(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_or(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
+  void eval_xor(Errors* errors, IR::Format format, Axle::ViewArr<u8> to, Axle::ViewArr<const u8> left, Axle::ViewArr<const u8> right);
 }
 
 namespace Axle {

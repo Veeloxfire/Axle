@@ -464,7 +464,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
 
-        Type* struct_c = comp->new_constant<Type>();
+        Type* struct_c = builder->new_constant<Type>();
         Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
@@ -475,7 +475,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
 
-        Type* struct_c = comp->new_constant<Type>();
+        Type* struct_c = builder->new_constant<Type>();
         Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
@@ -486,7 +486,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
 
-        Type* struct_c = comp->new_constant<Type>();
+        Type* struct_c = builder->new_constant<Type>();
         Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
@@ -497,7 +497,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
 
-        Type* struct_c = comp->new_constant<Type>();
+        Type* struct_c = builder->new_constant<Type>();
         Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
@@ -508,7 +508,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
 
-        Type* struct_c = comp->new_constant<Type>();
+        Type* struct_c = builder->new_constant<Type>();
         Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
@@ -519,7 +519,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
 
-        Type* struct_c = comp->new_constant<Type>();
+        Type* struct_c = builder->new_constant<Type>();
         Axle::memcpy_ts(struct_c, 1, &nt->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
@@ -531,7 +531,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASSERT(builder->eval_time == Eval::Time::CompileTime);
         ASSERT(!eval.requirements.has_address());
 
-        Type* struct_c = comp->new_constant<Type>();
+        Type* struct_c = builder->new_constant<Type>();
         Axle::memcpy_ts(struct_c, 1, &s->actual_type, 1);
 
         return Eval::as_constant((const u8*)struct_c, comp_thread->builtin_types->t_type);
@@ -586,9 +586,11 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
             u64 val = as->length;
 
-            const size_t size = sizeof(val);
+            ASSERT(sizeof(val) == comp_thread->builtin_types->t_u64.size());
+            ASSERT(alignof(decltype(val)) == comp_thread->builtin_types->t_u64.structure->alignment);
+            constexpr size_t size = sizeof(val);
 
-            uint8_t* val_c = comp->new_constant(size);
+            uint8_t* val_c = builder->new_constant(comp_thread->builtin_types->t_u64);
             Axle::memcpy_ts(val_c, size, (uint8_t*)&val, size);
 
             return Eval::as_constant(val_c, comp_thread->builtin_types->t_u64);
@@ -681,8 +683,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
             BinOpArgs args = {
               emit_info,
-              comp,
-              builder->ir,
+              comp_thread,
+              builder,
               index_val,
               c,
             };
@@ -703,8 +705,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
             BinOpArgs args = {
               emit_info,
-              comp,
-              builder->ir,
+              comp_thread,
+              builder,
               ptr,
               index_val,
             };
@@ -755,9 +757,11 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           {
             u64 val = as->length;
 
-            const size_t size = sizeof(val);
+            ASSERT(sizeof(val) == comp_thread->builtin_types->t_u64.size());
+            ASSERT(alignof(decltype(val)) == comp_thread->builtin_types->t_u64.structure->alignment);
+            constexpr size_t size = sizeof(val);
 
-            uint8_t* val_c = comp->new_constant(size);
+            uint8_t* val_c = builder->new_constant(comp_thread->builtin_types->t_u64);
             Axle::memcpy_ts(val_c, size, (uint8_t*)&val, size);
 
             Eval::RuntimeValue len = Eval::as_constant(val_c, comp_thread->builtin_types->t_u64);
@@ -790,10 +794,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         Eval::RuntimeValue tup_lit = {};
         u8* tup_constant = nullptr;
 
-
         const bool is_constant = VC::is_comptime(lit->value_category);
         if (is_constant) {
-          tup_constant = comp->new_constant(cpst->size);
+          tup_constant = builder->new_constant(lit->node_type);
           tup_lit = Eval::as_constant(tup_constant, lit->node_type);
         }
         else {
@@ -845,7 +848,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         const bool is_constant = VC::is_comptime(arr_expr->value_category);
         if (is_constant) {
-          arr_constant = comp->new_constant(arr_type->size);
+          arr_constant = builder->new_constant(arr_expr->node_type);
           arr = Eval::as_constant(arr_constant, arr_expr->node_type);
         }
         else {
@@ -891,7 +894,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTAsciiChar* ch = downcast_ast<ASTAsciiChar>(expr);
         ASSERT(!eval.requirements.has_address());
 
-        char* char_c = comp->new_constant<char>();
+        char* char_c = (char*)builder->new_constant(comp_thread->builtin_types->t_ascii);
         *char_c = ch->character;
 
         return Eval::as_constant((const u8*)char_c, ch->node_type);
@@ -903,7 +906,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         const auto* const arr_type = st->node_type.unchecked_base<ArrayStructure>();
 
         const size_t size = arr_type->size;
-        char* string_c = (char*)comp->new_constant(size);
+        ASSERT(st->node_type.size() == size);
+        char* string_c = (char*)builder->new_constant(st->node_type);
         Axle::memcpy_ts(string_c, size, st->string->string, size);
 
         return Eval::as_constant((const u8*)string_c, st->node_type);
@@ -912,9 +916,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         ASTNumber* num = downcast_ast<ASTNumber>(expr);
         ASSERT(!eval.requirements.has_address());
 
-        const size_t size = num->node_type.structure->size;
+        const size_t size = num->node_type.size();
 
-        uint8_t* val_c = comp->new_constant(size);
+        uint8_t* val_c = builder->new_constant(num->node_type);
         Axle::memcpy_ts(val_c, size, (uint8_t*)&num->num_value, size);
 
         return Eval::as_constant(val_c, num->node_type);
@@ -963,7 +967,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         const IR::DynLibraryImport& imp = comp->dyn_lib_imports[li->import_index - 1];
 
-        IR::GlobalLabel* label_holder = comp->new_constant<IR::GlobalLabel>();
+        IR::GlobalLabel* label_holder = builder->new_constant<IR::GlobalLabel>();
         *label_holder = imp.label;
 
         ASSERT(li->node_type.struct_type() == STRUCTURE_TYPE::LAMBDA);
@@ -1013,8 +1017,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         UnOpArgs args = {
           un_op->emit_info,
-          comp,
-          builder->ir,
+          comp_thread,
+          builder,
           ref,
         };
 
@@ -1039,8 +1043,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
         BinOpArgs args = {
           bin_op->emit_info,
-          comp,
-          builder->ir,
+          comp_thread,
+          builder,
           temp_left,
           temp_right,
         };
@@ -2983,7 +2987,7 @@ void create_builtin_named_type(CompilerGlobals* comp, CompilerThread* comp_threa
   g->decl.name = type.name;
   g->decl.type = comp->builtin_types->t_type;
   g->decl.span = span;
-  g->decl.init_value = (const u8*)comp->new_constant<Type>();
+  g->decl.init_value = (const u8*)comp->new_global_constant<Type>();
 
   Axle::memcpy_ts((Type*)g->decl.init_value, 1, &type, 1);
 
@@ -3001,7 +3005,7 @@ void create_builtin_named_enum_value(CompilerGlobals* comp, CompilerThread* comp
   g->decl.name = v->name;
   g->decl.type = v->type;
   g->decl.span = span;
-  g->decl.init_value = (const u8*)comp->new_constant<const EnumValue*>();
+  g->decl.init_value = (const u8*)comp->new_global_constant<const EnumValue*>();
 
   Axle::memcpy_ts((const EnumValue**)g->decl.init_value, 1, &v, 1);
 
@@ -3072,7 +3076,7 @@ void init_compiler(const APIOptions& options, CompilerGlobals* comp, CompilerThr
     g->decl.span = Span{};
     g->decl.type = builtin_types->t_void_ptr;
     g->decl.value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
-    g->decl.init_value = (const u8*)comp->new_constant<const u8*>();
+    g->decl.init_value = (const u8*)comp->new_global_constant<const u8*>();
     *(const u8**)g->decl.init_value = 0;//This is disgusting
 
     names->add_global_name_impl(&comp_thread->errors, builtin_namespace, g->decl.name, g);
