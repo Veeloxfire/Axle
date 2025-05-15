@@ -213,14 +213,14 @@ struct TypeStructure : public Structure {
 
 struct PointerStructure : public Structure {
   Type base ={};
-  bool is_mut = false;//TODO: move this to be part of the type
+  bool mut = false;
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::POINTER;
 };
 
 struct SliceStructure : public Structure {
   Type base ={};
-  bool is_mut = false;//TODO: move this to be part of the type
+  bool mut = false;
 
   constexpr static STRUCTURE_TYPE expected_type_enum = STRUCTURE_TYPE::SLICE;
 };
@@ -462,12 +462,24 @@ struct Structures {
     pointer_size{ptr_s}, pointer_align{ptr_a},
     slice_size{ptr_s * 2},
     slice_align{ptr_a}
-  {}
+  {
+    ASSERT(Axle::ceil_to_pow_2(ptr_a) == ptr_a);
+  }
 
   ~Structures();
 };
 
 namespace STRUCTS {
+  struct PointerArgs {
+    bool mut;
+    const Type& base;
+  };
+
+  struct SliceArgs {
+    bool mut;
+    const Type& base;
+  };
+
   TupleStructure* new_tuple_structure(Structures* comp, Axle::StringInterner* strings, const Axle::ViewArr<const Type>& types);
   IntegerStructure* new_int_structure(Structures* comp, const Axle::InternString* name);
   CompositeStructure* new_composite_structure(Structures* comp, Axle::StringInterner* strings);
@@ -475,8 +487,8 @@ namespace STRUCTS {
   ArrayStructure* new_array_structure(Structures* comp, Axle::StringInterner* strings,
                                       const Type& base,
                                       size_t length);
-  PointerStructure* new_pointer_structure(Structures* comp, Axle::StringInterner* strings, const Type& base);
-  SliceStructure* new_slice_structure(Structures* comp, Axle::StringInterner* strings, const Type& base);
+  PointerStructure* new_pointer_structure(Structures* comp, Axle::StringInterner* strings, const PointerArgs& args);
+  SliceStructure* new_slice_structure(Structures* comp, Axle::StringInterner* strings, const SliceArgs& args);
   SignatureStructure* new_lambda_structure(Structures* comp, Axle::StringInterner* strings,
                                            const CallingConvention* conv,
                                            Axle::OwnedArr<Type>&& params,
@@ -492,8 +504,8 @@ namespace STRUCTS {
 
 const ArrayStructure* find_or_make_array_structure(Structures* comp, Axle::StringInterner* strings, const Type& base, size_t length);
 
-const PointerStructure* find_or_make_pointer_structure(Structures* comp, Axle::StringInterner* strings, const Type& base);
-const SliceStructure* find_or_make_slice_structure(Structures* comp, Axle::StringInterner* strings, const Type& base);
+const PointerStructure* find_or_make_pointer_structure(Structures* comp, Axle::StringInterner* strings, const STRUCTS::PointerArgs& args);
+const SliceStructure* find_or_make_slice_structure(Structures* comp, Axle::StringInterner* strings, const STRUCTS::SliceArgs& args);
 
 const TupleStructure* find_or_make_tuple_structure(Structures* comp, Axle::StringInterner* strings,
                                                    const Axle::ViewArr<const Type>& types);

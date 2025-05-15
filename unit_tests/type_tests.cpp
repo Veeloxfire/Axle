@@ -203,6 +203,16 @@ TEST_FUNCTION(Types, lambdas) {
   TEST_EQ(builtin.t_void, sig_struct->return_type);
 }
 
+TEST_FUNCTION(Types, pointer_slice_sizes) {
+  Axle::StringInterner strings = {};
+  Structures structures = {13,16};
+  
+  TEST_EQ(static_cast<usize>(13), structures.pointer_size);
+  TEST_EQ(static_cast<usize>(16), structures.pointer_align);
+  TEST_EQ(static_cast<usize>(26), structures.slice_size);
+  TEST_EQ(static_cast<usize>(16), structures.slice_align);
+}
+
 TEST_FUNCTION(Types, pointers) {
   Axle::StringInterner strings = {};
   Structures structures = {8,8};
@@ -216,16 +226,41 @@ TEST_FUNCTION(Types, pointers) {
 
   const PointerStructure* ptr_struct
     = find_or_make_pointer_structure(&structures, &strings,
-                                     builtin.t_void);
+        { .mut = true, .base = builtin.t_void });
 
   TEST_EQ(STRUCTURE_TYPE::POINTER, ptr_struct->expected_type_enum);
   TEST_EQ(STRUCTURE_TYPE::POINTER, ptr_struct->type);
   TEST_EQ(IR::Format::pointer, ptr_struct->ir_format);
   TEST_EQ(static_cast<u32>(structures.pointer_size), ptr_struct->size);
-  TEST_EQ(static_cast<u32>(structures.pointer_size), ptr_struct->alignment);
+  TEST_EQ(static_cast<u32>(structures.pointer_align), ptr_struct->alignment);
+  TEST_EQ(true, ptr_struct->mut);
   TEST_EQ(builtin.t_void, ptr_struct->base);
 
   TEST_EQ(builtin.t_void_ptr.structure, static_cast<const Structure*>(ptr_struct));
+}
+
+TEST_FUNCTION(Types, slices) {
+  Axle::StringInterner strings = {};
+  Structures structures = {8,8};
+  
+  TEST_EQ(static_cast<usize>(8), structures.pointer_size);
+  TEST_EQ(static_cast<usize>(8), structures.pointer_align);
+  TEST_EQ(static_cast<usize>(16), structures.slice_size);
+  TEST_EQ(static_cast<usize>(8), structures.slice_align);
+
+  BuiltinTypes builtin = STRUCTS::create_builtins(&structures, &strings);
+
+  const SliceStructure* slice_struct
+    = find_or_make_slice_structure(&structures, &strings,
+        { .mut = true, .base = builtin.t_void });
+
+  TEST_EQ(STRUCTURE_TYPE::SLICE, slice_struct->expected_type_enum);
+  TEST_EQ(STRUCTURE_TYPE::SLICE, slice_struct->type);
+  TEST_EQ(IR::Format::slice, slice_struct->ir_format);
+  TEST_EQ(static_cast<u32>(structures.slice_size), slice_struct->size);
+  TEST_EQ(static_cast<u32>(structures.slice_align), slice_struct->alignment);
+  TEST_EQ(true, slice_struct->mut);
+  TEST_EQ(builtin.t_void, slice_struct->base);
 }
 
 TEST_FUNCTION(Types, arrays) {

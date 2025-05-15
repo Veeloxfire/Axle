@@ -1,5 +1,5 @@
-hash :: (ptr: *u8, len: u64) -> u64 {
-  hash_v : u64 = 0xcbf29ce484222325;
+hash :: (mut ptr: *u8, mut len: u64) -> u64 {
+  mut hash_v : u64 = 0xcbf29ce484222325;
 
   while(len > 0) {
     hash_v = hash_v * 0x100000001b3;

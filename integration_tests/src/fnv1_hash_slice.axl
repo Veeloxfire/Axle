@@ -1,6 +1,4 @@
-#import "io.axl";
-
-hash :: (slice: []u8) -> u64 {
+hash :: (slice: []ascii) -> u64 {
   mut hash_v : u64 = 0xcbf29ce484222325;
   mut i: u64 = 0;
 
@@ -14,8 +12,10 @@ hash :: (slice: []u8) -> u64 {
   return hash_v;
 }
 
+#import "tester.axl";
+
 main :: () -> u64 {
   arr :=  "hello";
 
-  print_u64(hash(cast([]u8, arr[])));
+  SubmitTest(hash(arr[]));
 }

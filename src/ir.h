@@ -611,7 +611,7 @@ namespace Eval {
                           const Type& ptr_type,
                           const Type& u64_type);
 
-  RuntimeValue addrof(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type);
+  RuntimeValue addrof(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type, IR::ValueRequirements reqs);
   RuntimeValue deref(IR::IRStore* const ir, const RuntimeValue& val, const Type& ptr_type);
 
   RuntimeValue no_value();
@@ -629,15 +629,18 @@ namespace Eval {
 namespace CASTS {
   Eval::RuntimeValue int_to_int(IR::IRStore* const ir,
                                 const Type& to,
-                                const Eval::RuntimeValue& val);
+                                const Eval::RuntimeValue& val,
+                                IR::ValueRequirements req);
 
   Eval::RuntimeValue no_op(IR::IRStore* const ir,
                            const Type& to,
-                           const Eval::RuntimeValue& val);
+                           const Eval::RuntimeValue& val,
+                           IR::ValueRequirements req);
 
   Eval::RuntimeValue take_address(IR::IRStore* const ir,
                                   const Type& to,
-                                  const Eval::RuntimeValue& val);
+                                  const Eval::RuntimeValue& val,
+                                  IR::ValueRequirements req);
 }
 
 namespace Axle::Format {

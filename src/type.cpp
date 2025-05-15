@@ -182,14 +182,17 @@ ArrayStructure* STRUCTS::new_array_structure(Structures* structures, Axle::Strin
 
 PointerStructure* STRUCTS::new_pointer_structure(Structures* structures,
                                                  Axle::StringInterner* strings,
-                                                 const Type& base) {
+                                                 const STRUCTS::PointerArgs& args) {
   AXLE_TELEMETRY_FUNCTION();
   
   PointerStructure* const type = structures->pointer_structures.allocate();
   type->type = STRUCTURE_TYPE::POINTER;
   type->ir_format = IR::Format::pointer;
-  type->base = base;
-  type->struct_name = strings->format_intern("*{}", base.name);
+  type->base = args.base;
+  type->mut = args.mut;
+  type->struct_name = strings->format_intern("*{}{}",
+      Format::PrintOptional{ args.mut, Axle::lit_view_arr("mut ") },
+      args.base.name);
   type->size = (u32)structures->pointer_size;
   type->alignment = (u32)structures->pointer_align;
 
@@ -200,14 +203,17 @@ PointerStructure* STRUCTS::new_pointer_structure(Structures* structures,
 
 SliceStructure* STRUCTS::new_slice_structure(Structures* structures,
                                              Axle::StringInterner* strings,
-                                             const Type& base) {
+                                             const STRUCTS::SliceArgs& args) {
   AXLE_TELEMETRY_FUNCTION();
   
   SliceStructure* const type = structures->slice_structures.allocate();
   type->type = STRUCTURE_TYPE::SLICE;
   type->ir_format = IR::Format::slice;
-  type->base = base;
-  type->struct_name = strings->format_intern("[]{}", base.name);
+  type->base = args.base;
+  type->mut = args.mut;
+  type->struct_name = strings->format_intern("[]{}{}",
+      Format::PrintOptional{ args.mut, Axle::lit_view_arr("mut ") },
+      args.base.name);
   type->size = (u32)structures->slice_size;
   type->alignment = (u32)structures->slice_align;
 
@@ -260,7 +266,7 @@ const ArrayStructure* find_or_make_array_structure(Structures* const structures,
 }
 
 const PointerStructure* find_or_make_pointer_structure(Structures* const structures, Axle::StringInterner* strings,
-                                                       const Type& base) {
+                                                       const STRUCTS::PointerArgs& args) {
   AXLE_TELEMETRY_FUNCTION();
 
   {
@@ -272,7 +278,7 @@ const PointerStructure* find_or_make_pointer_structure(Structures* const structu
       if (s->type == STRUCTURE_TYPE::POINTER) {
         //Is pointer
         const PointerStructure* ps = static_cast<const PointerStructure*>(s);
-        if (ps->base == base) {
+        if (ps->base == args.base && ps->mut == args.mut) {
           //Is same
           return ps;
         }
@@ -281,11 +287,11 @@ const PointerStructure* find_or_make_pointer_structure(Structures* const structu
   }
 
   //Doesnt exist - need to make new type
-  return STRUCTS::new_pointer_structure(structures, strings, base);
+  return STRUCTS::new_pointer_structure(structures, strings, args);
 }
 
 const SliceStructure* find_or_make_slice_structure(Structures* const structures, Axle::StringInterner* strings,
-                                                       const Type& base) {
+                                                       const STRUCTS::SliceArgs& args) {
   AXLE_TELEMETRY_FUNCTION();
 
   {
@@ -297,7 +303,7 @@ const SliceStructure* find_or_make_slice_structure(Structures* const structures,
       if (s->type == STRUCTURE_TYPE::SLICE) {
         //Is pointer
         const SliceStructure* ps = static_cast<const SliceStructure*>(s);
-        if (ps->base == base) {
+        if (ps->base == args.base && ps->mut == args.mut) {
           //Is same
           return ps;
         }
@@ -306,7 +312,7 @@ const SliceStructure* find_or_make_slice_structure(Structures* const structures,
   }
 
   //Doesnt exist - need to make new type
-  return STRUCTS::new_slice_structure(structures, strings, base);
+  return STRUCTS::new_slice_structure(structures, strings, args);
 }
 
 const TupleStructure* find_or_make_tuple_structure(Structures* const structures, Axle::StringInterner* strings,
@@ -448,7 +454,7 @@ BuiltinTypes STRUCTS::create_builtins(Structures* structures, Axle::StringIntern
 
   {
     Structure* const s_void_ptr = STRUCTS::new_pointer_structure(structures, strings, 
-                                                                 builtin_types.t_void);
+        { .mut = true, .base = builtin_types.t_void });
     builtin_types.t_void_ptr = to_type(s_void_ptr);
   }
 
@@ -575,6 +581,28 @@ static bool can_implicit_cast(const Type& from, const Type& to) {
 
         return true;
       }
+    case STRUCTURE_TYPE::POINTER: {
+        if (to.struct_type() != STRUCTURE_TYPE::POINTER) {
+          return false;
+        }
+        
+        const auto* ptr_f = from.unchecked_base<PointerStructure>();
+        const auto* ptr_t = to.unchecked_base<PointerStructure>();
+        
+        return ptr_f->base == ptr_t->base
+          && !(!ptr_f->mut && ptr_t->mut);
+    }
+    case STRUCTURE_TYPE::SLICE: {
+        if (to.struct_type() != STRUCTURE_TYPE::SLICE) {
+          return false;
+        }
+        
+        const auto* slc_f = from.unchecked_base<SliceStructure>();
+        const auto* slc_t = to.unchecked_base<SliceStructure>();
+        
+        return slc_f->base == slc_t->base
+          && !(!slc_f->mut && slc_t->mut);
+    }
 
     default: return false;
   }

@@ -10,12 +10,11 @@
 
 #define AXLE_TOKEN_KEYWORDS \
 MODIFY(Return, "return") \
-MODIFY(Function, "function") \
-MODIFY(Global, "global") \
 MODIFY(If, "if") \
 MODIFY(While, "while") \
 MODIFY(Else, "else") \
 MODIFY(Cast, "cast") \
+MODIFY(Mut, "mut") \
 MODIFY(Struct, "struct")
 
 #define AXLE_TOKEN_OPERATORS \

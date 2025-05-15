@@ -1,8 +1,8 @@
 fib :: (c: u64) -> u64 {
-  a := 0u64;
-  b := 1u64;
+  mut a := 0u64;
+  mut b := 1u64;
 
-  i := 0u64;
+  mut i := 0u64;
 
   while(i < c) {
     save := b;

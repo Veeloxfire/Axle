@@ -201,7 +201,8 @@ TC_STAGE(PTR_TYPE_DOWN) {
 
     s = find_or_make_pointer_structure(structures._ptr,
                                        strings._ptr,
-                                       base_type);
+                                       { .mut = ptr->mut,
+                                         .base = base_type });
   }
 
   ptr->actual_type = to_type(s);
@@ -236,8 +237,9 @@ TC_STAGE(SLICE_TYPE_DOWN) {
     comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
     s = find_or_make_slice_structure(structures._ptr,
-                                       strings._ptr,
-                                       base_type);
+                                     strings._ptr,
+                                     { .mut = ptr->mut,
+                                       .base = base_type });
   }
 
   ptr->actual_type = to_type(s);
@@ -443,7 +445,6 @@ TC_STAGE(LAMBDA_UP) {
     ASSERT(tn != nullptr);
     ASSERT(tn->local_ptr != nullptr);
     ASSERT(tn->local_ptr->decl.type.is_valid());
-    ASSERT(tn->local_ptr->decl.value_category == VALUE_CATEGORY::VARIABLE_MUTABLE);
   }
 
   lambda->node_type = to_type(sig_struct);
@@ -502,14 +503,19 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
         return;
       }
 
+      const bool is_mutable = VC::is_mutable(base.ast->value_category);
+
+      const PointerStructure* ptr;
       {
         Axle::AtomicLock<Structures> structures = {};
         Axle::AtomicLock<Axle::StringInterner> strings = {};
         comp->services.get_multiple({ .structures = &structures, .strings = &strings});
-        member->node_type = to_type(find_or_make_pointer_structure(structures._ptr,
-                                                                   strings._ptr,
-                                                                   as->base));
+        
+        ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
+            { .mut = is_mutable, .base = as->base });
       }
+      
+      member->node_type = to_type(ptr);
 
       reduce_category(member, base);
     }
@@ -531,14 +537,20 @@ TC_STAGE(MEMBER_ACCESS_DOWN) {
     const SliceStructure* as = slice_t.unchecked_base<SliceStructure>();
 
     if (member->name == comp_thread->important_names.ptr) {
+      const bool is_mutable = VC::is_mutable(base.ast->value_category);
+      
+      const PointerStructure* ptr;
+      
       {
         Axle::AtomicLock<Structures> structures = {};
         Axle::AtomicLock<Axle::StringInterner> strings = {};
         comp->services.get_multiple({ .structures = &structures, .strings = &strings});
-        member->node_type = to_type(find_or_make_pointer_structure(structures._ptr,
-                                                                   strings._ptr,
-                                                                   as->base));
+        
+        ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
+            { .mut = is_mutable, .base = as->base });
       }
+      
+      member->node_type = to_type(ptr);
 
       reduce_category(member, base);
     }
@@ -621,14 +633,20 @@ TC_STAGE(INDEX_EXPR_DOWN) {
     }
 
     const Type t = index_or_slice_base(base.ast->node_type);
-   
+    const bool is_mutable = VC::is_mutable(base.ast->value_category);
+
+    const SliceStructure* slice;
     {
       Axle::AtomicLock<Structures> structures;
       Axle::AtomicLock<Axle::StringInterner> strings;
       comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
-      index_expr->node_type = to_type(find_or_make_slice_structure(structures._ptr, strings._ptr, t));
+      slice = find_or_make_slice_structure(
+          structures._ptr, strings._ptr,
+          { .mut = is_mutable, .base = t });
     }
+    
+    index_expr->node_type = to_type(slice);
     return;
   }
   else {
@@ -1304,8 +1322,13 @@ static void run_un_up_addr_down(CompilerGlobals* const comp, AST_LOCAL this_node
     Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
-    ptr = find_or_make_pointer_structure(structures._ptr, strings._ptr,
-                                         expr->expr.ast->node_type);
+    bool is_mutable = VC::is_mutable(prim.ast->value_category);
+
+    ptr = find_or_make_pointer_structure(
+      structures._ptr, strings._ptr,
+      { .mut = is_mutable,
+        .base = expr->expr.ast->node_type }
+    );
   }
 
   expr->node_type = to_type(ptr);
@@ -1323,7 +1346,7 @@ static void run_un_up_deref_down(CompilerThread* const comp_thread, AST_LOCAL th
   if (prim.ast->node_type.struct_type() == STRUCTURE_TYPE::POINTER) {
     const auto* ptr = prim.ast->node_type.unchecked_base<PointerStructure>();
 
-    if (ptr->is_mut) {
+    if (ptr->mut) {
       expr->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
     }
     else {
@@ -2229,20 +2252,43 @@ TC_STAGE(ASSIGN_UP_LEFT) {
   return;
 }
 
+VALUE_CATEGORY value_category_from_mutability(ASTDeclMutability mut) {
+  switch (mut) {
+    case ASTDeclMutability::Comptime: {
+      return VALUE_CATEGORY::VARIABLE_CONSTANT;
+    }
+    case ASTDeclMutability::Immutable: {
+      return VALUE_CATEGORY::VARIABLE_IMMUTABLE;
+    }
+    case ASTDeclMutability::Mutable: {
+      return VALUE_CATEGORY::VARIABLE_MUTABLE;
+    }
+  }
+
+  INVALID_CODE_PATH("Invalid variable mutability type");
+}
+
 TC_STAGE(DECL_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTDecl, ast_decl);
 
   AST_LOCAL decl_expr = ast_decl->expr;
 
-  if (!ast_decl->type.is_valid()) {
+  Type decl_type = {};
+  if (ast_decl->type_ast != NULL_AST_NODE) {
+    decl_type = get_type_value(comp_thread, ast_decl->type_ast);
+    if (comp_thread->is_panic()) {
+      return;
+    }
+  }
+  else {
     ASSERT(decl_expr != NULL_AST_NODE);
-    ast_decl->type = ast_decl->expr.ast->node_type;
+    decl_type = ast_decl->expr.ast->node_type;
   }
 
-  ASSERT(ast_decl->type.is_valid());
+  ASSERT(decl_type.is_valid());
 
-  if (ast_decl->compile_time_const
+  if (ast_decl->mutability == ASTDeclMutability::Comptime
       && (decl_expr == NULL_AST_NODE || !VC::is_comptime(decl_expr.ast->value_category))) {
     comp_thread->report_error(ERROR_CODE::CONST_ERROR, ast_decl->node_span,
                               "Compile time declaration '{}' must be initialized by a compile time expression",
@@ -2250,41 +2296,37 @@ TC_STAGE(DECL_DOWN) {
     return;
   }
 
-  Decl* decl;
+  constexpr auto get_decl = 
+  [](ASTDecl* ast_decl) {
+    switch (ast_decl->location) {
+      case ASTDecl::Location::Local: {
+          Local* const loc = ast_decl->local_ptr;
+          return &loc->decl;
+        }
+      case ASTDecl::Location::Global: {
+          ASSERT(ast_decl->global_ptr != nullptr);
+          Global* global = ast_decl->global_ptr;
 
-  switch (ast_decl->decl_type) {
-    case ASTDecl::TYPE::LOCAL: {
-        Local* const loc = ast_decl->local_ptr;
-        decl = &loc->decl;
-        break;
-      }
-    case ASTDecl::TYPE::GLOBAL: {
-        ASSERT(ast_decl->global_ptr != nullptr);
-        Global* global = ast_decl->global_ptr;
+          return &global->decl;
+        }
+    }
+    INVALID_CODE_PATH("Declaration was somehow not a global or local variable ...");
+  };
 
-        decl = &global->decl;
-        break;
-      }
-    default: {
-        INVALID_CODE_PATH("Declaration was somehow not a global or local variable ...");
-      }
-  }
+  Decl* const decl = get_decl(ast_decl);
 
-  decl->type = ast_decl->type;
+  decl->type = decl_type;
 
-  if (ast_decl->compile_time_const) {
-    decl->value_category = VALUE_CATEGORY::VARIABLE_CONSTANT;
-  }
-  else {
-    decl->value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
-  }
+  decl->value_category = value_category_from_mutability(ast_decl->mutability);
 
   ast_decl->value_category = decl->value_category;
-  ast_decl->node_type = comp_thread->builtin_types->t_void;
+  ast_decl->node_type = decl_type;
 
   ASSERT(VC::is_variable(decl->value_category));
   
-  if (VC::is_comptime(decl->value_category) || VC::is_comptime(decl_expr.ast->value_category)) {
+  if (ast_decl->mutability == ASTDeclMutability::Comptime) {
+    ASSERT(VC::is_comptime(decl->value_category));
+
     if (!VC::is_comptime(decl_expr.ast->value_category)) {
       comp_thread->report_error(ERROR_CODE::CONST_ERROR, ast_decl->node_span,
                                 "Cannot initialize a compile time constant with "
@@ -2303,8 +2345,9 @@ TC_STAGE(DECL_DOWN) {
     VM::dispatch_eval_ast(comp, comp_thread, typer->available_names, decl_expr, p);
     return;
   }
-
-  return;
+  else {
+    return;
+  }
 }
 
 TC_STAGE(DECL_UP_EXPR) {
@@ -2313,15 +2356,10 @@ TC_STAGE(DECL_UP_EXPR) {
 
   Type expr_type = {};
   if (decl->type_ast != NULL_AST_NODE) {
-    decl->type = get_type_value(comp_thread, decl->type_ast);
+    expr_type = get_type_value(comp_thread, decl->type_ast);
     if (comp_thread->is_panic()) {
       return;
     }
-
-    expr_type = decl->type;
-  }
-  else {
-    decl->type = {};
   }
 
   if (decl->expr != NULL_AST_NODE) {
@@ -2428,7 +2466,7 @@ TC_STAGE(STRUCT_DOWN) {
       elements.insert_uninit(1);
       auto* b = elements.back();
 
-      b->type = get_type_value(comp_thread, tn->type);
+      b->type = get_type_value(comp_thread, tn->type_ast);
       if (comp_thread->is_panic()) {
         return;
       }
@@ -2469,7 +2507,7 @@ TC_STAGE(TYPED_NAME_DOWN) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTypedName, name);
 
-  name->node_type = get_type_value(comp_thread, name->type);
+  name->node_type = get_type_value(comp_thread, name->type_ast);
   if (comp_thread->is_panic()) {
     return;
   }
@@ -2480,7 +2518,7 @@ TC_STAGE(TYPED_NAME_DOWN) {
 
   ASSERT(loc->decl.name == name->name);
   loc->decl.type = name->node_type;
-  loc->decl.value_category = VALUE_CATEGORY::VARIABLE_MUTABLE;
+  loc->decl.value_category = value_category_from_mutability(name->mutability);
   loc->decl.init_value = nullptr;
 
   return;
@@ -2490,7 +2528,7 @@ TC_STAGE(TYPED_NAME_UP) {
   AXLE_TELEMETRY_FUNCTION();
   EXPAND_THIS(ASTTypedName, name);
   
-  name->type.ast->node_infer_type = comp_thread->builtin_types->t_type;
+  name->type_ast.ast->node_infer_type = comp_thread->builtin_types->t_type;
 
   return;
 }
@@ -2521,7 +2559,6 @@ void TC::type_check_ast(CompilerGlobals* const comp,
 
   ASSERT(!comp_thread->is_panic());
   ASSERT(!comp_thread->is_depends());
-  ASSERT(!context.finished());
 
   usize& index = context.next_index;
   const Axle::ViewArr<const AstVisit> visit_arr = context.visit_arr;
@@ -2530,7 +2567,6 @@ void TC::type_check_ast(CompilerGlobals* const comp,
   Typer typer = {};
   typer.available_names = ns;
   
-
   for (; index < visit_arr.size; ++index) {
     const AstVisit& v = visit_arr[index];
 

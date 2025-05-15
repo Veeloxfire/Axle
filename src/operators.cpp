@@ -391,7 +391,7 @@ Eval::RuntimeValue UnOpArgs::emit_neg_int() {
 Eval::RuntimeValue UnOpArgs::emit_address() {
   ASSERT(info.op_full == UnOpFull::address);
   
-  return Eval::addrof(ir, prim, info.dest_type);
+  return Eval::addrof(ir, prim, info.dest_type, {});
 }
 
 Eval::RuntimeValue UnOpArgs::emit_deref_ptr() {

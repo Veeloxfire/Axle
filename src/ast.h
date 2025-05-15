@@ -205,6 +205,7 @@ struct ASTArrayType : public AST {
 struct ASTPtrType : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::PTR_TYPE;
 
+  bool mut = false;
   Type actual_type = {};
   AST_LOCAL base = NULL_AST_NODE;
 };
@@ -212,6 +213,7 @@ struct ASTPtrType : public AST {
 struct ASTSliceType : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::SLICE_TYPE;
 
+  bool mut = false;
   Type actual_type = {};
   AST_LOCAL base = NULL_AST_NODE;
 };
@@ -345,26 +347,33 @@ struct ASTBlock : public AST {
   Axle::ViewArr<const AST_LOCAL> block = {};
 };
 
+enum struct ASTDeclMutability {
+  Comptime,
+  Immutable,
+  Mutable,
+};
+
 struct ASTTypedName : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::TYPED_NAME;
-  AST_LOCAL type = {};
+  ASTDeclMutability mutability;
+  
   const Axle::InternString* name = nullptr;
 
+  AST_LOCAL type_ast;
   Local* local_ptr = nullptr;
 };
 
 struct ASTDecl : public AST {
   constexpr static AST_TYPE EXPECTED_AST_TYPE = AST_TYPE::DECL;
-  enum TYPE {
-    LOCAL,
-    GLOBAL,
+  enum struct Location {
+    Local,
+    Global
   };
 
-  bool compile_time_const;
-  TYPE decl_type;
+  ASTDeclMutability mutability;
+  Location location;
 
   const Axle::InternString* name;
-  Type type;
 
   AST_LOCAL type_ast;
   AST_LOCAL expr;

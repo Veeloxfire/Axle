@@ -157,7 +157,7 @@ TEST_FUNCTION(Eval, value_creation) {
   }
 
   {
-    const PointerStructure* ps = STRUCTS::new_pointer_structure(&structures, &strings, builtin_types.t_u64);
+    const PointerStructure* ps = STRUCTS::new_pointer_structure(&structures, &strings, { .mut = true, .base = builtin_types.t_u64 });
 
     Type ps_t = to_type(ps);
     Eval::RuntimeValue v = Eval::as_indirect(id1, ps_t);
@@ -174,11 +174,11 @@ TEST_FUNCTION(Eval, constant_subobject) {
   SETUP_TEST_TYPES(strings, structures, builtin_types);
   SETUP_TEST_IR(ir, start_block);
 
-  const PointerStructure* const u64_ps_s = STRUCTS::new_pointer_structure(&structures, &strings, builtin_types.t_u64);
+  const PointerStructure* const u64_ps_s = STRUCTS::new_pointer_structure(&structures, &strings, { .mut = false, .base = builtin_types.t_u64 });
 
   const Type u64_ps_t = to_type(u64_ps_s);
 
-  const PointerStructure* const u32_ps_s = STRUCTS::new_pointer_structure(&structures, &strings, builtin_types.t_u32);
+  const PointerStructure* const u32_ps_s = STRUCTS::new_pointer_structure(&structures, &strings, { .mut = false, .base = builtin_types.t_u32 });
 
   const Type u32_ps_t = to_type(u32_ps_s);
 

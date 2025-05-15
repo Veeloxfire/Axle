@@ -1,4 +1,4 @@
-counter: u64 = 3;
+mut counter: u64 = 3;
 
 fib :: (a: u64) -> u64 {
   counter = counter + 1;

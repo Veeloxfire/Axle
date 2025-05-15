@@ -4,7 +4,7 @@ WIN_STD_OUT_REF :: cast(DWORD, -11i32);
 stdout_handle : HANDLE = GetStdHandle(WIN_STD_OUT_REF);
 
 print_raw :: (string: *ascii, len: u64) -> void {
-  WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*u32, nullptr));
+  WriteConsoleA(stdout_handle, cast(*void, string), cast(u32, len), cast(*mut u32, nullptr));
 }
 
 print :: (string: []ascii) -> void {
@@ -16,19 +16,19 @@ print_newline :: () -> void {
   print_raw(nl.ptr, nl.len);
 }
 
-print_u64 :: (val: u64) -> void {
+print_u64 :: (mut val: u64) -> void {
   if(val == 0) {
     zero :: "0";
     print_raw(zero.ptr, zero.len);
     return;
   }
   
-  arr: [ascii; 20] = [
+  mut arr: [ascii; 20] = [
     0,0,0,0,0,0,0,0,0,0,
     0,0,0,0,0,0,0,0,0,0
   ];
 
-  i: u64 = 0;
+  mut i: u64 = arr.len;
 
   while(val > 0) {
     d := val % 10;
@@ -38,5 +38,5 @@ print_u64 :: (val: u64) -> void {
     val = val / 10;
   }
 
-  print_raw(arr.ptr + i, arr.len - i);
+  print_raw(cast(*ascii, arr.ptr + i), arr.len - i);
 }

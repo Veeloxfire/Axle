@@ -823,6 +823,8 @@ void Eval::assign(IR::IRStore* const ir, const Eval::RuntimeValue& to, const Eva
         break;
       }
     case Eval::RVT::Indirect: {
+        ASSERT(to.type.unchecked_base<PointerStructure>()->mut);
+
         switch (from.rvt) {
           case Eval::RVT::Constant: {
               IR::Types::SetStore set = {};
@@ -980,7 +982,7 @@ IR::V_ARG Eval::load_v_arg(IR::IRStore* ir, const Eval::RuntimeValue& rv) {
   INVALID_CODE_PATH("Invalid RVT");
 }
 
-Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue& val, const Type& ptr_type) {
+Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue& val, const Type& ptr_type, IR::ValueRequirements req) {
   AXLE_TELEMETRY_FUNCTION();
   ASSERT(!ir->completed);
   ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
@@ -999,7 +1001,7 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
           ASSERT(cb->temporaries.data[val.value.index.index].requirements.has_address());
         }
 
-        IR::ValueIndex v = ir->new_temporary(ptr_type, {});
+        IR::ValueIndex v = ir->new_temporary(ptr_type, req);
 
         IR::Types::AddrOf addr = {};
         addr.from = IR::v_arg(val.value.index, val.value.offset, val.type);
@@ -1015,11 +1017,14 @@ Eval::RuntimeValue Eval::addrof(IR::IRStore* const ir, const Eval::RuntimeValue&
 
         const auto* ip = ptr_type.unchecked_base<PointerStructure>();
 
-        Eval::RuntimeValue res = val;
-        res.rvt = RVT::Direct;
-        res.type = ip->base;
+        IR::ValueIndex out = ir->new_temporary(ip->base, req);
 
-        return res;
+        IR::Types::Copy cc = {};
+        cc.from = Eval::load_v_arg(ir, val);
+        cc.to = IR::v_arg(out, 0, ip->base);
+
+        IR::Emit::Copy(ir->current_bytecode(), cc);
+        return Eval::as_direct(out, ip->base);
       }
   }
 

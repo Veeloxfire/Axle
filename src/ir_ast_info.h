@@ -29,8 +29,6 @@ struct BinOpEmitInfo {
   BinOpFull op_full;
 };
 
-
-
 enum struct UnOpFull {
   neg_int,
   address,
@@ -47,6 +45,7 @@ namespace IR {
   struct IRStore;
   struct FunctionSignature;
   struct Function;
+  struct ValueRequirements;
 }
 
 namespace Eval {
@@ -55,6 +54,7 @@ namespace Eval {
 
 namespace CASTS {
   using CAST_FUNCTION = Eval::RuntimeValue(*) (IR::IRStore* const ir,
-                                            const Type& to,
-                                            const Eval::RuntimeValue& val);
+                                               const Type& to,
+                                               const Eval::RuntimeValue& val,
+                                               IR::ValueRequirements reqs);
 }

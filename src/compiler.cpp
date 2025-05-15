@@ -237,7 +237,7 @@ static Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
                                            Eval::IrBuilder* const builder,
                                            const NodeEval& eval);
 
-static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
+static Type generate_pointer_type(CompilerGlobals* comp, const STRUCTS::PointerArgs& args) {
   AXLE_TELEMETRY_FUNCTION();
   const PointerStructure* ps;
   {
@@ -245,10 +245,30 @@ static Type generate_pointer_type(CompilerGlobals* comp, const Type& base) {
     Axle::AtomicLock<Axle::StringInterner> strings = {};
     comp->services.get_multiple({ .structures = &structures, .strings = &strings});
 
-    ps = find_or_make_pointer_structure(structures._ptr, strings._ptr, base);
+    ps = find_or_make_pointer_structure(structures._ptr, strings._ptr, args);
   }
 
   return to_type(ps);
+}
+
+static Eval::RuntimeValue get_slice_pointer(
+    CompilerGlobals* const comp,
+    Eval::IrBuilder* const builder,
+    const Eval::RuntimeValue& slice_obj,
+    Type ptr_type, VALUE_CATEGORY value_category
+) {
+  ASSERT(slice_obj.effective_type().struct_type() == STRUCTURE_TYPE::SLICE);
+  ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
+
+  const Type indirect_type = generate_pointer_type(comp,
+    { .mut = VC::is_mutable(value_category),
+      .base =  ptr_type });
+
+  const u64 val = 0;
+  return Eval::sub_object(builder->ir, slice_obj, val,
+                    indirect_type, comp->builtin_types->t_u64);
+
+
 }
 
 static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
@@ -282,9 +302,10 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
     }
 
     if (indirect) {
-      const Type ptr_type = generate_pointer_type(comp, val.type);
+      const Type ptr_type = generate_pointer_type(comp,
+          { .mut = false, .base = val.type});
 
-      val = Eval::addrof(builder->ir, val, ptr_type);
+      val = Eval::addrof(builder->ir, val, ptr_type, {});
     }
 
     ASSERT(!Eval::must_pass_type_by_reference(call->sig->calling_convention, val.type.structure));
@@ -331,49 +352,59 @@ static Eval::RuntimeValue compile_function_call(CompilerGlobals* const comp,
 
 Eval::RuntimeValue CASTS::int_to_int(IR::IRStore* const ir,
                                      const Type& to,
-                                     const Eval::RuntimeValue& val) {
+                                     const Eval::RuntimeValue& val,
+                                     IR::ValueRequirements req) {
   AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(to.is_valid() && to.struct_type() == STRUCTURE_TYPE::INTEGER);
   const Type from = val.effective_type();
   ASSERT(from.is_valid() && from.struct_type() == STRUCTURE_TYPE::INTEGER);
 
-  if (to == from) {
-    return val;
-  }
-
-  IR::ValueIndex temp = ir->new_temporary(to, {});
+  IR::ValueIndex out = ir->new_temporary(to, req);
 
   IR::Types::Copy cc = {};
   cc.from = Eval::load_v_arg(ir, val);
-  cc.to = IR::v_arg(temp, 0, to);
+  cc.to = IR::v_arg(out, 0, to);
 
   IR::Emit::Copy(ir->current_bytecode(), cc);
-  return Eval::as_direct(temp, to);
+  return Eval::as_direct(out, to);
 }
 
-Eval::RuntimeValue CASTS::no_op(IR::IRStore* const,
+Eval::RuntimeValue CASTS::no_op(IR::IRStore* const ir,
                                 const Type& to,
-                                const Eval::RuntimeValue& val) {
+                                const Eval::RuntimeValue& val,
+                                IR::ValueRequirements req) {
   AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(val.type.is_valid());
-  Eval::RuntimeValue res = val;
-  res.type = to;
-  return res;
+
+  IR::ValueIndex out = ir->new_temporary(to, req);
+
+  IR::Types::Copy cc = {};
+  cc.from = Eval::load_v_arg(ir, val);
+  cc.to = IR::v_arg(out, 0, to);
+
+  IR::Emit::Copy(ir->current_bytecode(), cc);
+  return Eval::as_direct(out, to);
 }
 
 Eval::RuntimeValue CASTS::take_address(IR::IRStore* const ir,
                                        const Type& to,
-                                       const Eval::RuntimeValue& val) {
+                                       const Eval::RuntimeValue& val,
+                                       IR::ValueRequirements req) {
   AXLE_TELEMETRY_FUNCTION();
   
   ASSERT(val.type.is_valid());
-  return Eval::addrof(ir, val, to);
+  return Eval::addrof(ir, val, to, req);
 }
 
+struct LoadDataMemoryArgs {
+  bool mut;
+  IR::ValueRequirements reqs;
+};
+
 Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* builder, Global* global,
-                                    const IR::ValueRequirements reqs) {
+                                    const LoadDataMemoryArgs& args) {
   AXLE_TELEMETRY_FUNCTION();
 
   IR::IRStore* const ir = builder->ir;
@@ -393,24 +424,25 @@ Eval::RuntimeValue load_data_memory(CompilerGlobals* comp, Eval::IrBuilder* buil
 
     for (; global_id < count; ++global_id) {
       if (grs[global_id].data_member == global->dynamic_init_index) {
-        grs[global_id].requirements |= reqs;
+        grs[global_id].requirements |= args.reqs;
         goto FOUND;
       }
     }
 
-    global_id = ir->new_global_reference({ global->decl.type, reqs, global->dynamic_init_index });
+    global_id = ir->new_global_reference({ global->decl.type, args.reqs, global->dynamic_init_index });
   }
 
 FOUND:
-  const Type ptr_type = generate_pointer_type(comp, global->decl.type);
+  const Type ptr_type = generate_pointer_type(comp,
+      { .mut = args.mut, .base =  global->decl.type });
 
   IR::ValueIndex v = ir->new_temporary(ptr_type, {});
 
-  IR::Types::AddrOfGlobal args = {};
-  args.val = IR::v_arg(v, 0, ptr_type);
-  args.im32 = global_id;
+  IR::Types::AddrOfGlobal addr = {};
+  addr.val = IR::v_arg(v, 0, ptr_type);
+  addr.im32 = global_id;
 
-  IR::Emit::AddrOfGlobal(ir->current_bytecode(), args);
+  IR::Emit::AddrOfGlobal(ir->current_bytecode(), addr);
 
   return Eval::as_indirect(v, ptr_type);
 }
@@ -526,7 +558,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             return Eval::no_value();
           }
 
-          const Type ptr_type = generate_pointer_type(comp, member_e->node_type);
+          const Type ptr_type = generate_pointer_type(comp,
+              { .mut = VC::is_mutable(m_base.ast->value_category),
+                .base =  member_e->node_type });
 
           return Eval::sub_object(builder->ir, obj, member_e->offset,
                                   ptr_type, comp->builtin_types->t_u64);
@@ -574,19 +608,17 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
 
           if (member_e->name == comp->important_names.ptr) {
             Type ptr_type = member_e->node_type;
-            ASSERT(ptr_type.struct_type() == STRUCTURE_TYPE::POINTER);
-
-            const Type indirect_type = generate_pointer_type(comp, ptr_type);
-
-            const u64 val = 0;
-            return Eval::sub_object(builder->ir, obj, val,
-                                    indirect_type, comp->builtin_types->t_u64);
+            
+            return get_slice_pointer(comp, builder,
+                obj, ptr_type, m_base.ast->value_category);
           }
           else if (member_e->name == comp->important_names.len) {
             Type len_type = member_e->node_type;
             ASSERT(len_type == comp->builtin_types->t_u64);
 
-            const Type indirect_type = generate_pointer_type(comp, len_type);
+            const Type indirect_type = generate_pointer_type(comp,
+              { .mut = VC::is_mutable(m_base.ast->value_category),
+                .base =  len_type });
 
             const u64 offset = Axle::ceil_to_n(comp->platform_interface.ptr_size,
                 static_cast<usize>(comp->builtin_types->t_u64.structure->alignment));
@@ -611,8 +643,6 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         
         const Type base_type = index->node_type;
         const size_t base_size = base_type.size();
-
-
         
         Eval::RuntimeValue arr = compile_bytecode(comp, comp_thread,
             builder, eval.forward(index_expr, IR::ValueRequirements::Address));
@@ -621,6 +651,8 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
         }
 
         const usize count = index->arguments.size;
+
+        const Type index_type = index_expr.ast->node_type;
 
         if(count == 1) {
           ASSERT(TYPE_TESTS::can_index(index_expr.ast->node_type));
@@ -633,32 +665,59 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             return Eval::no_value();
           }
 
-          u64 u = base_size;
-          const auto c = Eval::as_constant((const u8*)&u, comp_thread->builtin_types->t_u64);
+          const Type ptr_t = generate_pointer_type(comp,
+              { .mut = VC::is_mutable(index_expr.ast->value_category),
+                .base = base_type });
 
-          BinOpEmitInfo emit_info = {};
-          {
-            emit_info.dest_type = comp_thread->builtin_types->t_u64;
-            emit_info.main_side = MainSide::LEFT;
-            emit_info.op_full = BinOpFull::mul_ints;
+          if (index_type.struct_type() == STRUCTURE_TYPE::FIXED_ARRAY) {
+            u64 u = base_size;
+            const auto c = Eval::as_constant((const u8*)&u, comp_thread->builtin_types->t_u64);
+
+            const BinOpEmitInfo emit_info = {
+              .main_side = MainSide::LEFT,
+              .dest_type = comp_thread->builtin_types->t_u64,
+              .op_full = BinOpFull::mul_ints,
+            };
+
+            BinOpArgs args = {
+              emit_info,
+              comp,
+              builder->ir,
+              index_val,
+              c,
+            };
+
+            const Eval::RuntimeValue raw_offset = args.emit_mul_ints();
+
+            return Eval::sub_object(builder->ir, arr, raw_offset, ptr_t);
           }
+          else if (index_type.struct_type() == STRUCTURE_TYPE::SLICE) {
+            Eval::RuntimeValue ptr = get_slice_pointer(comp, builder,
+                arr, ptr_t, index_expr.ast->value_category);
 
-          BinOpArgs args = {
-            emit_info,
-            comp,
-            builder->ir,
-            index_val,
-            c,
-          };
+            const BinOpEmitInfo emit_info = {
+              .main_side = MainSide::LEFT,
+              .dest_type = ptr_t,
+              .op_full = BinOpFull::add_int_to_ptr,
+            };
 
-          const Eval::RuntimeValue offset = args.emit_mul_ints();
+            BinOpArgs args = {
+              emit_info,
+              comp,
+              builder->ir,
+              ptr,
+              index_val,
+            };
 
-          const Type t = generate_pointer_type(comp, base_type);
+            const Eval::RuntimeValue ptr_val = args.emit_add_int_to_ptr();
 
-          return Eval::sub_object(builder->ir, arr, offset, t);
+            return Eval::deref(builder->ir, ptr_val, ptr_t);
+          }
+          else  {
+            INVALID_CODE_PATH("Invalid index-able type");
+          }
         }
         else if(count == 0) {
-          const Type& index_type = index_expr.ast->node_type;
           if (index_type.struct_type() != STRUCTURE_TYPE::FIXED_ARRAY) {
             comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, index->node_span,
               "For now can only slice fixed arrays: {}", count);
@@ -669,7 +728,11 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           ASSERT(index->node_type.struct_type() == STRUCTURE_TYPE::SLICE);
           const SliceStructure* slice_s = index->node_type.unchecked_base<SliceStructure>();
 
-          const Type ptr_t = generate_pointer_type(comp, slice_s->base);
+          ASSERT(as->base == slice_s->base);
+
+          const Type ptr_t = generate_pointer_type(comp,
+              { .mut = slice_s->mut,
+                .base = slice_s->base });
 
           IR::ValueIndex v = builder->ir->new_temporary(index->node_type, eval.requirements);
 
@@ -884,7 +947,9 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
             return Eval::as_constant(glob->decl.init_value, glob->decl.type);
           }
           else {
-            return load_data_memory(comp, builder, glob, eval.requirements);
+            return load_data_memory(comp, builder, glob,
+                { .mut = VC::is_mutable(glob->decl.value_category),
+                  .reqs = eval.requirements });
           }
         }
 
@@ -907,7 +972,6 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
       }
     case AST_TYPE::CAST: {
         const ASTCastExpr* const cast = downcast_ast<ASTCastExpr>(expr);
-        ASSERT(!eval.requirements.has_address());
 
         Eval::RuntimeValue ref = compile_bytecode(comp, comp_thread,
                                                   builder, NodeEval::new_value(cast->expr));
@@ -915,7 +979,7 @@ Eval::RuntimeValue compile_bytecode(CompilerGlobals* const comp,
           return Eval::no_value();
         }
 
-        const auto res = cast->emit(builder->ir, cast->node_type, ref);
+        const auto res = cast->emit(builder->ir, cast->node_type, ref, eval.requirements);
         ASSERT(res.effective_type() == cast->node_type);
         return res;
       }
@@ -1312,7 +1376,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
     case AST_TYPE::DECL: {
         ASTDecl* const decl = downcast_ast<ASTDecl>(statement);
 
-        ASSERT(decl->decl_type == ASTDecl::TYPE::LOCAL);//globals are done elsewhere (maybe move that to here?)
+        ASSERT(decl->location == ASTDecl::Location::Local);//globals are done elsewhere (maybe move that to here?)
         Local* const local = decl->local_ptr;
 
         if (local->decl.init_value != nullptr) {
@@ -1323,7 +1387,7 @@ void compile_bytecode_of_statement(CompilerGlobals* const comp,
           Eval::assign(builder->ir, var, Eval::as_constant(local->decl.init_value, local->decl.type));
         }
         else {
-          ASSERT(!decl->compile_time_const);
+          ASSERT(decl->mutability != ASTDeclMutability::Comptime);
 
           Eval::RuntimeValue r = compile_bytecode(comp, comp_thread,
                                                   builder, NodeEval::new_value(decl->expr));
@@ -1581,7 +1645,9 @@ static void compile_lambda_body(CompilerGlobals* comp,
 
             Type p_type = *parameters;
             if (indirect) {
-              p_type = generate_pointer_type(comp, p_type);
+              p_type = generate_pointer_type(comp,
+                  { .mut = n->mutability == ASTDeclMutability::Mutable,
+                    .base = p_type });
             }
 
             auto id = builder.new_variable(p_type, {}, indirect);
@@ -1833,7 +1899,10 @@ void compile_global(CompilerGlobals* comp, CompilerThread* comp_thread,
                                                            global->decl.type.structure->alignment,
                                                            ir);
 
-      Eval::RuntimeValue glob_ref = load_data_memory(comp, &builder, global, {});
+      Eval::RuntimeValue glob_ref = load_data_memory(
+          comp, &builder, global,
+          { .mut = true, .reqs = {} }
+      );
 
       Eval::RuntimeValue init_expr = compile_bytecode(comp, comp_thread, &builder, NodeEval::new_value(decl->expr));
       if (comp_thread->is_panic()) {
@@ -1990,7 +2059,7 @@ void add_comp_unit_for_export(CompilerGlobals* const comp, Namespace* ns, ASTExp
 
 void add_comp_unit_for_global(CompilerGlobals* const comp, Namespace* ns, ASTDecl* global) noexcept {
   AXLE_TELEMETRY_FUNCTION();
-  ASSERT(global->decl_type == ASTDecl::TYPE::GLOBAL);
+  ASSERT(global->location == ASTDecl::Location::Global);
 
   Global* glob = comp->new_global();
 
@@ -2333,7 +2402,6 @@ void run_compiler_pipes(CompilerGlobals* const comp, CompilerThread* const comp_
       auto compilation = comp->services.compilation.get();
 
       if (comp_thread->is_depends()) {
-        ASSERT(!context.finished());
         bool depended = Compilation::maybe_depend(comp, comp_thread, compilation._ptr, unit);
         
         if (depended) break;

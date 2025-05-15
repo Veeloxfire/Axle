@@ -2,7 +2,7 @@
 
 heap_handle := GetProcessHeap();
 
-allocate :: (bytes: u64) -> *void {
+allocate :: (bytes: u64) -> *mut void {
   return HeapAlloc(heap_handle, 0, bytes);
 }
 

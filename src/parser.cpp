@@ -1229,9 +1229,15 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
         if (comp_thread->is_panic()) {
           return NULL_AST_NODE;
         }
+
+        // Lambdas start in 1 of 3 ways
+        // () - empty brackets must be lambda star
+        // (mut - expressions cannot have mut keyword in them
+        // (ident : - this is the start of a declaration, must be lambda
         
-        if ((parser->current.type == AxleTokenType::Identifier
-            && parser->next.type == AxleTokenType::Colon)
+        if (parser->current.type == AxleTokenType::Mut
+            || (parser->current.type == AxleTokenType::Identifier
+                && parser->next.type == AxleTokenType::Colon)
             || parser->current.type == AxleTokenType::Right_Bracket) {
           AST_LOCAL l = parse_lambda(comp, comp_thread, parser, true);
           if (comp_thread->is_panic()) {
@@ -1247,6 +1253,7 @@ static AST_LOCAL parse_primary(CompilerGlobals* const comp, CompilerThread* cons
           return { le };
         }
         else {
+          // Is just a nested expression
           AST_LOCAL e = parse_inner_expression(comp, comp_thread, parser);
           if (comp_thread->is_panic()) {
             return NULL_AST_NODE;
@@ -1640,9 +1647,23 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
         }
 
         if(parser->current.type == AxleTokenType::Right_Square) {
+          // Slice type
+          // [] (?mut) Type
+
           advance(comp, comp_thread, parser);
           if(comp_thread->is_panic()) {
             return NULL_AST_NODE;
+          }
+
+          bool mut = false;
+
+          if (parser->current.type == AxleTokenType::Mut) {
+            advance(comp, comp_thread, parser);
+            if (comp_thread->is_panic()) {
+              return NULL_AST_NODE;
+            }
+
+            mut = true;
           }
 
           AST_LOCAL base = parse_type(comp, comp_thread, parser);
@@ -1653,6 +1674,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
           arr->ast_type = AST_TYPE::SLICE_TYPE;
           arr->node_span = span;
           arr->base = base;
+          arr->mut = mut;
 
           return { arr };
         }
@@ -1694,11 +1716,22 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
       }
     case AxleTokenType::Star: {
         // Pointer type
-        // *BASE
+        // * (?mut) BASE
 
         advance(comp, comp_thread, parser);//*
         if (comp_thread->is_panic()) {
           return NULL_AST_NODE;
+        }
+
+        bool mut = false;
+
+        if (parser->current.type == AxleTokenType::Mut) {
+          advance(comp, comp_thread, parser);
+          if (comp_thread->is_panic()) {
+            return NULL_AST_NODE;
+          }
+
+          mut = true;
         }
 
         //Base
@@ -1713,6 +1746,7 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
         arr->ast_type = AST_TYPE::PTR_TYPE;
         arr->node_span = span;
         arr->base = base;
+        arr->mut = mut;
 
         return { arr };
       }
@@ -1727,6 +1761,17 @@ static AST_LOCAL parse_type(CompilerGlobals* const comp, CompilerThread* const c
 static AST_LOCAL parse_typed_name(CompilerGlobals* const comp, CompilerThread* const comp_thread, Parser* const parser) {
   Span span = {};
   SPAN_START;
+
+  bool mut = false;
+
+  if (parser->current.type == AxleTokenType::Mut) {
+    advance(comp, comp_thread, parser);
+    if (comp_thread->is_panic()) {
+      return NULL_AST_NODE;
+    }
+
+    mut = true;
+  }
 
   const Axle::InternString* name = parse_name(comp, comp_thread, parser);
   if (comp_thread->is_panic()) {
@@ -1748,8 +1793,16 @@ static AST_LOCAL parse_typed_name(CompilerGlobals* const comp, CompilerThread* c
   ASTTypedName* tn = ast_alloc<ASTTypedName>(parser);
   tn->ast_type = AST_TYPE::TYPED_NAME;
   tn->node_span = span;
+
+  if (mut) {
+    tn->mutability = ASTDeclMutability::Mutable;
+  }
+  else {
+    tn->mutability = ASTDeclMutability::Immutable;
+  }
+
   tn->name = name;
-  tn->type = ty;
+  tn->type_ast = ty;
   tn->local_ptr = nullptr;
 
   return { tn };
@@ -1764,12 +1817,29 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
   AST_LOCAL expr = NULL_AST_NODE;
   AST_LOCAL ty = NULL_AST_NODE;
 
-  bool constant = false;
+  bool comptime = false;
+  bool mut = false;
 
-  if (parser->current.type != AxleTokenType::Identifier) {
-    comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->full_path(), parser->current),
-                              "Expected Identifier as declarations start with identifiers");
-    return NULL_AST_NODE;
+  if (parser->current.type == AxleTokenType::Mut) {
+    advance(comp, comp_thread, parser);
+    if (comp_thread->is_panic()) {
+      return NULL_AST_NODE;
+    }
+
+    mut = true;
+
+    if (parser->current.type != AxleTokenType::Identifier) {
+      comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->full_path(), parser->current),
+                                "Expected Identifier to follow 'mut'");
+      return NULL_AST_NODE;
+    }
+  }
+  else {
+    if (parser->current.type != AxleTokenType::Identifier) {
+      comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->full_path(), parser->current),
+                                "Expected Identifier as declarations start with identifiers or 'mut'");
+      return NULL_AST_NODE;
+    }
   }
 
   const Axle::InternString* name = parser->current.string;
@@ -1793,11 +1863,11 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
 
   if (parser->current.type == AxleTokenType::Equals) {
     advance(comp, comp_thread, parser);
-    constant = false;
+    comptime = false;
   }
   else if (parser->current.type == AxleTokenType::Colon) {
     advance(comp, comp_thread, parser);
-    constant = true;
+    comptime = true;
   }
   else {
     comp_thread->report_error(ERROR_CODE::SYNTAX_ERROR, span_of_token(parser->full_path(), parser->current),
@@ -1821,8 +1891,16 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
       return NULL_AST_NODE;
     }
   }
-
+  
   SPAN_END;
+
+  if (comptime && mut) {
+    comp_thread->report_error(ERROR_CODE::CONST_ERROR, span,
+                              "Declaration cannot be '{}' and '{}{}'",
+                              AxleTokenType::Mut,
+                              AxleTokenType::Colon, AxleTokenType::Colon);
+    return NULL_AST_NODE;
+  }
 
   ASTDecl* d = ast_alloc<ASTDecl>(parser);
   d->ast_type = AST_TYPE::DECL;
@@ -1830,15 +1908,25 @@ static AST_LOCAL parse_decl(CompilerGlobals* const comp, CompilerThread* const c
   d->name = name;
 
   if (global) {
-    d->decl_type = ASTDecl::TYPE::GLOBAL;
+    d->location = ASTDecl::Location::Global;
     d->global_ptr = nullptr;
   }
   else {
-    d->decl_type = ASTDecl::TYPE::LOCAL;
+    d->location = ASTDecl::Location::Local;
     d->local_ptr = nullptr;
   }
 
-  d->compile_time_const = constant;
+  ASSERT(!(comptime && mut));
+  if (mut) {
+    d->mutability = ASTDeclMutability::Mutable;
+  }
+  else if (comptime) {
+    d->mutability = ASTDeclMutability::Comptime;
+  }
+  else {
+    d->mutability = ASTDeclMutability::Immutable;
+  }
+
   d->type_ast = ty;
   d->expr = expr;
 
@@ -1965,6 +2053,9 @@ static AST_LOCAL parse_statement(CompilerGlobals* const comp, CompilerThread* co
         w->statement = loop;
 
         return { w };
+      }
+    case AxleTokenType::Mut: {
+        return parse_decl(comp, comp_thread, parser, false);
       }
     default: {
         if (parser->current.type == AxleTokenType::Identifier && parser->next.type == AxleTokenType::Colon) {
@@ -2367,8 +2458,9 @@ void parse_file(CompilerGlobals* const comp, CompilerThread* const comp_thread, 
         return;
       }
     }
-    else if (parser->current.type == AxleTokenType::Identifier
-             && parser->next.type == AxleTokenType::Colon) {
+    else if (parser->current.type == AxleTokenType::Mut
+             || (parser->current.type == AxleTokenType::Identifier
+                 && parser->next.type == AxleTokenType::Colon)) {
       //Decl
       AST_LOCAL decl = parse_decl(comp, comp_thread, parser, true);
       if (comp_thread->is_panic()) {
@@ -2604,6 +2696,10 @@ static void print_ast(Printer* const printer, AST_LOCAL a) noexcept {
     case AST_TYPE::DECL: {
         ASTDecl* d = downcast_ast<ASTDecl>(a);
 
+        if (d->mutability == ASTDeclMutability::Mutable) {
+          IO_Single::print("mut ");
+        }
+
         if (d->type_ast == NULL_AST_NODE) {
           IO_Single::format("{} :", d->name);
         }
@@ -2613,10 +2709,11 @@ static void print_ast(Printer* const printer, AST_LOCAL a) noexcept {
           IO_Single::print(" ");
         }
 
-        if (d->compile_time_const) {
+        if (d->mutability == ASTDeclMutability::Comptime) {
           IO_Single::print(": ");
         }
         else {
+          ASSERT(d->mutability == ASTDeclMutability::Immutable);
           IO_Single::print("= ");
         }
 
@@ -2626,8 +2723,14 @@ static void print_ast(Printer* const printer, AST_LOCAL a) noexcept {
     case AST_TYPE::TYPED_NAME: {
         ASTTypedName* d = downcast_ast<ASTTypedName>(a);
 
+        ASSERT(d->mutability != ASTDeclMutability::Comptime);
+
+        if (d->mutability == ASTDeclMutability::Mutable) {
+          IO_Single::print("mut ");
+        }
+
         IO_Single::format("{}:", d->name);
-        print_ast(printer, d->type);
+        print_ast(printer, d->type_ast);
         return;
       }
     case AST_TYPE::ASSIGN: {

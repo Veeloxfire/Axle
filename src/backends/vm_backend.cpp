@@ -548,15 +548,20 @@ void VM::exec(CompilerGlobals* comp, CompilerThread* comp_thread, VM::StackFrame
 
             GlobalLabelInfo label_info = comp->get_label_info(op.label);
             const IR::IRStore* store = label_info.ir;
-            ASSERT(store != nullptr);
+
+            if (store == nullptr) {
+              comp_thread->report_error(ERROR_CODE::CONST_ERROR, label_info.span, "Attempted to call on runtime function at compile time");
+              return ;
+            }
+
             ASSERT(store->completed);
 
             StackFrame callframe = new_stack_frame(store);
 
             const SignatureStructure* sig = label_info.signature;
-            ASSERT(stack_frame->num_parameters == sig->parameter_types.size);
-            const u32 num_params = stack_frame->num_parameters;
-          
+
+            ASSERT(callframe.num_parameters == sig->parameter_types.size);
+            const u32 num_params = callframe.num_parameters;
             const bool has_return = sig->return_type != comp_thread->builtin_types->t_void;
 
             ASSERT(op.n_values == num_params + has_return);

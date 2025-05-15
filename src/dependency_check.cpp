@@ -372,7 +372,7 @@ void type_dependency_check_ast_node(
           type_dependency_check_ast_node(comp, comp_thread, state, decl->expr);
         }
 
-        if (decl->decl_type == ASTDecl::TYPE::LOCAL) {
+        if (decl->location == ASTDecl::Location::Local) {
           if (decl->local_ptr == nullptr) {
             const Local* shadowing = state.get_local(decl->name);
 
@@ -401,10 +401,10 @@ void type_dependency_check_ast_node(
     case AST_TYPE::TYPED_NAME: {
         ASTTypedName* tn = downcast_ast<ASTTypedName>(a);
 
-        if (tn->type != NULL_AST_NODE) {
+        if (tn->type_ast != NULL_AST_NODE) {
           state.push_visit(a, AST_VISIT_STEP::TYPED_NAME_UP);
 
-          type_dependency_check_ast_node(comp, comp_thread, state, tn->type);
+          type_dependency_check_ast_node(comp, comp_thread, state, tn->type_ast);
         }
 
         if (tn->local_ptr == nullptr) {
@@ -739,8 +739,8 @@ void eval_dependency_check_ast_node(
     case AST_TYPE::TYPED_NAME: {
         ASTTypedName* tn = downcast_ast<ASTTypedName>(a);
 
-        if (tn->type != NULL_AST_NODE) {
-          eval_dependency_check_ast_node(comp, comp_thread, state, tn->type);
+        if (tn->type_ast != NULL_AST_NODE) {
+          eval_dependency_check_ast_node(comp, comp_thread, state, tn->type_ast);
         }
         return;
       }
