@@ -711,18 +711,6 @@ namespace Axle::Format {
   };
 }
 
-namespace Axle {
-  template<>
-  struct Viewable<Eval::ConstantValue> {
-    using ViewT = const u8;
-    
-    template<typename U>
-    [[nodiscard]] static constexpr ViewArr<U> view(const Eval::ConstantValue& v) {
-      return { v.constant, v.type.size() };
-    }
-  };
-}
-
 struct Errors;
 
 namespace VM {
@@ -786,6 +774,16 @@ namespace VM {
 }
 
 namespace Axle {
+  template<>
+  struct Viewable<Eval::ConstantValue> {
+    using ViewT = const u8;
+    
+    template<typename U>
+    [[nodiscard]] static constexpr ViewArr<U> view(const Eval::ConstantValue& v) {
+      return { v.constant, v.type.size() };
+    }
+  };
+
   template<>
   struct Viewable<IR::C_ARG> {
     using ViewT = const u8;

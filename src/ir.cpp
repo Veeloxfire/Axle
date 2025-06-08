@@ -1396,11 +1396,8 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
 
             print_value(set.to);
 
-            Axle::ByteArray arr = {};
-            arr.ptr = set.data.val;
-            arr.size = set.data.size;
-
-            IO_Single::format(" = raw [ {} ]\n", arr);
+            IO_Single::format(" = raw [ {} ]\n",
+                Axle::Format::ByteArray{ Axle::view_arr(set.data) });
 
             break;
           }
@@ -1410,11 +1407,8 @@ void IR::print_ir(CompilerGlobals* const comp, const IR::IRStore* builder) {
 
             print_value(set.to);
 
-            Axle::ByteArray arr = {};
-            arr.ptr = set.data.val;
-            arr.size = set.data.size;
-
-            IO_Single::format(" = raw [ {} ]\n", arr);
+            IO_Single::format(" = raw [ {} ]\n",
+                Axle::Format::ByteArray{ Axle::view_arr(set.data) });
 
             break;
           }

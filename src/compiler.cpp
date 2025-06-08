@@ -1542,7 +1542,8 @@ static void eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, AST_LOC
                     Axle::view_arr(return_value));
 
     if (comp->print_options.comptime_exec) {
-      IO::format("Exec Result | {} | {}", eval.type.name, Axle::PrintList{eval.data, eval.type.size()});
+      IO::format("Exec Result | {} | {}", eval.type.name,
+          Axle::Format::PrintList{ Axle::const_view_arr(eval) });
     }
   }
 }
@@ -1811,8 +1812,9 @@ static void compile_import(CompilerGlobals* comp, CompilerThread* comp_thread, N
 
   //Didn't find
   if (!found) {
-    comp_thread->report_error(ERROR_CODE::FILE_ERROR, root->node_span, "Couldn't find the file specified.\nTried paths: {}",
-                              Axle::PrintList<const Axle::InternString*>{paths_to_try, array_size(paths_to_try)});
+    comp_thread->report_error(ERROR_CODE::FILE_ERROR, root->node_span,
+                              "Couldn't find the file specified.\nTried paths: {}",
+                              Axle::Format::PrintList{ Axle::view_arr(paths_to_try)});
     return;
   }
 
@@ -2204,6 +2206,34 @@ void dispatch_ready_dependencies(
   ptr->dependency_list.remove_if(remove_dep);
 }
 
+struct QuotedUnfoundNamesFormat {
+  Axle::ViewArr<UnfoundNameHolder> names;
+};
+
+namespace Axle::Format {
+  template<>
+  struct FormatArg<QuotedUnfoundNamesFormat> {
+    template<Formatter F>
+    constexpr static void load_string(F& res, QuotedUnfoundNamesFormat un) {
+      auto i = un.names.begin();
+      const auto e = un.names.end();
+
+      if (i < e) {
+        res.load_char('"');
+        Format::FormatArg<const Axle::InternString*>::load_string(res, i->name.ident);
+        res.load_char('"');
+
+        i += 1;
+        for (; i < e; ++i) {
+          res.load_string_lit(", \"");
+          Format::FormatArg<const Axle::InternString*>::load_string(res, i->name.ident);
+          res.load_char('"');
+        }
+      }
+    }
+  };
+}
+
 //Might be that dependencies were already dispatched
 //Return true if depended
 bool Compilation::maybe_depend(CompilerGlobals* comp, CompilerThread* comp_thread, Compilation* compilation, CompilationUnit* unit) {
@@ -2262,12 +2292,8 @@ bool Compilation::maybe_depend(CompilerGlobals* comp, CompilerThread* comp_threa
 
     if (comp_thread->print_options.comp_units) {
       const Axle::ViewArr<UnfoundNameHolder> names = view_arr(comp_thread->local_unfound_names.names);
-      IO::format("Comp unit {} waiting on {}\n", unit->id, Axle::PrintListCF{names.data, names.size, 
-                 [](Format::Formatter auto& res, const UnfoundNameHolder& nh) {
-        res.load_char('"');
-        Format::FormatArg<const Axle::InternString*>::load_string(res, nh.name.ident);
-        res.load_char('"');
-      }});
+      IO::format("Comp unit {} waiting on {}\n", unit->id,
+        QuotedUnfoundNamesFormat { names });
     }
     compilation->unfound_names.names.concat(std::move(comp_thread->local_unfound_names.names));
     comp_thread->local_unfound_names.names.clear();

@@ -49,6 +49,18 @@ namespace VM {
   void dispatch_eval_ast(CompilerGlobals* comp, CompilerThread* comp_thread, Namespace* ns, AST_LOCAL root, EvalPromise eval);
 }
 
+namespace Axle {
+  template<>
+  struct Viewable<VM::EvalPromise> {
+    using ViewT = u8;
+    
+    template<typename U>
+    [[nodiscard]] static constexpr ViewArr<U> view(const VM::EvalPromise& v) {
+      return { v.data, v.type.size() };
+    }
+  };
+}
+
 enum struct COMPILATION_UNIT_TYPE : uint8_t {
   STRUCTURE, LAMBDA_BODY, LAMBDA_SIG, GLOBAL, IMPORT, EXPORT, EVAL,
 };

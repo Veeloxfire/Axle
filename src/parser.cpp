@@ -309,7 +309,7 @@ static Token make_operator_token(CompilerGlobals* comp, CompilerThread* comp_thr
   }
 
   Span span = span_of_lex(lex);
-  comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "Unlexable character: '{}'", Axle::DisplayChar{ lex->top[0] });
+  comp_thread->report_error(ERROR_CODE::LEXING_ERROR, span, "Unlexable character: '{}'", Axle::Format::DisplayChar{ lex->top[0] });
   return {};
 }
 
@@ -635,7 +635,7 @@ void reset_parser(CompilerGlobals* const comp,
     comp_thread->report_error(ERROR_CODE::INTERNAL_ERROR, Span{},
                               "Parser was passed a fully or partially null stream"
                               "Start: '{}', End: '{}'",
-                              Axle::PrintPtr{ parser->stream.i }, Axle::PrintPtr{ parser->stream.end });
+                              Axle::Format::PrintPtr{ parser->stream.i }, Axle::Format::PrintPtr{ parser->stream.end });
     return;
   }
 
